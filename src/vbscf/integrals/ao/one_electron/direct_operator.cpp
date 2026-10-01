@@ -58,7 +58,9 @@ int matrix_index(int row, int column, int n_bf) {
   return column * n_bf + row;
 }
 
-H1eTerms make_terms(
+// Integral decoding is part of the contraction loop: do not materialize the
+// eleven-field stencil through an out-of-line return for every AO integral.
+[[gnu::always_inline]] inline H1eTerms make_terms(
     const AoIntegralInput& ao,
     std::size_t integral_index) {
   const AoPairGraph& graph = ao.pair_graph;
