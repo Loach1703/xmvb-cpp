@@ -34,7 +34,7 @@ NonredundantRetractionMetric::NonredundantRetractionMetric(
     const OrbitalPreparationInput& input)
     : space_(space),
       parameter_view_(parameter_view),
-      physical_metric_(input) {}
+      physical_metric_(input, space.uses_active_subspace_gauge()) {}
 
 Eigen::VectorXd NonredundantRetractionMetric::tangent(
     const Eigen::VectorXd& reduced_step) const {
@@ -153,6 +153,9 @@ Eigen::VectorXd NonredundantRetractionMetric::solve(
 double NonredundantRetractionMetric::dual_norm(
     const Eigen::VectorXd& covector) const {
   if (covector.size() == 0) return 0.0;
+  if (space_.uses_active_subspace_gauge() && physical_metric_.has_full_support(parameter_view_)) {
+    return physical_metric_.subspace_dual_norm(parameter_view_, space_.expand_gradient(covector));
+  }
   const Eigen::VectorXd riesz_gradient = solve(covector);
   const double squared_norm = covector.dot(riesz_gradient);
   const double roundoff =

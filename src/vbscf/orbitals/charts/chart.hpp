@@ -65,6 +65,11 @@ public:
     return static_cast<int>(block_bases_.size());
   }
 
+  /** @brief Whether this chart removes the complete active-space GL gauge. */
+  bool uses_active_subspace_gauge() const noexcept {
+    return active_subspace_gauge_;
+  }
+
   StructuralDiagnostics structural_diagnostics() const noexcept;
 
   Eigen::VectorXd project_reduced_gradient(
@@ -212,6 +217,7 @@ private:
       bool build_packed_projection) const;
 
   std::vector<BlockBasis> block_bases_;
+  bool active_subspace_gauge_ = false;
   int packed_parameter_size_ = 0;
   int reduced_size_ = 0;
   std::uint64_t rank_signature_ = 1469598103934665603ull;

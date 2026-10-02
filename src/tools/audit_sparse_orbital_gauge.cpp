@@ -48,7 +48,8 @@ int main(int argc, char** argv) {
     }
     const auto audit = xmvb::vb::audit_orbital_chart(
         orbital, parameter_view, &basis);
-    const xmvb::vb::OrbitalPhysicalMetric physical_metric(orbital);
+    const xmvb::vb::OrbitalPhysicalMetric physical_metric(
+        orbital, space.uses_active_subspace_gauge());
 
     std::cout << std::setprecision(12);
     std::cout << "input = " << argv[1] << '\n';

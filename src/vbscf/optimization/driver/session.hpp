@@ -20,6 +20,19 @@ OrbitalChart build_orbital_chart(
     const SparseParameterLayout& parameter_view,
     OrbitalPreconditioner preconditioner = OrbitalPreconditioner::OneElectron);
 
+/**
+ * @brief Certifies the shared stopping target in the accepted orbital chart.
+ *
+ * Complete OEO also requires the gauge-invariant quotient dual norm. Other
+ * manifolds retain their established projected-gradient infinity criterion.
+ */
+bool orbital_gradient_converged(
+    const VbScfObjective& objective,
+    const SparseParameterLayout& parameter_view,
+    const OrbitalChart& chart,
+    const Eigen::VectorXd& reduced_gradient,
+    double tolerance);
+
 void sync_result_from_objective(
     const VbScfObjective& objective,
     VbScfOptimizerResult* result);

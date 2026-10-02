@@ -10,16 +10,18 @@
 namespace xmvb::vb {
 
 /**
- * @brief Accepted-point metric of the inactive subspace and projected active rays.
+ * @brief Accepted-point metric with the same gauge as the orbital chart.
  *
- * This is the coupled quotient metric of Eq. (31) in the orbital-optimization
- * theory note. It measures the physical derivative of the same raw-coefficient
+ * Selected structures use the coupled ray metric of Eq. (31); complete OEO
+ * uses the inactive/active span metric of Section 14 of the theory note.
+ * It measures the physical derivative of the same raw-coefficient
  * curve used by the optimizer and annihilates support-admissible orbital gauge
  * directions. No orbital Hessian or AO-by-AO directional projector is formed.
  */
 class OrbitalPhysicalMetric {
  public:
-  explicit OrbitalPhysicalMetric(const OrbitalPreparationInput& input);
+  OrbitalPhysicalMetric(const OrbitalPreparationInput& input,
+                       bool active_subspace_gauge);
 
   /** @brief Squared physical length of one packed raw-coefficient direction. */
   double squared_norm(
@@ -30,6 +32,14 @@ class OrbitalPhysicalMetric {
   Eigen::VectorXd apply(
       const SparseParameterLayout& layout,
       const Eigen::Ref<const Eigen::VectorXd>& packed_direction) const;
+
+  /** @brief Whether every occupied coefficient is a variational full-AO slot. */
+  bool has_full_support(const SparseParameterLayout& layout) const;
+
+  /** @brief Exact flag-metric dual norm for a gauge-annihilating full-AO covector. */
+  double subspace_dual_norm(
+      const SparseParameterLayout& layout,
+      const Eigen::Ref<const Eigen::VectorXd>& packed_covector) const;
 
  private:
   Eigen::VectorXd physical_feature(
@@ -43,11 +53,15 @@ class OrbitalPhysicalMetric {
   Eigen::MatrixXd inactive_inverse_upper_;
   Eigen::MatrixXd complement_;
   Eigen::MatrixXd projected_active_;
+  Eigen::MatrixXd active_complement_;
+  Eigen::MatrixXd active_inverse_;
+  Eigen::MatrixXd active_inverse_upper_;
   Eigen::VectorXd projected_norm_squared_;
   std::vector<std::vector<int>> orbital_supports_;
   int n_basis_functions_ = 0;
   int n_inactive_ = 0;
   int n_active_ = 0;
+  bool active_subspace_gauge_;
 };
 
 }  // namespace xmvb::vb

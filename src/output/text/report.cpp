@@ -1,5 +1,6 @@
 #include "output/text/report.hpp"
 #include "output/text/sections.hpp"
+#include "vbscf/core/contracts/orbital_type.hpp"
 
 #include <array>
 #include <cerrno>
@@ -367,6 +368,16 @@ void print_summary(
     print_log_field("Molden output", molden_output_path->string());
   }
   print_log_field("Gradient metric", gradient_tolerance_metric_name(options.backend));
+  const bool certifies_physical_gradient = input.complete_active_space &&
+      input.orbital_preparation_input.orbital_type == vb::kOrbitalTypeOeo &&
+      (options.backend == vb::VbScfOptimizerBackend::BlockLbfgs ||
+       options.backend == vb::VbScfOptimizerBackend::Neo ||
+       options.backend == vb::VbScfOptimizerBackend::NonredundantTruncatedNewton);
+  if (certifies_physical_gradient) {
+    print_log_field("Additional stationarity metric", "physical |g|_(G^-1)");
+    print_log_field("Physical gradient threshold",
+                    format_scientific_double(options.gradient_tolerance, 8));
+  }
   print_log_field(
       "Convergence threshold",
       format_convergence_threshold_summary(

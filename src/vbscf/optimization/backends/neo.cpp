@@ -380,7 +380,8 @@ BackendRunResult run_neo_backend(
     final_gradient_inf = gradient_infinity_norm(projected.reduced_gradient);
     final_gradient_l2 = projected.reduced_gradient.norm();
     if (run_result.n_iterations == 0 &&
-        final_gradient_inf < options.gradient_tolerance) {
+        orbital_gradient_converged(*objective, parameter_view, chart,
+            projected.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason = "neo_initial_tolerance";
       break;
@@ -439,7 +440,8 @@ BackendRunResult run_neo_backend(
     const double energy_change = energy - previous_energy;
     previous_energy = energy;
     if (std::abs(energy_change) < options.energy_tolerance &&
-        final_gradient_inf < options.gradient_tolerance) {
+        orbital_gradient_converged(*objective, parameter_view, next_geometry,
+            next_projected.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason = "neo_projected_gradient_tolerance";
     }

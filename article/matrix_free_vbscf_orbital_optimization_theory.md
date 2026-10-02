@@ -3705,3 +3705,122 @@ Implementation-level correctness and performance evidence are recorded in
 The latter also defines the small-system explicit reduced-Hessian reference
 used to compare matrix-free actions and future subproblem solvers without
 allowing dense Hessian assembly to enter the production optimization path.
+
+## 14. Complete-OEO quotient metric and stationarity certification
+
+The projected-active-ray metric of eq 31 applies when the individual active
+orbital rays are physical, including arbitrary selected VB structure spaces.
+It must not be used unchanged for full-AO OEO with a complete active space:
+the latter is invariant under the entire nonsingular active GL transformation,
+not just independent orbital scalings. This distinction affects the trust
+region and the interpretation of its dual gradient norm; it does not modify
+the variational energy or introduce orthogonal-orbital rotation updates.
+
+Let the AO metric be $\mathbf S$, the inactive coefficients be $\mathbf I$,
+and the active coefficients be $\mathbf A$. Define
+
+$$
+\mathbf G_{\mathrm I}=\mathbf I^T\mathbf S\mathbf I,\qquad
+\mathbf Q_{\mathrm I}=\mathbf 1-\mathbf I\mathbf G_{\mathrm I}^{-1}\mathbf I^T\mathbf S,
+\qquad \mathbf V=\mathbf Q_{\mathrm I}\mathbf A.
+$$
+
+For an additive raw-coefficient tangent, put
+
+$$
+\mathbf D_{\mathrm I}=\mathbf Q_{\mathrm I}\delta\mathbf I,
+\qquad
+\delta\mathbf V=\mathbf Q_{\mathrm I}\delta\mathbf A
+-\mathbf D_{\mathrm I}\mathbf G_{\mathrm I}^{-1}\mathbf I^T\mathbf S\mathbf A
+-\mathbf I\mathbf G_{\mathrm I}^{-1}\mathbf D_{\mathrm I}^T\mathbf S\mathbf A.
+$$
+
+The complete-active-space metric is
+
+$$
+\begin{aligned}
+\mathbf G_{\mathrm A}&=\mathbf V^T\mathbf S\mathbf V,\qquad
+\mathbf Q_{\mathrm A}=\mathbf 1-\mathbf V\mathbf G_{\mathrm A}^{-1}\mathbf V^T\mathbf S,\\
+\|\delta\mathbf C\|_{\mathrm{flag}}^2
+&=\operatorname{tr}\bigl[\mathbf G_{\mathrm I}^{-1}
+\mathbf D_{\mathrm I}^T\mathbf S\mathbf D_{\mathrm I}\bigr]
++\operatorname{tr}\bigl[\mathbf G_{\mathrm A}^{-1}
+(\mathbf Q_{\mathrm A}\delta\mathbf V)^T\mathbf S
+(\mathbf Q_{\mathrm A}\delta\mathbf V)\bigr].
+\end{aligned}
+$$
+
+Equivalently, this is one half of the sum of the squared Frobenius norms of
+the derivatives of the AO-whitened inactive and projected-active orthogonal
+projectors. It is invariant under constant, nonsingular changes of inactive
+and active representatives, including support-admissible inactive additions
+to active columns. In particular, a pure active tangent
+$\delta\mathbf A=\mathbf A\mathbf Z$ with fixed inactive coefficients has
+zero metric length, since $\delta\mathbf V=\mathbf V\mathbf Z$ and
+$\mathbf Q_{\mathrm A}\mathbf V=0$. Such mixing must remain physical for a
+general selected-structure space, where the ray metric is retained.
+
+The matrix-free cotangent action is the exact adjoint of these feature maps.
+It is tested against the independent projector finite difference, bilinear
+symmetry, annihilation of GL gauge directions, and simultaneous transformation
+of representative coefficients, tangents, and covectors. No full reduced
+metric or orbital Hessian is assembled.
+
+For complete OEO, the three chart-based production optimizers supplement
+their energy-change and projected-gradient-infinity tests with
+
+$$
+\sqrt{\mathbf g^T\mathbf M^{-1}\mathbf g}<\varepsilon_g,
+\qquad \mathbf M=\mathbf U^T\mathcal M\mathbf U.
+$$
+
+This is an additional, gauge-invariant stationarity requirement, not an
+equivalent rewriting of the former coordinate-infinity threshold. Thus
+iteration counts obtained with the former stopping rule must be labeled
+separately. The original XMVB-compatible ISCF=5 stopping convention is not
+changed by this correction.
+
+### 14.1. Analytic dual norm for unrestricted full-AO coefficients
+
+The full-AO flag metric also admits an analytic dual norm. This avoids an
+iterative Riesz solve whose condition number may reflect poorly scaled AO
+or orbital representatives rather than physical stationarity. Let
+$\mathbf S=\mathbf W^T\mathbf W$,
+$\mathbf G_{\mathrm I}=\mathbf R_{\mathrm I}^T\mathbf R_{\mathrm I}$,
+and $\mathbf G_{\mathrm A}=\mathbf R_{\mathrm A}^T\mathbf R_{\mathrm A}$,
+with upper-triangular Cholesky factors. Set
+
+$$
+\mathbf Q_i=\mathbf W\mathbf I\mathbf R_{\mathrm I}^{-1},\qquad
+\mathbf Q_a=\mathbf W\mathbf V\mathbf R_{\mathrm A}^{-1},\qquad
+\mathbf P_e=\mathbf 1-\mathbf Q_i\mathbf Q_i^T-\mathbf Q_a\mathbf Q_a^T,
+\qquad \mathbf B=\mathbf G_{\mathrm I}^{-1}\mathbf I^T\mathbf S\mathbf A.
+$$
+
+For an ambient energy covector $(\mathbf F_I,\mathbf F_A)$ annihilating the
+orbital gauge, define
+
+$$
+\mathbf L_i=\mathbf W^{-T}(\mathbf F_I+\mathbf F_A\mathbf B^T)
+\mathbf R_{\mathrm I}^T,\qquad
+\mathbf L_a=\mathbf W^{-T}\mathbf F_A\mathbf R_{\mathrm A}^T.
+$$
+
+The independent horizontal motions are external--inactive,
+external--active, and active--inactive. Their metric weights are respectively
+one, one, and two: the last motion changes both span projectors. Consequently,
+
+$$
+\|dE\|_{\mathrm{flag},*}^2
+=\|\mathbf P_e\mathbf L_i\|_F^2
++\|\mathbf P_e\mathbf L_a\|_F^2
++\tfrac12\|\mathbf Q_a^T\mathbf L_i-\mathbf L_a^T\mathbf Q_i\|_F^2.
+$$
+
+This identity assumes all occupied full-AO coefficients are variational.
+For restricted supports, the Riesz problem must instead be solved on the
+actual reduced chart; the unrestricted expression is not its replacement.
+The implementation compares this analytic expression with the independently
+solved reduced metric on the complete-OEO regression fixture. AO whitening
+here is a coordinate operation for evaluating a norm, not an orthogonal
+orbital-rotation update.

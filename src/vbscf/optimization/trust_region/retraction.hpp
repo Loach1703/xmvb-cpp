@@ -19,8 +19,9 @@ Eigen::VectorXd gather_nonredundant_retract_tangent(
  * @brief Accepted-point pullback metric of the additive sparse retraction.
  *
  * The algebraic quotient chart supplies the horizontal raw-coefficient lift.
- * This object measures that same lift after the inactive-subspace and active-
- * ray physical map; it never stores a full reduced metric matrix. The chart is
+ * This object measures that same lift after the inactive-subspace and active
+ * physical map. Complete OEO uses the active span; a structure subset uses
+ * individual rays. It never stores a full reduced metric matrix. The chart is
  * prewhitened only in independent local orbital-normalization metrics, so the
  * complete coupled reduced metric is generally not the identity. Callers must
  * use `apply` for the metric covector and `norm` for the physical tangent norm;

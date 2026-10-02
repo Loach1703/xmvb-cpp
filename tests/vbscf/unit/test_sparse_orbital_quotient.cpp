@@ -9,6 +9,7 @@
 
 #include <Eigen/Cholesky>
 #include <Eigen/Geometry>
+#include <Eigen/LU>
 #include <Eigen/SVD>
 
 #include "vbscf/orbitals/charts/chart.hpp"
@@ -251,7 +252,7 @@ void check(const std::string& name, const OrbitalPreparationInput& input,
   require(audit.current_retained_gauge_dimension == 0 &&
               audit.current_missing_physical_dimension == 0,
           name + ": incorrect physical image");
-  const OrbitalPhysicalMetric coupled_metric(input);
+  const OrbitalPhysicalMetric coupled_metric(input, space.uses_active_subspace_gauge());
   for (int gauge = 0; gauge < audit.packed_gauge_basis.cols(); ++gauge) {
     require(coupled_metric.squared_norm(
                 view, audit.packed_gauge_basis.col(gauge)) < 1.0e-18,
@@ -501,6 +502,82 @@ void check_complete_oeo_active_subspace_gauge() {
   require(complete_cas_chart.project_vector(active_mixing)
               .reduced_gradient.norm() < 1.0e-12,
           "complete-CAS OEO chart retained an active--active gauge direction");
+  const OrbitalPhysicalMetric metric(input, true);
+  const OrbitalPhysicalMetric subset_metric(input, false);
+  require(metric.squared_norm(view, active_mixing) < 1.0e-22 &&
+              metric.apply(view, active_mixing).norm() < 1.0e-12,
+          "complete-CAS metric retained active GL gauge");
+  require(subset_metric.squared_norm(view, active_mixing) > 0.1,
+          "structure-subset metric incorrectly removed physical active mixing");
+
+  const Eigen::VectorXd direction =
+      Eigen::VectorXd::LinSpaced(view.size(), -0.3, 0.7);
+  const Eigen::VectorXd other =
+      Eigen::VectorXd::LinSpaced(view.size(), 0.8, -0.2);
+  const double reference = metric.squared_norm(view, direction);
+  const auto action = metric.apply(view, direction);
+  require(std::abs(direction.dot(action) - reference) < 1.0e-12 &&
+              std::abs(other.dot(action) - direction.dot(metric.apply(view, other))) <
+                  1.0e-12,
+          "complete-CAS metric action is not the feature adjoint");
+
+  // Independent finite differences of the two AO-whitened span projectors.
+  const auto projectors = [&](const Eigen::VectorXd& parameters) {
+    auto displaced = input;
+    view.unpack(parameters, &displaced);
+    Eigen::LLT<Eigen::MatrixXd> factor(input.ao_overlap_matrix);
+    const Eigen::MatrixXd white = factor.matrixU() * dense(displaced);
+    Eigen::MatrixXd core = white.leftCols(1);
+    Eigen::MatrixXd pi = core * (core.transpose()*core).ldlt().solve(core.transpose());
+    const Eigen::MatrixXd active = white.rightCols(2) - pi * white.rightCols(2);
+    Eigen::MatrixXd pa = active *
+        (active.transpose()*active).ldlt().solve(active.transpose());
+    return std::make_pair(pi, pa);
+  };
+  constexpr double h = 1.0e-5;
+  const auto plus = projectors(view.pack(input) + h * direction);
+  const auto minus = projectors(view.pack(input) - h * direction);
+  const double finite = ((plus.first-minus.first).squaredNorm() +
+                        (plus.second-minus.second).squaredNorm()) / (8*h*h);
+  require(std::abs(finite-reference) < 1.0e-8,
+          "complete-CAS metric differs from projector derivative norm");
+
+  Eigen::Matrix3d gauge = Eigen::Matrix3d::Identity();
+  gauge(0,0)=1.7; gauge(0,1)=0.4; gauge(0,2)=-0.2;
+  gauge(1,2)=2.0; gauge(2,1)=-0.3; gauge(2,2)=1.1;
+  const Eigen::MatrixXd changed = coefficients * gauge;
+  auto changed_input = make_input(changed,
+      {{0,1,2,3,4},{0,1,2,3,4},{0,1,2,3,4}},1);
+  changed_input.orbital_type = kOrbitalTypeOeo;
+  const SparseParameterLayout changed_view(changed_input);
+  const OrbitalPhysicalMetric changed_metric(changed_input, true);
+  const Eigen::MatrixXd moved_direction =
+      Eigen::Map<const Eigen::MatrixXd>(direction.data(),5,3) * gauge;
+  const Eigen::VectorXd changed_direction =
+      Eigen::Map<const Eigen::VectorXd>(moved_direction.data(),15);
+  require(std::abs(changed_metric.squared_norm(changed_view, changed_direction) -
+                   reference) < 1.0e-11,
+          "complete-CAS metric is not GL-representative invariant");
+  const OrbitalChart changed_chart(changed_input,changed_view,changed,changed,
+                                  nullptr,false,true);
+  const NonredundantRetractionMetric original_reduced(complete_cas_chart,view,input);
+  const NonredundantRetractionMetric changed_reduced(changed_chart,changed_view,changed_input);
+  const Eigen::VectorXd reduced_covector =
+      complete_cas_chart.project_gradient(action).reduced_gradient;
+  const double cg_dual = std::sqrt(reduced_covector.dot(original_reduced.solve(reduced_covector)));
+  require(std::abs(original_reduced.dual_norm(reduced_covector) - cg_dual) < 1.0e-10,
+          "analytic complete-CAS dual norm differs from the matrix-free Riesz solve");
+  const Eigen::MatrixXd changed_covector =
+      Eigen::Map<const Eigen::MatrixXd>(action.data(),5,3) * gauge.inverse().transpose();
+  const Eigen::VectorXd packed_covector =
+      Eigen::Map<const Eigen::VectorXd>(changed_covector.data(),15);
+  require(std::abs(original_reduced.dual_norm(
+                       complete_cas_chart.project_gradient(action).reduced_gradient) -
+                   changed_reduced.dual_norm(
+                       changed_chart.project_gradient(packed_covector).reduced_gradient)) <
+                  1.0e-10,
+          "complete-CAS stationarity norm depends on GL representative");
+  std::cout << "complete-CAS metric gauge, adjoint, projector and dual invariance: passed\n";
 }
 
 void check_occupation_curvature() {

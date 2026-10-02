@@ -10,6 +10,7 @@
 #include "vbscf/optimization/driver/result.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
+#include "vbscf/optimization/trust_region/retraction.hpp"
 
 namespace xmvb::vb::optimizer_detail {
 
@@ -61,6 +62,19 @@ OrbitalChart build_orbital_chart(
       false,
       objective.input().complete_active_space,
       hessian_diagonal ? &*hessian_diagonal : nullptr);
+}
+
+bool orbital_gradient_converged(
+    const VbScfObjective& objective,
+    const SparseParameterLayout& parameter_view,
+    const OrbitalChart& chart,
+    const Eigen::VectorXd& reduced_gradient,
+    double tolerance) {
+  if (gradient_infinity_norm(reduced_gradient) >= tolerance) return false;
+  if (!chart.uses_active_subspace_gauge()) return true;
+  const NonredundantRetractionMetric metric(
+      chart, parameter_view, objective.input().orbital_preparation_input);
+  return metric.dual_norm(reduced_gradient) < tolerance;
 }
 
 void sync_result_from_objective(

@@ -509,6 +509,7 @@ OrbitalChart::OrbitalChart(
       build_stable_inactive_span_basis(global_inactive_orbitals, ao_overlap);
   const bool use_active_subspace_gauge =
       complete_active_space && input.orbital_type == kOrbitalTypeOeo;
+  active_subspace_gauge_ = use_active_subspace_gauge;
   const auto blocks = detect_orbital_blocks(input);
 
   int block_index = 0;
