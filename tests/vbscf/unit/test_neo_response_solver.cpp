@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -438,6 +439,33 @@ void check_response_is_local_to_candidate_direction() {
           "response NEO solved unused orbital-basis response directions");
 }
 
+void check_small_gradient_needs_relative_accuracy() {
+  Eigen::Matrix3d a = Eigen::Vector3d(1.0, 3.0, 9.0).asDiagonal();
+  Eigen::Matrix3d b = 0.2 * Eigen::Matrix3d::Identity();
+  Eigen::Matrix3d c = 2.0 * Eigen::Matrix3d::Identity();
+  const Eigen::Vector3d gradient(1.0e-5, -2.0e-5, 3.0e-5);
+  const auto problem = dense_problem(a, b, c, Eigen::Matrix3d::Identity(), gradient);
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.relative_residual_tolerance = gradient.norm() / (1.0 + gradient.norm());
+  options.require_curvature_certificate = false;
+  const auto result = xmvb::vb::solve_response_neo(problem, options);
+  const Eigen::Matrix3d relaxed = a - b.transpose() * c.ldlt().solve(b);
+  const Eigen::Vector3d reference = -relaxed.ldlt().solve(gradient);
+  require(result.converged(), "small-gradient relative solve did not converge");
+  const double target = options.relative_residual_tolerance * gradient.norm();
+  // Eliminating the structure residual gives H_relaxed (p-p_exact)
+  // = r_o - B^T C^-1 r_s. Bound the step error by the requested KKT accuracy,
+  // rather than demanding accuracy stricter than the solver was asked for.
+  const double error_bound = relaxed.ldlt().solve(Eigen::Matrix3d::Identity()).norm() *
+      std::hypot(1.0, c.ldlt().solve(b).norm()) * target;
+  require((result.step.orbital - reference).norm() <= error_bound +
+              64.0 * std::numeric_limits<double>::epsilon() * reference.norm(),
+          "small-gradient response step exceeds its KKT-derived error bound");
+  require(result.residual_norm <= options.relative_residual_tolerance * gradient.norm(),
+          "small-gradient KKT residual was hidden by an absolute tolerance");
+}
+
 }  // namespace
 
 int main() {
@@ -452,6 +480,7 @@ int main() {
     check_inexact_block_preconditioner_preserves_coupled_step();
     check_keyframe_response_uses_forcing_accuracy();
     check_response_is_local_to_candidate_direction();
+    check_small_gradient_needs_relative_accuracy();
     std::cout << "response NEO solver tests passed\n";
     return 0;
   } catch (const std::exception& error) {

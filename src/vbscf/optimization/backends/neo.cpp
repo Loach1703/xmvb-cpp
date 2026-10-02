@@ -261,8 +261,10 @@ bool build_accepted_neo_keyframe(
     neo_options.trust_radius = trial_radius;
     neo_options.relative_residual_tolerance = neo_forcing_term(
         gradient_l2, chart.reduced_size());
-    // A linear solve below the requested nonlinear stationarity is unusable
-    // accuracy, especially for the final energy-confirmation keyframe.
+    // The current keyframe controller uses a coordinate-space absolute floor.
+    // This is not a physical stationarity certificate. Removing this floor
+    // alone can oversolve the model; it must be revised with micro/keyframe
+    // control, not justified by the nonlinear gradient threshold.
     neo_options.absolute_residual_tolerance = options.gradient_tolerance;
     neo_options.maximum_subspace_dimension = 0;
     neo_options.require_curvature_certificate = false;
