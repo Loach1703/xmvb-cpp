@@ -265,6 +265,12 @@ if (BUILD_TESTING)
   target_link_libraries(test_input_guess_selection PRIVATE xmvb_input_deck)
   add_test(NAME input_guess_selection COMMAND test_input_guess_selection)
 
+  add_executable(
+    test_generated_structures
+    ${CMAKE_SOURCE_DIR}/tests/input/test_generated_structures.cpp)
+  target_link_libraries(test_generated_structures PRIVATE xmvb_input)
+  add_test(NAME generated_structures COMMAND test_generated_structures)
+
   add_test(
     NAME state_average_f2
     COMMAND

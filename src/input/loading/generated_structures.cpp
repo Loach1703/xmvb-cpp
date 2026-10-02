@@ -212,8 +212,11 @@ bool is_single_reference_active_structure_case(
   const int spin_multiplicity = metadata.declared_spin_multiplicity;
   const int n_active_beta_electrons =
       (n_active_electrons - spin_multiplicity + 1) / 2;
+  // All-alpha electrons define one structure only when every active orbital
+  // is occupied. With holes, each occupied subset is an independent structure.
   return (n_active_beta_electrons == 0 &&
-          n_active_electrons == spin_multiplicity - 1) ||
+          n_active_electrons == spin_multiplicity - 1 &&
+          n_active_electrons == n_active_orbitals) ||
       (n_active_beta_electrons == n_active_orbitals &&
        spin_multiplicity == 1);
 }
