@@ -95,6 +95,16 @@ int run(Options command_line) {
         });
   }
 
+  std::shared_ptr<xmvb::output::NeoTraceWriter> neo_trace_writer;
+  if (!neo_trace_path.empty()) {
+    neo_trace_writer =
+        std::make_shared<xmvb::output::NeoTraceWriter>(neo_trace_path);
+    options.neo_iteration_callback =
+        [neo_trace_writer](const xmvb::vb::NeoIterationRecord& record) {
+          neo_trace_writer->write(record);
+        };
+  }
+
   xmvb::vb::VbScfOptimizer optimizer(options);
   std::vector<int> selected_states(load_result.state_average_count);
   std::iota(selected_states.begin(), selected_states.end(), 0);
@@ -109,9 +119,6 @@ int run(Options command_line) {
           load_result.nuclear_repulsion_energy);
   if (!tnhvp_trace_path.empty()) {
     xmvb::output::write_tnhvp_trace(tnhvp_trace_path, result);
-  }
-  if (!neo_trace_path.empty()) {
-    xmvb::output::write_neo_trace(neo_trace_path, result);
   }
   if (trace_writer != nullptr) {
     trace_writer->finalize(result);

@@ -102,6 +102,11 @@ bool build_accepted_neo_keyframe(
       objective->input().orbital_preparation_input;
   NonredundantRetractionMetric orbital_metric(
       chart, parameter_view, accepted_orbitals);
+  record->source_gradient_norm = reduced_gradient.stableNorm();
+  if (options.neo_iteration_callback) {
+    record->source_physical_gradient_norm =
+        orbital_metric.dual_norm(reduced_gradient);
+  }
   ExactHvpOperator orbital_hessian(
       objective->second_order_context(),
       &objective->input(),
@@ -330,6 +335,12 @@ bool build_accepted_neo_keyframe(
 
     record->kkt_residual_norm = step.residual_norm;
     record->kkt_residual_target = step.residual_target;
+    record->orbital_step_norm = step.step_norm;
+    record->shift = step.shift;
+    if (options.neo_iteration_callback) {
+      record->physical_orbital_kkt_norm =
+          orbital_metric.dual_norm(step.kkt_residual.orbital);
+    }
     record->curvature_residual_norm = step.curvature_residual_norm;
     record->curvature_residual_target = step.curvature_residual_target;
     record->global_curvature_certified = step.global_curvature_certified;
@@ -442,6 +453,13 @@ BackendRunResult run_neo_backend(
     final_gradient_inf =
         gradient_infinity_norm(next_projected.reduced_gradient);
     final_gradient_l2 = next_projected.reduced_gradient.norm();
+    if (options.neo_iteration_callback) {
+      const NonredundantRetractionMetric next_metric(
+          next_geometry, parameter_view,
+          objective->input().orbital_preparation_input);
+      iteration_record.accepted_physical_gradient_norm =
+          next_metric.dual_norm(next_projected.reduced_gradient);
+    }
     // Retain the packed trial direction only while following the same
     // exact-gradient keyframe sequence. All accepted points are still
     // counted and reported independently.
@@ -482,6 +500,9 @@ BackendRunResult run_neo_backend(
                   iteration_record.predicted_reduction
             : -std::numeric_limits<double>::infinity();
     result->neo_iteration_trace.push_back(iteration_record);
+    if (options.neo_iteration_callback) {
+      options.neo_iteration_callback(iteration_record);
+    }
     sync_result_from_objective(*objective, result);
     record_accepted_iteration_snapshot(
         objective,

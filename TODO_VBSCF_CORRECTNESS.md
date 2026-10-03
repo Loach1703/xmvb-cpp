@@ -227,8 +227,8 @@ wavefunction constraints merely to reproduce a reference energy.
     -2181.624464883727796 Eh (job 249623, 24 macro iterations), leaving
     a gap of **0.0068200091 Eh**. Thus the CI stationarity repair does NOT
     resolve the main energy discrepancy. Do not label this energy validated.
-  - [ ] Companion NEO job 269147_0 is still running. At step 311 its energy
-    is -2181.6176411989 Eh; this is an intermediate value, not convergence.
+  - [x] Companion NEO job 269147_0 was stopped after 1312 steps at
+    -2181.6176414357 Eh. This is an intermediate value, not convergence.
     Both jobs retain the original input's 2000-step budget, not a 30-step
     diagnostic cutoff. Logs are under
     `results/diagnostics/pyrrole-molcas-20261002/ci-convergence/`.
@@ -289,6 +289,40 @@ small-block Schur reference. No production derivative formulas were changed.
   residuals do not bound the eliminated orbital error when C is ill-conditioned.
   The production correction addresses that certificate defect, not the entire
   nonlinear convergence problem.
+  **Confirmed long-tail mechanism, not yet an optimizer repair:** baseline
+  revision 94d343d also stagnates at step 642, -2181.6176426469 Eh
+  (job 269150, diagnostic wall-time limit). Do not blame the entire failure
+  on the CI stationarity gate; retain that validated accuracy change.
+  Job 269164 streams 689 accepted-step records with no change to the NEO
+  algorithm. At step 280:
+
+  | Quantity | Value |
+  | --- | ---: |
+  | Source coordinate gradient L2 | 2.3690e-4 |
+  | Source physical gradient dual norm | 1.5495e-3 |
+  | Accepted coordinate KKT residual | 2.6822e-4 |
+  | Coordinate KKT target | 1.000056e-3 |
+  | Physical orbital KKT residual | 1.5542e-3 |
+  | Accepted physical gradient dual norm | 1.5556e-3 |
+  | Orbital HVP / structure actions | 1 / 42 |
+  | Trust radius / shift / boundary | 1 / 0 / false |
+  | Actual decrease / trust ratio | 4.0973e-10 / 0.9941 |
+
+  The coordinate KKT gate certifies a step while its physical residual is
+  essentially the entire physical gradient. The outer physical-gradient
+  gate correctly refuses convergence, and globalization accepts tiny
+  positive decreases. The next keyframe repeats one orbital direction and
+  dozens of structure actions. At step 689 the physical residual remains
+  1.3475e-3 and the decrease is only 1.69e-10 Eh. This is not trust-radius
+  exhaustion or evidence of inaccurate CI energies. Structure-response
+  correction alone does not repair the missing orbital accuracy.
+  The new observer flushes `--neo-trace` per accepted step; physical norm
+  diagnostics run only when that observer is enabled. NEO/response-NEO tests
+  pass; F2 and 241 remain 5 and 6 steps at their previous energies.
+  **Next:** use one physical residual/forcing contract for inner and outer
+  decisions and enrich the orbital space when that certificate fails.
+  Do not simply remove the scalar floor, tune a smaller fixed threshold, or
+  claim this also resolves the independent negative-curvature escape problem.
 - [ ] Do not repeat the already established fixed-orbital energy comparison.
   Forward agreement is established; it does not separately prove every RDM
   component or every derivative. A real negative-curvature HVP direction also

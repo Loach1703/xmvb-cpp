@@ -65,6 +65,7 @@ struct TnhvpIterationRecord {
   double predicted_decrease = 0.0;
   double actual_decrease = 0.0;
   double trust_ratio = 0.0;
+
   double minimum_ritz_value = 0.0;
   double minimum_shifted_ritz_value = 0.0;
   double trust_region_shift = 0.0;
@@ -112,6 +113,16 @@ struct NeoIterationRecord {
   double predicted_reduction = 0.0;
   double actual_reduction = 0.0;
   double trust_ratio = 0.0;
+
+  /** Source reduced-gradient L2 norm, before the accepted step. */
+  double source_gradient_norm = 0.0;
+  /** Physical dual norms, evaluated only when a live NEO observer is present. */
+  double source_physical_gradient_norm = 0.0;
+  double physical_orbital_kkt_norm = 0.0;
+  double accepted_physical_gradient_norm = 0.0;
+  /** Physical orbital step norm and trust-region shift. */
+  double orbital_step_norm = 0.0;
+  double shift = 0.0;
 
   bool global_curvature_certified = false;
   bool reached_boundary = false;
