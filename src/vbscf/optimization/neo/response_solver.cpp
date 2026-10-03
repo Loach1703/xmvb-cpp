@@ -390,6 +390,31 @@ void ResponseNeoWorkspace::store_structure(
       direction.transpose() * structure_structure_images_;
 }
 
+bool ResponseNeoWorkspace::retain_structure_image(
+    Eigen::VectorXd direction,
+    ResponseNeoDirection image) {
+  const double initial_norm = direction.stableNorm();
+  if (!(initial_norm > 0.0) || !std::isfinite(initial_norm)) return false;
+  // Apply the same linear changes to the vector and its coupled image.
+  // H(q - Z a) = Hq - (HZ)a, so no new action is needed.
+  for (int pass = 0; pass < 2; ++pass) {
+    const Eigen::VectorXd coefficients =
+        structure_basis_.transpose() * direction;
+    direction.noalias() -= structure_basis_ * coefficients;
+    image.orbital.noalias() -= structure_orbital_images_ * coefficients;
+    image.structure.noalias() -= structure_structure_images_ * coefficients;
+  }
+  const double norm = direction.stableNorm();
+  const double threshold =
+      64.0 * std::numeric_limits<double>::epsilon() * initial_norm;
+  if (!(norm > threshold) || !std::isfinite(norm)) return false;
+  direction /= norm;
+  image.orbital /= norm;
+  image.structure /= norm;
+  store_structure(direction, image);
+  return true;
+}
+
 bool ResponseNeoWorkspace::append_structure_block(
     Eigen::MatrixXd directions,
     int* actions,
@@ -701,9 +726,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
               result.stop_reason = NeoStopReason::SubspaceLimit;
               return result;
             }
-            if (!append_structure(
-                    correction, &result.coupled_actions,
-                    &result.structure_actions)) {
+            if (!retain_structure_image(correction, image)) {
               result.stop_reason = NeoStopReason::NumericalFailure;
               return result;
             }

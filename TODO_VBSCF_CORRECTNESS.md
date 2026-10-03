@@ -360,6 +360,50 @@ small-block Schur reference. No production derivative formulas were changed.
   negative-curvature escape, using the new physical certificate as an invariant.
   Do not simply remove the scalar floor, tune a smaller fixed threshold, or
   claim this also resolves the independent negative-curvature escape problem.
+
+### 2026-10-03: NEO action reuse and rejected enrichment trial
+
+- [x] Retain candidate-local structure correction images without applying
+  the coupled operator again. Two-pass orthogonalization and normalization
+  act identically on the direction and its cached orbital/structure images.
+  The complete physical KKT certificate is unchanged. A regression counts
+  operator calls separately from residual solves to prevent double evaluation;
+  its curvature certificate is disabled to isolate response-image reuse.
+  Independent curvature-certificate tests remain enabled.
+- [x] Hanhai25 job 269219: both NEO test executables pass. One matched
+  before/after run on anode003, 32 threads, exact integrals, Davidson:
+
+  | System | Steps before / after | Wall before / after (s) | Orbital actions before / after | Structure actions before / after |
+  | --- | ---: | ---: | ---: | ---: |
+  | F2 OEO | 5 / 5 | 0.259 / 0.252 | 28 / 28 | 28 / 28 |
+  | 241 HAO | 6 / 6 | 2.512 / 2.486 | 10 / 10 | 119 / 119 |
+  | FeCl2 | 3 / 3 | 12.901 / 12.754 | 302 / 302 | 1167 / 1145 |
+
+  All final energies agree at the printed ten-decimal precision. FeCl2's
+  physical gradient remains 9.1958e-4; its process peak RSS changes from
+  436.2 to 452.1 MiB. First-step structure actions decrease from 961 to 941,
+  but orbital actions remain 258. This is a redundant-action removal, not a
+  significant speedup; single-run wall differences are not statistically
+  qualified. Raw logs, binary/input hashes and scheduler scripts are under
+  results/diagnostics/pyrrole-molcas-20261002/ci-convergence/enrichment-269219/.
+- [x] Reject simultaneous orbital enrichment from the corrected residual.
+  Job 269214: first-step structure actions decrease to 807, but total orbital
+  / structure actions increase from 302 / 1167 to 324 / 1295; wall time changes
+  from 11.842 to 12.008 s. The trial is removed from production code.
+- [x] Do not replace the default preconditioner with Hessian-diagonal based
+  on intuition. Job 269208's diagonal trial reaches a lower branch but fails
+  after 113.521 s with an explicitly unmet bordered structure-response
+  residual. It is not a converged result or a speedup. The default remains
+  one-electron; the residual failure is retained as evidence, not suppressed.
+- [ ] Prototype a structure-aware orbital preconditioner using cached
+  structure-to-orbital images and the projected structure Hessian, without
+  additional complete response solves. The first FeCl2 step has zero shift,
+  so shifted-metric preconditioner changes cannot explain its cost. Current
+  independent one-electron blocks omit the relaxed Schur coupling. A
+  Woodbury update requires a principled treatment of singular/indefinite
+  projected factors and reuse across expansions before it can become a
+  production improvement; do not introduce a hidden fallback or claim a
+  speedup without a matched converged benchmark.
 - [ ] Do not repeat the already established fixed-orbital energy comparison.
   Forward agreement is established; it does not separately prove every RDM
   component or every derivative. A real negative-curvature HVP direction also

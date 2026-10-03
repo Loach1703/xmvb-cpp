@@ -186,6 +186,10 @@ private:
       Eigen::VectorXd direction,
       int* actions,
       int* structure_actions);
+  /** @brief Retains a computed response image without repeating its action. */
+  bool retain_structure_image(
+      Eigen::VectorXd direction,
+      ResponseNeoDirection image);
   bool append_structure_block(
       Eigen::MatrixXd directions,
       int* actions,

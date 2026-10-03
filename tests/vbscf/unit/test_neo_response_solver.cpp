@@ -551,6 +551,7 @@ void check_small_structure_residual_requires_response_correction() {
   const Eigen::Matrix2d metric = Eigen::Matrix2d::Identity();
   const Eigen::Vector2d gradient(0.1, 0.0);
   int callback_calls = 0;
+  int structure_image_calls = 0;
   double first_structure_residual = 0.0;
   const ResponseNeoProblem problem(
       gradient,
@@ -558,7 +559,8 @@ void check_small_structure_residual_requires_response_correction() {
       [a, b](const Eigen::VectorXd& p) {
         return ResponseNeoDirection{a * p, b * p};
       },
-      [b, c](const Eigen::VectorXd& q) {
+      [b, c, &structure_image_calls](const Eigen::VectorXd& q) {
+        ++structure_image_calls;
         return ResponseNeoDirection{b.transpose() * q, c * q};
       },
       [metric](const Eigen::VectorXd& p) { return metric * p; },
@@ -577,6 +579,7 @@ void check_small_structure_residual_requires_response_correction() {
   options.trust_radius = 1.0;
   options.relative_residual_tolerance = 1.0e-12;
   options.absolute_residual_tolerance = 1.0e-3;
+  options.require_curvature_certificate = false;
   const ResponseNeoResult result = workspace.solve(options);
 
   require(result.converged(), "response-corrected NEO did not converge");
@@ -586,6 +589,10 @@ void check_small_structure_residual_requires_response_correction() {
           "small structure residual did not trigger a response solve");
   require(workspace.structure_basis_size() == 1,
           "missing response direction was not retained");
+  require(structure_image_calls == callback_calls,
+          "retaining the response correction repeated its coupled action: " +
+              std::to_string(structure_image_calls) + " images for " +
+              std::to_string(callback_calls) + " residual solves");
   const Eigen::Matrix2d relaxed =
       a - b.transpose() * (b / c(0, 0));
   require_close(result.step.orbital,
