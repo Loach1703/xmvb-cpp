@@ -395,7 +395,7 @@ small-block Schur reference. No production derivative formulas were changed.
   after 113.521 s with an explicitly unmet bordered structure-response
   residual. It is not a converged result or a speedup. The default remains
   one-electron; the residual failure is retained as evidence, not suppressed.
-- [ ] Prototype a structure-aware orbital preconditioner using cached
+- [x] Evaluate a structure-aware orbital preconditioner using cached
   structure-to-orbital images and the projected structure Hessian, without
   additional complete response solves. The first FeCl2 step has zero shift,
   so shifted-metric preconditioner changes cannot explain its cost. Current
@@ -404,6 +404,37 @@ small-block Schur reference. No production derivative formulas were changed.
   projected factors and reuse across expansions before it can become a
   production improvement; do not introduce a hidden fallback or claim a
   speedup without a matched converged benchmark.
+- [x] Re-test the cached response-space Woodbury proposal rather than assume
+  the previously rejected update will now help. Prior commits 3799413 and
+  c2776c4 already implemented and rejected this class of update on MnF2.
+  Job 269228 uses the same signed Schur inverse identity, but caches base
+  inverse images incrementally as structure columns are added, invalidates
+  them on shift/accuracy changes, handles structure null modes consistently
+  with the projected model, and keeps the full physical KKT certificate.
+  Both NEO test executables pass, including a new signed/singular structure
+  fixture. The prototype is removed after the measurement, not kept behind
+  an option or introduced as a new algorithm.
+
+  | Same-node exact/Davidson, 32 threads | Steps before / trial | Wall before / trial (s) | Orbital actions before / trial | Structure actions before / trial |
+  | --- | ---: | ---: | ---: | ---: |
+  | F2 OEO | 5 / 5 | 0.249 / 0.267 | 28 / 28 | 28 / 28 |
+  | 241 HAO | 6 / 6 | 2.511 / 2.500 | 10 / 10 | 119 / 119 |
+  | FeCl2 | 3 / 3 | 12.800 / 12.592 | 302 / 292 | 1145 / 1094 |
+
+  FeCl2's first orbital/structure actions change from 258/941 to 249/644.
+  The final energy changes from -2181.6176448571 to -2181.6176448851 Eh;
+  trial physical gradient is 9.7789e-4. Process peak RSS changes from 444.3
+  to 448.6 MiB. The 1.6% single-run wall decrease does not establish a stable
+  speedup and does not restore the historic approximately 5 s runtime.
+  F2 changes by 1e-8 Eh and 241 retains its printed energy. This experiment
+  changes the Krylov trajectory, unlike the historic unchanged MnF2 case,
+  but still gives little total-work reduction. The counters alone do not
+  attribute an exact wall-time fraction to any kernel.
+  The patch, logs, source/binary/input provenance and Slurm script remain in
+  results/diagnostics/pyrrole-molcas-20261002/ci-convergence/woodbury-269228/.
+  **Conclusion:** retained response information alone is not enough to remove
+  the costly orbital expansions; do not repeat this same Woodbury update
+  without a materially different curvature representation and a new test.
 - [ ] Do not repeat the already established fixed-orbital energy comparison.
   Forward agreement is established; it does not separately prove every RDM
   component or every derivative. A real negative-curvature HVP direction also
