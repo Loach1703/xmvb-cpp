@@ -18,7 +18,7 @@ enum class NeoStopReason {
 struct NeoOptions {
   /** Radius measured in the physical coordinate metric. */
   double trust_radius = 1.0;
-  /** Relative tolerance for the scale-aware Euclidean KKT residual. */
+  /** Relative tolerance for the physical dual-norm KKT residual. */
   double relative_residual_tolerance = 1.0e-8;
   /** Absolute tolerance for the explicit KKT residual. */
   double absolute_residual_tolerance = 0.0;
@@ -62,11 +62,11 @@ struct NeoResult {
   double shift = 0.0;
   double predicted_reduction = 0.0;
   double step_norm = 0.0;
-  /** Euclidean norm of `gradient + H * step + shift * M * step`. */
+  /** Physical dual norm of `gradient + H * step + shift * M * step`. */
   double residual_norm = 0.0;
-  /** Scale-aware Euclidean accuracy requested for `residual_norm`. */
+  /** Absolute plus gradient-relative dual-norm accuracy for `residual_norm`. */
   double residual_target = 0.0;
-  /** Full-space residual of the lowest generalized-Hessian Ritz pair. */
+  /** Euclidean spectral residual of the lowest generalized-Hessian Ritz pair. */
   double curvature_residual_norm = 0.0;
   /** Requested accuracy for `curvature_residual_norm`. */
   double curvature_residual_target = 0.0;
@@ -106,9 +106,9 @@ struct NeoResult {
  * assumes that the generic starting probe overlaps the lowest eigenspace. A
  * complete basis or a caller-supplied spectral lower bound supplies the
  * stronger rigorous global certificate reported in `NeoResult`. The
- * physical metric enters only through the trust-region norm and projected
- * generalized eigenproblem; an optional preconditioner only proposes new
- * subspace directions.
+ * physical metric enters the trust-region norm, projected generalized
+ * eigenproblem, and dual KKT certificate; an optional preconditioner only
+ * proposes new subspace directions.
  * `stop_on_negative_curvature` is a zero-gradient spectral probe: it may
  * return a verified negative Rayleigh direction before KKT convergence.
  * A nonnegative Ritz value from an incomplete subspace is not a global

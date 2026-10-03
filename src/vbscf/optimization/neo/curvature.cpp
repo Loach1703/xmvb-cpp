@@ -35,6 +35,13 @@ NeoResult probe_neo_curvature(
         image.head(n_orbital) = chart.apply_reduced_curvature(vector.head(n_orbital));
         return image;
       },
+      [&](const Eigen::VectorXd& covector) {
+        const Eigen::VectorXd orbital_inverse =
+            chart.apply_inverse_reduced_block_preconditioner(
+                covector.head(n_orbital));
+        return std::sqrt(covector.head(n_orbital).dot(orbital_inverse) +
+                         covector.tail(n_structure).squaredNorm());
+      },
       [&](const Eigen::VectorXd& vector) -> Eigen::VectorXd {
         Eigen::VectorXd image(vector.size());
         image.head(n_orbital) = chart.apply_inverse_reduced_block_preconditioner(

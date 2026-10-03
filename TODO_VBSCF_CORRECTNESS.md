@@ -319,8 +319,45 @@ small-block Schur reference. No production derivative formulas were changed.
   The new observer flushes `--neo-trace` per accepted step; physical norm
   diagnostics run only when that observer is enabled. NEO/response-NEO tests
   pass; F2 and 241 remain 5 and 6 steps at their previous energies.
-  **Next:** use one physical residual/forcing contract for inner and outer
-  decisions and enrich the orbital space when that certificate fails.
+  **Implemented and tested, 2026-10-03:** use the orbital retraction metric's
+  dual norm for both the orbital KKT certificate and gradient-relative forcing.
+  The coupled norm combines this orbital norm with the existing horizontal
+  structure-coordinate Euclidean norm. The candidate-local structure correction
+  is checked in the same units. The absolute tolerance remains 1e-3; this is
+  a metric repair, not a smaller fixed threshold. Core NEO also scales the
+  relative tolerance by the gradient alone, not cancelling Hessian terms.
+  Mandatory dual-norm callbacks prevent accidental coordinate-norm substitution.
+  Anisotropic two-dimensional core/coupled tests reject an incomplete first
+  direction and recover the exact Newton step; a coordinate-rescaling test
+  recovers the same physical step. Both test executables pass in Slurm job
+  269198 on Hanhai25.
+
+  | System, exact integrals / Davidson / 32 threads | Steps | End-to-end wall (s) | Peak RSS (MiB) | Orbital / structure actions | Final energy (Eh) |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | F2 OEO low-energy initial guess | 5 | 0.213 | 69.9 | 28 / 28 | -198.7611115200 |
+  | 241 HAO | 6 | 2.157 | 961.2 | 10 / 119 | -230.7205903766 |
+  | FeCl2 original initial guess | 3 | 11.790 | 447.8 | 302 / 1167 | -2181.6176448571 |
+
+  Dense FeCl2 cross-check, Hanhai25 job 269203 using the same frozen binary:
+  3 steps, 12.775 s, 454.0 MiB, 299 orbital / 75 structure actions,
+  -2181.6176448568 Eh, physical gradient 9.4006e-4. Both eigensolvers
+  satisfy the repaired contract and agree in final energy within 3e-10 Eh.
+
+  FeCl2 now satisfies both the physical-gradient gate (9.1958e-4) and energy
+  change gate (4.5061e-9 Eh), rather than taking more than a thousand tiny steps.
+  Its first keyframe costs 258 orbital and 961 structure actions: the repair
+  moves work into the inner solve instead of certifying inaccurate tiny steps.
+  This is NOT a claim of cheap Newton solves or quadratic convergence. F2/241
+  retain their step counts; their final energies change by -2.8038e-7 and
+  +1.11e-8 Eh, respectively, because the accepted steps change. Single-run
+  control wall times were 0.200 and 1.820 s before this repair; the measured
+  241 overhead still needs investigation, not a speedup claim.
+  **Still unresolved:** FeCl2 remains 0.0068200266 Eh above the same-initial-guess
+  PySCF reference (-2181.624464883727796 Eh). The long-tail certificate defect
+  is repaired, but the higher-energy branch/negative-curvature escape problem
+  is not. Do not mark the overall FeCl2 correctness task complete.
+  **Next:** investigate efficient orbital-space enrichment and genuine
+  negative-curvature escape, using the new physical certificate as an invariant.
   Do not simply remove the scalar floor, tune a smaller fixed threshold, or
   claim this also resolves the independent negative-curvature escape problem.
 - [ ] Do not repeat the already established fixed-orbital energy comparison.

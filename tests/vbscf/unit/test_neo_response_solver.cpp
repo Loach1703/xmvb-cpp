@@ -35,12 +35,20 @@ void require_close(
           message);
 }
 
+double physical_dual_norm(
+    const Eigen::MatrixXd& metric,
+    const Eigen::VectorXd& covector) {
+  return std::sqrt(covector.dot(metric.ldlt().solve(covector)));
+}
+
 ResponseNeoProblem dense_problem(
     const Eigen::MatrixXd& a,
     const Eigen::MatrixXd& b,
     const Eigen::MatrixXd& c,
     const Eigen::MatrixXd& metric,
     const Eigen::VectorXd& gradient) {
+  const Eigen::MatrixXd metric_inverse = metric.ldlt().solve(
+      Eigen::MatrixXd::Identity(metric.rows(), metric.cols()));
   return ResponseNeoProblem(
       gradient,
       c.rows(),
@@ -50,7 +58,10 @@ ResponseNeoProblem dense_problem(
       [b, c](const Eigen::VectorXd& q) {
         return ResponseNeoDirection{b.transpose() * q, c * q};
       },
-      [metric](const Eigen::VectorXd& p) { return metric * p; });
+      [metric](const Eigen::VectorXd& p) { return metric * p; },
+      [metric_inverse](const Eigen::VectorXd& covector) {
+        return std::sqrt(covector.dot(metric_inverse * covector));
+      });
 }
 
 Eigen::VectorXd explicit_orbital_step(
@@ -89,13 +100,16 @@ void verify_coupled_residual(
   const Eigen::VectorXd structure =
       b * result.step.orbital + c * result.step.structure;
   const double residual = std::hypot(
-      orbital.stableNorm(), structure.stableNorm());
+      physical_dual_norm(metric, orbital), structure.stableNorm());
   const double scale = std::max({
-      1.0, gradient.stableNorm(),
-      (a * result.step.orbital).stableNorm(),
-      (b.transpose() * result.step.structure).stableNorm()});
+      1.0, physical_dual_norm(metric, gradient),
+      physical_dual_norm(metric, a * result.step.orbital),
+      physical_dual_norm(metric, b.transpose() * result.step.structure)});
   require(residual <= 2.0e-9 * scale,
           "full coupled KKT residual is not converged");
+  require(std::abs(result.residual_norm - residual) <=
+              2.0e-9 * std::max(1.0, residual),
+          "returned coupled residual has the wrong physical norm");
   require(structure.stableNorm() <= 2.0e-9 * scale,
           "structure stationarity is not converged");
   require(std::sqrt(result.step.orbital.dot(
@@ -138,6 +152,60 @@ void check_spd_structure_and_explicit_schur() {
   require_close(result.step.structure, -c.ldlt().solve(b * reference),
                 2.0e-9,
                 "reconstructed structure response is inconsistent");
+}
+
+void check_anisotropic_coupled_dual_residual() {
+  Eigen::Matrix2d a = Eigen::Matrix2d::Zero();
+  a.diagonal() << 1.0, 1.0e4;
+  const Eigen::RowVector2d b = Eigen::RowVector2d::Zero();
+  const Eigen::Matrix<double, 1, 1> c =
+      Eigen::Matrix<double, 1, 1>::Identity();
+  Eigen::Matrix2d metric = Eigen::Matrix2d::Zero();
+  metric.diagonal() << 1.0e-4, 1.0;
+  const Eigen::Matrix2d metric_inverse =
+      metric.ldlt().solve(Eigen::Matrix2d::Identity());
+  const Eigen::Vector2d gradient(1.0e-4, 1.0e-4);
+  const ResponseNeoProblem problem(
+      gradient,
+      1,
+      [a, b](const Eigen::VectorXd& p) {
+        return ResponseNeoDirection{a * p, b * p};
+      },
+      [b, c](const Eigen::VectorXd& q) {
+        return ResponseNeoDirection{b.transpose() * q, c * q};
+      },
+      [metric](const Eigen::VectorXd& p) { return metric * p; },
+      [metric_inverse](const Eigen::VectorXd& covector) {
+        return std::sqrt(covector.dot(metric_inverse * covector));
+      });
+
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.absolute_residual_tolerance = 1.0e-3;
+  options.relative_residual_tolerance = 1.0e-8;
+  options.require_curvature_certificate = false;
+  const ResponseNeoResult result = xmvb::vb::solve_response_neo(
+      problem, options);
+
+  require(result.converged(), "anisotropic response NEO did not converge");
+  require(result.orbital_actions >= 2,
+          "anisotropic response NEO accepted its incomplete first direction");
+  require_close(result.step.orbital,
+                Eigen::Vector2d(-1.0e-4, -1.0e-8), 1.0e-10,
+                "anisotropic response NEO missed the full Newton step");
+  require(result.step.structure.stableNorm() <= 1.0e-12,
+          "uncoupled anisotropic structure response was nonzero");
+  const Eigen::Vector2d orbital_residual =
+      gradient + a * result.step.orbital;
+  const Eigen::VectorXd structure_residual =
+      b * result.step.orbital + c * result.step.structure;
+  const double physical_residual = std::hypot(
+      physical_dual_norm(metric, orbital_residual),
+      structure_residual.stableNorm());
+  require(physical_residual <= result.residual_target,
+          "anisotropic response NEO physical residual exceeds its target");
+  require(std::abs(result.residual_norm - physical_residual) <= 1.0e-12,
+          "anisotropic response NEO reported a coordinate residual norm");
 }
 
 void check_negative_relaxed_curvature() {
@@ -271,6 +339,7 @@ void check_recycled_orbital_guess_starts_subspace() {
             Eigen::VectorXd::Zero(2), Eigen::VectorXd::Zero(0)};
       },
       [](const Eigen::VectorXd& p) { return p; },
+      [](const Eigen::VectorXd& covector) { return covector.stableNorm(); },
       {},
       guess);
   NeoOptions options;
@@ -301,6 +370,7 @@ void check_boundary_residual_uses_shifted_preconditioner() {
             Eigen::VectorXd::Zero(3), Eigen::VectorXd::Zero(0)};
       },
       [](const Eigen::VectorXd& p) { return p; },
+      [](const Eigen::VectorXd& covector) { return covector.stableNorm(); },
       [&largest_shift](
           const Eigen::VectorXd& residual,
           double shift,
@@ -335,6 +405,8 @@ void check_inexact_block_preconditioner_preserves_coupled_step() {
             0.0, -0.1, 0.8;
   const Eigen::Vector3d gradient(0.9, -0.7, 0.5);
   const Eigen::Vector3d block_diagonal(3.0, 2.1, 1.4);
+  const Eigen::Matrix3d metric_inverse =
+      metric.ldlt().solve(Eigen::Matrix3d::Identity());
   double largest_shift = 0.0;
   const ResponseNeoProblem problem(
       gradient,
@@ -346,6 +418,9 @@ void check_inexact_block_preconditioner_preserves_coupled_step() {
         return ResponseNeoDirection{b.transpose() * q, c * q};
       },
       [metric](const Eigen::VectorXd& p) { return metric * p; },
+      [metric_inverse](const Eigen::VectorXd& covector) {
+        return std::sqrt(covector.dot(metric_inverse * covector));
+      },
       [&largest_shift, block_diagonal](
           const Eigen::VectorXd& residual,
           double shift,
@@ -398,7 +473,7 @@ void check_keyframe_response_uses_forcing_accuracy() {
       problem, keyframe_options);
   require(keyframe.converged(),
           "inexact keyframe response solve did not converge");
-  require(keyframe.kkt_residual.orbital.stableNorm() <=
+  require(problem.orbital_dual_norm(keyframe.kkt_residual.orbital) <=
               keyframe.residual_target,
           "inexact keyframe orbital residual exceeds its certificate");
   require(keyframe.kkt_residual.structure.stableNorm() <=
@@ -453,7 +528,8 @@ void check_small_gradient_needs_relative_accuracy() {
   const Eigen::Matrix3d relaxed = a - b.transpose() * c.ldlt().solve(b);
   const Eigen::Vector3d reference = -relaxed.ldlt().solve(gradient);
   require(result.converged(), "small-gradient relative solve did not converge");
-  const double target = options.relative_residual_tolerance * gradient.norm();
+  const double target = options.relative_residual_tolerance *
+      problem.orbital_dual_norm(gradient);
   // Eliminating the structure residual gives H_relaxed (p-p_exact)
   // = r_o - B^T C^-1 r_s. Bound the step error by the requested KKT accuracy,
   // rather than demanding accuracy stricter than the solver was asked for.
@@ -462,7 +538,7 @@ void check_small_gradient_needs_relative_accuracy() {
   require((result.step.orbital - reference).norm() <= error_bound +
               64.0 * std::numeric_limits<double>::epsilon() * reference.norm(),
           "small-gradient response step exceeds its KKT-derived error bound");
-  require(result.residual_norm <= options.relative_residual_tolerance * gradient.norm(),
+  require(result.residual_norm <= target,
           "small-gradient KKT residual was hidden by an absolute tolerance");
 }
 
@@ -486,6 +562,7 @@ void check_small_structure_residual_requires_response_correction() {
         return ResponseNeoDirection{b.transpose() * q, c * q};
       },
       [metric](const Eigen::VectorXd& p) { return metric * p; },
+      [](const Eigen::VectorXd& covector) { return covector.stableNorm(); },
       {}, {}, 0.0, {},
       [&callback_calls, &first_structure_residual, c](
           const Eigen::VectorXd& residual) {
@@ -564,6 +641,7 @@ void check_incomplete_structure_basis_cannot_certify_global_curvature() {
 int main() {
   try {
     check_spd_structure_and_explicit_schur();
+    check_anisotropic_coupled_dual_residual();
     check_negative_relaxed_curvature();
     check_budget_reports_subspace_limit();
     check_structure_contracts();

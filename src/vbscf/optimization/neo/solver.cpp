@@ -133,7 +133,7 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
     throw std::invalid_argument(
         "NEO negative-curvature probe requires an exactly zero gradient");
   }
-  const double gradient_norm = problem.gradient().norm();
+  const double gradient_norm = problem.dual_norm(problem.gradient());
 
   NeoResult result;
   result.step = Eigen::VectorXd::Zero(dimension);
@@ -230,12 +230,9 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
         0.0, result.step.dot(result.metric_step)));
     result.kkt_residual = problem.gradient() + result.hessian_step +
         result.shift * result.metric_step;
-    result.residual_norm = result.kkt_residual.norm();
+    result.residual_norm = problem.dual_norm(result.kkt_residual);
     result.residual_target = options.absolute_residual_tolerance +
-        options.relative_residual_tolerance * std::max({
-            gradient_norm,
-            result.hessian_step.norm(),
-            result.shift * result.metric_step.norm()});
+        options.relative_residual_tolerance * gradient_norm;
     result.predicted_reduction = -problem.gradient().dot(result.step) -
         0.5 * result.step.dot(result.hessian_step);
 

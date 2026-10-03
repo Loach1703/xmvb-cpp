@@ -36,7 +36,8 @@ using ResponseNeoStructureResidualSolver =
  *
  * The coupled action represents
  * @f$[\bar A p+B^Tz,\;Bp+Cz]@f$.  Only the orbital metric defines the
- * trust region.  The optional preconditioner acts only on orbital covectors.
+ * trust region. The required dual norm measures orbital KKT covectors in
+ * physical units. The optional preconditioner acts only on orbital covectors.
  */
 class ResponseNeoProblem {
 public:
@@ -46,6 +47,7 @@ public:
       ResponseNeoBlockAction apply_orbital_coupling,
       ResponseNeoBlockAction apply_structure_coupling,
       NeoAction apply_orbital_metric,
+      NeoDualNorm orbital_dual_norm,
       ResponseNeoPreconditioner apply_orbital_preconditioner = {},
       Eigen::VectorXd initial_orbital_guess = {},
       double operator_relative_accuracy = 0.0,
@@ -68,6 +70,8 @@ public:
       const Eigen::MatrixXd& directions) const;
   Eigen::VectorXd apply_orbital_metric(
       const Eigen::VectorXd& direction) const;
+  /** @brief Measures a finite orbital covector in the physical dual metric. */
+  double orbital_dual_norm(const Eigen::VectorXd& covector) const;
   bool has_orbital_preconditioner() const noexcept {
     return static_cast<bool>(apply_orbital_preconditioner_);
   }
@@ -105,6 +109,7 @@ private:
   const ResponseNeoBlockAction apply_structure_coupling_;
   const ResponseNeoMatrixAction apply_structure_coupling_block_;
   const NeoAction apply_orbital_metric_;
+  const NeoDualNorm orbital_dual_norm_;
   const ResponseNeoPreconditioner apply_orbital_preconditioner_;
   const ResponseNeoStructureResidualSolver solve_structure_residual_;
   const Eigen::VectorXd initial_orbital_guess_;
@@ -121,8 +126,11 @@ struct ResponseNeoResult {
   double shift = 0.0;
   double predicted_reduction = 0.0;
   double step_norm = 0.0;
+  /** Physical orbital dual norm combined with Euclidean structure norm. */
   double residual_norm = 0.0;
+  /** Gradient-relative target in the physical orbital dual norm. */
   double residual_target = 0.0;
+  /** Separate Euclidean spectral residual of the lowest Ritz pair. */
   double curvature_residual_norm = 0.0;
   double curvature_residual_target = 0.0;
   int iterations = 0;

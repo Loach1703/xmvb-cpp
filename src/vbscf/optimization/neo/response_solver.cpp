@@ -137,6 +137,7 @@ ResponseNeoProblem::ResponseNeoProblem(
     ResponseNeoBlockAction apply_orbital_coupling,
     ResponseNeoBlockAction apply_structure_coupling,
     NeoAction apply_orbital_metric,
+    NeoDualNorm orbital_dual_norm,
     ResponseNeoPreconditioner apply_orbital_preconditioner,
     Eigen::VectorXd initial_orbital_guess,
     double operator_relative_accuracy,
@@ -149,6 +150,7 @@ ResponseNeoProblem::ResponseNeoProblem(
       apply_structure_coupling_block_(
           std::move(apply_structure_coupling_block)),
       apply_orbital_metric_(std::move(apply_orbital_metric)),
+      orbital_dual_norm_(std::move(orbital_dual_norm)),
       apply_orbital_preconditioner_(std::move(apply_orbital_preconditioner)),
       solve_structure_residual_(std::move(solve_structure_residual)),
       initial_orbital_guess_(std::move(initial_orbital_guess)),
@@ -158,8 +160,9 @@ ResponseNeoProblem::ResponseNeoProblem(
     throw std::invalid_argument("response NEO requires finite dimensions");
   }
   if (!apply_orbital_coupling_ || !apply_structure_coupling_ ||
-      !apply_orbital_metric_) {
-    throw std::invalid_argument("response NEO requires coupling and metric actions");
+      !apply_orbital_metric_ || !orbital_dual_norm_) {
+    throw std::invalid_argument(
+        "response NEO requires coupling, metric, and dual-norm actions");
   }
   if (initial_orbital_guess_.size() != 0 &&
       (initial_orbital_guess_.size() != orbital_size() ||
@@ -252,6 +255,20 @@ Eigen::VectorXd ResponseNeoProblem::apply_orbital_metric(
   return apply_orbital_checked(
       apply_orbital_metric_, direction,
       "response NEO orbital metric returned an invalid vector");
+}
+
+double ResponseNeoProblem::orbital_dual_norm(
+    const Eigen::VectorXd& covector) const {
+  if (covector.size() != orbital_size() || !covector.allFinite()) {
+    throw std::invalid_argument(
+        "invalid orbital covector passed to response NEO dual norm");
+  }
+  const double norm = orbital_dual_norm_(covector);
+  if (!std::isfinite(norm) || norm < 0.0) {
+    throw std::runtime_error(
+        "response NEO orbital dual norm returned an invalid value");
+  }
+  return norm;
 }
 
 Eigen::VectorXd ResponseNeoProblem::apply_orbital_preconditioner(
@@ -416,7 +433,8 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
   const int maximum_dimension = options.maximum_subspace_dimension == 0
       ? full_dimension
       : std::min(full_dimension, options.maximum_subspace_dimension);
-  const double gradient_norm = problem_.orbital_gradient().stableNorm();
+  const double gradient_norm =
+      problem_.orbital_dual_norm(problem_.orbital_gradient());
   const double kkt_residual_target =
       options.absolute_residual_tolerance +
       options.relative_residual_tolerance * gradient_norm;
@@ -585,10 +603,10 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
     result.kkt_residual.structure = result.hessian_step.structure;
     // Inexact Newton convergence is controlled relative to the current
     // gradient, not to the much larger cancelling Hessian terms.  Scaling by
-    // those terms would permit an O(||g||) residual and destroy the local
-    // Newton rate in ill-conditioned coordinates.
+    // those terms would permit an O(||g||) residual in the physical dual
+    // metric and destroy the local Newton rate in ill-conditioned coordinates.
     const double orbital_residual_norm =
-        result.kkt_residual.orbital.stableNorm();
+        problem_.orbital_dual_norm(result.kkt_residual.orbital);
     const double structure_residual_norm =
         result.kkt_residual.structure.stableNorm();
     result.residual_norm = std::hypot(
@@ -670,7 +688,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
           const Eigen::VectorXd corrected_structure =
               result.kkt_residual.structure + image.structure;
           const double corrected_norm = std::hypot(
-              corrected_orbital.stableNorm(),
+              problem_.orbital_dual_norm(corrected_orbital),
               corrected_structure.stableNorm());
           if (corrected_norm > kkt_residual_target) {
             const int basis_size = static_cast<int>(

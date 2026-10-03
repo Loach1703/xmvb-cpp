@@ -92,7 +92,6 @@ bool build_accepted_neo_keyframe(
     const Eigen::VectorXd& reduced_gradient,
     const Eigen::VectorXd& current_parameters,
     const Eigen::VectorXd& orbital_guess_packed,
-    double gradient_l2,
     double energy,
     double* trust_radius,
     NeoIterationRecord* record,
@@ -103,10 +102,8 @@ bool build_accepted_neo_keyframe(
   NonredundantRetractionMetric orbital_metric(
       chart, parameter_view, accepted_orbitals);
   record->source_gradient_norm = reduced_gradient.stableNorm();
-  if (options.neo_iteration_callback) {
-    record->source_physical_gradient_norm =
-        orbital_metric.dual_norm(reduced_gradient);
-  }
+  const double physical_gradient_norm = orbital_metric.dual_norm(reduced_gradient);
+  record->source_physical_gradient_norm = physical_gradient_norm;
   ExactHvpOperator orbital_hessian(
       objective->second_order_context(),
       &objective->input(),
@@ -168,6 +165,9 @@ bool build_accepted_neo_keyframe(
         },
         [&orbital_metric](const Eigen::VectorXd& vector) {
           return orbital_metric.apply(vector);
+        },
+        [&orbital_metric](const Eigen::VectorXd& covector) {
+          return orbital_metric.dual_norm(covector);
         },
         [&chart, &orbital_metric](
             const Eigen::VectorXd& residual,
@@ -241,6 +241,9 @@ bool build_accepted_neo_keyframe(
         [&orbital_metric](const Eigen::VectorXd& vector) {
           return orbital_metric.apply(vector);
         },
+        [&orbital_metric](const Eigen::VectorXd& covector) {
+          return orbital_metric.dual_norm(covector);
+        },
         [&chart](const Eigen::VectorXd& residual) {
           return chart.apply_inverse_reduced_block_preconditioner(residual);
         });
@@ -278,11 +281,10 @@ bool build_accepted_neo_keyframe(
     NeoOptions neo_options;
     neo_options.trust_radius = trial_radius;
     neo_options.relative_residual_tolerance = neo_forcing_term(
-        gradient_l2, chart.reduced_size());
-    // The current keyframe controller uses a coordinate-space absolute floor.
-    // This is not a physical stationarity certificate. Removing this floor
-    // alone can oversolve the model; it must be revised with micro/keyframe
-    // control, not justified by the nonlinear gradient threshold.
+        physical_gradient_norm, chart.reduced_size());
+    // Match the outer physical stationarity budget. The solver measures
+    // orbital covectors in the dual of this same retraction metric; a small
+    // coordinate residual cannot certify an unresolved physical gradient.
     neo_options.absolute_residual_tolerance = options.gradient_tolerance;
     neo_options.maximum_subspace_dimension = 0;
     neo_options.require_curvature_certificate = false;
@@ -425,7 +427,6 @@ BackendRunResult run_neo_backend(
             projected.reduced_gradient,
             parameters,
             orbital_guess_packed,
-            final_gradient_l2,
             energy,
             &trust_radius,
             &iteration_record,
