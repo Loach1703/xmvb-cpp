@@ -147,6 +147,53 @@ wavefunction constraints merely to reproduce a reference energy.
 
 ## Required next steps
 
+### 2026-10-03: coupled-response certificate audit
+
+- [x] Fix false global-curvature certification: a complete orbital basis and
+  a converged lowest Ritz residual are insufficient when the structure basis
+  is incomplete. The regression has a retained curvature of -1 and an omitted
+  Schur curvature of -8. Both bases must be complete before reporting the
+  stronger global certificate.
+- [x] Add candidate-local structure-residual correction before accepting a
+  coupled KKT certificate. Solve `C dq = -r_s`, evaluate `B^T dq` and `C dq`,
+  and check both corrected residuals. A missing response direction is added
+  to the retained structure basis only when needed. Do not solve response for
+  every retained orbital direction. The regression uses `C = 1e-6`: an
+  apparently acceptable `|r_s| = 5e-5` propagates into an orbital error of
+  0.05; the corrected solution agrees with the explicit Schur reference.
+- [x] Validate the production correction on Hanhai25 job 268983 (32 threads,
+  one-electron preconditioner, exact integrals). NEO and response-NEO unit
+  tests pass. F2 low-energy reference remains 5 steps at
+  -198.761111239623; 241 remains 6 steps at -230.720590387652 (dense) and
+  -230.720590385933 (Davidson). Dense wall time changes from 0.221 to
+  0.251 s for F2 and 1.603 to 1.678 s for 241. Davidson wall time changes
+  from 0.216 to 0.234 s and 1.278 to 1.552 s, respectively. These are
+  single-run checks, not a speedup claim. Additional response work is counted.
+- [x] Reject the simultaneous orbital/structure expansion trial: on the
+  identical FeCl2 second-step fixture, actions change from 459 orbital + 27
+  structure to 413 + 84. It does not improve total action count. Canonical
+  coordinate completion is not responsible for the original 486 actions.
+- [ ] Resolve the remaining FeCl2 optimizer failure. Analytic diagonal alone
+  reduces the diagnostic second-step action count from 486 to 104, but its
+  full trajectory still times out after 29 accepted steps in 300 s. With
+  the new candidate-local response certificate, the experimental negative-
+  curvature guard plus analytic diagonal still times out after 6 steps in
+  180 s (last printed energy -2181.6240866197). Neither is a successful
+  convergence. The guard/diagonal default change is NOT retained in the
+  production backend; its patch and logs remain under results/diagnostics.
+- [ ] Derive metric-consistent residual/error control and investigate the
+  accepted-point coordinate conditioning. Do not blindly remove the absolute
+  floor or repeat system-specific tuning. Small coordinate-space structure
+  residuals do not bound the eliminated orbital error when C is ill-conditioned.
+  The production correction addresses that certificate defect, not the entire
+  nonlinear convergence problem.
+- [ ] Do not repeat the already established fixed-orbital energy comparison.
+  Forward agreement is established; it does not separately prove every RDM
+  component or every derivative. A real negative-curvature HVP direction also
+  agrees with energy differences. Further tests should target the actual
+  failing derivative directions and optimizer certificates, not assume RDM
+  failure solely because the system is ill-conditioned.
+
 1. [ ] Certify CI error propagation into the physical orbital gradient at the
    in-memory accepted point, including recycled eigenvectors and gauge changes.
    An energy-based CI certificate is not a first-order derivative certificate.

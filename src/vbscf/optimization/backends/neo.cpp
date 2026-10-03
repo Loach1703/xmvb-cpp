@@ -201,6 +201,19 @@ bool build_accepted_neo_keyframe(
                     images.adjoint_multipliers[column]);
           }
           return result;
+        },
+        [&orbital_hessian, &structure_hessian, record,
+         operator_relative_accuracy](const Eigen::VectorXd& residual) {
+          const StructureResponseBlock response =
+              orbital_hessian.solve_structure_response_block(
+                  {structure_hessian.expand(residual).scaled_coefficients},
+                  operator_relative_accuracy);
+          // Count iterative C actions in addition to projected basis actions.
+          // Dense response uses the already available complete eigenspectrum.
+          record->structure_response_actions += response.block_actions;
+          record->coupled_block_actions += response.block_actions;
+          return structure_hessian.project_coordinates(
+              response.scaled_coefficients.at(0));
         });
     auto workspace = std::make_shared<ResponseNeoWorkspace>(*problem);
     solve_step = [problem = std::move(problem),

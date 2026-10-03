@@ -466,6 +466,99 @@ void check_small_gradient_needs_relative_accuracy() {
           "small-gradient KKT residual was hidden by an absolute tolerance");
 }
 
+void check_small_structure_residual_requires_response_correction() {
+  Eigen::Matrix2d a = Eigen::Matrix2d::Zero();
+  a.diagonal() << 2.0, 3.0;
+  const Eigen::RowVector2d b(1.0e-3, 0.0);
+  const Eigen::Matrix<double, 1, 1> c =
+      1.0e-6 * Eigen::Matrix<double, 1, 1>::Identity();
+  const Eigen::Matrix2d metric = Eigen::Matrix2d::Identity();
+  const Eigen::Vector2d gradient(0.1, 0.0);
+  int callback_calls = 0;
+  double first_structure_residual = 0.0;
+  const ResponseNeoProblem problem(
+      gradient,
+      1,
+      [a, b](const Eigen::VectorXd& p) {
+        return ResponseNeoDirection{a * p, b * p};
+      },
+      [b, c](const Eigen::VectorXd& q) {
+        return ResponseNeoDirection{b.transpose() * q, c * q};
+      },
+      [metric](const Eigen::VectorXd& p) { return metric * p; },
+      {}, {}, 0.0, {},
+      [&callback_calls, &first_structure_residual, c](
+          const Eigen::VectorXd& residual) {
+        if (callback_calls == 0) {
+          first_structure_residual = residual.stableNorm();
+        }
+        ++callback_calls;
+        return (-residual / c(0, 0)).eval();
+      });
+  ResponseNeoWorkspace workspace(problem);
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.absolute_residual_tolerance = 1.0e-3;
+  const ResponseNeoResult result = workspace.solve(options);
+
+  require(result.converged(), "response-corrected NEO did not converge");
+  require(callback_calls >= 1 &&
+              first_structure_residual > 0.0 &&
+              first_structure_residual < options.absolute_residual_tolerance,
+          "small structure residual did not trigger a response solve");
+  require(workspace.structure_basis_size() == 1,
+          "missing response direction was not retained");
+  const Eigen::Matrix2d relaxed =
+      a - b.transpose() * (b / c(0, 0));
+  require_close(result.step.orbital,
+                explicit_orbital_step(relaxed, metric, gradient,
+                                      options.trust_radius),
+                2.0e-9,
+                "small structure residual hid a large orbital response");
+  verify_coupled_residual(a, b, c, metric, gradient,
+                          options.trust_radius, result);
+}
+
+void check_incomplete_structure_basis_cannot_certify_global_curvature() {
+  Eigen::Matrix2d a = Eigen::Matrix2d::Zero();
+  a.diagonal() << -1.0, 1.0;
+  const Eigen::RowVector2d b(0.0, 3.0);
+  const Eigen::Matrix<double, 1, 1> c =
+      Eigen::Matrix<double, 1, 1>::Identity();
+  const Eigen::Matrix2d metric = Eigen::Matrix2d::Identity();
+  const Eigen::Vector2d gradient(0.1, 0.0);
+  const ResponseNeoProblem problem = dense_problem(a, b, c, metric, gradient);
+  ResponseNeoWorkspace workspace(problem);
+
+  NeoOptions options;
+  options.trust_radius = 0.5;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.require_curvature_certificate = true;
+  const ResponseNeoResult result = workspace.solve(options);
+  require(result.converged(), "partial-response fixture did not converge");
+  require(workspace.orbital_basis_size() == 2 &&
+              workspace.structure_basis_size() == 0,
+          "partial-response fixture did not retain only the orbital basis");
+  require(result.curvature_residual_norm <= result.curvature_residual_target,
+          "partial-response lowest Ritz pair was not converged");
+  // The retained lowest mode is -1, but the omitted response to the second
+  // orbital lowers its relaxed curvature from +1 to 1 - 3^2 = -8.
+  const Eigen::Matrix2d relaxed =
+      a - b.transpose() * (b / c(0, 0));
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> full_spectrum(relaxed);
+  require(full_spectrum.info() == Eigen::Success,
+          "partial-response full spectrum failed");
+  const double retained_curvature =
+      result.minimum_curvature_orbital.dot(
+          a * result.minimum_curvature_orbital) /
+      result.minimum_curvature_orbital.squaredNorm();
+  require(full_spectrum.eigenvalues()[0] < retained_curvature - 1.0,
+          "partial-response fixture has no hidden lower curvature");
+  require(!result.global_curvature_certified,
+          "incomplete structure response falsely certified global curvature");
+}
+
 }  // namespace
 
 int main() {
@@ -481,6 +574,8 @@ int main() {
     check_keyframe_response_uses_forcing_accuracy();
     check_response_is_local_to_candidate_direction();
     check_small_gradient_needs_relative_accuracy();
+    check_small_structure_residual_requires_response_correction();
+    check_incomplete_structure_basis_cannot_certify_global_curvature();
     std::cout << "response NEO solver tests passed\n";
     return 0;
   } catch (const std::exception& error) {

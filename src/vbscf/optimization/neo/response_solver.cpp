@@ -140,7 +140,8 @@ ResponseNeoProblem::ResponseNeoProblem(
     ResponseNeoPreconditioner apply_orbital_preconditioner,
     Eigen::VectorXd initial_orbital_guess,
     double operator_relative_accuracy,
-    ResponseNeoMatrixAction apply_structure_coupling_block)
+    ResponseNeoMatrixAction apply_structure_coupling_block,
+    ResponseNeoStructureResidualSolver solve_structure_residual)
     : orbital_gradient_(std::move(orbital_gradient)),
       structure_size_(structure_size),
       apply_orbital_coupling_(std::move(apply_orbital_coupling)),
@@ -149,6 +150,7 @@ ResponseNeoProblem::ResponseNeoProblem(
           std::move(apply_structure_coupling_block)),
       apply_orbital_metric_(std::move(apply_orbital_metric)),
       apply_orbital_preconditioner_(std::move(apply_orbital_preconditioner)),
+      solve_structure_residual_(std::move(solve_structure_residual)),
       initial_orbital_guess_(std::move(initial_orbital_guess)),
       operator_relative_accuracy_(operator_relative_accuracy) {
   if (orbital_gradient_.size() == 0 || !orbital_gradient_.allFinite() ||
@@ -278,6 +280,23 @@ Eigen::VectorXd ResponseNeoProblem::apply_orbital_preconditioner(
         "response NEO orbital preconditioner returned an invalid vector");
   }
   return result;
+}
+
+Eigen::VectorXd ResponseNeoProblem::solve_structure_residual(
+    const Eigen::VectorXd& residual) const {
+  if (!solve_structure_residual_) {
+    throw std::logic_error("response NEO has no structure residual solver");
+  }
+  if (residual.size() != structure_size() || !residual.allFinite()) {
+    throw std::invalid_argument(
+        "invalid vector passed to response NEO structure residual solver");
+  }
+  Eigen::VectorXd correction = solve_structure_residual_(residual);
+  if (correction.size() != structure_size() || !correction.allFinite()) {
+    throw std::runtime_error(
+        "response NEO structure residual solver returned an invalid vector");
+  }
+  return correction;
 }
 
 bool ResponseNeoWorkspace::append_orbital(
@@ -622,7 +641,9 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
     const bool orbital_complete =
         orbital_basis_.cols() == problem_.orbital_size();
     result.global_curvature_certified =
-        orbital_complete && curvature_converged;
+        orbital_complete &&
+        structure_basis_.cols() == problem_.structure_size() &&
+        curvature_converged;
     // A nonlinear keyframe certifies a regular boundary candidate by its
     // actual/predicted decrease.  Resolving an unrelated lowest Ritz vector
     // is therefore unnecessary unless explicitly requested.  A hard case is
@@ -632,6 +653,56 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
     const bool required_curvature_converged =
         !need_curvature_certificate || curvature_converged;
     if (stationary && required_curvature_converged && shifted_positive) {
+      // A small raw structure residual can still produce a large orbital
+      // response when C is ill-conditioned. Check the actual response before
+      // certifying the projected candidate.
+      if (problem_.has_structure_residual_solver() &&
+          !result.kkt_residual.structure.isZero(0.0)) {
+        const Eigen::VectorXd correction = problem_.solve_structure_residual(
+            result.kkt_residual.structure);
+        if (!correction.isZero(0.0)) {
+          const ResponseNeoDirection image =
+              problem_.apply_structure_coupling(correction);
+          ++result.coupled_actions;
+          ++result.structure_actions;
+          const Eigen::VectorXd corrected_orbital =
+              result.kkt_residual.orbital + image.orbital;
+          const Eigen::VectorXd corrected_structure =
+              result.kkt_residual.structure + image.structure;
+          const double corrected_norm = std::hypot(
+              corrected_orbital.stableNorm(),
+              corrected_structure.stableNorm());
+          if (corrected_norm > kkt_residual_target) {
+            const int basis_size = static_cast<int>(
+                orbital_basis_.cols() + structure_basis_.cols());
+            if (structure_basis_.cols() == problem_.structure_size()) {
+              result.stop_reason = NeoStopReason::NumericalFailure;
+              return result;
+            }
+            if (basis_size >= maximum_dimension) {
+              result.stop_reason = NeoStopReason::SubspaceLimit;
+              return result;
+            }
+            if (!append_structure(
+                    correction, &result.coupled_actions,
+                    &result.structure_actions)) {
+              result.stop_reason = NeoStopReason::NumericalFailure;
+              return result;
+            }
+            continue;
+          }
+          result.step.structure += correction;
+          result.hessian_step.orbital += image.orbital;
+          result.hessian_step.structure += image.structure;
+          result.kkt_residual.orbital = corrected_orbital;
+          result.kkt_residual.structure = corrected_structure;
+          result.residual_norm = corrected_norm;
+          result.predicted_reduction =
+              -problem_.orbital_gradient().dot(result.step.orbital) -
+              0.5 * (result.step.orbital.dot(result.hessian_step.orbital) +
+                     result.step.structure.dot(result.hessian_step.structure));
+        }
+      }
       result.stop_reason = NeoStopReason::Converged;
       return result;
     }

@@ -27,6 +27,9 @@ using ResponseNeoMatrixAction =
 using ResponseNeoPreconditioner =
     std::function<Eigen::VectorXd(
         const Eigen::VectorXd&, double, double)>;
+/** @brief Returns `dq` satisfying `C * dq = -structure_residual`. */
+using ResponseNeoStructureResidualSolver =
+    std::function<Eigen::VectorXd(const Eigen::VectorXd&)>;
 
 /**
  * @brief Quadratic model for orbital-trust NEO with projected response.
@@ -46,7 +49,8 @@ public:
       ResponseNeoPreconditioner apply_orbital_preconditioner = {},
       Eigen::VectorXd initial_orbital_guess = {},
       double operator_relative_accuracy = 0.0,
-      ResponseNeoMatrixAction apply_structure_coupling_block = {});
+      ResponseNeoMatrixAction apply_structure_coupling_block = {},
+      ResponseNeoStructureResidualSolver solve_structure_residual = {});
 
   Eigen::Index orbital_size() const noexcept {
     return orbital_gradient_.size();
@@ -71,6 +75,11 @@ public:
       const Eigen::VectorXd& covector,
       double shift,
       double residual_target) const;
+  bool has_structure_residual_solver() const noexcept {
+    return static_cast<bool>(solve_structure_residual_);
+  }
+  Eigen::VectorXd solve_structure_residual(
+      const Eigen::VectorXd& residual) const;
   /** @brief Initial Davidson direction recycled within one nonlinear macro. */
   const Eigen::VectorXd& initial_orbital_guess() const noexcept {
     return initial_orbital_guess_;
@@ -97,6 +106,7 @@ private:
   const ResponseNeoMatrixAction apply_structure_coupling_block_;
   const NeoAction apply_orbital_metric_;
   const ResponseNeoPreconditioner apply_orbital_preconditioner_;
+  const ResponseNeoStructureResidualSolver solve_structure_residual_;
   const Eigen::VectorXd initial_orbital_guess_;
   const double operator_relative_accuracy_;
 };
