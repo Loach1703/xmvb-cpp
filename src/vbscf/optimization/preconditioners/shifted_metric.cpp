@@ -1,5 +1,6 @@
 #include "vbscf/optimization/preconditioners/shifted_metric.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -23,18 +24,19 @@ Eigen::VectorXd checked_action(
 Eigen::VectorXd apply_shifted_metric_preconditioner(
     const Eigen::VectorXd& covector,
     double shift,
-    double residual_target,
+    double relative_residual_target,
     const PreconditionerAction& apply_model,
     const PreconditionerAction& apply_metric,
     const PreconditionerAction& apply_block_inverse) {
   if (covector.size() == 0 || !covector.allFinite() ||
       !(shift >= 0.0) || !std::isfinite(shift) ||
-      !(residual_target >= 0.0) || !std::isfinite(residual_target) ||
+      !(relative_residual_target >= 0.0) ||
+      !std::isfinite(relative_residual_target) ||
       !apply_model || !apply_metric || !apply_block_inverse) {
     throw std::invalid_argument("invalid shifted-metric preconditioner data");
   }
   if (covector.isZero()) return Eigen::VectorXd::Zero(covector.size());
-  if (shift == 0.0 || residual_target >= covector.norm()) {
+  if (shift == 0.0 || relative_residual_target >= 1.0) {
     return checked_action(
         apply_block_inverse, covector,
         "shifted block inverse returned an invalid vector");
@@ -49,27 +51,42 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
   };
 
   // This solve only supplies a direction to the outer coupled Krylov space.
-  // Use the geometric mean of its RHS norm and the outer KKT target: the
-  // preconditioner becomes more accurate as the outer solve tightens, without
-  // imposing the final KKT tolerance on every individual basis direction.
-  const double target = std::max(
-      std::sqrt(residual_target * covector.norm()),
-      std::sqrt(std::numeric_limits<double>::epsilon()) * covector.norm());
-  Eigen::VectorXd solution = Eigen::VectorXd::Zero(covector.size());
-  Eigen::VectorXd residual = covector;
-  Eigen::VectorXd preconditioned = checked_action(
-      apply_block_inverse, residual,
+  // Measure the inner residual in the dual norm of the same positive block
+  // inverse used by PCG. A relative budget is independent of the coordinate
+  // scale of the outer physical KKT target. Its square root preserves the
+  // geometric-mean accuracy rule for a basis direction.
+  const Eigen::VectorXd rhs_preconditioned = checked_action(
+      apply_block_inverse, covector,
       "shifted block inverse returned an invalid vector");
-  Eigen::VectorXd direction = preconditioned;
-  double residual_pairing = residual.dot(preconditioned);
-  if (!(residual_pairing > 0.0) || !std::isfinite(residual_pairing)) {
+  const double rhs_pairing = covector.dot(rhs_preconditioned);
+  if (!(rhs_pairing > 0.0) || !std::isfinite(rhs_pairing)) {
     throw std::runtime_error(
         "shifted-metric block inverse is not positive definite");
   }
+  const double rhs_norm = std::sqrt(rhs_pairing);
+  const double target = std::max(
+      std::sqrt(relative_residual_target),
+      std::sqrt(std::numeric_limits<double>::epsilon())) * rhs_norm;
+  const auto residual_norm = [&](const Eigen::VectorXd& residual) {
+    const Eigen::VectorXd inverse_residual = checked_action(
+        apply_block_inverse, residual,
+        "shifted block inverse returned an invalid vector");
+    const double pairing = residual.dot(inverse_residual);
+    if (!(pairing >= 0.0) || !std::isfinite(pairing)) {
+      throw std::runtime_error(
+          "shifted-metric block inverse is not positive definite");
+    }
+    return std::sqrt(pairing);
+  };
+  Eigen::VectorXd solution = Eigen::VectorXd::Zero(covector.size());
+  Eigen::VectorXd residual = covector;
+  Eigen::VectorXd preconditioned = rhs_preconditioned;
+  Eigen::VectorXd direction = preconditioned;
+  double residual_pairing = rhs_pairing;
 
   Eigen::VectorXd best_solution = preconditioned;
-  double best_residual =
-      (covector - apply_shifted(best_solution)).norm();
+  double best_residual = residual_norm(
+      covector - apply_shifted(best_solution));
   if (best_residual <= target) return best_solution;
 
   for (Eigen::Index iteration = 0;
@@ -87,18 +104,21 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
     }
     solution.noalias() += step * direction;
     residual = covector - apply_shifted(solution);
-    const double residual_norm = residual.norm();
-    if (residual_norm < best_residual) {
-      best_residual = residual_norm;
-      best_solution = solution;
-    }
-    if (residual_norm <= target) return solution;
-
     preconditioned = checked_action(
         apply_block_inverse, residual,
         "shifted block inverse returned an invalid vector");
     const double next_pairing = residual.dot(preconditioned);
-    if (!(next_pairing > 0.0) || !std::isfinite(next_pairing)) {
+    if (!(next_pairing >= 0.0) || !std::isfinite(next_pairing)) {
+      throw std::runtime_error(
+          "shifted-metric preconditioner lost positive definiteness");
+    }
+    const double current_residual_norm = std::sqrt(next_pairing);
+    if (current_residual_norm < best_residual) {
+      best_residual = current_residual_norm;
+      best_solution = solution;
+    }
+    if (current_residual_norm <= target) return solution;
+    if (!(next_pairing > 0.0)) {
       throw std::runtime_error(
           "shifted-metric preconditioner lost positive definiteness");
     }

@@ -25,27 +25,79 @@ void check_scaled_inner_budget() {
            -0.1, 0.2, 0.8;
   const Eigen::Vector3d rhs(0.7, -1.2, 0.4);
   constexpr double shift = 0.65;
-  constexpr double target = 1.0e-4;
+  constexpr double relative_target = 1.0e-8;
+  const Eigen::Matrix3d block = model + shift * Eigen::Matrix3d::Identity();
+  const Eigen::Matrix3d block_inverse =
+      block.ldlt().solve(Eigen::Matrix3d::Identity());
   const Eigen::Vector3d result =
       xmvb::vb::apply_shifted_metric_preconditioner(
           rhs,
           shift,
-          target,
+          relative_target,
           [model](const Eigen::VectorXd& vector) {
             return (model * vector).eval();
           },
           [metric](const Eigen::VectorXd& vector) {
             return (metric * vector).eval();
           },
-          [model, shift](const Eigen::VectorXd& vector) {
-            return (model + shift * Eigen::Matrix3d::Identity())
-                .ldlt()
-                .solve(vector);
+          [block_inverse](const Eigen::VectorXd& vector) {
+            return (block_inverse * vector).eval();
           });
   const Eigen::Vector3d residual =
       rhs - (model + shift * metric) * result;
-  require(residual.norm() <= std::sqrt(target * rhs.norm()),
+  const double rhs_norm = std::sqrt(rhs.dot(block_inverse * rhs));
+  const double residual_norm =
+      std::sqrt(residual.dot(block_inverse * residual));
+  require(residual_norm <= std::sqrt(relative_target) * rhs_norm,
           "preconditioner exceeded its scaled inner residual budget");
+}
+
+void check_coordinate_rescaling_preserves_direction() {
+  Eigen::Matrix3d model;
+  model << 3.0, 0.1, -0.2,
+           0.1, 1.8, 0.3,
+          -0.2, 0.3, 1.1;
+  Eigen::Matrix3d metric;
+  metric << 1.4, 0.35, -0.1,
+            0.35, 1.1, 0.2,
+           -0.1, 0.2, 0.8;
+  const Eigen::Vector3d rhs(0.7, -1.2, 0.4);
+  const Eigen::Vector3d scales(0.01, 8.0, 100.0);
+  const Eigen::Matrix3d coordinates = scales.asDiagonal();
+  constexpr double shift = 0.65;
+  constexpr double relative_target = 0.01;
+  const auto solve = [shift, relative_target](
+      const Eigen::Matrix3d& local_model,
+      const Eigen::Matrix3d& local_metric,
+      const Eigen::Matrix3d& local_block_inverse,
+      const Eigen::Vector3d& local_rhs) {
+    return xmvb::vb::apply_shifted_metric_preconditioner(
+        local_rhs, shift, relative_target,
+        [local_model](const Eigen::VectorXd& vector) {
+          return (local_model * vector).eval();
+        },
+        [local_metric](const Eigen::VectorXd& vector) {
+          return (local_metric * vector).eval();
+        },
+        [local_block_inverse](const Eigen::VectorXd& vector) {
+          return (local_block_inverse * vector).eval();
+        });
+  };
+  const Eigen::Matrix3d block = model + shift * Eigen::Matrix3d::Identity();
+  const Eigen::Matrix3d block_inverse =
+      block.ldlt().solve(Eigen::Matrix3d::Identity());
+  const Eigen::Vector3d original = solve(model, metric, block_inverse, rhs);
+  const Eigen::Matrix3d rescaled_model = coordinates * model * coordinates;
+  const Eigen::Matrix3d rescaled_metric = coordinates * metric * coordinates;
+  const Eigen::Matrix3d inverse_coordinates = scales.cwiseInverse().asDiagonal();
+  const Eigen::Matrix3d rescaled_inverse =
+      inverse_coordinates * block_inverse * inverse_coordinates;
+  const Eigen::Vector3d rescaled = solve(
+      rescaled_model, rescaled_metric, rescaled_inverse,
+      coordinates * rhs);
+  require((coordinates * rescaled - original).norm() <=
+              1.0e-9 * std::max(1.0, original.norm()),
+          "coordinate rescaling changed the shifted preconditioner direction");
 }
 
 void check_zero_shift_uses_block_inverse() {
@@ -76,6 +128,7 @@ void check_zero_shift_uses_block_inverse() {
 int main() {
   try {
     check_scaled_inner_budget();
+    check_coordinate_rescaling_preserves_direction();
     check_zero_shift_uses_block_inverse();
     std::cout << "shifted-metric preconditioner tests passed\n";
     return 0;

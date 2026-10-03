@@ -390,6 +390,45 @@ void check_boundary_residual_uses_shifted_preconditioner() {
           "boundary KKT residual did not pass its shift to the preconditioner");
 }
 
+void check_preconditioner_receives_relative_physical_budget() {
+  const Eigen::Vector2d gradient(1.0, 1.0);
+  const Eigen::Vector2d metric_diagonal(1.0e-4, 1.0e4);
+  const double gradient_norm = std::sqrt(1.0e4 + 1.0e-4);
+  double observed_fraction = -1.0;
+  const ResponseNeoProblem problem(
+      gradient, 0,
+      [](const Eigen::VectorXd& p) {
+        return ResponseNeoDirection{p, Eigen::VectorXd::Zero(0)};
+      },
+      [](const Eigen::VectorXd&) {
+        return ResponseNeoDirection{
+            Eigen::VectorXd::Zero(2), Eigen::VectorXd::Zero(0)};
+      },
+      [metric_diagonal](const Eigen::VectorXd& p) {
+        return (metric_diagonal.array() * p.array()).matrix().eval();
+      },
+      [metric_diagonal](const Eigen::VectorXd& covector) {
+        return std::sqrt((covector.array().square() /
+                          metric_diagonal.array()).sum());
+      },
+      [&observed_fraction](const Eigen::VectorXd& residual,
+                           double, double fraction) {
+        observed_fraction = fraction;
+        return residual;
+      });
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.relative_residual_tolerance = 0.25;
+  options.absolute_residual_tolerance = 0.1;
+  options.maximum_subspace_dimension = 1;
+  options.require_curvature_certificate = false;
+  static_cast<void>(xmvb::vb::solve_response_neo(problem, options));
+  const double expected_fraction =
+      0.25 + options.absolute_residual_tolerance / gradient_norm;
+  require(std::abs(observed_fraction - expected_fraction) <= 1.0e-12,
+          "orbital preconditioner received an absolute physical target");
+}
+
 void check_inexact_block_preconditioner_preserves_coupled_step() {
   Eigen::Matrix3d a;
   a << 3.0, 0.3, -0.1,
@@ -655,6 +694,7 @@ int main() {
     check_workspace_reuses_actions_after_radius_change();
     check_recycled_orbital_guess_starts_subspace();
     check_boundary_residual_uses_shifted_preconditioner();
+    check_preconditioner_receives_relative_physical_budget();
     check_inexact_block_preconditioner_preserves_coupled_step();
     check_keyframe_response_uses_forcing_accuracy();
     check_response_is_local_to_candidate_direction();

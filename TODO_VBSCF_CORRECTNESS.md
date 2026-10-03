@@ -539,3 +539,48 @@ Implementation references: `tests/input/test_full_space.cpp`,
 `src/tools/audit_orbital_gradient.cpp`, and `src/tools/audit_newton_step.cpp`.
 Detailed input, direction, endpoint, and finite-difference artifacts are under
 `results/diagnostics/pyrrole-molcas-20261002/gradient-comparison/`.
+
+### NEO metric-budget repair (2026-10-03)
+
+- [x] Correct the physical-absolute/coordinate-absolute budget mismatch in
+  shifted orbital preconditioning. The coupled solver now passes a
+  dimensionless fraction of the already evaluated physical orbital residual.
+  Shifted PCG measures its own residual and RHS in the same positive
+  block-inverse dual norm, with the existing geometric-mean relative budget.
+  This is an inner direction generator, not a replacement KKT certificate.
+  Final coupled physical KKT certification, candidate-local structure
+  certification, CI stationarity, and outer convergence gates remain intact.
+- [x] Cache accepted-point orbital products in the physical metric. Inactive
+  inverse cross products, AO-overlap times active orbitals, and projected-ray
+  overlap images are computed once instead of in every metric action. No dense
+  reduced metric or Hessian is assembled; storage is AO-by-occupied or
+  occupied-by-occupied. Product reassociation may change roundoff, not formulas.
+- [x] Validate on Hanhai25 Slurm 269290, anode005, 32 OpenMP threads and one
+  BLAS thread, exact libcint/Davidson, identical archived inputs and basis.
+  Four tests passed: neo, neo_response_solver, shifted_metric_preconditioner,
+  sparse_orbital_quotient. New tests cover the dimensionless callback budget
+  and congruent coordinate rescaling. All ten native before/after runs
+  converged without iteration caps; `--neo-trace` was enabled on both variants.
+
+  | System | Before steps / HVP / wall (s) | Repair steps / HVP / wall (s) |
+  | --- | ---: | ---: |
+  | F2 | 5 / 11 / 0.16 | 5 / 11 / 0.16 |
+  | 241 | 6 / 10 / 2.66 | 6 / 10 / 2.04 |
+  | 240 | 8 / 13 / 5.62 | 8 / 13 / 3.88 |
+  | MnF2 | 16 / 534 / 192.33 | 14 / 669 / 112.29 |
+  | FeCl2 | 3 / 302 / 12.79 | 3 / 302 / 12.57 |
+
+  MnF2 final energies differ by 5.70e-8 Eh; the other four differ by at most
+  3e-12 Eh at printed precision. MnF2 physical gradients are 7.9073e-4 and
+  9.2449e-4; CI residuals remain below 1e-7 Eh. Its peak RSS increased from
+  534.1 to 563.4 MiB while other peak RSS values decreased. These are single
+  native runs, not a hotspot attribution or a universal speedup claim.
+  CSV: `results/history/neo_metric_repair_269290.csv`; logs, source/binary/input
+  hashes and test outputs: `results/diagnostics/pyrrole-molcas-20261002/`
+  `ci-convergence/metric-repair-269290/`.
+- [ ] Recover efficient physically certified orbital expansions. MnF2 time
+  decreased by 41.6%, but HVP count increased by 25.3%; this round does not
+  recover historical 9-second performance. Do not weaken physical KKT
+  certification just to reproduce an old, differently certified trajectory.
+  Historical macro counts also differ from accepted-point counts: the saved
+  c2776c4 MnF2 trace has 11 macros but 14 keyframes (241 has six of each).

@@ -24,6 +24,7 @@ using ResponseNeoBlockAction =
     std::function<ResponseNeoDirection(const Eigen::VectorXd&)>;
 using ResponseNeoMatrixAction =
     std::function<ResponseNeoDirectionBlock(const Eigen::MatrixXd&)>;
+/** The final argument is a physical-dual residual fraction for this covector. */
 using ResponseNeoPreconditioner =
     std::function<Eigen::VectorXd(
         const Eigen::VectorXd&, double, double)>;
@@ -75,10 +76,11 @@ public:
   bool has_orbital_preconditioner() const noexcept {
     return static_cast<bool>(apply_orbital_preconditioner_);
   }
+  /** Passes a dimensionless residual fraction to the orbital preconditioner. */
   Eigen::VectorXd apply_orbital_preconditioner(
       const Eigen::VectorXd& covector,
       double shift,
-      double residual_target) const;
+      double relative_residual_target) const;
   bool has_structure_residual_solver() const noexcept {
     return static_cast<bool>(solve_structure_residual_);
   }

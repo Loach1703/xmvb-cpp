@@ -121,12 +121,20 @@ StructureInverse symmetric_pseudoinverse(const Eigen::MatrixXd& matrix) {
 Eigen::VectorXd preconditioned_orbital(
     const ResponseNeoProblem& problem,
     const Eigen::VectorXd& residual,
-    double residual_target,
+    double relative_residual_target,
     double shift = 0.0) {
   return problem.has_orbital_preconditioner()
       ? problem.apply_orbital_preconditioner(
-            residual, shift, residual_target)
+            residual, shift, relative_residual_target)
       : residual;
+}
+
+double relative_preconditioner_budget(
+    double absolute_target,
+    double covector_norm) {
+  return covector_norm == 0.0
+      ? 1.0
+      : std::min(1.0, absolute_target / covector_norm);
 }
 
 }  // namespace
@@ -274,7 +282,7 @@ double ResponseNeoProblem::orbital_dual_norm(
 Eigen::VectorXd ResponseNeoProblem::apply_orbital_preconditioner(
     const Eigen::VectorXd& covector,
     double shift,
-    double residual_target) const {
+    double relative_residual_target) const {
   if (!apply_orbital_preconditioner_) {
     throw std::logic_error("response NEO has no orbital preconditioner");
   }
@@ -282,16 +290,17 @@ Eigen::VectorXd ResponseNeoProblem::apply_orbital_preconditioner(
     throw std::invalid_argument(
         "response NEO preconditioner shift must be finite and nonnegative");
   }
-  if (!(residual_target >= 0.0) || !std::isfinite(residual_target)) {
+  if (!(relative_residual_target >= 0.0) ||
+      !std::isfinite(relative_residual_target)) {
     throw std::invalid_argument(
-        "response NEO preconditioner target must be finite and nonnegative");
+        "response NEO preconditioner fraction must be finite and nonnegative");
   }
   if (covector.size() != orbital_size() || !covector.allFinite()) {
     throw std::invalid_argument(
         "invalid vector passed to response NEO preconditioner");
   }
   Eigen::VectorXd result = apply_orbital_preconditioner_(
-      covector, shift, residual_target);
+      covector, shift, relative_residual_target);
   if (result.size() != orbital_size() || !result.allFinite()) {
     throw std::runtime_error(
         "response NEO orbital preconditioner returned an invalid vector");
@@ -483,7 +492,8 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
             ? problem_.initial_orbital_guess()
             : preconditioned_orbital(
                   problem_, -problem_.orbital_gradient(),
-                  kkt_residual_target);
+                  relative_preconditioner_budget(
+                      kkt_residual_target, gradient_norm));
     if (!append_orbital(
             std::move(first), &result.coupled_actions,
             &result.orbital_actions)) {
@@ -783,7 +793,9 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
       expanded = append_orbital(
           preconditioned_orbital(
               problem_, -result.kkt_residual.orbital,
-              kkt_residual_target, result.shift),
+              relative_preconditioner_budget(
+                  kkt_residual_target, orbital_residual_norm),
+              result.shift),
           &result.coupled_actions,
           &result.orbital_actions);
     }
@@ -797,7 +809,10 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
         curvature_orbital_target) {
       expanded = append_orbital(
           preconditioned_orbital(
-              problem_, -curvature_orbital, kkt_residual_target),
+              problem_, -curvature_orbital,
+              relative_preconditioner_budget(
+                  kkt_residual_target,
+                  problem_.orbital_dual_norm(curvature_orbital))),
           &result.coupled_actions,
           &result.orbital_actions);
     }

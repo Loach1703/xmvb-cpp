@@ -172,7 +172,7 @@ bool build_accepted_neo_keyframe(
         [&chart, &orbital_metric](
             const Eigen::VectorXd& residual,
             double shift,
-            double residual_target) {
+            double relative_residual_target) {
           if (shift == 0.0) {
             return chart.apply_inverse_reduced_block_preconditioner(residual);
           }
@@ -180,7 +180,7 @@ bool build_accepted_neo_keyframe(
           return apply_shifted_metric_preconditioner(
               residual,
               shift,
-              residual_target,
+              relative_residual_target,
               [&chart](const Eigen::VectorXd& vector) {
                 return chart.apply_reduced_curvature(vector);
               },

@@ -99,6 +99,19 @@ OrbitalPhysicalMetric::OrbitalPhysicalMetric(const OrbitalPreparationInput& inpu
       throw std::runtime_error("degenerate projected active ray in physical metric");
     }
   }
+  if (n_active_ > 0) {
+    overlap_active_ = overlap_ * active_;
+    overlap_projected_active_ = overlap_ * projected_active_;
+    transposed_overlap_projected_active_ = overlap_.transpose() * projected_active_;
+  }
+  if (n_inactive_ > 0 && n_active_ > 0) {
+    const Eigen::MatrixXd inactive_active_overlap =
+        inactive_.transpose() * overlap_ * active_;
+    inactive_inverse_active_overlap_ = inactive_inverse_ * inactive_active_overlap;
+    inactive_times_inverse_ = inactive_ * inactive_inverse_;
+    inactive_inverse_times_inactive_transpose_ =
+        inactive_inverse_ * inactive_.transpose();
+  }
 }
 
 Eigen::VectorXd OrbitalPhysicalMetric::physical_feature(
@@ -139,14 +152,12 @@ Eigen::VectorXd OrbitalPhysicalMetric::physical_feature(
 
   Eigen::MatrixXd delta_projected_active = complement_ * delta_active;
   if (n_inactive_ > 0 && n_active_ > 0) {
-    const Eigen::MatrixXd inactive_active_overlap =
-        inactive_.transpose() * overlap_ * active_;
     const Eigen::MatrixXd horizontal_active_overlap =
-        horizontal_inactive.transpose() * overlap_ * active_;
+        horizontal_inactive.transpose() * overlap_active_;
     delta_projected_active.noalias() -=
-        horizontal_inactive * inactive_inverse_ * inactive_active_overlap;
+        horizontal_inactive * inactive_inverse_active_overlap_;
     delta_projected_active.noalias() -=
-        inactive_ * inactive_inverse_ * horizontal_active_overlap;
+        inactive_times_inverse_ * horizontal_active_overlap;
   }
   if (active_subspace_gauge_ && n_active_ > 0) {
     // The complete CAS depends on the active span, not on individual rays.
@@ -157,10 +168,10 @@ Eigen::VectorXd OrbitalPhysicalMetric::physical_feature(
     return feature;
   }
   for (int active = 0; active < n_active_; ++active) {
-    const Eigen::VectorXd projected = projected_active_.col(active);
+    const auto projected = projected_active_.col(active);
     Eigen::VectorXd horizontal = delta_projected_active.col(active);
     horizontal.noalias() -= projected *
-        (projected.dot(overlap_ * horizontal) /
+        (transposed_overlap_projected_active_.col(active).dot(horizontal) /
          projected_norm_squared_[active]);
     feature.segment(
         n_basis_functions_ * (n_inactive_ + active),
@@ -206,8 +217,7 @@ double OrbitalPhysicalMetric::subspace_dual_norm(
   if (n_inactive_ > 0) {
     core.noalias() = ao_metric_upper_ * inactive_ * inactive_inverse_upper_;
     if (n_active_ > 0) {
-      gi.noalias() += ga *
-          (inactive_inverse_ * inactive_.transpose() * overlap_ * active_).transpose();
+      gi.noalias() += ga * inactive_inverse_active_overlap_.transpose();
     }
     gi = (gi * inactive_inverse_upper_.triangularView<Eigen::Upper>().solve(
         Eigen::MatrixXd::Identity(n_inactive_, n_inactive_)).transpose()).eval();
@@ -276,36 +286,33 @@ Eigen::VectorXd OrbitalPhysicalMetric::apply(
   }
   Eigen::MatrixXd active_cotangent = Eigen::MatrixXd::Zero(
       n_basis_functions_, n_active_);
-  const Eigen::MatrixXd inactive_active_overlap =
-      inactive_.transpose() * overlap_ * active_;
   if (active_subspace_gauge_ && n_active_ > 0) {
     Eigen::MatrixXd delta = complement_ * delta_active;
     if (n_inactive_ > 0) {
-      delta.noalias() -= horizontal_inactive * inactive_inverse_ * inactive_active_overlap;
-      delta.noalias() -= inactive_ * inactive_inverse_ *
-          horizontal_inactive.transpose() * overlap_ * active_;
+      delta.noalias() -= horizontal_inactive * inactive_inverse_active_overlap_;
+      delta.noalias() -= inactive_times_inverse_ *
+          (horizontal_inactive.transpose() * overlap_active_);
     }
     const Eigen::MatrixXd weighted =
         overlap_ * active_complement_ * delta * active_inverse_;
     active_cotangent.noalias() += complement_.transpose() * weighted;
     if (n_inactive_ > 0) {
-      inactive_cotangent.noalias() -= weighted *
-          (inactive_inverse_ * inactive_active_overlap).transpose();
-      inactive_cotangent.noalias() -= overlap_ * active_ *
-          (inactive_inverse_ * inactive_.transpose() * weighted).transpose();
+      inactive_cotangent.noalias() -=
+          weighted * inactive_inverse_active_overlap_.transpose();
+      inactive_cotangent.noalias() -= overlap_active_ *
+          (inactive_inverse_times_inactive_transpose_ * weighted).transpose();
     }
   } else {
     for (int active = 0; active < n_active_; ++active) {
       Eigen::VectorXd delta_ray = complement_ * delta_active.col(active);
       if (n_inactive_ > 0) {
         delta_ray.noalias() -= horizontal_inactive *
-            (inactive_inverse_ * inactive_active_overlap.col(active));
-        delta_ray.noalias() -= inactive_ * inactive_inverse_ *
-            (horizontal_inactive.transpose() * overlap_ * active_.col(active));
+            inactive_inverse_active_overlap_.col(active);
+        delta_ray.noalias() -= inactive_times_inverse_ *
+            (horizontal_inactive.transpose() * overlap_active_.col(active));
       }
-      const Eigen::VectorXd ray = projected_active_.col(active);
       const double norm_squared = projected_norm_squared_[active];
-      const Eigen::VectorXd overlap_ray = overlap_ * ray;
+      const auto overlap_ray = overlap_projected_active_.col(active);
       const Eigen::VectorXd weighted_ray_cotangent =
           (overlap_ * delta_ray - overlap_ray *
            (overlap_ray.dot(delta_ray) / norm_squared)) / norm_squared;
@@ -313,10 +320,10 @@ Eigen::VectorXd OrbitalPhysicalMetric::apply(
           complement_.transpose() * weighted_ray_cotangent;
       if (n_inactive_ > 0) {
         inactive_cotangent.noalias() -= weighted_ray_cotangent *
-            (inactive_inverse_ * inactive_active_overlap.col(active)).transpose();
+            inactive_inverse_active_overlap_.col(active).transpose();
         inactive_cotangent.noalias() -=
-            (overlap_ * active_.col(active)) *
-            (inactive_inverse_ * inactive_.transpose() *
+            overlap_active_.col(active) *
+            (inactive_inverse_times_inactive_transpose_ *
              weighted_ray_cotangent).transpose();
       }
     }

@@ -53,6 +53,13 @@ class OrbitalPhysicalMetric {
   Eigen::MatrixXd inactive_inverse_upper_;
   Eigen::MatrixXd complement_;
   Eigen::MatrixXd projected_active_;
+  /** @brief Accepted-point contractions reused by feature and cotangent actions. */
+  Eigen::MatrixXd inactive_inverse_active_overlap_;
+  Eigen::MatrixXd inactive_times_inverse_;
+  Eigen::MatrixXd inactive_inverse_times_inactive_transpose_;
+  Eigen::MatrixXd overlap_active_;
+  Eigen::MatrixXd overlap_projected_active_;
+  Eigen::MatrixXd transposed_overlap_projected_active_;
   Eigen::MatrixXd active_complement_;
   Eigen::MatrixXd active_inverse_;
   Eigen::MatrixXd active_inverse_upper_;
