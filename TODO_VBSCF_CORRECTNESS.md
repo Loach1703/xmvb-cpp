@@ -75,11 +75,34 @@ wavefunction constraints merely to reproduce a reference energy.
   Smaller displacements show cancellation, so use the two larger probes
   as the sign check. This establishes real negative local curvature at the
   dense endpoint, not a formally stationary saddle or a global-minimum claim.
-- [ ] Map this independently verified soft orbital mode into the C++ chart
+- [x] Map this independently verified soft orbital mode into the C++ chart
   and compare the full relaxed HVP along it with the C++ energy differences.
   If the curvature is correct, inspect NEO subspace discovery and stopping;
   if it is not, repair the HVP/coupling. Do not replace this diagnosis with
   tighter scalar stopping thresholds or further Davidson parameter tuning.
+  Job 268808 (Hanhai25, 32 cores) verifies this direction using dense CI:
+
+  | Contribution / check | Curvature, unit physical orbital step |
+  | --- | ---: |
+  | Fixed-CI orbital HVP | +0.000003457761 |
+  | Structure-response correction | -0.000489596871 |
+  | Complete relaxed HVP | -0.000486139111 |
+  | C++ retraction energy difference, h=0.01 | -0.000486329554 |
+
+  The complete HVP and energy curvature differ by about 0.039%. Structure
+  response relative residual is 3.97e-14. Smaller energy-difference steps
+  show cancellation against the ~-2181 hartree total energy; do not use them
+  as stronger accuracy certificates. The analytic directional derivative
+  is only 4.18e-9 for physical direction norm 1, while physical gradient
+  dual norm is 0.000964845: the unstable mode is almost orthogonal to the
+  gradient. This validates the sign and response contribution on ONE mode,
+  not the entire Hessian. Current NEO initial/final stopping checks only
+  first-order stationarity, and its model requests no curvature certificate.
+- [ ] Add a separate soft/negative-curvature discovery mechanism near apparent
+  convergence, and verify that NEO does not accept this endpoint unchanged.
+  Distinguish a discovered negative direction from a global PSD certificate;
+  solving the gradient-seeded Newton KKT residual alone cannot establish the
+  latter. Use the independently mapped mode above as a strict regression.
 
 ## Required next steps
 

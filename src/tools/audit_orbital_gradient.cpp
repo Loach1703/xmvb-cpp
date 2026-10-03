@@ -13,6 +13,7 @@
 
 #include "input/loading/loader.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
+#include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/optimization/driver/session.hpp"
 #include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
@@ -68,10 +69,14 @@ double infinity_norm(const Eigen::VectorXd& values) {
 }
 
 void run_audit(int argc, char** argv) {
-  if (argc < 2 || argc > 6) {
+  if (argc < 2 || argc > 7) {
     throw std::invalid_argument(
         "usage: audit_orbital_gradient INPUT [dense|davidson] "
-        "[energy-tol] [gradient-tol] [packed-direction-f64.bin]");
+        "[energy-tol] [gradient-tol] [packed-direction-f64.bin] [full-hvp]");
+  }
+  const bool audit_hvp = argc == 7;
+  if (audit_hvp && std::string(argv[6]) != "full-hvp") {
+    throw std::invalid_argument("last argument must be full-hvp");
   }
 
   auto loaded = load_vbscf_input_with_timings(argv[1]);
@@ -118,7 +123,7 @@ void run_audit(int argc, char** argv) {
       chart, layout, objective.input().orbital_preparation_input);
 
   Eigen::VectorXd reduced_direction = -reduced_gradient;
-  if (argc == 6) {
+  if (argc >= 6) {
     const Eigen::VectorXd packed_direction =
         read_packed_direction(argv[5], layout.size());
     reduced_direction =
@@ -168,7 +173,7 @@ void run_audit(int argc, char** argv) {
             << "physical_gradient_dual_norm = "
             << metric.dual_norm(reduced_gradient) << '\n'
             << "probe_source = "
-            << (argc == 6 ? argv[5] : "negative_reduced_gradient") << '\n'
+            << (argc >= 6 ? argv[5] : "negative_reduced_gradient") << '\n'
             << "probe_physical_norm = " << metric.norm(reduced_direction) << '\n'
             << "analytic_directional_derivative = " << analytic_derivative << '\n'
             << "raw_directional_derivative = " << raw_derivative << '\n'
@@ -182,7 +187,32 @@ void run_audit(int argc, char** argv) {
             << "binary_prefix = " << prefix << '\n';
   std::cout.flush();
 
-  for (const double h : {1.0e-3, 3.0e-4}) {
+  double analytic_curvature = 0.0;
+  if (audit_hvp) {
+    ExactHvpOperator operation(objective.second_order_context(),
+                              &objective.input(), layout, &chart);
+    const Eigen::VectorXd image = operation.apply_reduced(reduced_direction);
+    analytic_curvature = reduced_direction.dot(image);
+    HvpComponents fixed_ci;
+    fixed_ci.structure_response = false;
+    const Eigen::VectorXd fixed_image =
+        operation.apply_reduced(reduced_direction, fixed_ci);
+    const auto diagnostics = operation.diagnostics();
+    std::cout << "full_hvp_curvature = " << analytic_curvature << '\n'
+              << "fixed_ci_hvp_curvature = "
+              << reduced_direction.dot(fixed_image) << '\n'
+              << "structure_response_curvature = "
+              << reduced_direction.dot(image - fixed_image) << '\n'
+              << "hvp_response_enabled = " << diagnostics.outer_response_enabled << '\n'
+              << "hvp_response_relative_residual = "
+              << diagnostics.max_structure_response_relative_residual << '\n';
+    write_doubles(prefix + "reduced_hvp_f64.bin", image.data(), image.size());
+    std::cout.flush();
+  }
+  const std::vector<double> steps = audit_hvp
+      ? std::vector<double>{1.0e-2, 3.0e-3, 1.0e-3, 3.0e-4}
+      : std::vector<double>{1.0e-3, 3.0e-4};
+  for (const double h : steps) {
     const auto energy_at = [&](double signed_step) {
       const OrbitalPreparationInput trial_orbitals = chart.retract_step(
           orbital_input, reduced_direction, signed_step);
@@ -203,6 +233,14 @@ void run_audit(int argc, char** argv) {
                      std::max({1.0e-12, std::abs(finite_difference),
                                std::abs(analytic_derivative)})
               << '\n';
+    if (audit_hvp) {
+      const double curvature =
+          ((plus_energy - accepted_energy) +
+           (minus_energy - accepted_energy)) / (h * h);
+      std::cout << "probe_fd_curvature = " << curvature << '\n'
+                << "probe_curvature_minus_hvp = "
+                << curvature - analytic_curvature << '\n';
+    }
   }
 }
 
