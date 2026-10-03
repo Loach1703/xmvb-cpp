@@ -472,6 +472,47 @@ small-block Schur reference. No production derivative formulas were changed.
   **Conclusion:** reject this same-point update, not every cross-orbital
   preconditioner. A genuinely coupled one-electron surrogate has not been
   implemented or measured by this trial; do not conflate the two.
+
+### 2026-10-03: recover a measured historical baseline
+
+- [x] Stop speculative preconditioner changes. Create candidate branch
+  codex/stable-baseline-c2776c4 without switching or resetting master.
+  The main worktree's existing .gitignore change and untracked artifacts are
+  preserved. Commit b3616b2 records the rejected SR1 experiment; it does not
+  change the production optimizer.
+- [x] Hanhai25 job 269248, anode003, 32 threads: compare archived c2776c4
+  executable with the restored current executable on identical archived inputs,
+  exact integrals, and Davidson. Five systems and both NEO/block-LBFGS give
+  20 completed, natively converged runs. Input hashes and initial printed
+  energies match for each system across both versions and both optimizers.
+
+  | System | NEO historical steps / wall (s) | NEO current steps / wall (s) | Block-LBFGS historical steps / wall (s) | Block-LBFGS current steps / wall (s) |
+  | --- | ---: | ---: | ---: | ---: |
+  | F2 | 4 / 0.132 | 5 / 0.153 | 8 / 0.070 | 8 / 0.074 |
+  | 241 | 6 / 1.243 | 6 / 2.378 | 9 / 0.918 | 9 / 1.212 |
+  | 240 | 5 / 10.447 | 8 / 4.750 | 9 / 3.962 | 9 / 2.060 |
+  | MnF2 | 11 / 8.926 | 16 / 190.046 | 104 / 8.466 | 105 / 9.892 |
+  | FeCl2 | 4 / 5.868 | 3 / 12.670 | 12 / 6.335 | 256 / 75.992 |
+
+  CSV: results/history/stable_baseline_269248.csv. Full logs and immutable
+  executable/input hashes: results/diagnostics/pyrrole-molcas-20261002/
+  ci-convergence/history-269248/. No production source changes or main-branch
+  rollback have been made by this comparison.
+  **Do not assert identical stopping contracts:** both versions have the same
+  requested scalar energy/gradient thresholds, but the current full-OEO
+  convergence gate additionally checks physical stationarity. Historical
+  FeCl2 physical-gradient diagnostics are 1.1490e-3 (NEO) and 4.9096e-3
+  (block-LBFGS), versus current 9.1958e-4 and 9.8883e-4. The historical metric
+  itself predates the quotient-metric repair. Historical/current FeCl2 NEO
+  energies differ by 4.9609e-6 Eh; MnF2 differs by 1.9004e-6 Eh. These
+  differences must remain visible; a zero exit code is not proof of matching
+  PySCF energies or a common derivative certificate.
+- [ ] Decide the recovery scope using this candidate, rather than assume
+  whole-repository rollback is uniformly beneficial. The historical NEO
+  runtime is reproducible on 241/MnF2/FeCl2, but current 240 is substantially
+  faster for both methods. Further work should qualify the historical baseline
+  and retain only independently verified necessary fixes; do not resume
+  speculative optimizer tuning while this recovery decision is open.
 - [ ] Do not repeat the already established fixed-orbital energy comparison.
   Forward agreement is established; it does not separately prove every RDM
   component or every derivative. A real negative-curvature HVP direction also
