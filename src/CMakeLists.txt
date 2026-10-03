@@ -271,6 +271,12 @@ if (BUILD_TESTING)
   target_link_libraries(test_generated_structures PRIVATE xmvb_input)
   add_test(NAME generated_structures COMMAND test_generated_structures)
 
+  add_executable(
+    test_full_space
+    ${CMAKE_SOURCE_DIR}/tests/input/test_full_space.cpp)
+  target_link_libraries(test_full_space PRIVATE xmvb_input)
+  add_test(NAME full_space COMMAND test_full_space)
+
   add_test(
     NAME state_average_f2
     COMMAND

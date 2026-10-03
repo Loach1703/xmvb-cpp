@@ -21,6 +21,7 @@
 
 #include "input/loading/loader.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
+#include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/optimization/objective/reduced_hvp.hpp"
 #include "vbscf/optimization/preconditioners/transported_lbfgs.hpp"
@@ -182,6 +183,8 @@ std::vector<PackedSecantPair> rebuild_lbfgs_history(
     double nuclear_repulsion_energy,
     StructureEigensolver eigensolver,
     const StructureSolveAccuracy& accuracy,
+    const std::vector<int>& selected_states,
+    const std::vector<double>& state_weights,
     int history_size) {
   OrbitalGradientEvaluator evaluator;
   const Eigen::MatrixXd no_initial_eigenvectors;
@@ -199,7 +202,7 @@ std::vector<PackedSecantPair> rebuild_lbfgs_history(
         &point.orbital_preparation_input);
     const auto evaluated =
         evaluator.evaluate_without_reference_energy_gradient(
-            point, {0}, {1.0}, nuclear_repulsion_energy,
+            point, selected_states, state_weights, nuclear_repulsion_energy,
             eigensolver, accuracy, no_initial_eigenvectors);
     auto chart = build_chart(point, layout, evaluated);
     const Eigen::VectorXd parameters =
@@ -695,6 +698,10 @@ void run_operator_audit(
     double nuclear_repulsion_energy,
     const StructureSolveAccuracy& accuracy) {
   std::cout << std::setprecision(17);
+  const auto& selected_states =
+      accepted.second_order_context->selected_state_indices;
+  const auto& state_weights =
+      accepted.second_order_context->normalized_state_weights;
   run_frozen_response_audit(accepted, input, layout, chart);
   const auto& blocks = recorded_hvp.recorded_blocks();
   std::cout << std::setprecision(17)
@@ -799,8 +806,8 @@ void run_operator_audit(
     const OrbitalGradientResult dense_accepted =
         evaluator.evaluate_without_reference_energy_gradient(
             input,
-            {0},
-            {1.0},
+            selected_states,
+            state_weights,
             nuclear_repulsion_energy,
             StructureEigensolver::Dense,
             accuracy,
@@ -898,8 +905,8 @@ void run_operator_audit(
       const auto evaluated =
           evaluator.evaluate_without_reference_energy_gradient(
               point,
-              {0},
-              {1.0},
+              selected_states,
+              state_weights,
               nuclear_repulsion_energy,
               options.eigensolver,
               accuracy,
@@ -1024,6 +1031,8 @@ void run_audit(const Options& options) {
         loaded.nuclear_repulsion_energy,
         options.eigensolver,
         accuracy,
+        selected_states,
+        state_weights,
         kHistorySize);
     lbfgs_preconditioner =
         std::make_unique<TransportedReducedLbfgsPreconditioner>(
@@ -1226,7 +1235,7 @@ void run_audit(const Options& options) {
     }
   }
   const auto trial_gradient = evaluator.evaluate_without_reference_energy_gradient(
-      trial, {0}, {1.0}, loaded.nuclear_repulsion_energy,
+      trial, selected_states, state_weights, loaded.nuclear_repulsion_energy,
       options.eigensolver, accuracy, no_initial_eigenvectors);
   const SparseParameterLayout trial_layout(trial.orbital_preparation_input);
   auto trial_chart = build_chart(trial, trial_layout, trial_gradient);
@@ -1254,7 +1263,7 @@ void run_audit(const Options& options) {
           input.orbital_preparation_input, direction, displacement);
       const auto evaluated =
           evaluator.evaluate_without_reference_energy_gradient(
-              point, {0}, {1.0}, loaded.nuclear_repulsion_energy,
+              point, selected_states, state_weights, loaded.nuclear_repulsion_energy,
               options.eigensolver, accuracy, no_initial_eigenvectors);
       return std::pair{
           chart->project_reduced_gradient(

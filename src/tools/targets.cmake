@@ -148,6 +148,10 @@ target_link_libraries(audit_newton_step
     xmvb_input
     xmvb_output)
 
+add_executable(audit_orbital_gradient
+  tools/audit_orbital_gradient.cpp)
+target_link_libraries(audit_orbital_gradient PRIVATE xmvb_input)
+
 add_executable(audit_sparse_orbital_gauge
   tools/audit_sparse_orbital_gauge.cpp)
 target_link_libraries(audit_sparse_orbital_gauge
