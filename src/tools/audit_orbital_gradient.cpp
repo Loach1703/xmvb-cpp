@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -10,10 +11,12 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include <Eigen/Eigenvalues>
 
 #include "input/loading/loader.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
+#include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/optimization/driver/session.hpp"
 #include "vbscf/optimization/objective/function.hpp"
@@ -70,20 +73,79 @@ double infinity_norm(const Eigen::VectorXd& values) {
   return values.size() == 0 ? 0.0 : values.cwiseAbs().maxCoeff();
 }
 
+/** @brief Dense diagnostic of the small coupled structure block, not a solver path. */
+void audit_coupled_elimination(const ExactHvpOperator& operation,
+                              const VbScfObjective& objective,
+                              const Eigen::VectorXd& direction,
+                              const Eigen::VectorXd& relaxed_image) {
+  const StructureTangentOperator structure(objective.second_order_context(),
+                                           operation.structure_action());
+  const Eigen::Index n = structure.tangent_size();
+  constexpr Eigen::Index maximum_reference_size = 1024;
+  if (n == 0 || n > maximum_reference_size) {
+    std::cout << "coupled_reference_available = 0\n";
+    return;
+  }
+  Eigen::MatrixXd c(n, n);
+  for (Eigen::Index j = 0; j < n; ++j) {
+    const Eigen::VectorXd axis = Eigen::VectorXd::Unit(n, j);
+    c.col(j) = structure.apply_coupling_coordinates(axis).hessian_coordinates;
+  }
+  const double symmetry_error = (c - c.transpose()).norm() /
+      std::max(1.0e-12, c.norm());
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(
+      (0.5 * (c + c.transpose())).eval());
+  if (spectrum.info() != Eigen::Success) {
+    throw std::runtime_error("coupled reference eigensystem failed");
+  }
+  const double cutoff = 256.0 * std::numeric_limits<double>::epsilon() *
+      static_cast<double>(n) *
+      std::max(1.0, spectrum.eigenvalues().cwiseAbs().maxCoeff());
+  Eigen::VectorXd inverse = spectrum.eigenvalues();
+  for (Eigen::Index j = 0; j < n; ++j) {
+    inverse[j] = std::abs(inverse[j]) > cutoff ? 1.0 / inverse[j] : 0.0;
+  }
+  const auto orbital = operation.apply_orbital_coupling(direction);
+  const Eigen::VectorXd b = structure.coordinates(
+      structure.project(orbital.scaled_structure_forcing));
+  const Eigen::VectorXd q = -spectrum.eigenvectors() * inverse.asDiagonal() *
+      (spectrum.eigenvectors().transpose() * b);
+  const auto correction = structure.apply_coupling_coordinates(q);
+  const Eigen::VectorXd bt = operation.apply_structure_coupling_adjoint(
+      correction.coefficient_response, correction.adjoint_multipliers);
+  const Eigen::VectorXd reference = orbital.orbital_hessian + bt;
+  std::cout << "coupled_reference_available = 1\n"
+            << "coupled_reference_structure_dimension = " << n << '\n'
+            << "coupled_reference_c_symmetry_error = " << symmetry_error << '\n'
+            << "coupled_reference_c_minimum = " << spectrum.eigenvalues()[0] << '\n'
+            << "coupled_reference_structure_residual = "
+            << (b + c * q).norm() << '\n'
+            << "coupled_reference_hvp_relative_error = "
+            << (reference - relaxed_image).norm() /
+               std::max({1.0e-12, reference.norm(), relaxed_image.norm()}) << '\n';
+}
+
 void run_audit(int argc, char** argv) {
-  if (argc < 2 || argc > 7) {
+  if (argc < 2 || argc > 8) {
     throw std::invalid_argument(
         "usage: audit_orbital_gradient INPUT [dense|davidson] "
-        "[energy-tol] [gradient-tol] [packed-direction-f64.bin] "
-        "[full-hvp|probe-curvature]");
+        "[energy-tol] [gradient-tol] [packed-direction-f64.bin|gradient|random] "
+        "[full-hvp|probe-curvature|vector-hvp] [orbital-table-f64.bin]");
   }
-  const bool audit_hvp = argc == 7;
+  const bool audit_hvp = argc >= 7;
+  const bool vector_hvp = audit_hvp && std::string(argv[6]) == "vector-hvp";
   const bool probe_curvature = audit_hvp && std::string(argv[6]) == "probe-curvature";
-  if (audit_hvp && !probe_curvature && std::string(argv[6]) != "full-hvp") {
-    throw std::invalid_argument("last argument must be full-hvp or probe-curvature");
+  if (audit_hvp && !probe_curvature && !vector_hvp &&
+      std::string(argv[6]) != "full-hvp") {
+    throw std::invalid_argument("unknown HVP audit mode");
   }
 
   auto loaded = load_vbscf_input_with_timings(argv[1]);
+  if (argc == 8) {
+    auto& table = loaded.input.orbital_preparation_input.orbital_value_table;
+    const Eigen::VectorXd values = read_packed_direction(argv[7], table.size());
+    std::copy(values.data(), values.data() + values.size(), table.begin());
+  }
   StructureEigensolver solver = loaded.structure_eigensolver;
   if (argc >= 3) {
     const std::string name = argv[2];
@@ -128,7 +190,14 @@ void run_audit(int argc, char** argv) {
       chart, layout, objective.input().orbital_preparation_input);
 
   Eigen::VectorXd reduced_direction = -reduced_gradient;
-  if (argc >= 6) {
+  if (argc >= 6 && std::string(argv[5]) == "random") {
+    Eigen::VectorXd packed_direction(layout.size());
+    for (Eigen::Index i = 0; i < packed_direction.size(); ++i) {
+      packed_direction[i] = std::sin(0.73 * static_cast<double>(i + 1)) +
+                            std::cos(1.19 * static_cast<double>(i + 1));
+    }
+    reduced_direction = chart.project_vector(packed_direction).reduced_gradient;
+  } else if (argc >= 6 && std::string(argv[5]) != "gradient") {
     const Eigen::VectorXd packed_direction =
         read_packed_direction(argv[5], layout.size());
     reduced_direction =
@@ -193,15 +262,20 @@ void run_audit(int argc, char** argv) {
   std::cout.flush();
 
   double analytic_curvature = 0.0;
+  Eigen::VectorXd full_image, fixed_image;
   if (audit_hvp) {
     ExactHvpOperator operation(objective.second_order_context(),
                               &objective.input(), layout, &chart);
     const Eigen::VectorXd image = operation.apply_reduced(reduced_direction);
+    full_image = image;
     analytic_curvature = reduced_direction.dot(image);
     HvpComponents fixed_ci;
     fixed_ci.structure_response = false;
-    const Eigen::VectorXd fixed_image =
+    fixed_image =
         operation.apply_reduced(reduced_direction, fixed_ci);
+    if (vector_hvp) {
+      audit_coupled_elimination(operation, objective, reduced_direction, image);
+    }
     const auto diagnostics = operation.diagnostics();
     std::cout << "full_hvp_curvature = " << analytic_curvature << '\n'
               << "fixed_ci_hvp_curvature = "
@@ -236,10 +310,49 @@ void run_audit(int argc, char** argv) {
     }
     std::cout.flush();
   }
-  const std::vector<double> steps = audit_hvp
+  const std::vector<double> steps = vector_hvp
+      ? std::vector<double>{1.0e-3, 3.0e-4, 1.0e-4, 3.0e-5}
+      : audit_hvp
       ? std::vector<double>{1.0e-2, 3.0e-3, 1.0e-3, 3.0e-4}
       : std::vector<double>{1.0e-3, 3.0e-4};
   for (const double h : steps) {
+    if (vector_hvp) {
+      // Keep the accepted affine chart fixed. Its transpose is the Jacobian
+      // pullback at both displaced points; rebuilding either chart would
+      // compare covectors in different coordinates rather than a Hessian.
+      const auto evaluate = [&](double displacement) {
+        const auto orbitals = chart.retract_step(
+            orbital_input, reduced_direction, displacement);
+        const Eigen::VectorXd parameters = layout.pack(orbitals);
+        return objective.evaluate_trial(parameters, false);
+      };
+      const auto plus = evaluate(h);
+      const auto minus = evaluate(-h);
+      const Eigen::VectorXd fd = chart.project_reduced_gradient(
+          (plus.gradient - minus.gradient) / (2.0 * h));
+      const auto relative_error = [](const Eigen::VectorXd& actual,
+                                     const Eigen::VectorXd& reference) {
+        return (actual - reference).norm() /
+            std::max({1.0e-12, actual.norm(), reference.norm()});
+      };
+      const double fd_gradient = (plus.energy - minus.energy) / (2.0 * h);
+      std::cout << "vector_probe_h = " << h << '\n'
+                << "vector_fd_derivative = " << fd_gradient << '\n'
+                << "vector_gradient_absolute_error = "
+                << std::abs(fd_gradient - analytic_derivative) << '\n'
+                << "vector_gradient_relative_error = "
+                << std::abs(fd_gradient - analytic_derivative) /
+                   std::max({1.0e-12, std::abs(fd_gradient),
+                             std::abs(analytic_derivative)}) << '\n'
+                << "vector_hvp_absolute_error = "
+                << (full_image - fd).norm() << '\n'
+                << "vector_hvp_relative_error = "
+                << relative_error(full_image, fd) << '\n'
+                << "vector_hvp_norm = " << full_image.norm() << '\n'
+                << "vector_fd_norm = " << fd.norm() << '\n';
+      std::cout.flush();
+      continue;
+    }
     const auto energy_at = [&](double signed_step) {
       const OrbitalPreparationInput trial_orbitals = chart.retract_step(
           orbital_input, reduced_direction, signed_step);
