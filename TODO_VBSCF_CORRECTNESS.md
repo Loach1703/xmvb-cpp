@@ -435,6 +435,43 @@ small-block Schur reference. No production derivative formulas were changed.
   **Conclusion:** retained response information alone is not enough to remove
   the costly orbital expansions; do not repeat this same Woodbury update
   without a materially different curvature representation and a new test.
+- [x] Test current-point orbital inverse SR1 using only cached core HVP
+  columns, with no cross-point gradient-difference history. This is distinct
+  from the transported LBFGS trial removed in a5c6dbb, but is not a new source
+  of Hessian information. Incremental rank-one updates preserve a fixed-point
+  symmetric inverse model's accepted secants in exact arithmetic. They only
+  change expansion directions; the complete physical KKT gate remains.
+  Hanhai25 job 269236 passes both NEO test executables, but the matched
+  same-node exact/Davidson measurements reject the update:
+
+  | System | Steps before / trial | Wall before / trial (s) | Orbital actions before / trial | Structure actions before / trial |
+  | --- | ---: | ---: | ---: | ---: |
+  | F2 OEO | 5 / 5 | 0.242 / 0.255 | 28 / 27 | 28 / 28 |
+  | 241 HAO | 6 / 6 | 2.578 / 2.562 | 10 / 10 | 119 / 118 |
+  | FeCl2 | 3 / 3 | 12.781 / 14.335 | 302 / 322 | 1145 / 1203 |
+
+  FeCl2's first-step orbital/structure actions change from 258/941 to 280/817.
+  Its final energy changes from -2181.6176448571 to -2181.6176449184 Eh,
+  physical gradient is 9.8590e-4, and peak RSS is 446.3 / 450.2 MiB.
+  F2 trial energy is -198.7611114342 and 241 is -230.7205903792 Eh.
+  The trial is removed; its patch, logs, input/binary hashes and job script
+  are preserved in results/diagnostics/pyrrole-molcas-20261002/ci-convergence/
+  orbital-sr1-269236/.
+  **Theory limitation:** in an uncoupled quadratic with a fixed linear
+  symmetric base inverse, fixed shift, a single preconditioned-gradient seed,
+  and ordinary single-vector expansion, inverse SR1 stays in the same
+  preconditioned Krylov sequence. The next quotient space has at most one
+  new direction, so this cannot generally reduce its exact-arithmetic
+  Krylov dimension. Coupled structure adjoints, recycled/generic seeds and
+  changing shifts break that invariance, but do not guarantee an improvement.
+  At nonzero shift the current truncated-CG base inverse is nonlinear, so
+  exact SR1 multisecant guarantees do not apply. All accepted molecular
+  trace shifts in this comparison are zero; they do not validate shifted SR1.
+  A near-zero SR1 denominator is a numerical breakdown/safeguard condition,
+  not proof that the underlying curvature correction has zero rank.
+  **Conclusion:** reject this same-point update, not every cross-orbital
+  preconditioner. A genuinely coupled one-electron surrogate has not been
+  implemented or measured by this trial; do not conflate the two.
 - [ ] Do not repeat the already established fixed-orbital energy comparison.
   Forward agreement is established; it does not separately prove every RDM
   component or every derivative. A real negative-curvature HVP direction also
