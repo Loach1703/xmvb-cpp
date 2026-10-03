@@ -301,6 +301,86 @@ void check_hidden_negative_curvature() {
           "a complete basis lacks its global curvature certificate");
 }
 
+void check_zero_gradient_curvature_probe() {
+  const Eigen::Matrix3d hessian = hidden_curvature_hessian();
+  Eigen::Matrix3d metric = Eigen::Matrix3d::Zero();
+  metric.diagonal() << 2.0, 3.0, 4.0;
+  const Eigen::Vector3d first_order_gradient(1.0, 0.0, 0.0);
+  const Eigen::Vector3d hidden_mode(0.0, 5.0 / 3.0, 4.0 / 3.0);
+  require_close(first_order_gradient.dot(hidden_mode), 0.0, 0.0,
+                "hidden curvature is not orthogonal to the first-order gradient");
+
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.maximum_subspace_dimension = 3;
+  options.stop_on_negative_curvature = true;
+  const Eigen::Vector3d zero_gradient = Eigen::Vector3d::Zero();
+  const NeoResult result = solve_neo(
+      dense_problem(hessian, metric, zero_gradient), options);
+  require(result.stop_reason == NeoStopReason::NegativeCurvature,
+          "zero-gradient probe missed hidden negative curvature");
+  require(!result.converged(),
+          "curvature witness was mislabeled as KKT convergence");
+  require(result.hessian_actions <= 3,
+          "curvature probe exceeded its action budget");
+  const Eigen::VectorXd& direction = result.minimum_curvature_direction;
+  require_close(direction.dot(metric * direction), 1.0, 2.0e-10,
+                "curvature witness is not metric-normalized");
+  require_close(result.minimum_curvature_hessian_image,
+                hessian * direction, 2.0e-10,
+                "curvature witness has the wrong Hessian image");
+  require_close(result.minimum_curvature_metric_image,
+                metric * direction, 2.0e-10,
+                "curvature witness has the wrong metric image");
+  require_close(result.minimum_curvature_value,
+                direction.dot(hessian * direction) /
+                    direction.dot(metric * direction),
+                2.0e-10, "curvature witness has the wrong Rayleigh quotient");
+  require(result.minimum_curvature_value < -1.0,
+          "curvature witness is not decisively negative");
+  require_close(result.hessian_step, hessian * result.step, 2.0e-10,
+                "curvature probe lost the spectral step Hessian image");
+  require_close(result.metric_step, metric * result.step, 2.0e-10,
+                "curvature probe lost the spectral step metric image");
+
+  bool rejected = false;
+  try {
+    (void)solve_neo(
+        dense_problem(hessian, metric, first_order_gradient), options);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected,
+          "curvature-only stopping accepted a nonzero Newton gradient");
+}
+
+void check_positive_zero_gradient_curvature_probe() {
+  Eigen::Matrix2d hessian;
+  hessian << 2.0, 0.5,
+             0.5, 4.0;
+  Eigen::Matrix2d metric;
+  metric << 2.0, 0.25,
+            0.25, 3.0;
+  const Eigen::Vector2d gradient = Eigen::Vector2d::Zero();
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.stop_on_negative_curvature = true;
+  const NeoResult result = solve_neo(
+      dense_problem(hessian, metric, gradient), options);
+  verify_kkt("positive zero-gradient curvature probe", hessian, metric,
+             gradient, options.trust_radius, result);
+  require(result.stop_reason == NeoStopReason::Converged,
+          "positive curvature triggered negative-curvature stopping");
+  require(result.minimum_curvature_value > 0.0,
+          "positive probe returned a nonpositive Ritz value");
+  require_close(result.minimum_curvature_value,
+                result.minimum_curvature_direction.dot(
+                    result.minimum_curvature_hessian_image),
+                2.0e-10, "positive probe returned an inconsistent Ritz value");
+}
+
 void check_certified_lower_bounds() {
   const Eigen::Matrix3d hessian = hidden_curvature_hessian();
   const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
@@ -430,6 +510,8 @@ int main() {
     check_indefinite_regular_boundary();
     check_hard_case();
     check_hidden_negative_curvature();
+    check_zero_gradient_curvature_probe();
+    check_positive_zero_gradient_curvature_probe();
     check_certified_lower_bounds();
     check_scalable_lowest_root_convergence();
     check_optional_curvature_certificate();

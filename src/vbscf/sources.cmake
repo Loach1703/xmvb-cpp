@@ -119,6 +119,7 @@ set(XMVB_VBSCF_OPTIMIZATION_SOURCES
   vbscf/optimization/globalization/line_search.cpp
   vbscf/optimization/driver/session.cpp
   vbscf/optimization/neo/coordinates.cpp
+  vbscf/optimization/neo/curvature.cpp
   vbscf/optimization/neo/globalization.cpp
   vbscf/optimization/neo/problem.cpp
   vbscf/optimization/neo/response_solver.cpp

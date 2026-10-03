@@ -11,6 +11,7 @@ enum class NeoStopReason {
   Converged,
   SubspaceLimit,
   NumericalFailure,
+  NegativeCurvature,
 };
 
 /** @brief Accuracy and trust-region controls for a NEO microproblem. */
@@ -35,14 +36,27 @@ struct NeoOptions {
    * converged only oversolves a stale quadratic model.
    */
   bool require_curvature_certificate = true;
+  /**
+   * Stop with a negative-curvature witness for an exactly zero gradient,
+   * after refining its Ritz residual to the negative curvature scale.
+   */
+  bool stop_on_negative_curvature = false;
 };
 
-/** @brief Step and explicit optimality certificate returned by NEO. */
+/** @brief Step, spectral witness, and optimality diagnostics returned by NEO. */
 struct NeoResult {
   Eigen::VectorXd step;
   Eigen::VectorXd hessian_step;
   Eigen::VectorXd metric_step;
   Eigen::VectorXd kkt_residual;
+  /** Lowest Ritz direction, normalized in the problem's supplied metric. */
+  Eigen::VectorXd minimum_curvature_direction;
+  /** Matrix-free Hessian action on `minimum_curvature_direction`. */
+  Eigen::VectorXd minimum_curvature_hessian_image;
+  /** Matrix-free metric action on `minimum_curvature_direction`. */
+  Eigen::VectorXd minimum_curvature_metric_image;
+  /** Direct Rayleigh quotient of `minimum_curvature_direction`. */
+  double minimum_curvature_value = 0.0;
   /** `[beta, y]` in the scaled augmented-Hessian equation. */
   Eigen::VectorXd augmented_eigenvector;
   double shift = 0.0;
@@ -84,7 +98,7 @@ struct NeoResult {
  * The method builds a Euclidean-orthonormal action subspace, whitens its small
  * projected physical metric, solves the projected norm-constrained quadratic
  * problem, and expands with the KKT or lowest-curvature Ritz residual. A
- * successful return always requires an explicit full-space KKT residual.
+ * `Converged` always requires an explicit full-space KKT residual.
  * Lowest-curvature Ritz convergence is additionally required when requested
  * by the caller and for a hard-case step. A regular boundary candidate is
  * certified by its exact nonlinear keyframe instead of an unrelated extremal
@@ -95,6 +109,10 @@ struct NeoResult {
  * physical metric enters only through the trust-region norm and projected
  * generalized eigenproblem; an optional preconditioner only proposes new
  * subspace directions.
+ * `stop_on_negative_curvature` is a zero-gradient spectral probe: it may
+ * return a verified negative Rayleigh direction before KKT convergence.
+ * A nonnegative Ritz value from an incomplete subspace is not a global
+ * positive-semidefiniteness certificate.
  */
 NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options);
 

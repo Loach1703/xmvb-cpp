@@ -128,6 +128,11 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
   const int maximum_dimension = options.maximum_subspace_dimension == 0
       ? dimension
       : std::min(dimension, options.maximum_subspace_dimension);
+  if (options.stop_on_negative_curvature &&
+      !problem.gradient().isZero(0.0)) {
+    throw std::invalid_argument(
+        "NEO negative-curvature probe requires an exactly zero gradient");
+  }
   const double gradient_norm = problem.gradient().norm();
 
   NeoResult result;
@@ -135,6 +140,9 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
   result.hessian_step = Eigen::VectorXd::Zero(dimension);
   result.metric_step = Eigen::VectorXd::Zero(dimension);
   result.kkt_residual = problem.gradient();
+  result.minimum_curvature_direction = Eigen::VectorXd::Zero(dimension);
+  result.minimum_curvature_hessian_image = Eigen::VectorXd::Zero(dimension);
+  result.minimum_curvature_metric_image = Eigen::VectorXd::Zero(dimension);
   result.residual_target = options.absolute_residual_tolerance +
       options.relative_residual_tolerance * gradient_norm;
 
@@ -152,7 +160,8 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
 
   // A reproducible generic seed supplies the nonzero-overlap assumption used
   // by matrix-free lowest-root Davidson/Lanczos methods.
-  if (options.require_curvature_certificate && maximum_dimension > 1) {
+  if ((options.require_curvature_certificate ||
+       options.stop_on_negative_curvature) && maximum_dimension > 1) {
     append_direction(
         problem, generic_probe(problem.size()), &basis,
         &result.hessian_actions);
@@ -235,6 +244,14 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
     const Eigen::VectorXd minimum_ritz_vector = q * minimum_coordinates;
     const Eigen::VectorXd minimum_hessian_image = hq * minimum_coordinates;
     const Eigen::VectorXd minimum_metric_image = mq * minimum_coordinates;
+    const double metric_length_squared =
+        minimum_ritz_vector.dot(minimum_metric_image);
+    result.minimum_curvature_direction = minimum_ritz_vector;
+    result.minimum_curvature_hessian_image = minimum_hessian_image;
+    result.minimum_curvature_metric_image = minimum_metric_image;
+    result.minimum_curvature_value =
+        minimum_ritz_vector.dot(minimum_hessian_image) /
+        metric_length_squared;
     const Eigen::VectorXd curvature_residual =
         minimum_hessian_image -
         spectrum.eigenvalues()[0] * minimum_metric_image;
@@ -262,13 +279,34 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
             -positivity_tolerance;
     result.global_curvature_certified =
         complete_basis || lower_bound_certifies;
+    // A directly negative Rayleigh quotient witnesses indefiniteness even
+    // before its Ritz residual has converged to final accuracy. The margin
+    // follows local operator accuracy and roundoff. Residual refinement to the
+    // curvature scale prevents a first negative projection dominated by stiff
+    // components from becoming an ineffective nonlinear trial direction.
+    if (options.stop_on_negative_curvature) {
+      const double local_action_scale = minimum_ritz_vector.norm() *
+          minimum_hessian_image.norm() / metric_length_squared;
+      const double negative_curvature_margin = std::max(
+          options.relative_residual_tolerance * local_action_scale,
+          symmetry_factor * projected_hessian.norm());
+      if (std::isfinite(result.minimum_curvature_value) &&
+          result.minimum_curvature_value < -negative_curvature_margin &&
+          result.curvature_residual_norm <=
+              -result.minimum_curvature_value * minimum_metric_image.norm()) {
+        result.stop_reason = NeoStopReason::NegativeCurvature;
+        set_augmented_certificate(problem, minimum_ritz_vector, &result);
+        return result;
+      }
+    }
     // A regular boundary step is certified by the exact nonlinear keyframe
     // and its actual/predicted decrease.  Resolving an unrelated lowest Ritz
     // vector after the shifted Newton equation has converged only oversolves
     // the stale quadratic model.  A hard case remains different because the
     // step itself depends on the minimum-curvature direction.
     const bool need_curvature_certificate =
-        options.require_curvature_certificate || result.hard_case;
+        options.require_curvature_certificate ||
+        options.stop_on_negative_curvature || result.hard_case;
     const bool required_curvature_converged =
         !need_curvature_certificate || curvature_converged;
     if (stationary && required_curvature_converged && shifted_positive &&

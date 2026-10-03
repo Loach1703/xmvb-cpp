@@ -103,6 +103,47 @@ wavefunction constraints merely to reproduce a reference energy.
   Distinguish a discovered negative direction from a global PSD certificate;
   solving the gradient-seeded Newton KKT residual alone cannot establish the
   latter. Use the independently mapped mode above as a strict regression.
+  A generic zero-gradient coupled-spectrum probe is now implemented in
+  `optimization/neo/curvature.*`. It uses the analytic orbital preconditioner
+  only as an SPD spectral metric, does not rotate physical orbitals, and
+  does not perform a structure-response solve for every direction. Its
+  negative witness must pass a Ritz-residual refinement to the curvature
+  scale; finding the first negative projection alone gave poor trial steps.
+
+  **Do not enable the experimental stopping guard by default yet.** The
+  backend trial was measured on Hanhai25 job 268813 and then removed from
+  the production backend. Its reproducible patch and run artifacts remain
+  under `results/diagnostics/pyrrole-molcas-20261002/`:
+
+  | Input / starting point | Original NEO | Experimental guard |
+  | --- | --- | --- |
+  | FeCl2 dense endpoint | 0 steps, -2181.617644858680 | 20 steps, -2181.623929428968; **not converged**, 114.04 s |
+  | F2 OEO original guess | 3 steps, -198.689799668759 | 20 steps, -198.760726276711; **not converged**, 1.05 s |
+  | 241 | 6 steps, -230.720590387652, 1.50 s | same steps/energy, 8.62 s |
+
+  The FeCl2 trial escapes the false termination region but leaves physical
+  gradient norm 0.02898. It is not a successful final convergence. The F2
+  divergence from the old trajectory begins only after the old version
+  declares convergence; the new energies are lower, not a forward-energy
+  regression. Job 268837 checks the low-energy F2 reference guess: both
+  versions reach -198.761111239623 in 5 steps, but the guard adds 45 joint
+  actions and increases wall time from 0.20 to 0.53 s. For 241, actions grow
+  from 9 to 169 without changing energy. This fails the efficiency target.
+  Retain independent curvature discovery as a diagnostic while developing
+  reuse/cost control and fixing the slow Newton tail; do not claim a completed
+  optimizer fix or silently change all stopping costs.
+  Job 268842 validates the retained standalone diagnostic and restored
+  production backend. Without using the supplied PySCF direction as its
+  spectral seed, the generic probe finds a witness in **7 joint actions**.
+  Its orbital component has complete relaxed HVP curvature -0.000648316;
+  C++ energy differences at h=0.01 give -0.000648402. The discrepancy is
+  about 0.013%. Normal F2 low-guess production is restored to 5 steps,
+  -198.761111239623 and 0.20 s. Solver and response-solver unit tests passed.
+  The experimental FeCl2 trace shows the next ordinary NEO step consumes
+  **486 coupled actions (459 orbital, 27 structure)**. Thus inexpensive
+  discovery alone does not fix the subsequent microproblem inefficiency.
+  The 241 positive-mode exclusion consumes 80 joint actions. These are
+  separate remaining targets; do not blame both costs on initial discovery.
 
 ## Required next steps
 

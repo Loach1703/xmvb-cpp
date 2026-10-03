@@ -14,9 +14,11 @@
 #include "input/loading/loader.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
+#include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/optimization/driver/session.hpp"
 #include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
+#include "vbscf/optimization/neo/curvature.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 
 namespace {
@@ -72,11 +74,13 @@ void run_audit(int argc, char** argv) {
   if (argc < 2 || argc > 7) {
     throw std::invalid_argument(
         "usage: audit_orbital_gradient INPUT [dense|davidson] "
-        "[energy-tol] [gradient-tol] [packed-direction-f64.bin] [full-hvp]");
+        "[energy-tol] [gradient-tol] [packed-direction-f64.bin] "
+        "[full-hvp|probe-curvature]");
   }
   const bool audit_hvp = argc == 7;
-  if (audit_hvp && std::string(argv[6]) != "full-hvp") {
-    throw std::invalid_argument("last argument must be full-hvp");
+  const bool probe_curvature = audit_hvp && std::string(argv[6]) == "probe-curvature";
+  if (audit_hvp && !probe_curvature && std::string(argv[6]) != "full-hvp") {
+    throw std::invalid_argument("last argument must be full-hvp or probe-curvature");
   }
 
   auto loaded = load_vbscf_input_with_timings(argv[1]);
@@ -116,7 +120,8 @@ void run_audit(int argc, char** argv) {
   Eigen::VectorXd packed_gradient;
   const double accepted_energy = objective(accepted_parameters, packed_gradient);
   const OrbitalChart chart = optimizer_detail::build_orbital_chart(
-      objective, layout, OrbitalPreconditioner::Identity);
+      objective, layout, probe_curvature ? OrbitalPreconditioner::HessianDiagonal
+                                        : OrbitalPreconditioner::Identity);
   const Eigen::VectorXd reduced_gradient =
       chart.project_reduced_gradient(packed_gradient);
   const NonredundantRetractionMetric metric(
@@ -207,6 +212,28 @@ void run_audit(int argc, char** argv) {
               << "hvp_response_relative_residual = "
               << diagnostics.max_structure_response_relative_residual << '\n';
     write_doubles(prefix + "reduced_hvp_f64.bin", image.data(), image.size());
+    if (probe_curvature) {
+      const StructureTangentOperator structure(objective.second_order_context(),
+                                                operation.structure_action());
+      const auto probe = probe_neo_curvature(operation, structure, chart);
+      std::cout << "independent_probe_found_negative = "
+                << (probe.stop_reason == NeoStopReason::NegativeCurvature) << '\n'
+                << "independent_probe_actions = " << probe.hessian_actions << '\n'
+                << "independent_probe_rayleigh = " << probe.minimum_curvature_value << '\n'
+                << "independent_probe_ritz_residual = " << probe.curvature_residual_norm << '\n'
+                << "independent_probe_global_certificate = "
+                << probe.global_curvature_certified << '\n';
+      if (probe.stop_reason == NeoStopReason::NegativeCurvature) {
+        Eigen::VectorXd packed_mode = chart.expand_step(
+            probe.minimum_curvature_direction.head(chart.reduced_size()));
+        const double norm = metric.norm(
+            probe.minimum_curvature_direction.head(chart.reduced_size()));
+        if (!(norm > 0.0)) throw std::runtime_error("structure-only negative mode");
+        packed_mode /= norm;
+        write_doubles(prefix + "independent_mode_f64.bin", packed_mode.data(),
+                      packed_mode.size());
+      }
+    }
     std::cout.flush();
   }
   const std::vector<double> steps = audit_hvp
