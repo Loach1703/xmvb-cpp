@@ -219,6 +219,19 @@ wavefunction constraints merely to reproduce a reference energy.
     8-step F2 result with a prior 5-step NEO run as an algorithm regression.
     Final-source validation job 269085 passes Davidson, NEO, response-NEO,
     and eigen-response tests and reproduces the same FeCl2 derivative errors.
+  - [x] Test final optimization energy, not just same-point derivatives:
+    Hanhai25 job 269147_1 uses revision 35d0871, the original FeCl2 guess,
+    exact integrals, default Davidson and block-LBFGS. It reports convergence
+    after 256 steps, 67.12 s, at -2181.6176448746 Eh. Physical gradient dual
+    norm is 9.88834e-4. The converged same-guess PySCF Newton reference is
+    -2181.624464883727796 Eh (job 249623, 24 macro iterations), leaving
+    a gap of **0.0068200091 Eh**. Thus the CI stationarity repair does NOT
+    resolve the main energy discrepancy. Do not label this energy validated.
+  - [ ] Companion NEO job 269147_0 is still running. At step 311 its energy
+    is -2181.6176411989 Eh; this is an intermediate value, not convergence.
+    Both jobs retain the original input's 2000-step budget, not a 30-step
+    diagnostic cutoff. Logs are under
+    `results/diagnostics/pyrrole-molcas-20261002/ci-convergence/`.
   - [ ] A CI stationarity residual is NOT a general bound on the orbital
     derivative error: inverse structure gaps and orbital/structure coupling
     still matter. The new gate repairs the demonstrated premature acceptance,
