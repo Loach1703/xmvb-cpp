@@ -39,6 +39,47 @@ wavefunction constraints merely to reproduce a reference energy.
   states and weights as the accepted point, not hard-coded root zero.
   Job 268784 passed a dense F2 two-state audit: directional HVP finite-
   difference relative error 3.95e-9.
+- [x] Isolate diagonalization from orbital optimization using the original
+  FeCl2 guess and block-LBFGS, changing only the eigensolver. Job 268789:
+  dense takes 258 accepted steps / 287.83 s to -2181.617644858690;
+  Davidson takes 117 / 31.23 s to -2181.617641690341. The dense result remains
+  0.006820025 hartree above the same-guess PySCF Newton reference. Thus
+  Davidson derivative errors are real but do not explain the principal gap.
+  Both runs use the one-electron block preconditioner.
+- [ ] Audit accepted-step gauge changes against block-LBFGS secant history.
+  The Armijo routine canonicalizes accepted orbitals and exposes
+  `accepted_chart_changed`, but the block backend does not request that flag
+  and clears history only when the chart rank changes. FULL OEO disables
+  active balancing, not inactive balancing. This is a code-level risk; its
+  occurrence and impact in the FeCl2 trajectory have not been measured.
+- [x] Probe the actual dense endpoint with an independent matrix-free coupled
+  Hessian and relaxed-energy directional differences. Keep the action budget
+  bounded; absence of a negative Ritz value is not a positivity certificate,
+  and negative curvature at a nonstationary point does not establish a saddle.
+  Job 268798: independent orbital gradient L2 is 0.000970395, consistent
+  with the reported physical norm 0.000964406. Unscaled 40-action probes
+  found positive Ritz values but large residuals; they do not certify
+  positive semidefiniteness. Job 268799: PySCF joint Newton restarted from
+  exactly this occupied-space endpoint reaches -2181.622437040922 after
+  8 macro iterations (17 keyframes, 88 HVPs), decreasing energy by
+  0.004792182 hartree while retaining S^2=6. This bounded restart is NOT
+  converged. It proves substantial further descent is possible and rules
+  out labeling the dense endpoint a validated local minimum.
+  Job 268803 adds a diagonal congruence to expose the soft spectrum:
+  a 60-action projected joint probe finds a negative Rayleigh direction.
+  The scaled Ritz value is -8.451875 (residual 8.4e-9); the unscaled
+  normalized joint Rayleigh value is -0.000174981. These are different
+  coordinate metrics, not interchangeable Hessian eigenvalues. Independent
+  CASCI-relaxed energy differences along its normalized orbital component
+  give curvature -0.000972168 at h=0.01 and -0.000972957 at h=0.003.
+  Smaller displacements show cancellation, so use the two larger probes
+  as the sign check. This establishes real negative local curvature at the
+  dense endpoint, not a formally stationary saddle or a global-minimum claim.
+- [ ] Map this independently verified soft orbital mode into the C++ chart
+  and compare the full relaxed HVP along it with the C++ energy differences.
+  If the curvature is correct, inspect NEO subspace discovery and stopping;
+  if it is not, repair the HVP/coupling. Do not replace this diagnosis with
+  tighter scalar stopping thresholds or further Davidson parameter tuning.
 
 ## Required next steps
 
