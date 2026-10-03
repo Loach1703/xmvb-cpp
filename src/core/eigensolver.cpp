@@ -124,6 +124,10 @@ void validate_davidson_options(
       options.energy_tolerance <= 0.0) {
     throw std::invalid_argument("Davidson energy tolerance must be positive");
   }
+  if (!std::isfinite(options.stationarity_tolerance) ||
+      options.stationarity_tolerance <= 0.0) {
+    throw std::invalid_argument("Davidson stationarity tolerance must be positive");
+  }
 }
 
 void validate_davidson_diagonals(
@@ -300,13 +304,15 @@ DavidsonOptions make_davidson_options(
     int dimension,
     int n_roots,
     double energy_tolerance,
-    double relative_residual_tolerance) {
+    double relative_residual_tolerance,
+    double stationarity_tolerance) {
   if (dimension <= 0 || n_roots <= 0 || n_roots > dimension) {
     throw std::invalid_argument("invalid Davidson eigenproblem dimensions");
   }
   if (!std::isfinite(energy_tolerance) || energy_tolerance <= 0.0 ||
       !std::isfinite(relative_residual_tolerance) ||
-      relative_residual_tolerance <= 0.0) {
+      relative_residual_tolerance <= 0.0 ||
+      !std::isfinite(stationarity_tolerance) || stationarity_tolerance <= 0.0) {
     throw std::invalid_argument(
         "Davidson accuracy tolerances must be positive");
   }
@@ -331,7 +337,8 @@ DavidsonOptions make_davidson_options(
       2 * dimension,
       max_subspace,
       energy_tolerance,
-      relative_residual_tolerance};
+      relative_residual_tolerance,
+      stationarity_tolerance};
 }
 
 GeneralizedEigenResult GeneralizedEigensolver::solve_dense(
@@ -489,6 +496,7 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
         : std::numeric_limits<double>::epsilon();
 
     result.relative_residual_norms.assign(options.n_roots, 0.0);
+    result.stationarity_residual_norms.assign(options.n_roots, 0.0);
     bool converged = true;
     Eigen::MatrixXd corrections(dimension, options.n_roots);
     int n_corrections = 0;
@@ -504,6 +512,9 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
                   overlap_root_vectors.col(root).norm());
       const double relative_residual = residual.norm() / residual_scale;
       result.relative_residual_norms[root] = relative_residual;
+      const double stationarity_residual =
+          residual.norm() / root_vectors.col(root).norm();
+      result.stationarity_residual_norms[root] = stationarity_residual;
       const double energy_scale = std::max(1.0, std::abs(eigenvalue));
       const double first_iteration_residual_tolerance =
           options.energy_tolerance / energy_scale;
@@ -520,6 +531,7 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
           options.residual_tolerance,
           spectral_energy_residual_tolerance);
       if (relative_residual <= required_residual &&
+          stationarity_residual <= options.stationarity_tolerance &&
           (ritz_energy_stable || independently_certified)) {
         continue;
       }
@@ -553,7 +565,12 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
       message << "complete Davidson basis cannot meet the requested Ritz residual: "
               << *std::max_element(
                      result.relative_residual_norms.begin(),
-                     result.relative_residual_norms.end());
+                     result.relative_residual_norms.end())
+              << "; CI stationarity residual = "
+              << *std::max_element(
+                     result.stationarity_residual_norms.begin(),
+                     result.stationarity_residual_norms.end())
+              << " (requested " << options.stationarity_tolerance << ')';
       throw std::runtime_error(message.str());
     }
 
@@ -618,7 +635,12 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
           << " iterations; largest relative residual = "
           << *std::max_element(
                  result.relative_residual_norms.begin(),
-                 result.relative_residual_norms.end());
+                 result.relative_residual_norms.end())
+          << "; largest CI stationarity residual = "
+          << *std::max_element(
+                 result.stationarity_residual_norms.begin(),
+                 result.stationarity_residual_norms.end())
+          << " (requested " << options.stationarity_tolerance << ')';
   throw std::runtime_error(message.str());
 }
 

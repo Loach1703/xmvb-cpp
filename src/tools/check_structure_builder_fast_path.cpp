@@ -347,6 +347,7 @@ int main(int argc, char** argv) {
         2 * n_structures,
         std::min(n_structures, 128),
         1.0,
+        1.0e-8,
         1.0e-8};
     const auto davidson_start = std::chrono::high_resolution_clock::now();
     const auto davidson = eigensolver.solve_davidson(

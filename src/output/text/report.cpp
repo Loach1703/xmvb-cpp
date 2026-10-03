@@ -360,6 +360,9 @@ void print_summary(
     print_log_field(
         "Final Davidson max rel. residual",
         format_scientific_double(davidson.maximum_relative_residual, 8));
+    print_log_field(
+        "Final Davidson CI residual (Eh)",
+        format_scientific_double(davidson.maximum_stationarity_residual, 8));
   }
   if (trace_sample_directory.has_value()) {
     print_log_field("Trace sample directory", trace_sample_directory->string());

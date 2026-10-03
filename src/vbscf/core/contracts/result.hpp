@@ -22,6 +22,9 @@ struct DavidsonDiagnostics {
 
   /** Largest converged relative residual among the requested roots. */
   double maximum_relative_residual = 0.0;
+
+  /** Largest CI stationarity residual, in hartree; not an orbital error bound. */
+  double maximum_stationarity_residual = 0.0;
 };
 
 /**

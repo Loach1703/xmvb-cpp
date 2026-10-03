@@ -130,6 +130,7 @@ bool run_case(
       4 * dimension,
       std::min(dimension, std::max(128, 24 * n_roots)),
       1.0,
+      2.0e-8,
       2.0e-8};
 
   const xmvb::core::GeneralizedEigensolver solver;
@@ -206,6 +207,7 @@ bool run_recycled_case() {
       4 * dimension,
       128,
       1.0,
+      2.0e-8,
       2.0e-8};
   const xmvb::core::GeneralizedEigensolver solver;
   const auto cold = solver.solve_davidson(
@@ -258,7 +260,8 @@ bool run_outer_accuracy_case() {
       2 * dimension,
       128,
       1.0e-7,
-      1.0e-3};
+      1.0e-3,
+      1.0e-7};
   const xmvb::core::GeneralizedEigensolver solver;
   const auto reference = solver.solve_dense(
       flatten(problem.hamiltonian),
@@ -278,7 +281,11 @@ bool run_outer_accuracy_case() {
       result.relative_residual_norms.end());
   const bool passed =
       eigenvalue_error <= options.energy_tolerance &&
-      residual <= options.residual_tolerance;
+      residual <= options.residual_tolerance &&
+      *std::max_element(
+          result.stationarity_residual_norms.begin(),
+          result.stationarity_residual_norms.end()) <=
+          options.stationarity_tolerance;
   std::cout << "outer-accuracy Davidson"
             << " iterations=" << result.iterations
             << " eigenvalue_error=" << eigenvalue_error
@@ -302,6 +309,7 @@ bool run_bounded_multiroot_restart_case() {
       300,
       128,
       1.0,
+      2.0e-8,
       2.0e-8};
   const xmvb::core::GeneralizedEigensolver solver;
   const auto reference = solver.solve_dense(
@@ -332,15 +340,16 @@ bool run_bounded_multiroot_restart_case() {
 
 bool run_default_option_cases() {
   const auto small =
-      xmvb::core::make_davidson_options(3, 2, 1.0e-7, 1.0e-3);
+      xmvb::core::make_davidson_options(3, 2, 1.0e-7, 1.0e-3, 1.0e-7);
   const auto large =
-      xmvb::core::make_davidson_options(10000, 4, 1.0e-7, 1.0e-3);
+      xmvb::core::make_davidson_options(10000, 4, 1.0e-7, 1.0e-3, 1.0e-7);
   const bool passed =
       small.n_roots == 2 &&
       small.max_subspace_dimension == 3 &&
       small.max_iterations >= 3 &&
       small.energy_tolerance == 1.0e-7 &&
       small.residual_tolerance == 1.0e-3 &&
+      small.stationarity_tolerance == 1.0e-7 &&
       large.n_roots == 4 &&
       large.max_subspace_dimension < 10000 &&
       large.max_subspace_dimension >= 2 * large.n_roots;
@@ -351,11 +360,49 @@ bool run_default_option_cases() {
   return passed;
 }
 
+/** @brief A large energy offset must not conceal a first-order CI defect. */
+bool run_stationarity_case() {
+  constexpr int dimension = 4;
+  Eigen::MatrixXd initial = Eigen::MatrixXd::Zero(dimension, 2);
+  initial(0, 0) = 1.0;
+  initial(1, 0) = 1.5e-6;
+  initial(2, 1) = 1.0;
+  Eigen::MatrixXd derivative = Eigen::MatrixXd::Zero(dimension, dimension);
+  derivative(0, 1) = derivative(1, 0) = 1000.0;
+  const auto options = xmvb::core::make_davidson_options(
+      dimension, 1, 1.0e-7, 1.0e-3, 1.0e-7);
+  const xmvb::core::GeneralizedEigensolver solver;
+  bool passed = true;
+  for (double shift : {0.0, -2000.0}) {
+    Eigen::MatrixXd h = Eigen::MatrixXd::Zero(dimension, dimension);
+    h.diagonal() << shift, shift + 0.1, shift + 1.0, shift + 2.0;
+    const auto result = solver.solve_davidson(
+        [&h](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
+          return xmvb::core::GeneralizedEigenActionResult{h * vectors, vectors};
+        },
+        h.diagonal(), Eigen::VectorXd::Ones(dimension), initial, options);
+    const Eigen::Map<const Eigen::VectorXd> c(
+        result.eigenpairs.eigenvector_matrix.data(), dimension);
+    const double gradient_error = std::abs(c.dot(derivative * c));
+    const bool case_passed =
+        result.stationarity_residual_norms[0] <= options.stationarity_tolerance &&
+        gradient_error < 1.0e-8 && result.iterations > 1;
+    passed = case_passed && passed;
+    std::cout << "CI stationarity shift=" << shift
+              << " iterations=" << result.iterations
+              << " gradient_error=" << gradient_error
+              << " stationarity=" << result.stationarity_residual_norms[0]
+              << (case_passed ? " PASS\n" : " FAIL\n");
+  }
+  return passed;
+}
+
 }  // namespace
 
 int main() {
   bool passed = true;
   passed = run_default_option_cases() && passed;
+  passed = run_stationarity_case() && passed;
   for (const int dimension : {80, 120, 200, 400, 600}) {
     for (const int n_roots : {1, 3, 5, 8}) {
       passed = run_case(

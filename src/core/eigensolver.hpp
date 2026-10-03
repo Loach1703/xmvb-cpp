@@ -49,6 +49,12 @@ struct DavidsonOptions {
   double energy_tolerance;
   /** Maximum normalized eigen-equation backward error. */
   double residual_tolerance;
+  /** Maximum norm of `(H - E S)c / ||c||`, in Hamiltonian units.
+   * Unlike the relative backward error, this budget cannot be weakened by
+   * adding a constant times S to H. It bounds CI stationarity, not the
+   * orbital-gradient error (which also depends on gaps and coupling).
+   */
+  double stationarity_tolerance;
 };
 
 /**
@@ -62,7 +68,8 @@ DavidsonOptions make_davidson_options(
     int dimension,
     int n_roots,
     double energy_tolerance,
-    double relative_residual_tolerance);
+    double relative_residual_tolerance,
+    double stationarity_tolerance);
 
 /**
  * @brief Converged Davidson eigenpairs and solver diagnostics.
@@ -72,6 +79,8 @@ struct DavidsonResult {
   /** @brief Matrix `S C` for the converged roots, retained without forming S. */
   Eigen::MatrixXd overlap_eigenvectors;
   std::vector<double> relative_residual_norms;
+  /** @brief CI stationarity residuals in Hamiltonian units. */
+  std::vector<double> stationarity_residual_norms;
   int iterations = 0;
   int block_actions = 0;
   int peak_subspace_dimension = 0;

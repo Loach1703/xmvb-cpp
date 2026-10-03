@@ -174,7 +174,8 @@ xmvb::core::DavidsonResult solve_selected_structure_roots(
           n_structures,
           n_roots,
           structure_solve_accuracy.energy_tolerance,
-          structure_solve_accuracy.gradient_tolerance);
+          structure_solve_accuracy.gradient_tolerance,
+          structure_solve_accuracy.stationarity_tolerance());
   const bool can_recycle =
       initial_eigenvectors.rows() == n_structures &&
       initial_eigenvectors.cols() >= n_roots &&
@@ -202,7 +203,10 @@ void retain_davidson_result(
       davidson.peak_subspace_dimension,
       *std::max_element(
           davidson.relative_residual_norms.begin(),
-          davidson.relative_residual_norms.end())};
+          davidson.relative_residual_norms.end()),
+      *std::max_element(
+          davidson.stationarity_residual_norms.begin(),
+          davidson.stationarity_residual_norms.end())};
   context->eigen_result = std::move(davidson.eigenpairs);
   context->overlap_eigenvectors =
       std::move(davidson.overlap_eigenvectors);

@@ -186,6 +186,45 @@ wavefunction constraints merely to reproduce a reference energy.
   for selective sensitivity, not a universal RDM formula error. It also does
   NOT explain away the independently established dense-path optimization
   failure or the negative curvature at its old endpoint.
+  - [x] Add an independent first-order CI stationarity gate to Davidson,
+    measured in Hamiltonian units as residual norm divided by coefficient
+    norm. The VBSCF boundary supplies the smaller existing energy/gradient
+    budget, instead of inventing a molecule-dependent threshold. Retain the
+    relative backward-error and Ritz-energy checks as additional conditions.
+    Adding an energy offset cannot weaken this new absolute gate. Expose its
+    achieved residual separately from the relative residual in the output.
+  - [x] Hanhai25 job 269075: all Davidson unit tests pass, including a
+    state with a negligible energy error but a detectable derivative error
+    at Hamiltonian offsets 0 and -2000. At the exact same FeCl2 raw orbitals
+    and packed direction as the dense reference, the default gradient L2
+    error drops from 5.6436e-4 to 2.2141e-7; full analytic HVP relative error
+    drops from 2.8913e-4 to 2.8345e-6. The energy is
+    -2181.6176448586803 Eh. No orbital derivative formulas were changed.
+  - [x] Same-node, same-input, same-backend comparison against HEAD 94d343d,
+    Hanhai25 job 269080 (32 threads, default Davidson, exact integrals):
+
+    | Input | Optimizer | Steps before / after | Wall seconds before / after |
+    | --- | --- | ---: | ---: |
+    | F2 low guess | block-LBFGS | 15 / 15 | 0.108 / 0.113 |
+    | F2 low guess | TNHVP | 8 / 8 | 0.250 / 0.246 |
+    | F2 low guess | NEO | 5 / 5 | 0.198 / 0.212 |
+    | HAO 241 | block-LBFGS | 9 / 9 | 0.991 / 1.188 |
+    | HAO 241 | TNHVP | 6 / 6 | 1.612 / 1.783 |
+    | HAO 241 | NEO | 6 / 6 | 1.497 / 1.706 |
+
+    All six pairs converge with unchanged outer step counts. Final energies
+    change by at most 2.2e-9 Eh. This is an accuracy repair, NOT a speedup:
+    241's additional CI work costs roughly 11--20% in these single runs.
+    The initial job 269075 used input-default TNHVP; do not compare its
+    8-step F2 result with a prior 5-step NEO run as an algorithm regression.
+    Final-source validation job 269085 passes Davidson, NEO, response-NEO,
+    and eigen-response tests and reproduces the same FeCl2 derivative errors.
+  - [ ] A CI stationarity residual is NOT a general bound on the orbital
+    derivative error: inverse structure gaps and orbital/structure coupling
+    still matter. The new gate repairs the demonstrated premature acceptance,
+    not every possible near-degenerate case. A complete sensitivity-aware
+    derivative certificate remains separate work; do not mark it complete
+    on the strength of this single-point regression.
 
 Logs and the complete four-displacement error grid are under
 `results/diagnostics/pyrrole-molcas-20261002/vector-audit/`;
