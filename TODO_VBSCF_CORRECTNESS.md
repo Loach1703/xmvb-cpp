@@ -584,3 +584,55 @@ Detailed input, direction, endpoint, and finite-difference artifacts are under
   certification just to reproduce an old, differently certified trajectory.
   Historical macro counts also differ from accepted-point counts: the saved
   c2776c4 MnF2 trace has 11 macros but 14 keyframes (241 has six of each).
+
+### Rejected NEO expansion experiments (2026-10-03)
+
+- [x] Test the existing structure H/S diagonal inverse as a residual/curvature
+  expansion preconditioner. Only expansion directions changed; no full C
+  solves were added and all KKT, candidate-local C, CI and outer gates stayed
+  unchanged. A six-mode diagonal-C unit regression recovered the exact Schur
+  solution in fewer structure actions, and NEO tests passed. Nevertheless the
+  five-system matched Hanhai25 test (Slurm 269300, anode023, exact integrals,
+  Davidson, 32 threads) rejected the production candidate:
+
+  | System | Before HVP / C actions / wall (s) | Trial HVP / C actions / wall (s) |
+  | --- | ---: | ---: |
+  | MnF2 | 669 / 2054 / 118.36 | 658 / 2631 / 120.61 |
+  | FeCl2 | 302 / 1145 / 12.30 | 302 / 1145 / 12.74 |
+  | 241 | 10 / 119 / 1.95 | 10 / 119 / 1.96 |
+  | F2 | 11 / 25 / 0.15 | 11 / 25 / 0.17 |
+  | 240 | 13 / 0 / 3.54 | 13 / 0 / 3.59 |
+
+  All ten runs converged. This changes MnF2's response trajectory, but adds
+  structure work without lowering wall time. Remove the trial callback and
+  implementation rather than retain a useless option.
+- [x] Test a generalized-metric constrained orbital inverse direction, inspired
+  by Jacobi-Davidson correction preconditioning. It used the fixed linear SPD
+  block inverse (the callback's fraction-one action), cached inverse metric
+  images and their Gram incrementally, and whitened only the small constraint
+  system. It added no Hessian actions or full C solves. A nonidentity-metric
+  regression used two orbital actions instead of three and satisfied the
+  independent exact-step/KKT check; all NEO tests passed. This small fixture
+  did NOT predict performance on the real ill-conditioned problems.
+  [Primary reference](https://epubs.siam.org/doi/10.1137/S0895479894270427).
+  In job 269302, anode005, the matched MnF2 baseline converged in 112.41 s;
+  the trial had only ten accepted points and remained inside step eleven
+  after more than seven minutes of candidate execution. Cancel the job as a
+  performance rejection, NOT as convergence. The separate frozen-binary job
+  269309 reached its four-minute allocation timeout while the FeCl2 candidate
+  had no accepted point (its matched baseline is about 13 s). Its later fast
+  cases were not run. Do not assign converged energies or full-run timings to
+  either cancelled/timed-out candidate.
+- [x] Remove both production trials and their trial-only tests. Preserve the
+  source patches, hashes and logs under `ci-convergence/structure-precond-269300/`,
+  `jd-expand-269302/` and `jd-fast-269309/` for evidence, not maintenance.
+  Restore the production mirror to 40b28a7 sources and rebuild/retest under
+  Hanhai25 Slurm 269310 (completed successfully). No new algorithmic speedup
+  was established by this round. CSV: `results/history/neo_expansion_trials_20261003.csv`.
+- [ ] Inspect the actual retained orbital/structure model relative to the
+  block inverse before another direction change. The two rejected experiments
+  do not establish a unique causal bottleneck. Determine which physically
+  weighted curvature/error directions remain unresolved, and distinguish
+  preconditioner inadequacy, operator accuracy and projected-solve work with
+  direct evidence. Do not keep repeating Woodbury, SR1 or expansion variants
+  on the strength of small constructed fixtures.
