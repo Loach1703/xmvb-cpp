@@ -1,0 +1,17 @@
+{
+  "scope": "document toy algebra only; not a VBSCF benchmark",
+  "phase_convention": "common minus phase; sorted alpha then beta",
+  "explicit_overlap": -2.0759798600000003,
+  "regrouped_overlap": -2.0759798600000003,
+  "overlap_error": 0.0,
+  "adjoint_A_fd_error": 1.2408509775241328e-09,
+  "adjoint_B_fd_error": 1.5377716877651437e-09,
+  "cpp_revision": "d25d96c4b9d281328e68212f6ffa83052e23e93c",
+  "official_reference": "attachment xmvb4.0 branch a3613ed32ebffcaf2d98c1c9124555708bea995b",
+  "render_versions": {
+    "matplotlib": "3.10.9",
+    "numpy": "2.2.6",
+    "font": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+  },
+  "pages": 12
+}
