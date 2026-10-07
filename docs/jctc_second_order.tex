@@ -84,14 +84,14 @@ where \(|\Phi_I\rangle\) is a spin-adapted VB structure, \(\mathbf C\) contains 
  \qquad M_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\Phi_J(\mathbf x)\rangle,
  \label{eq:matrixelements}
 \end{equation}
-where \(\hat H\) is the electronic Hamiltonian. The AO overlap matrix is denoted by \(\mathbf S\), with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), where \(\chi_\mu\) is an AO basis function. Nuclear repulsion is constant at a fixed geometry and is omitted below.
+where \(\hat H\) is the electronic Hamiltonian. Nuclear repulsion is constant at a fixed geometry and is omitted below.
 
 For fixed orbitals, the structure-coefficient vector \(\mathbf C_n\) of electronic state \(n\) is obtained from the generalized eigenvalue problem
 \begin{equation}
  \mathbf H\mathbf C_n=E_n\mathbf M\mathbf C_n,
  \label{eq:eigenproblem}
 \end{equation}
-where \(E_n\) is the energy of state \(n\) and \(\mathbf C_n\) contains the coefficients \(C_{In}\).
+where \(E_n\) is the energy of state \(n\). The \(I\)th component of \(\mathbf C_n\), denoted by \(C_{In}\), is the coefficient of VB structure \(I\) in that state.
 
 In equal-weight state-averaged valence bond self-consistent field (VBSCF) calculations, the orbital objective is
 \begin{equation}
@@ -108,7 +108,7 @@ The AO expansion of orbital \(i\) is
  \phi_i=\sum_\mu b_{\mu i}\chi_\mu,\qquad \mathbf b_i=\mathbf R_i\mathbf x_i,
  \label{eq:orbitalexpansion}
 \end{equation}
-where \(b_{\mu i}\) is an AO coefficient, \(\mathbf b_i\) is the corresponding full coefficient vector, \(\mathbf x_i\) contains only its allowed entries, and \(\mathbf R_i\) embeds them into the full AO basis. A hybrid atomic orbital (HAO) has a prescribed localized subset of allowed AOs; an overlap-enhanced orbital (OEO) has full AO support.
+where \(\chi_\mu\) is an AO basis function, \(b_{\mu i}\) is an AO coefficient, \(\mathbf b_i\) is the corresponding full coefficient vector, \(\mathbf x_i\) contains only its allowed entries, and \(\mathbf R_i\) embeds them into the full AO basis. A hybrid atomic orbital (HAO) has a prescribed localized subset of allowed AOs; an overlap-enhanced orbital (OEO) has full AO support.
 
 Redundant orbital directions are infinitesimal invariances of the wave function that preserve the prescribed AO supports. These invariances include orbital scaling and admissible changes of inactive representatives. For a complete active-space expansion with full-AO orbitals, nonsingular changes of the active basis can also be compensated by changes of the structure coefficients. For a selected VB expansion, active--active mixing is retained unless it preserves the structure subspace.
 
@@ -138,7 +138,7 @@ Normalization of a raw orbital gives
  \end{aligned}
  \label{eq:normalization}
 \end{equation}
-where \(\mathbf b\) is a raw orbital coefficient vector, \(\|\mathbf b\|_{\mathbf S}\) is its AO-metric norm, \(\bar{\mathbf b}\) is the normalized vector, \(\delta\mathbf b\) is a coefficient variation, \(D\) denotes a first differential, and \(\mathbf I\) is the identity matrix.
+where \(\mathbf S\) is the AO overlap matrix, with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), \(\mathbf b\) is a raw orbital coefficient vector, \(\|\mathbf b\|_{\mathbf S}\) is its AO-metric norm, \(\bar{\mathbf b}\) is the normalized vector, \(\delta\mathbf b\) is a coefficient variation, \(D\) denotes a first differential, and \(\mathbf I\) is the identity matrix.
 
 The trust-region norm measures the physical orbital displacement. Let \(\mathcal L_k\) map a packed coefficient tangent to AO-metric-weighted horizontal orbital features. For individually meaningful active orbitals, these features are the differentials of normalized, inactive-projected orbital rays, weighted by \(\mathbf S^{1/2}\). For inactive orbitals, and for the active orbitals of a complete full-AO active space, horizontal subspace tangents replace individual-ray tangents; inverse Gram factors remove dependence on the chosen basis within each subspace. Variations of the inactive projector are included in the active features.
 
