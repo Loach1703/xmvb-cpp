@@ -97,16 +97,18 @@ where \(N_{\mathrm{state}}\) is the number of lowest-energy states included in t
 
 \subsection{Nonredundant Orbital Coordinates}
 
-The AO expansion of orbital \(i\) is
+Direct optimization of all orbital coefficients includes redundant degrees of freedom: some orbital changes leave the normalized wave function unchanged, either alone or together with a compensating change of the structure coefficients. These redundancies can lead to singular or poorly conditioned second-order equations and unnecessary iterative work. We therefore construct nonredundant orbital coordinates that remove such directions while preserving the variational freedom and localization constraints of the chosen VB wave function.
+
+The \(i\)th orbital is expressed as a linear combination of atomic orbitals,
 \begin{equation}
  \phi_i=\sum_\mu b_{\mu i}\chi_\mu,
  \label{eq:orbitalexpansion}
 \end{equation}
 where \(\chi_\mu\) is an AO basis function and \(b_{\mu i}\) is its coefficient in orbital \(i\). Hybrid atomic orbitals (HAOs) are strictly localized on a prescribed atom or group of atoms: coefficients of AOs outside that region remain zero during optimization. Overlap-enhanced orbitals (OEOs) can expand over the entire AO basis without this localization constraint. Both orbital descriptions allow nonorthogonal orbitals.
 
-Redundant orbital directions are infinitesimal changes of the orbitals that leave the wave function unchanged, up to normalization and compensating changes of the structure coefficients, while respecting any prescribed localization constraints. These invariances include orbital scaling and admissible changes of inactive representatives. For a complete active-space expansion with full-AO orbitals, nonsingular changes of the active basis can also be compensated by changes of the structure coefficients. For a selected VB expansion, active--active mixing is retained unless it preserves the structure subspace.
+The redundant directions depend on both the orbital description and the chosen structure space. They include orbital scaling and admissible changes of inactive representatives. For a complete active-space expansion with full-AO orbitals, nonsingular changes of the active basis can also be compensated by changes of the structure coefficients. For a selected VB expansion, active--active mixing is retained unless it preserves the structure subspace.
 
-The support condition must be imposed on the gauge generators themselves. If \(\mathbf G_i\) collects candidate gauge generators for orbital \(i\), and \(\mathbf F_i\) extracts its forbidden AO rows, admissible gauge combinations satisfy
+To preserve strict localization, the redundant directions must themselves satisfy the orbital localization constraints. If \(\mathbf G_i\) collects candidate gauge generators for orbital \(i\), and \(\mathbf F_i\) extracts the AO components outside its prescribed region, admissible gauge combinations satisfy
 \begin{equation}
  \mathbf F_i\mathbf G_i\mathbf t=\mathbf 0.
  \label{eq:supportgauge}
