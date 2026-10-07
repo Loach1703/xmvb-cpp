@@ -2,7 +2,9 @@
 
 \usepackage[margin=1in]{geometry}
 
-\usepackage{amsmath,amssymb,booktabs,longtable,array,hyperref}
+\usepackage{amsmath,amssymb,booktabs,longtable,array,xurl,hyperref}
+\urlstyle{same}
+\setlength{\emergencystretch}{1em}
 
 \usepackage{newtxtext,newtxmath}
 
@@ -53,15 +55,11 @@ Define the generalized structure eigenproblem at fixed orbital coefficients x. U
 
 
 \begin{equation}
-
 \mathbf H_{\mathrm{VB}}(\mathbf x)\mathbf a_s=E_s\mathbf S_{\mathrm{VB}}(\mathbf x)\mathbf a_s,\quad\mathbf a_r^T\mathbf S_{\mathrm{VB}}\mathbf a_s=\delta_{rs}
-
 \end{equation}
 
 \begin{equation}
-
 \mathcal E(\mathbf x)=\sum_{s\in\mathcal A}w_sE_s(\mathbf x),\quad w_s=1/m
-
 \end{equation}
 
 For the single-state case, use the lowest stationary eigenvalue; for equal-weight state averaging, define the selected eigenspace and its separation from excluded roots. Derive normalization and selected-subspace gauge projections before introducing response equations.
@@ -70,18 +68,14 @@ For the single-state case, use the lowest stationary eigenvalue; for equal-weigh
 \subsection{Support-preserving nonredundant orbital coordinates}
 
 \begin{equation}
-
 \mathbf c_p=\mathbf R_p\mathbf x_p,\quad \mathbf x(\mathbf p)=\mathcal R_k(\mathbf p),\quad\mathcal R_k(\mathbf 0)=\mathbf x_k
-
 \end{equation}
 
-Define the support injection R_p, horizontal lift U_k, local update map, and the physical step metric M_o. Classify a direction as redundant only if it leaves the represented wave function unchanged within the selected structure space. In particular, active--active mixing is not automatically redundant for an arbitrary selected-VB expansion.
+Define the support injection \(\mathbf R_p\), horizontal lift \(\mathbf U_k\), local update map, and the physical step metric \(\mathbf M_o\). Classify a direction as redundant only if it leaves the represented wave function unchanged within the selected structure space. In particular, active--active mixing is not automatically redundant for an arbitrary selected-VB expansion.
 
 
 \begin{equation}
-
 \mathbf g_o=\nabla_{\mathbf p}(\mathcal E\circ\mathcal R_k)(\mathbf 0),\quad \mathbf H_o\mathbf v=D^2(\mathcal E\circ\mathcal R_k)(\mathbf 0)[\mathbf v]
-
 \end{equation}
 
 Give the derivative of the actual update map, rather than transferring an orbital-rotation Hessian to a coefficient update. Check the consistency of lift, norm, and retraction.
@@ -95,15 +89,11 @@ At a structure-stationary accepted point, write the constrained local Hessian in
 
 
 \begin{equation}
-
 \mathbf z=\begin{pmatrix}\mathbf p\\\mathbf q\end{pmatrix},\quad\mathbf g=\begin{pmatrix}\mathbf g_o\\\mathbf 0\end{pmatrix},\quad\mathbf K=\begin{pmatrix}\mathbf A&\mathbf B^T\\\mathbf B&\mathbf C\end{pmatrix}
-
 \end{equation}
 
 \begin{equation}
-
 \mathbf H_{\mathrm{rel}}=\mathbf A-\mathbf B^T\mathbf C^\dagger\mathbf B,\quad\mathbf q_N=-\mathbf C^\dagger\mathbf B\mathbf p_N
-
 \end{equation}
 
 Define \(C^\dagger\) only on the admissible response space. Explain the equivalence of the unshifted coupled Newton and relaxed-orbital Newton limits, and why shifted coupled and eliminated models need not be identical away from that limit.
@@ -112,21 +102,15 @@ Define \(C^\dagger\) only on the admissible response space. Explain the equivale
 \subsection{Restricted steps and residual certification}
 
 \begin{equation}
-
 m(\mathbf z)=\mathcal E_k+\mathbf g^T\mathbf z+\tfrac12\mathbf z^T\mathbf K\mathbf z,\quad\mathbf z^T\mathbf M\mathbf z\leq\Delta_k^2
-
 \end{equation}
 
 \begin{equation}
-
 \mathbf r=(\mathbf K+\lambda\mathbf M)\mathbf z+\mathbf g,\quad\lambda\geq0,\quad\mathbf K+\lambda\mathbf M\succeq0
-
 \end{equation}
 
 \begin{equation}
-
 \lambda(\mathbf z^T\mathbf M\mathbf z-\Delta_k^2)=0,\quad\|\mathbf r\|_{\mathbf M^{-1}}\leq\epsilon_{\mathrm{abs}}+\eta_k\|\mathbf g\|_{\mathbf M^{-1}}
-
 \end{equation}
 
 Separate stationarity, step feasibility, complementarity, and curvature checks. State the regularity and inner-solve conditions required for superlinear or quadratic local convergence; an HVP implementation alone does not establish those properties.
@@ -138,15 +122,11 @@ Describe TNHVP as a truncated Newton realization of the relaxed model, and NEO a
 
 
 \begin{equation}
-
 \begin{pmatrix}0&\alpha\mathbf g^T\\\alpha\mathbf g&\mathbf K\end{pmatrix}\begin{pmatrix}\beta\\\mathbf y\end{pmatrix}=\mu\begin{pmatrix}1&0\\0&\mathbf M\end{pmatrix}\begin{pmatrix}\beta\\\mathbf y\end{pmatrix}
-
 \end{equation}
 
 \begin{equation}
-
 \mathbf z=\mathbf y/(\alpha\beta),\quad\lambda=-\mu,\quad(\mathbf K+\lambda\mathbf M)\mathbf z=-\mathbf g
-
 \end{equation}
 
 Discuss the nonzero homogeneous component, lowest-root selection, and the interior Newton limit. Describe how the projected solver reaches this model; do not equate a generic augmented-Hessian step with a certified norm-constrained solution.
@@ -169,9 +149,7 @@ Describe the accepted-point data required for gradient and HVP evaluation: norma
 \subsection{Trial steps and accepted-point updates}
 
 \begin{equation}
-
 \rho_k=\frac{\mathcal E_k-\mathcal E(\mathcal R_k(\mathbf p))}{m(\mathbf0)-m(\mathbf z)}
-
 \end{equation}
 
 Explain trial evaluation, acceptance, trust-radius updates, and rebuilding the local model. State which quantities are refreshed at a keyframe and which are reused during subspace expansion. Count rejected trials as work even when they do not advance the accepted-iteration counter.
@@ -207,7 +185,7 @@ Report orbital HVPs, orbital-to-structure and transpose-coupling actions, struct
 
 \subsection{Methods and matched conditions}
 
-\begin{longtable}{p{0.3\textwidth}|p{0.3\textwidth}|p{0.3\textwidth}}
+\begin{longtable}{*{3}{>{\raggedright\arraybackslash}p{0.3\textwidth}}}
 
 \toprule
 
@@ -242,7 +220,7 @@ Record the projected-gradient convention and the physical dual-metric norm. The 
 
 \subsection{Test-set design}
 
-\begin{longtable}{p{0.3\textwidth}|p{0.3\textwidth}|p{0.3\textwidth}}
+\begin{longtable}{*{3}{>{\raggedright\arraybackslash}p{0.3\textwidth}}}
 
 \toprule
 
@@ -313,7 +291,7 @@ Summarize the validated second-order formulation, the measured range of efficien
 
 \section*{ASSOCIATED CONTENT}
 
-\subsection{Supporting Information}
+\subsection*{Supporting Information}
 
 Planned contents: coordinate and response derivations; update-map derivatives; finite-difference protocols; complete molecular specifications and initial orbitals; raw convergence trajectories; nonconvergence records; timing scripts and environment details. Submit the SI separately from the main manuscript.
 
@@ -335,13 +313,13 @@ Corresponding Author: [Name and e-mail]. Author Contributions: [To be agreed by 
 
 \section*{REFERENCES --- STARTER LIST}
 
-(1) Jensen, H.-J. Aa.; Jørgensen, P. A Direct Approach to Second-Order MCSCF Calculations Using a Norm Extended Optimization Scheme. J. Chem. Phys. 1984, 80, 1204--1214. https://doi.org/10.1063/1.446797.
+(1) Jensen, H.-J. Aa.; Jørgensen, P. A Direct Approach to Second-Order MCSCF Calculations Using a Norm Extended Optimization Scheme. J. Chem. Phys. 1984, 80, 1204--1214. \url{https://doi.org/10.1063/1.446797}.
 
 
-(2) Werner, H.-J.; Knowles, P. J. A Second Order Multiconfiguration SCF Procedure with Optimum Convergence. J. Chem. Phys. 1985, 82, 5053--5063. https://doi.org/10.1063/1.448627.
+(2) Werner, H.-J.; Knowles, P. J. A Second Order Multiconfiguration SCF Procedure with Optimum Convergence. J. Chem. Phys. 1985, 82, 5053--5063. \url{https://doi.org/10.1063/1.448627}.
 
 
-(3) Sun, Q.; Yang, J.; Chan, G. K.-L. A General Second Order Complete Active Space Self-Consistent-Field Solver for Large-Scale Systems. Chem. Phys. Lett. 2017, 683, 291--299. https://doi.org/10.1016/j.cplett.2017.03.004.
+(3) Sun, Q.; Yang, J.; Chan, G. K.-L. A General Second Order Complete Active Space Self-Consistent-Field Solver for Large-Scale Systems. Chem. Phys. Lett. 2017, 683, 291--299. \url{https://doi.org/10.1016/j.cplett.2017.03.004}.
 
 
 [Complete the VBSCF/XMVB, inexact-Newton, trust-region, L-BFGS, and density-fitting literature before submission. This starter list is not an exhaustive priority review.]
@@ -349,7 +327,7 @@ Corresponding Author: [Name and e-mail]. Author Contributions: [To be agreed by 
 
 \clearpage
 
-\section*{INTERNAL DRAFT NOTES --- REMOVE BEFORE SUBMISSION}
+\section*{INTERNAL DRAFT NOTES}
 
 This is a LaTeX master outline, not a finished manuscript. Resolve placeholders before submission. The Word review snapshot is generated with Pandoc; equations are editable Word mathematics. Review comments from earlier snapshots are not automatically transferred.
 
@@ -357,10 +335,10 @@ This is a LaTeX master outline, not a finished manuscript. Resolve placeholders 
 The LaTeX master uses the standard article class, not an official ACS LaTeX class. The Word snapshot takes its formatting from the separately retained ACS-based Word draft. This experiment does not establish submission readiness.
 
 
-JCTC author guidelines: https://researcher-resources.acs.org/publish/author_guidelines?coden=jctcce
+JCTC author guidelines: \url{https://researcher-resources.acs.org/publish/author_guidelines?coden=jctcce}
 
 
-Official ACS Word template: https://pubsapp.acs.org/paragonplus/submission/templates/acs_template_msw2010_ol_pc.dotx
+Official ACS Word template: \url{https://pubsapp.acs.org/paragonplus/submission/templates/acs_template_msw2010_ol_pc.dotx}
 
 
 Code mapping checked for this outline: ISCF=5 conventional XMVB-style L-BFGS; ISCF=7 TNHVP; ISCF=8 block-LBFGS; ISCF=9 NEO. Historical theory notes are not treated as proof of current implementation behavior. No new molecular calculations were performed.
