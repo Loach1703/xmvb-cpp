@@ -95,16 +95,16 @@ In equal-weight state-averaged valence bond self-consistent field (VBSCF) calcul
 \end{equation}
 where \(N_{\mathrm{state}}\) is the number of lowest-energy states included in the average. Orbital optimization minimizes \(\mathcal E(\mathbf x)\) with the structure coefficients optimized at each orbital point. The choice \(N_{\mathrm{state}}=1\) recovers ground-state VBSCF.
 
-\subsection{Orbital Parameterization}
+\subsection{Nonredundant Orbital Coordinates}
 
 The AO expansion of orbital \(i\) is
 \begin{equation}
- \phi_i=\sum_\mu b_{\mu i}\chi_\mu,\qquad \mathbf b_i=\mathbf R_i\mathbf x_i,
+ \phi_i=\sum_\mu b_{\mu i}\chi_\mu,
  \label{eq:orbitalexpansion}
 \end{equation}
-where \(\chi_\mu\) is an AO basis function, \(b_{\mu i}\) is an AO coefficient, \(\mathbf b_i\) is the corresponding full coefficient vector, \(\mathbf x_i\) contains only its allowed entries, and \(\mathbf R_i\) embeds them into the full AO basis. A hybrid atomic orbital (HAO) has a prescribed localized subset of allowed AOs; an overlap-enhanced orbital (OEO) has full AO support.
+where \(\chi_\mu\) is an AO basis function and \(b_{\mu i}\) is its coefficient in orbital \(i\). Hybrid atomic orbitals (HAOs) are strictly localized on a prescribed atom or group of atoms: coefficients of AOs outside that region remain zero during optimization. Overlap-enhanced orbitals (OEOs) can expand over the entire AO basis without this localization constraint. Both orbital descriptions allow nonorthogonal orbitals.
 
-Redundant orbital directions are infinitesimal invariances of the wave function that preserve the prescribed AO supports. These invariances include orbital scaling and admissible changes of inactive representatives. For a complete active-space expansion with full-AO orbitals, nonsingular changes of the active basis can also be compensated by changes of the structure coefficients. For a selected VB expansion, active--active mixing is retained unless it preserves the structure subspace.
+Redundant orbital directions are infinitesimal changes of the orbitals that leave the wave function unchanged, up to normalization and compensating changes of the structure coefficients, while respecting any prescribed localization constraints. These invariances include orbital scaling and admissible changes of inactive representatives. For a complete active-space expansion with full-AO orbitals, nonsingular changes of the active basis can also be compensated by changes of the structure coefficients. For a selected VB expansion, active--active mixing is retained unless it preserves the structure subspace.
 
 The support condition must be imposed on the gauge generators themselves. If \(\mathbf G_i\) collects candidate gauge generators for orbital \(i\), and \(\mathbf F_i\) extracts its forbidden AO rows, admissible gauge combinations satisfy
 \begin{equation}
