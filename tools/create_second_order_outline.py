@@ -379,13 +379,12 @@ def main():
     h("REFERENCES — STARTER LIST")
     for text in (
         "(1) Jensen, H.-J. Aa.; Jørgensen, P. A Direct Approach to Second-Order MCSCF Calculations "
-        "Using a Norm Extended Optimization Scheme. J. Chem. Phys. 1984, 80, 1204–1214. "
-        "https://doi.org/10.1063/1.446797.",
+        "Using a Norm Extended Optimization Scheme. J. Chem. Phys. 1984, 80, 1204–1214.",
         "(2) Werner, H.-J.; Knowles, P. J. A Second Order Multiconfiguration SCF Procedure with "
-        "Optimum Convergence. J. Chem. Phys. 1985, 82, 5053–5063. https://doi.org/10.1063/1.448627.",
+        "Optimum Convergence. J. Chem. Phys. 1985, 82, 5053–5063.",
         "(3) Sun, Q.; Yang, J.; Chan, G. K.-L. A General Second Order Complete Active Space "
         "Self-Consistent-Field Solver for Large-Scale Systems. Chem. Phys. Lett. 2017, 683, "
-        "291–299. https://doi.org/10.1016/j.cplett.2017.03.004."):
+        "291–299."):
         body(text)
     body("[Complete the VBSCF/XMVB, inexact-Newton, trust-region, L-BFGS, and density-fitting "
          "literature before submission. This starter list is not an exhaustive priority review.]")
