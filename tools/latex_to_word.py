@@ -44,7 +44,6 @@ def main():
         style.font.size = Pt(12)
         style.font.color.rgb = RGBColor(0, 0, 0)
         style.paragraph_format.line_spacing = 1.3
-    doc.core_properties.author = "XMVB-CPP manuscript working group"
     doc.core_properties.subject = "LaTeX-to-Word internal review snapshot"
     doc.save(args.output)
     ns = {"m": "http://schemas.openxmlformats.org/officeDocument/2006/math"}
