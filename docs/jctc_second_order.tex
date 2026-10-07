@@ -35,7 +35,10 @@ State Key Laboratory of Physical Chemistry of Solid Surfaces, Fujian Provincial 
 % https://www.frontiersin.org/articles/10.3389/fchem.2019.00225/full (VB H/M conventions)
 % https://arxiv.org/html/1610.08394 (second-order CASSCF notation)
 % Retain coefficient updates for nonorthogonal VB orbitals, not CASSCF rotations.
-% Fixed notation: C_In / c_n = VB coefficients; b_mu_i / b_i = AO coefficients.
+% Fixed notation: C_I / bold C = VB coefficients; b_mu_i = AO coefficients.
+% Section 2.2 follows chart.cpp: build_exact_local_sparse_quotient_basis,
+% build_stable_inactive_span_basis, whiten_normalized_orbital_quotient_basis,
+% OrbitalChart constructor, and OrbitalChart::expand_step.
 % H-hat / H = Hamiltonian operator / structure matrix; M = VB overlap; S = AO overlap.
 % Calligraphic H^{oo}, H^{so}, H^{os}, H^{ss} denote matrix-free operator actions.
 % G_o = step metric; p / q = orbital step / horizontal coefficient response.
@@ -97,33 +100,143 @@ where \(N_{\mathrm{state}}\) is the number of lowest-energy states included in t
 
 \subsection{Nonredundant Orbital Coordinates}
 
-A normalized VB wave function does not have a unique orbital-coefficient representation. Rescaling an orbital changes its normalization but not its physical content, and some orbital mixings can be compensated by changes of the structure coefficients. Optimizing these redundant degrees of freedom can lead to singular or poorly conditioned second-order equations. We therefore construct local nonredundant coordinates that retain the independent orbital variations without changing the prescribed VB variational space.
+A normalized VB wave function does not have a unique orbital-coefficient representation. Rescaling an orbital leaves its normalized form unchanged, and certain orbital mixings can be compensated by changes of the structure coefficients. These redundant degrees of freedom can make the second-order equations singular or poorly conditioned. We construct nonredundant coordinates by identifying the redundant variations compatible with the orbital localization constraints and retaining a complement to them.
 
 The \(i\)th orbital is expressed as a linear combination of atomic orbitals,
 \begin{equation}
  \phi_i=\sum_\mu b_{\mu i}\chi_\mu,
  \label{eq:orbitalexpansion}
 \end{equation}
-where \(\chi_\mu\) is an AO basis function and \(b_{\mu i}\) is its coefficient in orbital \(i\). Hybrid atomic orbitals (HAOs) are strictly localized on a prescribed atom or group of atoms, so coefficients of AOs outside that region remain zero. Overlap-enhanced orbitals (OEOs) can expand over the entire AO basis without this localization constraint.
+where \(\chi_\mu\) is an AO basis function and \(b_{\mu i}\) is its coefficient in orbital \(i\). Hybrid atomic orbitals (HAOs) are strictly localized on a prescribed atom or group of atoms; coefficients outside that region remain zero. Overlap-enhanced orbitals (OEOs) can expand over the entire AO basis without this localization constraint. Let \(\mathcal A_i\) denote the set of AO indices allowed for orbital \(i\), and let \(\mathbf x_i=(b_{\mu i})_{\mu\in\mathcal A_i}\) collect its variable coefficients. The full parameter vector \(\mathbf x\) is formed by concatenating these vectors.
 
-The simplest redundant variation is orbital scaling, \(\delta\phi_i=\epsilon\phi_i\), where \(\epsilon\) is an infinitesimal scalar. It changes the length of the coefficient vector but not the normalized orbital. Additional redundancies arise from changes of basis within the doubly occupied inactive space and from adding inactive components to active orbitals, provided these changes respect the localization constraints. For a complete active-space expansion with full-AO orbitals, changes of basis within the active space are also redundant because the structure coefficients can compensate them. This compensation is generally unavailable for a selected VB expansion; active--active mixing must then be retained unless it preserves the chosen structure space.
+Orbital scaling, \(\delta\phi_i=\epsilon\phi_i\), is the simplest redundancy, where \(\epsilon\) is an infinitesimal scalar. Further redundancies arise from changes of basis within the doubly occupied inactive space and from adding inactive components to active orbitals. For a complete active-space expansion with OEOs, changes of basis within the active space can also be compensated by the structure coefficients. This active-space redundancy is not assumed for a selected VB expansion, because mixing active orbitals generally changes the chosen structure space.
 
-Strict localization determines which of these redundancies can actually be removed. Geometrically, the removable directions form the intersection of the redundant space and the space of orbital variations allowed by localization. A redundant direction that extends outside the allowed region cannot simply be truncated: its truncated part need not remain redundant. Instead, we seek linear combinations of redundant directions whose components outside that region cancel.
+More generally, an allowed orbital variation \(\delta\mathbf x\) is redundant if a structure-coefficient variation \(\delta\mathbf C\) exists such that
+\begin{equation}
+ D_{\mathbf x}|\Psi\rangle[\delta\mathbf x]
+ +\sum_I\delta C_I|\Phi_I\rangle=\gamma|\Psi\rangle,
+ \label{eq:redundancydefinition}
+\end{equation}
+where \(D_{\mathbf x}\) denotes a directional derivative at fixed structure coefficients, \(\delta C_I\) is the \(I\)th component of \(\delta\mathbf C\), and the scalar \(\gamma\) allows an overall normalization change. The normalized physical state is unchanged to first order. The construction below removes the orbital-representation redundancies described above; it does not classify directions by a small energy curvature.
 
-Let \(\mathbf G_i\) contain the candidate redundant directions for orbital \(i\), and let \(\mathbf F_i\) extract the AO components outside its localization region. A combination specified by \(\mathbf t\) is admissible if
+To construct these directions, let \(\mathbf D\) contain the AO coefficients of the inactive orbitals. An AO-metric-orthonormal basis of their span and the associated projector are
+\begin{equation}
+ \widetilde{\mathbf D}
+ =\mathbf D(\mathbf D^T\mathbf S\mathbf D)^{-1/2},
+ \qquad
+ \mathbf P_d=\widetilde{\mathbf D}\widetilde{\mathbf D}^{\,T}\mathbf S,
+ \label{eq:inactivegauge}
+\end{equation}
+where \(\mathbf S\) is the AO overlap matrix, with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), and \(\mathbf P_d\) projects onto the inactive span in this metric. If there are no inactive orbitals, \(\mathbf P_d=\mathbf 0\) and \(\widetilde{\mathbf D}\) has no columns. Let \(\mathbf A\) contain the AO coefficients of the current active orbitals and define
+\begin{equation}
+ \mathbf A_\perp=(\mathbf I-\mathbf P_d)\mathbf A,\qquad
+ \widetilde{\mathbf a}_i=
+ \frac{(\mathbf A_\perp)_i}
+ {\sqrt{(\mathbf A_\perp)_i^T\mathbf S(\mathbf A_\perp)_i}},
+ \qquad
+ \widetilde{\mathbf A}
+ =\mathbf A_\perp(\mathbf A_\perp^T\mathbf S\mathbf A_\perp)^{-1/2},
+ \label{eq:activegauge}
+\end{equation}
+where \((\mathbf A_\perp)_i\) is the column corresponding to active orbital \(i\), \(\widetilde{\mathbf a}_i\) is its normalized component outside the inactive span, and \(\mathbf I\) is the identity matrix. The full basis \(\widetilde{\mathbf A}\) is needed only when the complete OEO active-space redundancy is used. These orthonormal bases condition the construction of redundant directions; they do not impose mutual orthogonality on the optimized VB orbitals.
+
+The candidate redundant directions for orbital \(i\) are the columns of
+\begin{equation}
+ \mathbf G_i=
+ \begin{cases}
+  \widetilde{\mathbf D},&
+       i\text{ inactive},\\
+  (\widetilde{\mathbf D},\widetilde{\mathbf a}_i),&
+       i\text{ active, without the complete OEO gauge},\\
+  (\widetilde{\mathbf D},\widetilde{\mathbf A}),&
+       i\text{ active, with the complete OEO gauge}.
+ \end{cases}
+ \label{eq:gaugesources}
+\end{equation}
+For an inactive orbital, its scaling direction lies in the inactive span. For an active orbital, the inactive span together with its own projected direction contains its scaling direction. The complete OEO case additionally includes mixing with the other active orbitals.
+
+Not every direction in \(\operatorname{range}(\mathbf G_i)\) respects strict localization. Let \(\mathbf F_i\) extract the AO components outside \(\mathcal A_i\). A redundant variation \(\mathbf G_i\mathbf t\) is allowed only if
 \begin{equation}
  \mathbf F_i\mathbf G_i\mathbf t=\mathbf 0.
  \label{eq:supportgauge}
 \end{equation}
-Thus, the null space of \(\mathbf F_i\mathbf G_i\) identifies the combinations that are both redundant and consistent with localization. For an OEO there are no excluded AO components, so this restriction is absent. Within the allowed coefficient space, we construct a complement to the admissible redundant directions. Its basis, after local metric conditioning, defines the map \(\mathbf U_k\) from nonredundant coordinates to orbital-coefficient variations at iteration \(k\).
+Geometrically, the removable directions are the intersection of the redundant space and the allowed orbital-variation space. A redundant vector cannot simply be truncated to the localization region: its truncated part need not remain redundant. Equation~\eqref{eq:supportgauge} instead identifies combinations whose components outside that region cancel.
 
-The orbital update is written as
+Let \(\mathbf N_i\) have orthonormal columns spanning the null space of \(\mathbf F_i\mathbf G_i\). The admissible redundant directions, expressed in the allowed coefficients, are
 \begin{equation}
- \mathbf x(\mathbf p)=\mathbf x_k+\mathbf U_k\mathbf p,\qquad
- \boldsymbol\theta(\mathbf p)=\mathcal P(\mathbf x_k+\mathbf U_k\mathbf p),
+ \operatorname{range}(\mathbf N_i)=\ker(\mathbf F_i\mathbf G_i),
+ \qquad
+ \mathbf K_i=(\mathbf G_i\mathbf N_i)_{\mathcal A_i},
+ \label{eq:admissiblegauge}
+\end{equation}
+where the subscript \(\mathcal A_i\) means retaining the rows indexed by the allowed AOs. For an OEO with all coefficients variable, there are no excluded rows and \(\mathbf N_i\) can be chosen as the identity. We then construct an orthonormal complement \(\mathbf Q_i\) satisfying
+\begin{equation}
+ \operatorname{range}(\mathbf Q_i)=\ker(\mathbf K_i^T),
+ \qquad
+ \mathbf Q_i^T\mathbf Q_i=\mathbf I,\qquad
+ r_i=|\mathcal A_i|-\operatorname{rank}(\mathbf K_i),
+ \label{eq:quotientbasis}
+\end{equation}
+where \(r_i\) is the number of retained coordinates for orbital \(i\). Thus, any allowed coefficient variation admits a decomposition
+\begin{equation}
+ \delta\mathbf x_i
+ =\mathbf K_i\boldsymbol\alpha_i+\mathbf Q_i\mathbf z_i,
+ \label{eq:quotientdecomposition}
+\end{equation}
+where \(\boldsymbol\alpha_i\) gives the redundant component and \(\mathbf z_i\) parametrizes the complement before metric conditioning. Singular value decompositions determine both null spaces. For a matrix \(\mathbf L\), singular values exceeding
+\(\epsilon_{\mathrm{mach}}\max(\operatorname{rows}\mathbf L,\operatorname{cols}\mathbf L)\sigma_{\max}(\mathbf L)\)
+are counted toward its numerical rank, where \(\epsilon_{\mathrm{mach}}\) is machine precision. The complement is Euclidean in the coefficient coordinates; it is a choice of representatives, not an orthogonality condition on the physical orbitals.
+
+The complement is subsequently conditioned using the change of the normalized orbital. Let \(\mathbf S_i\) be the AO overlap matrix restricted to \(\mathcal A_i\). The normalized coefficients and their Jacobian are
+\begin{equation}
+ \begin{aligned}
+ \rho_i&=(\mathbf x_i^T\mathbf S_i\mathbf x_i)^{1/2},
+ &\overline{\mathbf x}_i&=\mathbf x_i/\rho_i,\\
+ \mathbf J_i
+ &=\frac{\mathbf I-\overline{\mathbf x}_i
+                \overline{\mathbf x}_i^T\mathbf S_i}{\rho_i},
+ &\delta\overline{\mathbf x}_i&=\mathbf J_i\delta\mathbf x_i,
+ \end{aligned}
+ \label{eq:normalization}
+\end{equation}
+where \(\rho_i\) is the orbital norm and \(\mathbf J_i\) is the derivative of normalization. In particular, \(\mathbf J_i\mathbf x_i=\mathbf 0\), which explicitly removes a radial scaling variation. On the complement, define
+\begin{equation}
+ \mathbf B_i=\mathbf Q_i^T\mathbf J_i^T\mathbf S_i
+                       \mathbf J_i\mathbf Q_i,\qquad
+ \widehat{\mathbf U}_i=\mathbf Q_i\mathbf B_i^{-1/2}.
+ \label{eq:quotientconditioning}
+\end{equation}
+Here \(\mathbf B_i\) measures the AO-metric lengths of normalized orbital variations. Its inverse square root rescales those variations to unit metric. The inactive and active Gram matrices used above, and \(\mathbf B_i\), must be numerically positive definite on their retained spaces; rank-deficient cases are rejected.
+
+For HAO and selected-structure calculations, when orbital scaling is an admissible variation, the final representative is chosen tangent to the normalization sphere:
+\begin{equation}
+ \mathbf U_i=\rho_i\mathbf J_i\widehat{\mathbf U}_i,
+ \qquad
+ \mathbf x_i^T\mathbf S_i\mathbf U_i=\mathbf 0.
+ \label{eq:sphererepresentative}
+\end{equation}
+This changes \(\widehat{\mathbf U}_i\) only by a radial, redundant component. For a complete OEO active-space expansion, the implementation instead retains
+\(\mathbf U_i=\widehat{\mathbf U}_i\), preserving the representative of the coupled inactive and active basis redundancies. The same choice is made when fixed coefficients prevent an admissible radial adjustment. In either case,
+\begin{equation}
+ (\mathbf J_i\mathbf U_i)^T\mathbf S_i
+       (\mathbf J_i\mathbf U_i)=\mathbf I.
+ \label{eq:normalizedtangentmetric}
+\end{equation}
+This is local normalization-metric conditioning, not a replacement for the full physical trust-region metric introduced below.
+
+The formulas above assume that all coefficients in each localization region are variable. If some stored coefficients are fixed, the construction of \(\mathbf F_i\) treats their variations as forbidden, while orbital norms and normalization derivatives include their current values. The complement is extended by zero rows on those fixed coefficients before applying \(\mathbf J_i\); only its variable rows are retained in the final map. This preserves the same construction without allowing fixed coefficients to move.
+
+Collecting the orbital maps gives the global nonredundant update,
+\begin{equation}
+ \begin{aligned}
+ \mathbf U_k&=\operatorname{diag}(\mathbf U_1,\mathbf U_2,\ldots),&
+ \mathbf p&=(\mathbf p_1^T,\mathbf p_2^T,\ldots)^T,\\
+ \mathbf x(\mathbf p)&=\mathbf x_k+\mathbf U_k\mathbf p,&
+ \boldsymbol\theta(\mathbf p)&=\mathcal P(\mathbf x_k+\mathbf U_k\mathbf p),
+ \end{aligned}
  \label{eq:update}
 \end{equation}
-where \(\mathbf x_k\) collects the allowed AO coefficients at the current accepted point and \(\mathbf p\) is the nonredundant orbital step. Each column of \(\mathbf U_k\) specifies an independent allowed variation after redundant directions have been removed. The map \(\mathcal P\) normalizes the orbitals and applies the inactive-space projection and admissible representative choices used in evaluating the wave function; \(\boldsymbol\theta\) denotes the resulting orbital coefficients. The map \(\mathbf U_k\) is held fixed while solving the local optimization problem and rebuilt after an accepted step.
+where \(\mathbf x_k\) is the vector of variable AO coefficients at accepted iteration \(k\) and \(\mathbf p_i\) contains the \(r_i\) metric-conditioned coordinates of orbital \(i\), giving a total dimension \(\sum_i r_i\). The map \(\mathcal P\) normalizes the orbitals and applies the inactive-space projection and admissible representative choices used in evaluating the wave function; \(\boldsymbol\theta\) denotes the resulting orbital coefficients. The map \(\mathbf U_k\) is fixed while solving the local optimization problem and rebuilt after an accepted step.
 
 \subsection{Coupled Response}
 
@@ -136,19 +249,6 @@ For an orbital direction, let a dot denote the derivative at the current accepte
  \label{eq:gradient}
 \end{equation}
 Here \(\dot{\mathbf H}\) and \(\dot{\mathbf M}\) are the directional derivatives of the structure Hamiltonian and overlap matrices, and \(\dot{\mathcal E}\) is the corresponding energy derivative. Structure response first enters the second derivative.
-
-Normalization of a raw orbital gives
-\begin{equation}
- \begin{aligned}
- \bar{\mathbf b}&=\frac{\mathbf b}{\|\mathbf b\|_{\mathbf S}},\qquad
- \|\mathbf b\|_{\mathbf S}=(\mathbf b^T\mathbf S\mathbf b)^{1/2},\\
- D\bar{\mathbf b}[\delta\mathbf b]
- &=\frac{(\mathbf I-\bar{\mathbf b}\bar{\mathbf b}^T\mathbf S)\delta\mathbf b}
- {\|\mathbf b\|_{\mathbf S}},
- \end{aligned}
- \label{eq:normalization}
-\end{equation}
-where \(\mathbf S\) is the AO overlap matrix, with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), \(\mathbf b\) is a raw orbital coefficient vector, \(\|\mathbf b\|_{\mathbf S}\) is its AO-metric norm, \(\bar{\mathbf b}\) is the normalized vector, \(\delta\mathbf b\) is a coefficient variation, \(D\) denotes a first differential, and \(\mathbf I\) is the identity matrix.
 
 Derivatives in the reduced coordinates follow from the orbital map in eq~\eqref{eq:update}. For a scalar function \(F\) of prepared orbitals, the second derivative is
 \begin{equation}
