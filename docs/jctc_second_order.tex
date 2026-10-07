@@ -73,12 +73,12 @@ Throughout this section, \(I,J\) label VB structures, \(\mu,\nu\) label AO basis
 
 \subsection{Wave Function and Energy}
 
-The valence bond (VB) wave function for state \(n\) is written as
+The valence bond (VB) wave function is written as
 \begin{equation}
- |\Psi_n(\mathbf x)\rangle=\sum_I C_{In}|\Phi_I(\mathbf x)\rangle ,
+ |\Psi(\mathbf c,\mathbf x)\rangle=\sum_I C_I|\Phi_I(\mathbf x)\rangle ,
  \label{eq:ansatz}
 \end{equation}
-where \(|\Phi_I\rangle\) is a spin-adapted VB structure and \(C_{In}\) is its expansion coefficient. The sum runs over the chosen structures, and \(\mathbf x\) collects the allowed atomic orbital (AO) coefficients. The Hamiltonian and overlap matrix elements are
+where \(|\Phi_I\rangle\) is a spin-adapted VB structure, \(\mathbf c\) contains the structure coefficients \(C_I\), and \(\mathbf x\) collects the allowed atomic orbital (AO) coefficients. The sum runs over the chosen structures. The Hamiltonian and overlap matrix elements are
 \begin{equation}
  H_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\hat H|\Phi_J(\mathbf x)\rangle,
  \qquad M_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\Phi_J(\mathbf x)\rangle,
@@ -86,7 +86,7 @@ where \(|\Phi_I\rangle\) is a spin-adapted VB structure and \(C_{In}\) is its ex
 \end{equation}
 where \(\hat H\) is the electronic Hamiltonian. The AO overlap matrix is denoted by \(\mathbf S\), with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), where \(\chi_\mu\) is an AO basis function. Nuclear repulsion is constant at a fixed geometry and is omitted below.
 
-For fixed orbitals, the structure coefficients are obtained from the generalized eigenvalue problem
+For fixed orbitals, the structure-coefficient vector \(\mathbf c_n\) of electronic state \(n\) is obtained from the generalized eigenvalue problem
 \begin{equation}
  \mathbf H\mathbf c_n=E_n\mathbf M\mathbf c_n,
  \label{eq:eigenproblem}
