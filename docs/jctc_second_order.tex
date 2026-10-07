@@ -30,14 +30,14 @@ State Key Laboratory of Physical Chemistry of Solid Surfaces, Fujian Provincial 
 \textsuperscript{*}Email: \href{mailto:czhou1989@xmu.edu.cn}{czhou1989@xmu.edu.cn}
 \end{center}
 
-% REVIEW: 暂定题目。先以非正交 VBSCF 的 matrix-free 二阶框架为主线；是否将 NEO 作为主方法、TNHVP 作为对照，需结合统一版本的测试结果决定。
+% REVIEW: NEO is the principal method; TNHVP is a secondary comparison.
 
-JCTC Article --- manuscript outline for internal review, 7 October 2026
+JCTC Article --- Theory draft for review, 7 October 2026
 
 
 \section*{ABSTRACT}
 
-Orbital optimization in valence-bond self-consistent-field theory must accommodate nonorthogonal orbitals, prescribed atomic-orbital supports, and relaxation of the structure coefficients. We formulate a matrix-free second-order treatment in support-preserving nonredundant coordinates and distinguish the relaxed-orbital and coupled orbital--structure models. The numerical study will compare truncated Newton and norm-extended optimization with conventional and block-preconditioned L-BFGS, reporting convergence, operator work, wall time, and peak memory under matched conditions. [Replace this sentence with the principal quantitative findings and the supported conclusion after the benchmark campaign.]
+Orbital optimization in valence-bond self-consistent-field theory must accommodate nonorthogonal orbitals, prescribed atomic-orbital supports, and relaxation of the structure coefficients. We formulate a matrix-free norm-extended optimization (NEO) treatment in support-preserving nonredundant coordinates, retaining orbital--structure coupling through independently expanded orbital and structure response spaces. The numerical study will compare NEO with conventional and block-preconditioned L-BFGS, with truncated Newton as an additional second-order comparison, reporting convergence, operator work, wall time, and peak memory under matched conditions. [Replace this sentence with the principal quantitative findings and the supported conclusion after the benchmark campaign.]
 
 
 % REVIEW: 这是四句摘要框架，不是已完成研究的结果摘要。不能把‘外层步数减少’直接写成‘总计算更快’，也不能预先承诺所有体系都二次收敛。
@@ -61,95 +61,236 @@ State the methodological contribution as a second-order optimization framework f
 
 \section{THEORY}
 
-\subsection{Stationary structure problem and state averaging}
+\subsection{Nonorthogonal VB wave functions and the stationary structure problem}
 
-Define the generalized structure eigenproblem at fixed orbital coefficients x. Use a different symbol for the AO overlap and the structure overlap throughout the manuscript.
-
-
+A VB wave function is expanded in a prescribed set of spin-adapted structures,
 \begin{equation}
-\mathbf H_{\mathrm{VB}}(\mathbf x)\mathbf a_s=E_s\mathbf S_{\mathrm{VB}}(\mathbf x)\mathbf a_s,\quad\mathbf a_r^T\mathbf S_{\mathrm{VB}}\mathbf a_s=\delta_{rs}
+ |\Psi_s(\mathbf x)\rangle=\sum_{I=1}^{N_{\mathrm{str}}}a_{Is}|\Phi_I(\mathbf x)\rangle .
+ \label{eq:ansatz}
 \end{equation}
+The packed vector \(\mathbf x\) contains the allowed AO coefficients of the inactive and active orbitals. The structures need not be orthogonal. We denote their overlap and Hamiltonian matrices by \(\mathbf S\) and \(\mathbf H\), respectively, and reserve \(\mathbf S_{\mathrm{AO}}\) for the AO overlap. Here \(\mathbf H\) includes the inactive-electron contribution; an equivalent implementation may separate a common reference energy from the active Hamiltonian. The nuclear repulsion is independent of \(\mathbf x\) and can be added afterward.
 
+At fixed orbitals, variation of the structure coefficients gives
 \begin{equation}
-\mathcal E(\mathbf x)=\sum_{s\in\mathcal A}w_sE_s(\mathbf x),\quad w_s=1/m
+ \mathbf H\mathbf a_s=E_s\mathbf S\mathbf a_s,\qquad
+ \mathbf a_r^T\mathbf S\mathbf a_s=\delta_{rs},\qquad
+ \mathcal E(\mathbf x)=\frac{1}{m}\sum_{s=1}^{m}E_s(\mathbf x).
+ \label{eq:eigenproblem}
 \end{equation}
+We consider real wave functions and equal weights for the lowest \(m\) states; \(m=1\) gives ground-state VBSCF. The following derivation assumes a positive-definite structure overlap on the working coefficient space and a selected eigenspace separated from excluded roots. Internal degeneracies among the equally weighted states do not change the state-averaged energy. A gap closing between selected and excluded roots, however, can destroy differentiability of this objective.
 
-For the single-state case, use the lowest stationary eigenvalue; for equal-weight state averaging, define the selected eigenspace and its separation from excluded roots. Derive normalization and selected-subspace gauge projections before introducing response equations.
-
-
-\subsection{Support-preserving nonredundant orbital coordinates}
-
+For an orbital direction, let a dot denote the derivative at the current accepted point. Stationarity with respect to the structure coefficients gives
 \begin{equation}
-\mathbf c_p=\mathbf R_p\mathbf x_p,\quad \mathbf x(\mathbf p)=\mathcal R_k(\mathbf p),\quad\mathcal R_k(\mathbf 0)=\mathbf x_k
+ \dot{\mathcal E}=\frac{1}{m}\sum_{s=1}^{m}
+ \mathbf a_s^T(\dot{\mathbf H}-E_s\dot{\mathbf S})\mathbf a_s.
+ \label{eq:gradient}
 \end{equation}
+Thus no coefficient-response solve is required for the first derivative. Coefficient response is required for the second derivative: the cancellation leading to eq~\eqref{eq:gradient} does not permit the eigenvectors to be held fixed when that equation is differentiated.
 
-Define the support injection \(\mathbf R_p\), horizontal lift \(\mathbf U_k\), local update map, and the physical step metric \(\mathbf M_o\). Classify a direction as redundant only if it leaves the represented wave function unchanged within the selected structure space. In particular, active--active mixing is not automatically redundant for an arbitrary selected-VB expansion.
+\subsection{Support-preserving orbital coordinates and the update map}
 
+For orbital \(i\), an injection matrix \(\mathbf R_i\) embeds its allowed coefficients into the AO space, \(\mathbf c_i=\mathbf R_i\mathbf x_i\). A localized HAO orbital has a prescribed subset of allowed AOs; an OEO orbital has full AO support. Neither designation imposes mutual orthogonality of the VB orbitals.
 
+We remove a direction only when it is an infinitesimal invariance of the represented wave function and respects the specified supports. These invariances include orbital scaling and admissible changes of inactive representatives. For a complete active-space expansion with full-AO orbitals, nonsingular changes of the active basis can also be compensated by changes of the structure coefficients. This active-space invariance does not generally hold for an arbitrary selected set of VB structures. Consequently, active--active mixing is not removed merely because both orbitals are active.
+
+The support condition must be imposed on the gauge generators themselves. If \(\mathbf G_i\) collects candidate gauge generators for orbital \(i\), and \(\mathbf F_i\) extracts its forbidden AO rows, admissible gauge combinations satisfy
 \begin{equation}
-\mathbf g_o=\nabla_{\mathbf p}(\mathcal E\circ\mathcal R_k)(\mathbf 0),\quad \mathbf H_o\mathbf v=D^2(\mathcal E\circ\mathcal R_k)(\mathbf 0)[\mathbf v]
+ \mathbf F_i\mathbf G_i\mathbf t=\mathbf 0.
+ \label{eq:supportgauge}
 \end{equation}
+The complement of these admissible generators defines a local quotient basis. In particular, truncating a dense gauge generator to the allowed rows is not equivalent to eq~\eqref{eq:supportgauge}. Local metric conditioning of the quotient basis produces a lift \(\mathbf U_k\) from reduced coordinates \(\mathbf p\) to packed raw coefficients.
 
-Give the derivative of the actual update map, rather than transferring an orbital-rotation Hessian to a coefficient update. Check the consistency of lift, norm, and retraction.
-
-
-% REVIEW: 最终稿需从冻结的代码版本核对 retraction 和 pullback。历史理论文档中的 additive chart 不能不加检查地当作当前实现。
-
-\subsection{Orbital--structure coupling and the relaxed Hessian}
-
-At a structure-stationary accepted point, write the constrained local Hessian in orbital and projected structure tangent variables. A is the fixed-structure orbital block, B is the mixed derivative, and C is the structure tangent block. All blocks include the chosen normalization and generalized-overlap constraints.
-
-
+The orbital update and the preparation of orbitals for energy evaluation are distinct maps:
 \begin{equation}
-\mathbf z=\begin{pmatrix}\mathbf p\\\mathbf q\end{pmatrix},\quad\mathbf g=\begin{pmatrix}\mathbf g_o\\\mathbf 0\end{pmatrix},\quad\mathbf K=\begin{pmatrix}\mathbf A&\mathbf B^T\\\mathbf B&\mathbf C\end{pmatrix}
+ \mathbf x(\mathbf p)=\mathbf x_k+\mathbf U_k\mathbf p,\qquad
+ \boldsymbol\theta(\mathbf p)=\mathcal P(\mathbf x_k+\mathbf U_k\mathbf p).
+ \label{eq:update}
 \end{equation}
+Here \(\mathcal P\) includes orbital normalization and inactive-space projection used by the objective, together with admissible representative choices. The lift is held fixed within a local model and rebuilt after an accepted step. Equation~\eqref{eq:update} is an additive coefficient update followed by preparation, not an orthogonal orbital rotation or a sphere exponential map.
 
+All derivatives must refer to this same composition. For a scalar function \(F\) of prepared orbitals, its Hessian pullback is
 \begin{equation}
-\mathbf H_{\mathrm{rel}}=\mathbf A-\mathbf B^T\mathbf C^\dagger\mathbf B,\quad\mathbf q_N=-\mathbf C^\dagger\mathbf B\mathbf p_N
+ D^2(F\circ\boldsymbol\theta)[\mathbf u,\mathbf v]
+ =D^2F[D\boldsymbol\theta\mathbf u,D\boldsymbol\theta\mathbf v]
+ +DF[D^2\boldsymbol\theta[\mathbf u,\mathbf v]].
+ \label{eq:pullback}
 \end{equation}
-
-Define \(C^\dagger\) only on the admissible response space. Explain the equivalence of the unshifted coupled Newton and relaxed-orbital Newton limits, and why shifted coupled and eliminated models need not be identical away from that limit.
-
-
-\subsection{Restricted steps and residual certification}
-
+The second term is necessary even though the raw lift in eq~\eqref{eq:update} is linear. For example, normalization of a raw orbital gives
 \begin{equation}
-m(\mathbf z)=\mathcal E_k+\mathbf g^T\mathbf z+\tfrac12\mathbf z^T\mathbf K\mathbf z,\quad\mathbf z^T\mathbf M\mathbf z\leq\Delta_k^2
+ \bar{\mathbf c}=\frac{\mathbf c}{n},\quad
+ n=(\mathbf c^T\mathbf S_{\mathrm{AO}}\mathbf c)^{1/2},\quad
+ D\bar{\mathbf c}[\delta\mathbf c]
+ =\frac{(\mathbf I-\bar{\mathbf c}\bar{\mathbf c}^T\mathbf S_{\mathrm{AO}})\delta\mathbf c}{n}.
+ \label{eq:normalization}
 \end{equation}
+Using an orbital-rotation Hessian with this coefficient update would omit the required map derivatives.
 
+\subsection{Physical orbital step metric}
+
+The trust-region norm measures changes of physical orbital representatives rather than the Euclidean magnitude of raw AO coefficients. Let \(\mathcal L_k\) map a packed coefficient tangent to AO-metric-weighted horizontal orbital features. For individually meaningful active orbitals, these features are the differentials of normalized, inactive-projected orbital rays, weighted by \(\mathbf S_{\mathrm{AO}}^{1/2}\). For inactive orbitals, and for the active orbitals of a complete full-AO active space, horizontal subspace tangents replace individual-ray tangents; inverse Gram factors remove dependence on the chosen basis within each subspace. Variations of the inactive projector are included in the active features.
+
+On the nonredundant coordinates, the metric and its dual norm are
 \begin{equation}
-\mathbf r=(\mathbf K+\lambda\mathbf M)\mathbf z+\mathbf g,\quad\lambda\geq0,\quad\mathbf K+\lambda\mathbf M\succeq0
+ \mathbf M_o=\mathbf U_k^T\mathcal L_k^T\mathcal L_k\mathbf U_k,
+ \qquad \|\mathbf p\|_{\mathbf M_o}^2=\mathbf p^T\mathbf M_o\mathbf p,
+ \qquad \|\mathbf r_o\|_{\mathbf M_o^{-1}}^2
+ =\mathbf r_o^T\mathbf M_o^{-1}\mathbf r_o.
+ \label{eq:metric}
 \end{equation}
+We assume \(\mathbf M_o\) is positive definite on the retained coordinates. Metric application and dual-norm evaluation need not construct a dense matrix. Local conditioning of each orbital quotient basis does not, in general, whiten the complete coupled physical metric. The metric is also distinct from a Hessian preconditioner: the former defines step size and residual norms, whereas the latter accelerates the iterative solution without changing the target equation.
 
+\subsection{Horizontal structure response and the coupled quadratic model}
+
+Collect the selected eigenvectors in \(\mathbf A_s=(\mathbf a_1,\ldots,\mathbf a_m)\). Differentiation of \(\mathbf A_s^T\mathbf S\mathbf A_s=\mathbf I\) fixes the symmetric selected-space component of their response. We choose the internal gauge
 \begin{equation}
-\lambda(\mathbf z^T\mathbf M\mathbf z-\Delta_k^2)=0,\quad\|\mathbf r\|_{\mathbf M^{-1}}\leq\epsilon_{\mathrm{abs}}+\eta_k\|\mathbf g\|_{\mathbf M^{-1}}
+ \dot{\mathbf A}_g=-\tfrac12\mathbf A_s
+ (\mathbf A_s^T\dot{\mathbf S}\mathbf A_s),\qquad
+ \dot{\mathbf a}_s=\dot{\mathbf a}_{g,s}+\frac{\mathbf Z\mathbf q_s}{d_s},
+ \quad d_s=\sqrt{2/m}.
+ \label{eq:structurechart}
 \end{equation}
+The columns of \(\mathbf Z\) satisfy \(\mathbf A_s^T\mathbf S\mathbf Z=0\) and \(\mathbf Z^T\mathbf Z=\mathbf I\). The latter is a coordinate convention, not orthogonality of the VB structures. Rotations within the selected equally weighted eigenspace do not affect the averaged energy and are excluded from \(\mathbf q=(\mathbf q_1^T,\ldots,\mathbf q_m^T)^T\).
 
-Separate stationarity, step feasibility, complementarity, and curvature checks. State the regularity and inner-solve conditions required for superlinear or quadratic local convergence; an HVP implementation alone does not establish those properties.
-
-
-\subsection{TNHVP and norm-extended optimization}
-
-Describe TNHVP as a truncated Newton realization of the relaxed model, and NEO as a norm-extended formulation of the local second-order model [1]. Define the gradient scaling and the step extracted from the generalized augmented eigenvector explicitly.
-
-
+Writing \(\dot{\mathbf H}[\mathbf p]\) and \(\dot{\mathbf S}[\mathbf p]\) for orbital directional derivatives, differentiation of the generalized eigenproblem and projection with \(\mathbf Z^T\) give
 \begin{equation}
-\begin{pmatrix}0&\alpha\mathbf g^T\\\alpha\mathbf g&\mathbf K\end{pmatrix}\begin{pmatrix}\beta\\\mathbf y\end{pmatrix}=\mu\begin{pmatrix}1&0\\0&\mathbf M\end{pmatrix}\begin{pmatrix}\beta\\\mathbf y\end{pmatrix}
+ \begin{aligned}
+ \mathbf C_s&=\mathbf Z^T(\mathbf H-E_s\mathbf S)\mathbf Z,\qquad
+ \mathbf C=\operatorname{diag}(\mathbf C_1,\ldots,\mathbf C_m),\\
+ (\mathbf B\mathbf p)_s&=d_s\mathbf Z^T\big[
+ (\dot{\mathbf H}[\mathbf p]-E_s\dot{\mathbf S}[\mathbf p])\mathbf a_s
+ +(\mathbf H-E_s\mathbf S)\dot{\mathbf a}_{g,s}[\mathbf p]\big].
+ \end{aligned}
+ \label{eq:coupling}
 \end{equation}
+The derivative of the eigenvalue drops out because \(\mathbf Z^T\mathbf S\mathbf a_s=0\). The factors \(d_s\) absorb the state weights and the factor of two in the real-wave-function coefficient Hessian. The gauge term in eq~\eqref{eq:coupling} is essential for a moving nonorthogonal structure metric.
 
+Let \(\bar{\mathbf A}\) denote the orbital Hessian block after enforcing this selected-space normalization gauge and the orbital-map pullback, but before eliminating horizontal structure response. It is not the raw Hessian obtained by freezing all structure coefficients. To specify this block explicitly, define \(\mathbf K_s=\mathbf H-E_s\mathbf S\), \(\mathbf K_{s,u}=D\mathbf H[\mathbf u]-E_sD\mathbf S[\mathbf u]\), and \(\mathbf K_{s,uv}=D^2\mathbf H[\mathbf u,\mathbf v]-E_sD^2\mathbf S[\mathbf u,\mathbf v]\), with \(E_s\) held at its accepted-point value in these definitions. The second variation of the normalization-constrained energy gives
 \begin{equation}
-\mathbf z=\mathbf y/(\alpha\beta),\quad\lambda=-\mu,\quad(\mathbf K+\lambda\mathbf M)\mathbf z=-\mathbf g
+ \begin{aligned}
+ \mathbf u^T\bar{\mathbf A}\mathbf v=\frac{1}{m}\sum_s\big\{&
+ \mathbf a_s^T\mathbf K_{s,uv}\mathbf a_s
+ +2\dot{\mathbf a}_{g,s}[\mathbf u]^T\mathbf K_{s,v}\mathbf a_s\\
+ &+2\dot{\mathbf a}_{g,s}[\mathbf v]^T\mathbf K_{s,u}\mathbf a_s
+ +2\dot{\mathbf a}_{g,s}[\mathbf u]^T\mathbf K_s
+       \dot{\mathbf a}_{g,s}[\mathbf v]\big\}.
+ \end{aligned}
+ \label{eq:orbitalblock}
 \end{equation}
+All matrix derivatives in this expression include the orbital preparation map. Second derivatives of the coefficient gauge cancel against the normalization multipliers at a stationary structure solution; the first derivatives of that gauge remain. The constrained energy expansion is
+\begin{equation}
+ \begin{aligned}
+ m_k(\mathbf p,\mathbf q)=\mathcal E_k+\mathbf g_o^T\mathbf p
+ +\tfrac12\mathbf p^T\bar{\mathbf A}\mathbf p
+ +\mathbf q^T\mathbf B\mathbf p+\tfrac12\mathbf q^T\mathbf C\mathbf q,
+ \end{aligned}
+ \label{eq:model}
+\end{equation}
+where \(\mathbf g_o\) is obtained from eq~\eqref{eq:gradient} in the coordinates of eq~\eqref{eq:update}. Thus the orbital and structure blocks arise from one constrained energy, and the two coupling actions must be adjoints in their stated coordinates.
 
-Discuss the nonzero homogeneous component, lowest-root selection, and the interior Newton limit. Describe how the projected solver reaches this model; do not equate a generic augmented-Hessian step with a certified norm-constrained solution.
+For a separated lowest-state manifold, \(\mathbf C\) is positive definite on the horizontal space. More generally, a pseudoinverse can be used only after checking that the forcing lies in the range of \(\mathbf C\). Eliminating structure response yields
+\begin{equation}
+ \mathbf q(\mathbf p)=-\mathbf C^\dagger\mathbf B\mathbf p,\qquad
+ \mathbf H_{\mathrm{rel}}=\bar{\mathbf A}-\mathbf B^T\mathbf C^\dagger\mathbf B.
+ \label{eq:schur}
+\end{equation}
+Small structure gaps can make the relaxation term large even when individual coupling elements are small. A complete eigenvalue spectrum is not needed to evaluate eq~\eqref{eq:schur}; iterative actions on the admissible response space suffice.
 
+\subsection{Orbital restricted steps and the norm-extended formulation}
 
-\subsection{Preconditioning and controlled structure response}
+We restrict the physical orbital displacement, not the joint length of orbital and structure response:
+\begin{equation}
+ \min_{\mathbf p,\mathbf q}m_k(\mathbf p,\mathbf q)
+ \quad\text{subject to}\quad \mathbf p^T\mathbf M_o\mathbf p\leq\Delta_k^2.
+ \label{eq:trust}
+\end{equation}
+The structure variables describe local electronic relaxation and do not receive an independent trust-region penalty. The stationary equations are
+\begin{equation}
+ \begin{pmatrix}\bar{\mathbf A}+\lambda\mathbf M_o&\mathbf B^T\\
+ \mathbf B&\mathbf C\end{pmatrix}
+ \begin{pmatrix}\mathbf p\\\mathbf q\end{pmatrix}
+ =-\begin{pmatrix}\mathbf g_o\\\mathbf 0\end{pmatrix},\qquad
+ \lambda\geq0,\quad
+ \lambda(\mathbf p^T\mathbf M_o\mathbf p-\Delta_k^2)=0.
+ \label{eq:couplednewton}
+\end{equation}
+Under the assumptions of eq~\eqref{eq:schur}, elimination gives
+\((\mathbf H_{\mathrm{rel}}+\lambda\mathbf M_o)\mathbf p=-\mathbf g_o\).
+The exact minimum additionally requires positive semidefiniteness of the shifted relaxed Hessian. A small stationarity residual alone does not certify that curvature condition.
 
-Distinguish the Hessian model from the preconditioner. Present the one-electron block preconditioner, retained secant information where applicable, and the role of coupled structure response. If the implementation omits or restricts response according to a work estimate, identify that calculation as an approximate model and report it separately.
+NEO connects a restricted Newton step to a gradient-scaled augmented eigenproblem [1]. In the eliminated orbital space, this relation reads
+\begin{equation}
+ \begin{pmatrix}0&\alpha\mathbf g_o^T\\
+ \alpha\mathbf g_o&\mathbf H_{\mathrm{rel}}\end{pmatrix}
+ \begin{pmatrix}\beta\\\mathbf y\end{pmatrix}
+ =\mu\begin{pmatrix}1&0\\0&\mathbf M_o\end{pmatrix}
+ \begin{pmatrix}\beta\\\mathbf y\end{pmatrix}.
+ \label{eq:neo}
+\end{equation}
+For \(\alpha>0\) and \(\beta\neq0\), the extracted step satisfies
+\begin{equation}
+ \mathbf p=\frac{\mathbf y}{\alpha\beta},\qquad
+ \lambda=-\mu,\qquad
+ (\mathbf H_{\mathrm{rel}}+\lambda\mathbf M_o)\mathbf p=-\mathbf g_o,
+ \qquad \alpha^2=\frac{\lambda}{-\mathbf g_o^T\mathbf p}.
+ \label{eq:neoextract}
+\end{equation}
+The gradient scale is therefore tied to the restricted step rather than being an arbitrary fixed parameter. The unshifted interior Newton step is recovered as a limiting case; a zero homogeneous component or a hard case requires direct treatment of the restricted quadratic problem rather than division by \(\beta\). Our solver obtains the small projected restricted step spectrally and uses eqs~\eqref{eq:neo} and \eqref{eq:neoextract} to express its norm-extended interpretation. It does not repeatedly solve a full-dimensional augmented eigenproblem or form \(\mathbf H_{\mathrm{rel}}\).
 
+\subsection{Independent response spaces and full residual certification}
 
-% REVIEW: 当前 NEO 后端仍有 structure-response admission 分支。正文不能把所有生产运行都描述为完整 coupled Newton；必须分别记录 admitted / core-only 路径。
+Orbital and structure spaces are expanded independently. With basis matrices \(\mathbf V\) and \(\mathbf W\), the trial response is \(\mathbf p=\mathbf V\mathbf u\), \(\mathbf q=\mathbf W\mathbf v\). The projected blocks are
+\begin{equation}
+ \begin{aligned}
+ \mathbf a&=\mathbf V^T\bar{\mathbf A}\mathbf V,&
+ \mathbf b&=\mathbf W^T\mathbf B\mathbf V,&
+ \mathbf c&=\mathbf W^T\mathbf C\mathbf W,&
+ \mathbf m&=\mathbf V^T\mathbf M_o\mathbf V,\\
+ \mathbf h&=\mathbf a-\mathbf b^T\mathbf c^\dagger\mathbf b.&&&&
+ \end{aligned}
+ \label{eq:projection}
+\end{equation}
+New directions require new operator images; previously computed images are retained at the same accepted orbital point. Changing the trust radius does not invalidate these images. The projected Schur complement is inexpensive once these blocks are available, but is not assumed to reproduce the full structure relaxation merely because its projected equations are solved accurately.
+
+Certification uses residuals in the original retained coordinate spaces:
+\begin{equation}
+ \begin{aligned}
+ \mathbf r_o&=\mathbf g_o+\bar{\mathbf A}\mathbf p+\mathbf B^T\mathbf q
+                  +\lambda\mathbf M_o\mathbf p,\\
+ \mathbf r_s&=\mathbf B\mathbf p+\mathbf C\mathbf q,\\
+ \big(\|\mathbf r_o\|_{\mathbf M_o^{-1}}^2+\|\mathbf r_s\|_2^2\big)^{1/2}
+ &\leq\epsilon_{\mathrm{abs}}+\eta_k\|\mathbf g_o\|_{\mathbf M_o^{-1}}.
+ \end{aligned}
+ \label{eq:residual}
+\end{equation}
+The Euclidean structure norm refers specifically to the scaled coordinates in eq~\eqref{eq:structurechart}. Step feasibility and complementarity are checked separately. Curvature information from the projected space is not a general certificate of positive semidefiniteness outside that space.
+
+A small structure residual can still give a significant orbital error when \(\mathbf C\) is ill-conditioned. Where needed, we solve for a response correction and examine its orbital effect:
+\begin{equation}
+ \mathbf C\delta\mathbf q=-\mathbf r_s,\qquad
+ \mathbf r_o^{\mathrm{corr}}=\mathbf r_o+\mathbf B^T\delta\mathbf q.
+ \label{eq:responsecertificate}
+\end{equation}
+An unresolved correction supplies an additional response direction; a sufficiently accurate correction completes the candidate response. This targets the response needed by the current orbital candidate instead of solving every orbital basis direction to final response accuracy. It does not eliminate coupling work: appending an orbital direction still requires its orbital-to-structure image.
+
+\subsection{Trial evaluation, approximate models, and local convergence}
+
+Only the orbital component of the local step is applied in eq~\eqref{eq:update}. At the trial orbitals, the selected structure problem is solved again; \(\mathbf q\) is an auxiliary local response, not a replacement for this nonlinear reoptimization. Acceptance compares the actual relaxed energy decrease with the coupled-model prediction,
+\begin{equation}
+ \rho_k=\frac{\mathcal E_k-\mathcal E(\mathbf x_k+\mathbf U_k\mathbf p)}
+ {m_k(\mathbf0,\mathbf0)-m_k(\mathbf p,\mathbf q)}.
+ \label{eq:agreement}
+\end{equation}
+Accepted points receive a new true gradient, chart, and local model. Rejected trials retain the accepted-point operator data while the trust radius is adjusted. No cross-iteration secant Hessian history is required by this NEO formulation; a previous orbital direction may provide a warm start.
+
+The full coupled model must be distinguished from the production core-only approximation. The latter retains direct inactive/core response and the nonlinear pullback with fixed upstream adjoints, but omits both local active response and horizontal structure response. It is therefore not simply eq~\eqref{eq:model} with \(\mathbf B=0\), nor is it the complete fixed-structure orbital Hessian. The current admission decision compares response-space dimension and estimated contraction work with orbital-space dimension and core work. This is a computational work heuristic, not an error bound on omitted curvature. In both branches, trial energies and accepted gradients are evaluated for the same relaxed VBSCF objective. Full and core-only calculations must be identified separately in the numerical results.
+
+Near a smooth isolated minimum with a nonsingular quotient Hessian, the full model approaches an ordinary Newton step once the trust region is inactive. Superlinear local convergence requires the effective Newton residual to be \(o(\|\mathbf g_o\|)\); quadratic convergence requires an \(O(\|\mathbf g_o\|^2)\) residual, locally Lipschitz second derivatives, and correspondingly controlled structure-solver and derivative errors. A forcing sequence \(\eta_k=O(\|\mathbf g_o\|)\) supplies the relative part of this requirement, but a fixed nonzero \(\epsilon_{\mathrm{abs}}\) eventually limits the certified accuracy. These local conclusions do not automatically apply to the core-only model or establish rapid entry into the Newton neighborhood.
+
+One-electron orbital blocks are used as a preconditioner, not substituted for the full Hessian in these statements. Block-LBFGS and TNHVP are comparison methods: the former retains secant history with a block initial inverse, whereas the current TNHVP implementation uses a block-LBFGS baseline with conditional HVP-based correction. Their performance must be measured against NEO rather than inferred from the labels ``first order'' and ``second order.''
+
+% Theory checked against orbital charts, physical_metric, eigen_response,
+% coupled/structure, coupled/coupling, exact/apply, backends/neo, and
+% neo/response_solver at the source state preceding this documentation commit.
 
 \section{IMPLEMENTATION}
 
@@ -160,11 +301,7 @@ Describe the accepted-point data required for gradient and HVP evaluation: norma
 
 \subsection{Trial steps and accepted-point updates}
 
-\begin{equation}
-\rho_k=\frac{\mathcal E_k-\mathcal E(\mathcal R_k(\mathbf p))}{m(\mathbf0)-m(\mathbf z)}
-\end{equation}
-
-Explain trial evaluation, acceptance, trust-radius updates, and rebuilding the local model. State which quantities are refreshed at a keyframe and which are reused during subspace expansion. Count rejected trials as work even when they do not advance the accepted-iteration counter.
+Give the acceptance and trust-radius update settings associated with eq~\eqref{eq:agreement}. State which quantities are refreshed at an accepted point and which are reused during subspace expansion. Count rejected trials as work even when they do not advance the accepted-iteration counter.
 
 
 Algorithm 1. Accepted-point second-order VBSCF optimization (outline)
@@ -213,7 +350,7 @@ TNHVP & ISCF=7 & Matrix-free truncated Newton comparison \\
 
 Block-LBFGS & ISCF=8 & Enhanced baseline with one-electron block initial inverse \\
 
-NEO & ISCF=9 & Norm-extended second-order method \\
+NEO & ISCF=9 & Principal norm-extended second-order method \\
 
 \bottomrule
 

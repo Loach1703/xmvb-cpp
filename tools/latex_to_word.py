@@ -6,6 +6,7 @@ Choose --output for each review round; existing snapshots are never overwritten.
 """
 
 import argparse
+import re
 from pathlib import Path
 from zipfile import ZipFile
 from xml.etree import ElementTree as ET
@@ -17,6 +18,33 @@ from docx.shared import Pt, RGBColor
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def number_equations(source):
+    """Preserve numbered equations and references unsupported by Pandoc's writer."""
+    labels = {}
+    count = 0
+
+    def equation(match):
+        nonlocal count
+        count += 1
+        body = match.group(1)
+        for label in re.findall(r"\\label\{([^}]+)\}", body):
+            labels[label] = count
+        body = re.sub(r"\\label\{[^}]+\}", "", body).strip()
+        return ("\\begin{equation}\n" + body +
+                "\\qquad\\text{(" + str(count) + ")}\n\\end{equation}")
+
+    source = re.sub(r"\\begin\{equation\}(.*?)\\end\{equation\}",
+                    equation, source, flags=re.DOTALL)
+
+    def reference(match):
+        label = match.group(1)
+        if label not in labels:
+            raise ValueError(f"Unresolved equation reference: {label}")
+        return f"({labels[label]})"
+
+    return re.sub(r"\\eqref\{([^}]+)\}", reference, source)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path,
@@ -25,8 +53,9 @@ def main():
     if args.output.exists():
         parser.error("Choose a new output path to preserve reviewed snapshots.")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    pypandoc.convert_file(
-        str(ROOT / "docs/jctc_second_order.tex"), "docx", format="latex",
+    source = (ROOT / "docs/jctc_second_order.tex").read_text()
+    pypandoc.convert_text(
+        number_equations(source), "docx", format="latex",
         outputfile=str(args.output),
         extra_args=["--standalone", "--number-sections",
                     "--reference-doc=" + str(ROOT / "docs/jctc_second_order_outline.docx")])
