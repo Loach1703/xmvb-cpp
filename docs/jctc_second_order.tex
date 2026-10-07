@@ -31,6 +31,10 @@ State Key Laboratory of Physical Chemistry of Solid Surfaces, Fujian Provincial 
 \end{center}
 
 % REVIEW: NEO is the principal method; TNHVP is a secondary comparison.
+% Notation references checked for this revision:
+% https://www.frontiersin.org/articles/10.3389/fchem.2019.00225/full (VB H/M conventions)
+% https://arxiv.org/html/1610.08394 (second-order CASSCF notation)
+% Retain coefficient updates for nonorthogonal VB orbitals, not CASSCF rotations.
 
 JCTC Article --- Theory draft for review, 7 October 2026
 
@@ -65,16 +69,16 @@ State the methodological contribution as a second-order optimization framework f
 
 A valence bond (VB) wave function is expanded in a prescribed set of spin-adapted structures,
 \begin{equation}
- |\Psi_s(\mathbf x)\rangle=\sum_{I=1}^{N_{\mathrm{str}}}a_{Is}|\Phi_I(\mathbf x)\rangle .
+ |\Psi_s(\mathbf x)\rangle=\sum_I a_{Is}|\Phi_I(\mathbf x)\rangle .
  \label{eq:ansatz}
 \end{equation}
-where \(|\Psi_s\rangle\) is electronic state \(s\), \(|\Phi_I\rangle\) is VB structure \(I\), \(a_{Is}\) is its expansion coefficient, and \(N_{\mathrm{str}}\) is the number of retained structures. The packed vector \(\mathbf x\in\mathbb R^{n_x}\) contains the \(n_x\) allowed atomic orbital (AO) coefficients of the inactive and active orbitals. The Hamiltonian and overlap matrices in the VB structure basis are defined by
+where \(|\Phi_I\rangle\) is VB structure \(I\), \(a_{Is}\) is its coefficient in electronic state \(s\), and the sum runs over the selected VB structures. The vector \(\mathbf x\) contains the allowed atomic orbital (AO) coefficients of the inactive and active orbitals. The Hamiltonian and overlap matrices in the VB structure basis are defined by
 \begin{equation}
- H_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\hat H_{\mathrm{el}}|\Phi_J(\mathbf x)\rangle,
+ H_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\hat H|\Phi_J(\mathbf x)\rangle,
  \qquad M_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\Phi_J(\mathbf x)\rangle.
  \label{eq:matrixelements}
 \end{equation}
-Here \(\hat H_{\mathrm{el}}\) is the electronic Hamiltonian, and \(\mathbf H,\mathbf M\in\mathbb R^{N_{\mathrm{str}}\times N_{\mathrm{str}}}\) act in the retained VB structure space. We reserve \(\mathbf S\) for the AO overlap matrix, whose elements are \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), with \(\chi_\mu\) denoting AO basis function \(\mu\). The matrix \(\mathbf H\) includes the inactive-electron contribution; an equivalent implementation may separate a common reference energy from the active Hamiltonian. The nuclear repulsion is independent of \(\mathbf x\) and can be added afterward.
+where \(\hat H\) is the electronic Hamiltonian. We use \(\mathbf M\) for the structure overlap matrix and \(\mathbf S\) for the AO overlap matrix, with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), where \(\chi_\mu\) denotes an AO basis function. The Hamiltonian matrix includes both inactive- and active-electron contributions. The nuclear repulsion is constant during orbital optimization and is omitted from the following expressions.
 
 At fixed orbitals, variation of the structure coefficients gives
 \begin{equation}
@@ -83,7 +87,7 @@ At fixed orbitals, variation of the structure coefficients gives
  \mathcal E(\mathbf x)=\frac{1}{m}\sum_{s=1}^{m}E_s(\mathbf x).
  \label{eq:eigenproblem}
 \end{equation}
-where \(E_s\) is the electronic energy of state \(s\), \(\mathbf a_s=(a_{1s},\ldots,a_{N_{\mathrm{str}}s})^T\) is its structure-coefficient vector, \(\delta_{rs}\) is the Kronecker delta, and the superscript \(T\) denotes transpose. The objective \(\mathcal E\) is the equally weighted average over the lowest \(m\) states; \(m=1\) gives ground-state valence bond self-consistent field (VBSCF) optimization. We consider real wave functions and assume a positive-definite structure overlap on the working coefficient space and a selected eigenspace separated from excluded roots. Internal degeneracies among the equally weighted states do not change the state-averaged energy. A gap closing between selected and excluded roots, however, can destroy differentiability of this objective.
+where \(E_s\) and \(\mathbf a_s\) are the energy and structure-coefficient vector of state \(s\), respectively, and \(\delta_{rs}\) is the Kronecker delta. We consider real wave functions; the superscript \(T\) denotes transpose. The objective \(\mathcal E\) is the equally weighted average over the lowest \(m\) states; \(m=1\) gives ground-state valence bond self-consistent field (VBSCF) optimization. We assume a positive-definite structure overlap on the working coefficient space and a selected eigenspace separated from excluded roots. Internal degeneracies among the equally weighted states do not change the state-averaged energy. A gap closing between selected and excluded roots, however, can destroy differentiability of this objective.
 
 For an orbital direction, let a dot denote the derivative at the current accepted point. Stationarity with respect to the structure coefficients gives
 \begin{equation}
@@ -95,7 +99,7 @@ Here \(\dot{\mathbf H}\) and \(\dot{\mathbf M}\) are the directional derivatives
 
 \subsection{Support-preserving orbital coordinates and the update map}
 
-For orbital \(i\), we write \(\mathbf c_i=\mathbf R_i\mathbf x_i\), where \(\mathbf c_i\in\mathbb R^{n_{\mathrm{bf}}}\) contains its full AO coefficients, \(\mathbf x_i\in\mathbb R^{n_i}\) contains only its \(n_i\) allowed coefficients, and \(\mathbf R_i\in\mathbb R^{n_{\mathrm{bf}}\times n_i}\) injects those coefficients into the full basis of \(n_{\mathrm{bf}}\) AO functions. A hybrid atomic orbital (HAO) has a prescribed localized subset of allowed AOs; an overlap-enhanced orbital (OEO) has full AO support. Neither designation imposes mutual orthogonality of the VB orbitals.
+For orbital \(i\), we write \(\mathbf c_i=\mathbf R_i\mathbf x_i\), where \(\mathbf c_i\) is its full AO coefficient vector, \(\mathbf x_i\) contains only the allowed coefficients, and \(\mathbf R_i\) embeds them into the full AO basis. A hybrid atomic orbital (HAO) has a prescribed localized subset of allowed AOs; an overlap-enhanced orbital (OEO) has full AO support. Neither designation imposes mutual orthogonality of the VB orbitals.
 
 We remove a direction only when it is an infinitesimal invariance of the represented wave function and respects the specified supports. These invariances include orbital scaling and admissible changes of inactive representatives. For a complete active-space expansion with full-AO orbitals, nonsingular changes of the active basis can also be compensated by changes of the structure coefficients. This active-space invariance does not generally hold for an arbitrary selected set of VB structures. Consequently, active--active mixing is not removed merely because both orbitals are active.
 
@@ -112,7 +116,7 @@ The orbital update and the preparation of orbitals for energy evaluation are dis
  \boldsymbol\theta(\mathbf p)=\mathcal P(\mathbf x_k+\mathbf U_k\mathbf p).
  \label{eq:update}
 \end{equation}
-where \(k\) labels the accepted outer iteration, \(\mathbf x_k\) is its packed coefficient vector, \(\mathbf p\in\mathbb R^{n_o}\) is the reduced orbital step, and \(\mathbf U_k\in\mathbb R^{n_x\times n_o}\) lifts the \(n_o\) nonredundant coordinates into the raw coefficient space. The preparation map \(\mathcal P\) includes orbital normalization and inactive-space projection used by the objective, together with admissible representative choices; \(\boldsymbol\theta\) denotes the resulting prepared orbital coefficients. The lift is held fixed within a local model and rebuilt after an accepted step. Equation~\eqref{eq:update} is an additive coefficient update followed by preparation, not an orthogonal orbital rotation or a sphere exponential map.
+where \(\mathbf x_k\) is the coefficient vector at accepted iteration \(k\), \(\mathbf p\) is the nonredundant orbital step, and \(\mathbf U_k\) maps that step to changes in the allowed AO coefficients. The preparation map \(\mathcal P\) includes orbital normalization and inactive-space projection used by the objective, together with admissible representative choices; \(\boldsymbol\theta\) denotes the resulting prepared orbital coefficients. The lift is held fixed within a local model and rebuilt after an accepted step. Equation~\eqref{eq:update} is an additive coefficient update followed by preparation, not an orthogonal orbital rotation or a sphere exponential map.
 
 All derivatives must refer to this same composition. For a scalar function \(F\) of prepared orbitals, its Hessian pullback is
 \begin{equation}
@@ -121,7 +125,7 @@ All derivatives must refer to this same composition. For a scalar function \(F\)
  +DF[D^2\boldsymbol\theta[\mathbf u,\mathbf v]].
  \label{eq:pullback}
 \end{equation}
-where \(D\) and \(D^2\) denote first and second differentials, \(\mathbf u,\mathbf v\in\mathbb R^{n_o}\) are reduced orbital directions, and all differentials are evaluated at \(\mathbf p=0\). The second term is necessary even though the raw lift in eq~\eqref{eq:update} is linear. For example, normalization of a raw orbital gives
+where \(D\) and \(D^2\) denote first and second differentials, \(\mathbf u\) and \(\mathbf v\) are reduced orbital directions, and all differentials are evaluated at \(\mathbf p=0\). The second term is necessary even though the raw lift in eq~\eqref{eq:update} is linear. For example, normalization of a raw orbital gives
 \begin{equation}
  \bar{\mathbf c}=\frac{\mathbf c}{n},\quad
  n=(\mathbf c^T\mathbf S\mathbf c)^{1/2},\quad
@@ -143,7 +147,7 @@ On the nonredundant coordinates, the metric and its dual norm are
  =\mathbf r_o^T\mathbf G_o^{-1}\mathbf r_o.
  \label{eq:metric}
 \end{equation}
-where \(\mathbf G_o\in\mathbb R^{n_o\times n_o}\) is the physical orbital metric and \(\mathbf r_o\in\mathbb R^{n_o}\) is an orbital covector, such as a gradient or an equation residual. The subscript \(o\) denotes orbital coordinates. We assume \(\mathbf G_o\) is positive definite on the retained coordinates. Metric application and dual-norm evaluation need not construct a dense matrix. Local conditioning of each orbital quotient basis does not, in general, whiten the complete coupled physical metric. The metric is also distinct from a Hessian preconditioner: the former defines step size and residual norms, whereas the latter accelerates the iterative solution without changing the target equation.
+where \(\mathbf G_o\) is the physical orbital metric and \(\mathbf r_o\) is an orbital gradient or stationarity residual. The subscript \(o\) denotes orbital coordinates. We assume \(\mathbf G_o\) is positive definite on the retained coordinates. Metric application and dual-norm evaluation need not construct a dense matrix. Local conditioning of each orbital quotient basis does not, in general, whiten the complete coupled physical metric. The metric is also distinct from a Hessian preconditioner: the former defines step size and residual norms, whereas the latter accelerates the iterative solution without changing the target equation.
 
 \subsection{Horizontal structure response and the coupled quadratic model}
 
@@ -155,7 +159,7 @@ Collect the selected eigenvectors in \(\mathbf A_s=(\mathbf a_1,\ldots,\mathbf a
  \quad d_s=\sqrt{2/m}.
  \label{eq:structurechart}
 \end{equation}
-Here \(\dot{\mathbf A}_g\) is the selected-space response required by normalization, \(\dot{\mathbf a}_{g,s}\) is its column for state \(s\), and \(\mathbf q_s\in\mathbb R^{N_{\mathrm{str}}-m}\) contains the independent response coordinates for that state. The factor \(d_s\) scales these coordinates according to the equal state weight. The columns of \(\mathbf Z\in\mathbb R^{N_{\mathrm{str}}\times(N_{\mathrm{str}}-m)}\) satisfy \(\mathbf A_s^T\mathbf M\mathbf Z=0\) and \(\mathbf Z^T\mathbf Z=\mathbf I\). The latter is a coordinate convention, not orthogonality of the VB structures. Rotations within the selected equally weighted eigenspace do not affect the averaged energy and are excluded from \(\mathbf q=(\mathbf q_1^T,\ldots,\mathbf q_m^T)^T\in\mathbb R^{n_s}\), where \(n_s=m(N_{\mathrm{str}}-m)\) is the total structure-response dimension.
+Here \(\dot{\mathbf A}_g\) is the selected-space response required by normalization, \(\dot{\mathbf a}_{g,s}\) is its column for state \(s\), and \(\mathbf q_s\) contains the independent response coordinates for that state. The factor \(d_s\) accounts for the equal state weight. The matrix \(\mathbf Z\) spans the complement of the selected states and satisfies \(\mathbf A_s^T\mathbf M\mathbf Z=0\) and \(\mathbf Z^T\mathbf Z=\mathbf I\). The latter condition fixes the response coordinates; it does not impose orthogonality on the VB structures. Rotations within the selected equally weighted eigenspace leave the averaged energy unchanged and are excluded from the combined response vector \(\mathbf q=(\mathbf q_1^T,\ldots,\mathbf q_m^T)^T\).
 
 Writing \(\dot{\mathbf H}[\mathbf p]\) and \(\dot{\mathbf M}[\mathbf p]\) for orbital directional derivatives, differentiation of the generalized eigenproblem and projection with \(\mathbf Z^T\) give
 \begin{equation}
@@ -168,7 +172,7 @@ Writing \(\dot{\mathbf H}[\mathbf p]\) and \(\dot{\mathbf M}[\mathbf p]\) for or
  \end{aligned}
  \label{eq:coupling}
 \end{equation}
-where \(\mathbf C_s\) is the structure Hessian block for state \(s\), \(\operatorname{diag}\) assembles the block-diagonal matrix \(\mathbf C\in\mathbb R^{n_s\times n_s}\), and \(\mathbf B\in\mathbb R^{n_s\times n_o}\) maps an orbital direction to a structure-response forcing. The notation \((\mathbf B\mathbf p)_s\) denotes its state-\(s\) block. The derivative of the eigenvalue drops out because \(\mathbf Z^T\mathbf M\mathbf a_s=0\). The factors \(d_s\) absorb the state weights and the factor of two in the real-wave-function coefficient Hessian. The gauge term in eq~\eqref{eq:coupling} is essential for a moving nonorthogonal structure metric.
+where \(\mathbf C_s\) is the structure Hessian block for state \(s\), \(\operatorname{diag}\) assembles these blocks into \(\mathbf C\), and \(\mathbf B\) maps an orbital direction to a structure-response forcing. The notation \((\mathbf B\mathbf p)_s\) denotes its state-\(s\) block. The derivative of the eigenvalue drops out because \(\mathbf Z^T\mathbf M\mathbf a_s=0\). The factors \(d_s\) absorb the state weights and the factor of two in the real-wave-function coefficient Hessian. The gauge term in eq~\eqref{eq:coupling} is essential for a moving nonorthogonal structure metric.
 
 Let \(\bar{\mathbf A}\) denote the orbital Hessian block after enforcing this selected-space normalization gauge and the orbital-map pullback, but before eliminating horizontal structure response. It is not the raw Hessian obtained by freezing all structure coefficients. To specify this block explicitly, define \(\mathbf K_s=\mathbf H-E_s\mathbf M\), \(\mathbf K_{s,u}=D\mathbf H[\mathbf u]-E_sD\mathbf M[\mathbf u]\), and \(\mathbf K_{s,uv}=D^2\mathbf H[\mathbf u,\mathbf v]-E_sD^2\mathbf M[\mathbf u,\mathbf v]\), with \(E_s\) held at its accepted-point value in these definitions. The second variation of the normalization-constrained energy gives
 \begin{equation}
@@ -182,7 +186,7 @@ Let \(\bar{\mathbf A}\) denote the orbital Hessian block after enforcing this se
  \end{aligned}
  \label{eq:orbitalblock}
 \end{equation}
-Here \(\mathbf u^T\bar{\mathbf A}\mathbf v\) is the bilinear second variation in orbital directions \(\mathbf u\) and \(\mathbf v\), and \(\bar{\mathbf A}\in\mathbb R^{n_o\times n_o}\) is the gauge-corrected orbital Hessian block. The sum runs over the \(m\) selected states. All matrix derivatives in this expression include the orbital preparation map. Second derivatives of the coefficient gauge cancel against the normalization multipliers at a stationary structure solution; the first derivatives of that gauge remain. The constrained energy expansion is
+Here \(\mathbf u^T\bar{\mathbf A}\mathbf v\) is the bilinear second variation in orbital directions \(\mathbf u\) and \(\mathbf v\), and \(\bar{\mathbf A}\) is the gauge-corrected orbital Hessian block. The sum runs over the \(m\) selected states. All matrix derivatives in this expression include the orbital preparation map. Second derivatives of the coefficient gauge cancel against the normalization multipliers at a stationary structure solution; the first derivatives of that gauge remain. The constrained energy expansion is
 \begin{equation}
  \begin{aligned}
  m_k(\mathbf p,\mathbf q)=\mathcal E_k+\mathbf g_o^T\mathbf p
@@ -191,7 +195,7 @@ Here \(\mathbf u^T\bar{\mathbf A}\mathbf v\) is the bilinear second variation in
  \end{aligned}
  \label{eq:model}
 \end{equation}
-where \(m_k\) is the local quadratic energy model, \(\mathcal E_k=\mathcal E(\mathbf x_k)\) is the accepted-point energy, and \(\mathbf g_o\in\mathbb R^{n_o}\) is its reduced orbital gradient, obtained from eq~\eqref{eq:gradient} in the coordinates of eq~\eqref{eq:update}. The blocks \(\bar{\mathbf A}\), \(\mathbf B\), and \(\mathbf C\) describe orbital curvature, orbital--structure coupling, and structure curvature, respectively. Thus the orbital and structure blocks arise from one constrained energy, and the two coupling actions must be adjoints in their stated coordinates.
+where \(m_k\) is the local quadratic energy model, \(\mathcal E_k=\mathcal E(\mathbf x_k)\) is the accepted-point energy, and \(\mathbf g_o\) is its reduced orbital gradient, obtained from eq~\eqref{eq:gradient} in the coordinates of eq~\eqref{eq:update}. The blocks \(\bar{\mathbf A}\), \(\mathbf B\), and \(\mathbf C\) describe orbital curvature, orbital--structure coupling, and structure curvature, respectively. Thus the orbital and structure blocks arise from one constrained energy, and the two coupling actions must be adjoints in their stated coordinates.
 
 For a separated lowest-state manifold, \(\mathbf C\) is positive definite on the horizontal space. More generally, a pseudoinverse can be used only after checking that the forcing lies in the range of \(\mathbf C\). Eliminating structure response yields
 \begin{equation}
@@ -232,7 +236,7 @@ Norm-extended optimization (NEO) connects a restricted Newton step to a gradient
  \begin{pmatrix}\beta\\\mathbf y\end{pmatrix}.
  \label{eq:neo}
 \end{equation}
-where \(\alpha\) scales the gradient coupling, \(\mu\) is an augmented generalized eigenvalue, and \((\beta,\mathbf y^T)^T\) is its eigenvector, with scalar homogeneous component \(\beta\) and orbital component \(\mathbf y\in\mathbb R^{n_o}\). For \(\alpha>0\) and \(\beta\neq0\), the extracted step satisfies
+where \(\alpha\) scales the gradient coupling, \(\mu\) is an augmented generalized eigenvalue, and \((\beta,\mathbf y^T)^T\) is its eigenvector, with scalar homogeneous component \(\beta\) and orbital component \(\mathbf y\). For \(\alpha>0\) and \(\beta\neq0\), the extracted step satisfies
 \begin{equation}
  \mathbf p=\frac{\mathbf y}{\alpha\beta},\qquad
  \lambda=-\mu,\qquad
@@ -244,7 +248,7 @@ Here the augmented eigenvalue determines the same orbital shift \(\lambda\) that
 
 \subsection{Independent response spaces and full residual certification}
 
-Orbital and structure spaces are expanded independently. Let \(\mathbf V\in\mathbb R^{n_o\times\ell_o}\) and \(\mathbf W\in\mathbb R^{n_s\times\ell_s}\) contain the retained orbital and structure basis directions, respectively, where \(\ell_o\) and \(\ell_s\) are the current subspace dimensions. We write the trial response as \(\mathbf p=\mathbf V\boldsymbol\xi\), \(\mathbf q=\mathbf W\boldsymbol\zeta\), where \(\boldsymbol\xi\in\mathbb R^{\ell_o}\) and \(\boldsymbol\zeta\in\mathbb R^{\ell_s}\) are expansion coefficients. The projected blocks are
+Orbital and structure spaces are expanded independently. Let \(\mathbf V\) and \(\mathbf W\) contain the retained orbital and structure basis directions, respectively. We write the trial response as \(\mathbf p=\mathbf V\boldsymbol\xi\) and \(\mathbf q=\mathbf W\boldsymbol\zeta\), where \(\boldsymbol\xi\) and \(\boldsymbol\zeta\) are the corresponding expansion coefficients. The projected blocks are
 \begin{equation}
  \begin{aligned}
  \mathbf a&=\mathbf V^T\bar{\mathbf A}\mathbf V,&
