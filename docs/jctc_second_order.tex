@@ -73,27 +73,34 @@ Throughout this section, \(I,J\) label VB structures, \(\mu,\nu\) label AO basis
 
 \subsection{Wave Function and Energy}
 
-A valence bond (VB) wave function is expanded in a prescribed set of spin-adapted structures,
+The valence bond (VB) wave function for state \(n\) is written as
 \begin{equation}
  |\Psi_n(\mathbf x)\rangle=\sum_I C_{In}|\Phi_I(\mathbf x)\rangle ,
  \label{eq:ansatz}
 \end{equation}
-where \(|\Phi_I\rangle\) is VB structure \(I\), \(C_{In}\) is its coefficient in electronic state \(n\), and the sum runs over the selected VB structures. The vector \(\mathbf x\) contains the allowed atomic orbital (AO) coefficients of the inactive and active orbitals. The Hamiltonian and overlap matrices in the VB structure basis are defined by
+where \(|\Phi_I\rangle\) is a spin-adapted VB structure and \(C_{In}\) is its expansion coefficient. The sum runs over the chosen structures, and \(\mathbf x\) collects the allowed atomic orbital (AO) coefficients. The Hamiltonian and overlap matrix elements are
 \begin{equation}
  H_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\hat H|\Phi_J(\mathbf x)\rangle,
  \qquad M_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\Phi_J(\mathbf x)\rangle,
  \label{eq:matrixelements}
 \end{equation}
-where \(\hat H\) is the electronic Hamiltonian. We use \(\mathbf M\) for the structure overlap matrix and \(\mathbf S\) for the AO overlap matrix, with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), where \(\chi_\mu\) denotes an AO basis function. The Hamiltonian matrix includes both inactive- and active-electron contributions. The nuclear repulsion is constant during orbital optimization and is omitted from the following expressions.
+where \(\hat H\) is the electronic Hamiltonian. The AO overlap matrix is denoted by \(\mathbf S\), with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), where \(\chi_\mu\) is an AO basis function. Nuclear repulsion is constant at a fixed geometry and is omitted below.
 
-At fixed orbitals, variation of the structure coefficients gives
+For fixed orbitals, the structure coefficients are obtained from the generalized eigenvalue problem
 \begin{equation}
  \mathbf H\mathbf c_n=E_n\mathbf M\mathbf c_n,\qquad
- \mathbf c_m^T\mathbf M\mathbf c_n=\delta_{mn},\qquad
- \mathcal E(\mathbf x)=\frac{1}{N_{\mathrm{state}}}\sum_{n=1}^{N_{\mathrm{state}}}E_n(\mathbf x),
+ \mathbf c_m^T\mathbf M\mathbf c_n=\delta_{mn},
  \label{eq:eigenproblem}
 \end{equation}
-where \(E_n\) and \(\mathbf c_n\) are the energy and structure-coefficient vector of state \(n\), respectively, with \((\mathbf c_n)_I=C_{In}\), and \(\delta_{mn}\) is the Kronecker delta. We consider real wave functions; the superscript \(T\) denotes transpose. The objective \(\mathcal E\) averages the lowest \(N_{\mathrm{state}}\) states with equal weights; \(N_{\mathrm{state}}=1\) gives ground-state valence bond self-consistent field (VBSCF) optimization. We assume a positive-definite structure overlap on the working coefficient space and a selected eigenspace separated from excluded roots. Internal degeneracies among the equally weighted states do not change the state-averaged energy. A gap closing between selected and excluded roots, however, can destroy differentiability of this objective.
+where \(E_n\) is the energy of state \(n\), \(\mathbf c_n\) contains the coefficients \(C_{In}\), and \(\delta_{mn}\) is the Kronecker delta. The superscript \(T\) denotes transpose.
+
+In equal-weight state-averaged valence bond self-consistent field (VBSCF) calculations, the orbital objective is
+\begin{equation}
+ \mathcal E(\mathbf x)=\frac{1}{N_{\mathrm{state}}}
+ \sum_{n=1}^{N_{\mathrm{state}}}E_n(\mathbf x),
+ \label{eq:stateaverage}
+\end{equation}
+where \(N_{\mathrm{state}}\) is the number of lowest-energy states included in the average. The choice \(N_{\mathrm{state}}=1\) recovers ground-state VBSCF. Orbital optimization minimizes this structure-relaxed energy with respect to \(\mathbf x\).
 
 \subsection{Orbital Parameterization}
 
@@ -147,6 +154,8 @@ On the nonredundant coordinates, the metric and its dual norm are
 where \(\mathbf G_o\) is the physical orbital metric and \(\mathbf r_o\) is an orbital gradient or stationarity residual. We assume \(\mathbf G_o\) is positive definite on the retained coordinates; its action is evaluated from the orbital features.
 
 \subsection{Coupled Response}
+
+The response derivation assumes that \(\mathbf M\) is positive definite on the working structure space and that the averaged states are separated from the remaining states by an energy gap. Degeneracies within the averaged manifold are allowed.
 
 For an orbital direction, let a dot denote the derivative at the current accepted point. Stationarity with respect to the structure coefficients gives
 \begin{equation}
