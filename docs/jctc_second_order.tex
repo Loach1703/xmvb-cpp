@@ -97,23 +97,25 @@ where \(N_{\mathrm{state}}\) is the number of lowest-energy states included in t
 
 \subsection{Nonredundant Orbital Coordinates}
 
-Direct optimization of all orbital coefficients includes redundant degrees of freedom: some orbital changes leave the normalized wave function unchanged, either alone or together with a compensating change of the structure coefficients. These redundancies can lead to singular or poorly conditioned second-order equations and unnecessary iterative work. We therefore construct nonredundant orbital coordinates that remove such directions while preserving the variational freedom and localization constraints of the chosen VB wave function.
+A normalized VB wave function does not have a unique orbital-coefficient representation. Rescaling an orbital changes its normalization but not its physical content, and some orbital mixings can be compensated by changes of the structure coefficients. Optimizing these redundant degrees of freedom can lead to singular or poorly conditioned second-order equations. We therefore construct local nonredundant coordinates that retain the independent orbital variations without changing the prescribed VB variational space.
 
 The \(i\)th orbital is expressed as a linear combination of atomic orbitals,
 \begin{equation}
  \phi_i=\sum_\mu b_{\mu i}\chi_\mu,
  \label{eq:orbitalexpansion}
 \end{equation}
-where \(\chi_\mu\) is an AO basis function and \(b_{\mu i}\) is its coefficient in orbital \(i\). Hybrid atomic orbitals (HAOs) are strictly localized on a prescribed atom or group of atoms: coefficients of AOs outside that region remain zero during optimization. Overlap-enhanced orbitals (OEOs) can expand over the entire AO basis without this localization constraint. Both orbital descriptions allow nonorthogonal orbitals.
+where \(\chi_\mu\) is an AO basis function and \(b_{\mu i}\) is its coefficient in orbital \(i\). Hybrid atomic orbitals (HAOs) are strictly localized on a prescribed atom or group of atoms, so coefficients of AOs outside that region remain zero. Overlap-enhanced orbitals (OEOs) can expand over the entire AO basis without this localization constraint.
 
-The redundant directions depend on both the orbital description and the chosen structure space. They include orbital scaling and admissible changes of inactive representatives. For a complete active-space expansion with full-AO orbitals, nonsingular changes of the active basis can also be compensated by changes of the structure coefficients. For a selected VB expansion, active--active mixing is retained unless it preserves the structure subspace.
+The simplest redundant variation is orbital scaling, \(\delta\phi_i=\epsilon\phi_i\), where \(\epsilon\) is an infinitesimal scalar. It changes the length of the coefficient vector but not the normalized orbital. Additional redundancies arise from changes of basis within the doubly occupied inactive space and from adding inactive components to active orbitals, provided these changes respect the localization constraints. For a complete active-space expansion with full-AO orbitals, changes of basis within the active space are also redundant because the structure coefficients can compensate them. This compensation is generally unavailable for a selected VB expansion; active--active mixing must then be retained unless it preserves the chosen structure space.
 
-To preserve strict localization, the redundant directions must themselves satisfy the orbital localization constraints. If \(\mathbf G_i\) collects candidate gauge generators for orbital \(i\), and \(\mathbf F_i\) extracts the AO components outside its prescribed region, admissible gauge combinations satisfy
+Strict localization determines which of these redundancies can actually be removed. Geometrically, the removable directions form the intersection of the redundant space and the space of orbital variations allowed by localization. A redundant direction that extends outside the allowed region cannot simply be truncated: its truncated part need not remain redundant. Instead, we seek linear combinations of redundant directions whose components outside that region cancel.
+
+Let \(\mathbf G_i\) contain the candidate redundant directions for orbital \(i\), and let \(\mathbf F_i\) extract the AO components outside its localization region. A combination specified by \(\mathbf t\) is admissible if
 \begin{equation}
  \mathbf F_i\mathbf G_i\mathbf t=\mathbf 0.
  \label{eq:supportgauge}
 \end{equation}
-Here \(\mathbf t\) gives a linear combination of gauge generators that vanishes on the forbidden AOs. The complement of these admissible generators defines a local quotient basis. Local metric conditioning of the quotient basis produces a lift \(\mathbf U_k\) from reduced coordinates \(\mathbf p\) to packed raw coefficients.
+Thus, the null space of \(\mathbf F_i\mathbf G_i\) identifies the combinations that are both redundant and consistent with localization. For an OEO there are no excluded AO components, so this restriction is absent. Within the allowed coefficient space, we construct a complement to the admissible redundant directions. Its basis, after local metric conditioning, defines the map \(\mathbf U_k\) from nonredundant coordinates to orbital-coefficient variations at iteration \(k\).
 
 The orbital update is written as
 \begin{equation}
@@ -121,7 +123,19 @@ The orbital update is written as
  \boldsymbol\theta(\mathbf p)=\mathcal P(\mathbf x_k+\mathbf U_k\mathbf p),
  \label{eq:update}
 \end{equation}
-where \(\mathbf x_k\) is the coefficient vector at accepted iteration \(k\), \(\mathbf p\) is the nonredundant orbital step, and \(\mathbf U_k\) maps that step to changes in the allowed AO coefficients. The preparation map \(\mathcal P\) includes orbital normalization and inactive-space projection used by the objective, together with admissible representative choices; \(\boldsymbol\theta\) denotes the resulting prepared orbital coefficients. The lift is held fixed within a local model and rebuilt after an accepted step.
+where \(\mathbf x_k\) collects the allowed AO coefficients at the current accepted point and \(\mathbf p\) is the nonredundant orbital step. Each column of \(\mathbf U_k\) specifies an independent allowed variation after redundant directions have been removed. The map \(\mathcal P\) normalizes the orbitals and applies the inactive-space projection and admissible representative choices used in evaluating the wave function; \(\boldsymbol\theta\) denotes the resulting orbital coefficients. The map \(\mathbf U_k\) is held fixed while solving the local optimization problem and rebuilt after an accepted step.
+
+\subsection{Coupled Response}
+
+The response derivation assumes that \(\mathbf M\) is positive definite on the working structure space and that the averaged states are separated from the remaining states by an energy gap. Degeneracies within the averaged manifold are allowed.
+
+For an orbital direction, let a dot denote the derivative at the current accepted point. Stationarity with respect to the structure coefficients gives
+\begin{equation}
+ \dot{\mathcal E}=\frac{1}{N_{\mathrm{state}}}\sum_{n=1}^{N_{\mathrm{state}}}
+ \mathbf C_n^T(\dot{\mathbf H}-E_n\dot{\mathbf M})\mathbf C_n.
+ \label{eq:gradient}
+\end{equation}
+Here \(\dot{\mathbf H}\) and \(\dot{\mathbf M}\) are the directional derivatives of the structure Hamiltonian and overlap matrices, and \(\dot{\mathcal E}\) is the corresponding energy derivative. Structure response first enters the second derivative.
 
 Normalization of a raw orbital gives
 \begin{equation}
@@ -135,30 +149,6 @@ Normalization of a raw orbital gives
  \label{eq:normalization}
 \end{equation}
 where \(\mathbf S\) is the AO overlap matrix, with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), \(\mathbf b\) is a raw orbital coefficient vector, \(\|\mathbf b\|_{\mathbf S}\) is its AO-metric norm, \(\bar{\mathbf b}\) is the normalized vector, \(\delta\mathbf b\) is a coefficient variation, \(D\) denotes a first differential, and \(\mathbf I\) is the identity matrix.
-
-The trust-region norm measures the physical orbital displacement. Let \(\mathcal L_k\) map a packed coefficient tangent to AO-metric-weighted horizontal orbital features. For individually meaningful active orbitals, these features are the differentials of normalized, inactive-projected orbital rays, weighted by \(\mathbf S^{1/2}\). For inactive orbitals, and for the active orbitals of a complete full-AO active space, horizontal subspace tangents replace individual-ray tangents; inverse Gram factors remove dependence on the chosen basis within each subspace. Variations of the inactive projector are included in the active features.
-
-On the nonredundant coordinates, the metric and its dual norm are
-\begin{equation}
- \mathbf G_o=\mathbf U_k^T\mathcal L_k^T\mathcal L_k\mathbf U_k,
- \qquad \|\mathbf p\|_{\mathbf G_o}^2=\mathbf p^T\mathbf G_o\mathbf p,
- \qquad \|\mathbf r_o\|_{\mathbf G_o^{-1}}^2
- =\mathbf r_o^T\mathbf G_o^{-1}\mathbf r_o,
- \label{eq:metric}
-\end{equation}
-where \(\mathbf G_o\) is the physical orbital metric and \(\mathbf r_o\) is an orbital gradient or stationarity residual. We assume \(\mathbf G_o\) is positive definite on the retained coordinates; its action is evaluated from the orbital features.
-
-\subsection{Coupled Response}
-
-The response derivation assumes that \(\mathbf M\) is positive definite on the working structure space and that the averaged states are separated from the remaining states by an energy gap. Degeneracies within the averaged manifold are allowed.
-
-For an orbital direction, let a dot denote the derivative at the current accepted point. Stationarity with respect to the structure coefficients gives
-\begin{equation}
- \dot{\mathcal E}=\frac{1}{N_{\mathrm{state}}}\sum_{n=1}^{N_{\mathrm{state}}}
- \mathbf C_n^T(\dot{\mathbf H}-E_n\dot{\mathbf M})\mathbf C_n.
- \label{eq:gradient}
-\end{equation}
-Here \(\dot{\mathbf H}\) and \(\dot{\mathbf M}\) are the directional derivatives of the structure Hamiltonian and overlap matrices, and \(\dot{\mathcal E}\) is the corresponding energy derivative. Structure response first enters the second derivative.
 
 Derivatives in the reduced coordinates follow from the orbital map in eq~\eqref{eq:update}. For a scalar function \(F\) of prepared orbitals, the second derivative is
 \begin{equation}
@@ -226,6 +216,18 @@ For a separated lowest-state manifold, \(\mathcal H^{ss}\) is positive definite 
 where \(\mathcal H_{\mathrm{rel}}[\mathbf p]\) is the relaxed orbital HVP, including structure-coefficient relaxation. The response map is evaluated by an iterative linear solve. Small structure gaps can make the relaxation contribution large even when the coupling action is small. A complete eigenvalue spectrum is not needed to evaluate eq~\eqref{eq:schur}; iterative actions on the admissible response space suffice.
 
 \subsection{Norm-Extended Optimization}
+
+The trust-region norm measures the physical orbital displacement. Let \(\mathcal L_k\) map a packed coefficient tangent to AO-metric-weighted horizontal orbital features. For individually meaningful active orbitals, these features are the differentials of normalized, inactive-projected orbital rays, weighted by \(\mathbf S^{1/2}\). For inactive orbitals, and for the active orbitals of a complete full-AO active space, horizontal subspace tangents replace individual-ray tangents; inverse Gram factors remove dependence on the chosen basis within each subspace. Variations of the inactive projector are included in the active features.
+
+On the nonredundant coordinates, the metric and its dual norm are
+\begin{equation}
+ \mathbf G_o=\mathbf U_k^T\mathcal L_k^T\mathcal L_k\mathbf U_k,
+ \qquad \|\mathbf p\|_{\mathbf G_o}^2=\mathbf p^T\mathbf G_o\mathbf p,
+ \qquad \|\mathbf r_o\|_{\mathbf G_o^{-1}}^2
+ =\mathbf r_o^T\mathbf G_o^{-1}\mathbf r_o,
+ \label{eq:metric}
+\end{equation}
+where \(\mathbf G_o\) is the physical orbital metric and \(\mathbf r_o\) is an orbital gradient or stationarity residual. We assume \(\mathbf G_o\) is positive definite on the retained coordinates; its action is evaluated from the orbital features.
 
 The coupled quadratic model is minimized within an orbital trust region:
 \begin{equation}
