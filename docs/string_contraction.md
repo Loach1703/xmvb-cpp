@@ -2,25 +2,87 @@
 
 算法说明 · 审阅稿 · 2026-10-07
 
-## 1. 结构矩阵元的计算
+## 1. XMVB 中结构矩阵元的计算
 
-VB 结构由成键模式和自旋耦合定义。一个结构通常包含许多完整行列式展开项；不同结构的展开项，又大量复用相同的单自旋占据串。
+VBSCF 将波函数写成所选价键结构的线性组合。轨道固定后，需要计算结构之间的 Hamiltonian 与重叠矩阵元：
 
-传统实现先计算单自旋核，再组合完整行列式对的矩阵元，最后根据展开系数累加到结构矩阵。不同结构共享同一展开项时，还需要查询该项的结构归属，分别累加。
+$$
+H_{IJ}=\langle\Phi_I|\hat H|\Phi_J\rangle,
+\qquad
+S_{IJ}=\langle\Phi_I|\Phi_J\rangle.
+$$
 
-本文将展开系数写成 spin-string 系数块，把上述求和重排为矩阵收缩。固定轨道、积分和结构列表后，两种计算给出相同的结构 H/S；区别在于求和顺序和中间量。
+XMVB4.0 的普通 RDM–VBSCF 路径通过结构的行列式展开完成这一计算。下面依次说明展开关系、单自旋核及结构累加；图 1 给出它们在程序中的联系。
 
-```mermaid
-flowchart LR
-    K[共享的单自旋算子核]
-    K --> O[旧路径：组合完整行列式对标量]
-    O --> P[按归属与展开符号散射]
-    P --> S[VB structure 矩阵或向量]
-    K --> N[新路径：与结构系数块直接收缩]
-    N --> S
-```
+### 1.1 从结构展开到项对求和
 
-XMVB4.0 的普通 RDM–VBSCF 已复用 unique-spin-string 核，也没有保存完整的行列式 H/S 数值矩阵。下文的比较针对核之后的 pair 组合与结构散射，而不是单自旋核的计算。
+一个结构可写成
+
+$$
+|\Phi_I\rangle=\sum_{\mu\in\mathcal{D}_I}d_{\mu I}|D_\mu\rangle.
+$$
+
+这里 $\mathcal{D}_I$ 是结构 $I$ 的展开项集合，$d_{\mu I}$ 包含自旋耦合与费米重排产生的系数，取实数。它由结构定义确定，不是待优化的结构系数。
+
+令 $H_{\mu\nu}$、$S_{\mu\nu}$ 表示完整行列式之间的矩阵元，则
+
+$$
+H_{IJ}=\sum_{\mu\in\mathcal{D}_I}\sum_{\nu\in\mathcal{D}_J}
+d_{\mu I}\,H_{\mu\nu}\,d_{\nu J},
+$$
+
+$$
+S_{IJ}=\sum_{\mu\in\mathcal{D}_I}\sum_{\nu\in\mathcal{D}_J}
+d_{\mu I}\,S_{\mu\nu}\,d_{\nu J}.
+$$
+
+因此，计算一个结构对，涉及两侧展开项的两两组合。例如，两对不相交 singlet 构成的结构包含 4 个展开项；其自矩阵元的直接表达式有 $4\times4=16$ 个有序项对。每个项对贡献一个 H/S 标量，再乘展开系数累加。对称性可减少实际处理的项对数量。
+
+### 1.2 从 unique-spin-string 核组合完整项对
+
+每个完整行列式由一条 α 占据串和一条 β 占据串组成：
+
+$$
+|D_\mu\rangle=|a_\alpha b_\beta\rangle,
+\qquad
+|D_\nu\rangle=|a'_\alpha b'_\beta\rangle.
+$$
+
+不同展开项可能共享同一条 α 或 β 串。XMVB 将这些串去重，并先计算单自旋串对的重叠核 $S^\sigma$、一电子及同自旋双电子能量核 $H^\sigma$，以及 opposite-spin 收缩所需的跃迁密度。
+
+完整项对的重叠由两个单自旋重叠相乘得到：
+
+$$
+S_{\mu\nu}=S^\alpha_{aa'}S^\beta_{bb'}.
+$$
+
+电子 Hamiltonian 的项对矩阵元则由三个部分组成：
+
+$$
+H^{\mathrm{el}}_{\mu\nu}
+=H^\alpha_{aa'}S^\beta_{bb'}
++S^\alpha_{aa'}H^\beta_{bb'}
++W^{\alpha\beta}_{aa',bb'}.
+$$
+
+前两项分别对应 α、β 自旋内的电子能量；另一自旋贡献重叠因子。$W^{\alpha\beta}$ 是两种自旋之间的双电子贡献，由两侧单自旋跃迁密度与电子积分收缩得到。核排斥能以 $E_{\mathrm{nuc}}S_{\mu\nu}$ 加入总 Hamiltonian。
+
+### 1.3 将项对贡献累加到所属结构
+
+一个展开项可能属于多个 VB 结构。XMVB 为每个完整项记录所属结构及展开系数；得到项对 $(\mu,\nu)$ 的 H/S 后，遍历两项各自的结构归属，将贡献累加到相应的 $H_{IJ}$、$S_{IJ}$：
+
+$$
+H_{IJ}\leftarrow H_{IJ}+d_{\mu I}d_{\nu J}H_{\mu\nu},
+\qquad
+S_{IJ}\leftarrow S_{IJ}+d_{\mu I}d_{\nu J}S_{\mu\nu}.
+$$
+
+<figure>
+<img src="figures/xmvb_contraction.svg" alt="XMVB 的结构展开、共享单自旋核、完整项对组合和结构累加" />
+<figcaption>图 1　XMVB4.0 普通 RDM–VBSCF 的收缩路径。单自旋核由不同展开项共享；完整项对的 H/S 标量计算后，依结构归属和展开系数累加。图中省略了对称性、连接筛选及并行细节。</figcaption>
+</figure>
+
+在官方代码中，这三步分别对应 `Hamhd`（单自旋核）、`Hov1`（完整项对组合）和 `Hovstr1`（结构累加）。程序不需要保存完整的行列式 H/S 数值矩阵，但仍显式形成完整项对的标量，并通过结构归属表累加。下文将从这组求和式出发，讨论如何把项对组合与结构累加合并为直接的 spin-string 收缩。
 
 ## 2. 三个层级
 

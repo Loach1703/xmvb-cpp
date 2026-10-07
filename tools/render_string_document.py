@@ -72,6 +72,9 @@ pre {
 .flow { padding: 10pt 12pt; margin: 10pt 0 14pt; background: #f5f5f5;
         font-size: 11pt; break-inside: avoid; }
 .flow p { margin: 0.25em 0; }
+figure { margin: 14pt 0 16pt; break-inside: avoid; }
+figure img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+figcaption { font-size: 10.5pt; line-height: 1.5; margin-top: 8pt; }
 """
 
 
