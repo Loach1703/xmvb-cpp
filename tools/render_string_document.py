@@ -1,65 +1,85 @@
 #!/usr/bin/env python3
-"""Render the continuous string-contraction document as an A4 PDF.
+"""Typeset the Markdown review as A4 with native CJK line breaking.
 
-uv run --python /usr/bin/python3 --with matplotlib --with reportlab \
-    --with svglib tools/render_string_document.py
+uv run --python /usr/bin/python3 --with matplotlib --with markdown \
+    --with weasyprint tools/render_string_document.py
+
+Requires Times New Roman, Noto Serif CJK SC (Song), Noto Sans CJK SC (Hei).
+Missing fonts are errors, not silently substituted.
 """
 
+import base64
 import html
 import io
 import re
-import tempfile
+import subprocess
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from matplotlib import mathtext
 from matplotlib.font_manager import FontProperties
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.graphics.shapes import Drawing, Line
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether,
-)
-from svglib.svglib import svg2rlg
+import markdown
+from weasyprint import HTML
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "docs/string_contraction.md"
 OUTPUT = ROOT / "docs/string_contraction_document.pdf"
-WIDTH = A4[0] - 100
-INK = colors.HexColor("#243443")
-BLUE = colors.HexColor("#245a80")
-pdfmetrics.registerFont(TTFont("Latin", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
-pdfmetrics.registerFont(TTFont("CJK", "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"))
-STYLES = {
-    "body": ParagraphStyle("body", fontName="Latin", fontSize=10.5,
-                           leading=18, textColor=INK, spaceAfter=9),
-    "title": ParagraphStyle("title", fontName="Latin", fontSize=23,
-                            leading=33, textColor=BLUE, spaceAfter=18),
-    "h2": ParagraphStyle("h2", fontName="Latin", fontSize=15,
-                         leading=23, textColor=BLUE, spaceBefore=18,
-                         spaceAfter=9, keepWithNext=True),
-    "h3": ParagraphStyle("h3", fontName="Latin", fontSize=12,
-                         leading=20, textColor=BLUE, spaceBefore=12,
-                         spaceAfter=7, keepWithNext=True),
-    "table": ParagraphStyle("table", fontName="Latin", fontSize=9,
-                            leading=15, textColor=INK),
-    "code": ParagraphStyle("code", fontName="Latin", fontSize=9,
-                           leading=15, textColor=INK),
-}
 matplotlib.rcParams["mathtext.fontset"] = "stix"
 
+CSS = """
+@page {
+    size: A4; margin: 22mm 22mm 20mm;
+    @bottom-center {
+        content: counter(page);
+        font-family: "Times New Roman"; font-size: 9pt; color: black;
+    }
+}
+html { font-family: "Times New Roman", "Noto Serif CJK SC"; }
+body { font-size: 12pt; line-height: 1.65; color: black; }
+p { margin: 0 0 0.8em; orphans: 2; widows: 2; }
+h1, h2, h3 {
+    font-family: "Noto Sans CJK SC", sans-serif;
+    font-weight: 700; color: black; line-height: 1.4; break-after: avoid;
+}
+h1 { font-size: 22pt; margin: 0 0 16pt; }
+h2 { font-size: 16pt; margin: 19pt 0 10pt; }
+h3 { font-size: 14pt; margin: 14pt 0 8pt; }
+p, td, th { word-break: normal; overflow-wrap: normal; hyphens: none; }
+table { width: 100%; border-collapse: collapse; margin: 10pt 0 14pt; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th, td {
+    border-bottom: 0.5pt solid #ccc; padding: 6pt 7pt;
+    text-align: left; vertical-align: top; font-weight: normal;
+}
+th { background: #f1f1f1; }
+a { color: black; text-decoration: none; }
+code { font-family: "Times New Roman", "Noto Serif CJK SC"; }
+pre {
+    font-family: "Times New Roman", "Noto Serif CJK SC";
+    font-size: 10.5pt; line-height: 1.5; white-space: pre-wrap;
+    padding: 10pt; background: #f5f5f5; break-inside: avoid;
+}
+.math-inline { vertical-align: -0.15em; max-width: 100%; }
+.equation {
+    text-align: center; margin: 12pt 0 15pt;
+    break-inside: avoid; break-before: avoid;
+}
+.equation img { max-width: 100%; height: auto; }
+.flow { padding: 10pt 12pt; margin: 10pt 0 14pt; background: #f5f5f5;
+        font-size: 11pt; break-inside: avoid; }
+.flow p { margin: 0.25em 0; }
+"""
 
-def plain(value):
-    """Use the CJK font only for CJK characters; preserve Latin coverage."""
-    return re.sub(r"[\u2e80-\ua4cf\uff00-\uffef]+",
-                  lambda m: '<font name="CJK">' + m[0] + '</font>',
-                  html.escape(value))
+
+def require_font(family):
+    actual = subprocess.check_output(
+        ["fc-match", family, "-f", "%{family}"], text=True).strip()
+    if family not in actual.split(","):
+        raise RuntimeError(f"Required font {family!r} missing (matched {actual!r})")
 
 
 def math_source(value):
@@ -67,164 +87,94 @@ def math_source(value):
     return value.replace(r"\boxed", "").strip()
 
 
-def main():
-    story = []
-    with tempfile.TemporaryDirectory(prefix="string-document-") as workspace:
-        inline_id = 0
+def matrix_svg(prefix, body):
+    """Render matrix glyphs and brackets as vectors."""
+    rows = [row.strip().split("&") for row in body.strip().split(r"\\")]
+    height, width = len(rows)*23+10, len(rows[0])*35+65
+    fig = plt.figure(figsize=(width/72, height/72))
+    ax = fig.add_axes([0, 0, 1, 1], xlim=(0, width), ylim=(0, height))
+    ax.axis("off")
+    ax.text(0, height/2, "$"+math_source(prefix)+"$", fontsize=13, va="center")
+    left, right = 43, width-3
+    for r, row in enumerate(rows):
+        for c, cell in enumerate(row):
+            ax.text(left+18+c*35, height-17-r*23, "$"+cell.strip()+"$",
+                    fontsize=13, ha="center", va="center")
+    for x, direction in ((left, 1), (right, -1)):
+        ax.plot([x+direction*5, x, x, x+direction*5],
+                [height-3, height-3, 3, 3], color="black", lw=.8)
+    stream = io.BytesIO()
+    fig.savefig(stream, format="svg", transparent=True)
+    plt.close(fig)
+    return stream.getvalue(), width, height
 
-        def inline(value, size=10.5):
-            nonlocal inline_id
-            value = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", value)
-            parts = re.split(r"(\$[^$]+\$|`[^`]+`)", value)
-            output = []
-            for part in parts:
-                if part.startswith("$") and part.endswith("$"):
-                    inline_id += 1
-                    path = Path(workspace) / f"math-{inline_id}.png"
-                    mathtext.math_to_image("$"+math_source(part[1:-1])+"$", path, dpi=200,
-                                          prop=FontProperties(size=size), format="png")
-                    from PIL import Image
-                    with Image.open(path) as bitmap:
-                        w, h = bitmap.size
-                    output.append(f'<img src="{path}" width="{w*72/200:.2f}" '
-                                  f'height="{h*72/200:.2f}" valign="middle"/>')
-                elif part.startswith("`"):
-                    output.append('<font color="#245a80">' + plain(part[1:-1]) + '</font>')
-                else:
-                    output.append(plain(part.replace("**", "")))
-            return "".join(output)
 
-        def para(value, kind="body"):
-            return Paragraph(inline(value, STYLES[kind].fontSize), STYLES[kind])
+def formula(value, display):
+    value = value.strip()
+    matrix = re.search(r"(.*?)\\begin\{pmatrix\}(.*?)\\end\{pmatrix\}", value, re.S)
+    if matrix:
+        svg, width, height = matrix_svg(*matrix.groups())
+    else:
+        value = "$"+math_source(value.replace("\n", " "))+"$"
+        prop = FontProperties(size=13 if display else 12)
+        width, height, *_ = mathtext.MathTextParser("path").parse(value, prop=prop)
+        stream = io.BytesIO()
+        mathtext.math_to_image(value, stream, prop=prop, format="svg")
+        svg = stream.getvalue()
+    data = base64.b64encode(svg).decode("ascii")
+    tag = (f'<img class="{"math-display" if display else "math-inline"}" '
+           f'width="{width*96/72:.2f}" height="{height*96/72:.2f}" '
+           f'src="data:image/svg+xml;base64,{data}"/>')
+    return f'<div class="equation">{tag}</div>' if display else tag
 
-        def equation(value):
-            matrix = re.search(r"(.*?)\\begin\{pmatrix\}(.*?)\\end\{pmatrix\}(.*)",
-                               value, re.S)
-            if matrix:
-                prefix, body, suffix = matrix.groups()
-                rows = [[cell.strip() for cell in row.split("&")]
-                        for row in body.strip().split(r"\\")]
-                height, matrix_width = len(rows)*23, len(rows[0])*38
-                label = svg_math(prefix.strip())
-                offset = label.width + 14
-                drawing = Drawing(offset+matrix_width+12, height+8)
-                label.translate(0, height/2-label.height/2)
-                drawing.add(label)
-                for r, row in enumerate(rows):
-                    for c, cell in enumerate(row):
-                        glyph = svg_math(cell)
-                        glyph.translate(offset+10+c*38, height-(r+1)*23+5)
-                        drawing.add(glyph)
-                for x, direction in ((offset, 1), (offset+matrix_width+4, -1)):
-                    drawing.add(Line(x, 2, x, height+2))
-                    drawing.add(Line(x, 2, x+direction*6, 2))
-                    drawing.add(Line(x, height+2, x+direction*6, height+2))
-                drawing.hAlign = "CENTER"
-                append_equation(drawing)
-                return
 
-            drawing = svg_math(value.replace("\n", " "))
-            scale = min(1, WIDTH / drawing.width)
-            drawing.scale(scale, scale)
-            drawing.width *= scale
-            drawing.height *= scale
-            drawing.hAlign = "CENTER"
-            append_equation(drawing)
+def render_html():
+    source, fragments = SOURCE.read_text(), {}
 
-        def svg_math(value):
-            stream = io.BytesIO()
-            mathtext.math_to_image("$" + math_source(value) + "$",
-                                  stream, prop=FontProperties(size=13), format="svg")
-            stream.seek(0)
-            return svg2rlg(stream)
+    def protect(value):
+        key = f"XMVBFRAGMENT{len(fragments)}END"
+        fragments[key] = value
+        return key
 
-        def append_equation(drawing):
-            block = [Spacer(1, 6), drawing, Spacer(1, 12)]
-            if story and isinstance(story[-1], Paragraph):
-                block.insert(0, story.pop())
-            story.append(KeepTogether(block))
-
-        def add_table(rows, widths=None, header=True):
-            table = Table(rows, colWidths=widths or [WIDTH / len(rows[0])] * len(rows[0]),
-                          repeatRows=1 if header else 0, hAlign="LEFT")
-            rules = [("VALIGN", (0, 0), (-1, -1), "TOP"),
-                     ("LEFTPADDING", (0, 0), (-1, -1), 7),
-                     ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-                     ("TOPPADDING", (0, 0), (-1, -1), 6),
-                     ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                     ("LINEBELOW", (0, 0), (-1, -1), .3, colors.HexColor("#dce3e9"))]
-            if header:
-                rules.append(("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eaf0f5")))
-            table.setStyle(TableStyle(rules))
-            story.extend([table, Spacer(1, 12)])
-
-        lines = SOURCE.read_text().splitlines()
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            i += 1
-            if not line:
-                continue
-            if line == "$$":
-                block = []
-                while i < len(lines) and lines[i].strip() != "$$":
-                    block.append(lines[i])
-                    i += 1
-                i += 1
-                equation("\n".join(block))
-            elif line.startswith("```"):
-                block = []
-                while i < len(lines) and not lines[i].startswith("```"):
-                    block.append(lines[i])
-                    i += 1
-                i += 1
-                if "mermaid" in line:
-                    diagram = ("共享单自旋核 → pair 组合 → 结构散射\n"
-                               "共享单自旋核 → 系数块收缩 → 结构矩阵／向量") if any(
-                                   "旧路径" in v for v in block) else (
-                               "结构向量 → string 系数 → 核作用 → image → 结构投影")
-                    cells = [[para(row, "code")] for row in diagram.splitlines()]
-                else:
-                    cells = [[Paragraph(plain(row).replace(" ", "&#160;"), STYLES["code"])]
-                             for row in block]
-                panel = Table(cells, colWidths=[WIDTH])
-                panel.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f3f6f8")),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 12),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
-                story.extend([KeepTogether(panel), Spacer(1, 12)])
-            elif line.startswith("|"):
-                rows = [line]
-                while i < len(lines) and lines[i].strip().startswith("|"):
-                    rows.append(lines[i].strip())
-                    i += 1
-                cells = [[para(v.strip(), "table") for v in row.strip("|").split("|")]
-                         for row in rows if not re.match(r"^\|[\s:|\-]+\|$", row)]
-                add_table(cells)
-            elif line.startswith("#"):
-                count = len(line) - len(line.lstrip("#"))
-                story.append(para(line[count:].strip(), {1: "title", 2: "h2"}.get(count, "h3")))
+    def code_block(match):
+        language, content = match.groups()
+        if language.strip() == "mermaid":
+            if "旧路径" in content:
+                flow = ("旧路径：共享单自旋核 → pair 组合 → 结构散射",
+                        "新路径：共享单自旋核 → 系数块收缩 → 结构矩阵／向量")
             else:
-                block = [line.removeprefix("> ")]
-                while i < len(lines) and lines[i].strip() and not lines[i].startswith(
-                        ("#", "|", "```", "$$")):
-                    block.append(lines[i].strip().removeprefix("> "))
-                    i += 1
-                story.append(para(" ".join(block)))
+                flow = ("结构向量 → string 系数 → 核作用 → image → 结构投影",)
+            block = '<div class="flow">'+"".join(f"<p>{row}</p>" for row in flow)+"</div>"
+        else:
+            block = "<pre>"+html.escape(content.rstrip())+"</pre>"
+        return "\n\n"+protect(block)+"\n\n"
 
-        def footer(canvas, doc):
-            canvas.setFont("Latin", 8)
-            canvas.setFillColor(colors.HexColor("#758491"))
-            canvas.drawString(50, 28, "XMVB-CPP | String-to-structure contraction | Review draft")
-            canvas.drawRightString(A4[0]-50, 28, str(doc.page))
+    source = re.sub(r"```([^\n]*)\n(.*?)```", code_block, source, flags=re.S)
+    source = re.sub(r"\$\$(.*?)\$\$", lambda m: "\n\n"+protect(
+        formula(m[1], True))+"\n\n", source, flags=re.S)
+    source = re.sub(r"\$([^$\n]+)\$", lambda m: protect(formula(m[1], False)), source)
+    body = markdown.markdown(source, extensions=["tables"])
+    for key, value in fragments.items():
+        body = body.replace(f"<p>{key}</p>", value).replace(key, value)
+    return ('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+            '<title>Unique-spin-string 直接结构收缩</title>'
+            f'<style>{CSS}</style></head><body>{body}</body></html>')
 
-        doc = SimpleDocTemplate(str(OUTPUT), pagesize=A4, rightMargin=50,
-                                leftMargin=50, topMargin=48, bottomMargin=48,
-                                title="Unique-spin-string to VB structure contraction",
-                                author="xmvb-cpp project")
-        doc.build(story, onFirstPage=footer, onLaterPages=footer)
-    print(OUTPUT)
+
+def main():
+    for family in ("Times New Roman", "Noto Serif CJK SC", "Noto Sans CJK SC"):
+        require_font(family)
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    document = HTML(string=render_html(), base_url=str(SOURCE.parent)).render()
+    # Regression for the premature Latin/CJK fragment break in the old PDF.
+    if "spin-string 系数块" in SOURCE.read_text():
+        lines = ["".join(getattr(child, "text", "") for child in box.descendants())
+                 for page in document.pages for box in page._page_box.descendants()
+                 if type(box).__name__ == "LineBox"]
+        if not any("spin-string 系数块" in line for line in lines):
+            raise RuntimeError("Latin/CJK line-break regression: spin-string 系数块")
+    document.write_pdf(OUTPUT)
+    print(f"{OUTPUT} ({len(document.pages)} pages)")
 
 
 if __name__ == "__main__":
