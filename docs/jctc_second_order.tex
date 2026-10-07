@@ -78,20 +78,14 @@ The valence bond (VB) wave function is written as
  |\Psi(\mathbf C,\mathbf x)\rangle=\sum_I C_I|\Phi_I(\mathbf x)\rangle ,
  \label{eq:ansatz}
 \end{equation}
-where \(|\Phi_I\rangle\) is a spin-adapted VB structure, \(\mathbf C\) contains the structure coefficients \(C_I\), and \(\mathbf x\) collects the allowed atomic orbital (AO) coefficients. The sum runs over the chosen structures. The Hamiltonian and overlap matrix elements are
-\begin{equation}
- H_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\hat H|\Phi_J(\mathbf x)\rangle,
- \qquad M_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\Phi_J(\mathbf x)\rangle,
- \label{eq:matrixelements}
-\end{equation}
-where \(\hat H\) is the electronic Hamiltonian. Nuclear repulsion is constant at a fixed geometry and is omitted below.
+where \(|\Phi_I\rangle\) is the \(I\)th spin-adapted VB structure, \(\mathbf C\) is the vector of structure coefficients \(C_I\), and \(\mathbf x\) collects the allowed atomic orbital (AO) coefficients. The sum runs over the chosen structures.
 
 For fixed orbitals, the structure-coefficient vector \(\mathbf C_n\) of electronic state \(n\) is obtained from the generalized eigenvalue problem
 \begin{equation}
  \mathbf H\mathbf C_n=E_n\mathbf M\mathbf C_n,
  \label{eq:eigenproblem}
 \end{equation}
-where \(E_n\) is the energy of state \(n\). The \(I\)th component of \(\mathbf C_n\), \(C_{In}\), is the coefficient of the \(I\)th VB structure in state \(n\).
+where \(\mathbf H\) and \(\mathbf M\) are the electronic Hamiltonian and overlap matrices in the VB structure basis, respectively, and \(E_n\) is the electronic energy of state \(n\). The \(I\)th component of \(\mathbf C_n\), \(C_{In}\), is the coefficient of the \(I\)th VB structure in state \(n\).
 
 In equal-weight state-averaged valence bond self-consistent field (VBSCF) calculations, the orbital objective is
 \begin{equation}
@@ -99,7 +93,7 @@ In equal-weight state-averaged valence bond self-consistent field (VBSCF) calcul
  \sum_{n=1}^{N_{\mathrm{state}}}E_n(\mathbf x),
  \label{eq:stateaverage}
 \end{equation}
-where \(N_{\mathrm{state}}\) is the number of lowest-energy states included in the average. The choice \(N_{\mathrm{state}}=1\) recovers ground-state VBSCF. Orbital optimization minimizes this structure-relaxed energy with respect to \(\mathbf x\).
+where \(N_{\mathrm{state}}\) is the number of lowest-energy states included in the average. Orbital optimization minimizes \(\mathcal E(\mathbf x)\) with the structure coefficients optimized at each orbital point. The choice \(N_{\mathrm{state}}=1\) recovers ground-state VBSCF.
 
 \subsection{Orbital Parameterization}
 
