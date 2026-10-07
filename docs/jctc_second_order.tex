@@ -75,10 +75,10 @@ Throughout this section, \(I,J\) label VB structures, \(\mu,\nu\) label AO basis
 
 The valence bond (VB) wave function is written as
 \begin{equation}
- |\Psi(\mathbf c,\mathbf x)\rangle=\sum_I C_I|\Phi_I(\mathbf x)\rangle ,
+ |\Psi(\mathbf C,\mathbf x)\rangle=\sum_I C_I|\Phi_I(\mathbf x)\rangle ,
  \label{eq:ansatz}
 \end{equation}
-where \(|\Phi_I\rangle\) is a spin-adapted VB structure, \(\mathbf c\) contains the structure coefficients \(C_I\), and \(\mathbf x\) collects the allowed atomic orbital (AO) coefficients. The sum runs over the chosen structures. The Hamiltonian and overlap matrix elements are
+where \(|\Phi_I\rangle\) is a spin-adapted VB structure, \(\mathbf C\) contains the structure coefficients \(C_I\), and \(\mathbf x\) collects the allowed atomic orbital (AO) coefficients. The sum runs over the chosen structures. The Hamiltonian and overlap matrix elements are
 \begin{equation}
  H_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\hat H|\Phi_J(\mathbf x)\rangle,
  \qquad M_{IJ}(\mathbf x)=\langle\Phi_I(\mathbf x)|\Phi_J(\mathbf x)\rangle,
@@ -86,12 +86,12 @@ where \(|\Phi_I\rangle\) is a spin-adapted VB structure, \(\mathbf c\) contains 
 \end{equation}
 where \(\hat H\) is the electronic Hamiltonian. The AO overlap matrix is denoted by \(\mathbf S\), with elements \(S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle\), where \(\chi_\mu\) is an AO basis function. Nuclear repulsion is constant at a fixed geometry and is omitted below.
 
-For fixed orbitals, the structure-coefficient vector \(\mathbf c_n\) of electronic state \(n\) is obtained from the generalized eigenvalue problem
+For fixed orbitals, the structure-coefficient vector \(\mathbf C_n\) of electronic state \(n\) is obtained from the generalized eigenvalue problem
 \begin{equation}
- \mathbf H\mathbf c_n=E_n\mathbf M\mathbf c_n,
+ \mathbf H\mathbf C_n=E_n\mathbf M\mathbf C_n,
  \label{eq:eigenproblem}
 \end{equation}
-where \(E_n\) is the energy of state \(n\) and \(\mathbf c_n\) contains the coefficients \(C_{In}\).
+where \(E_n\) is the energy of state \(n\) and \(\mathbf C_n\) contains the coefficients \(C_{In}\).
 
 In equal-weight state-averaged valence bond self-consistent field (VBSCF) calculations, the orbital objective is
 \begin{equation}
@@ -159,7 +159,7 @@ The response derivation assumes that \(\mathbf M\) is positive definite on the w
 For an orbital direction, let a dot denote the derivative at the current accepted point. Stationarity with respect to the structure coefficients gives
 \begin{equation}
  \dot{\mathcal E}=\frac{1}{N_{\mathrm{state}}}\sum_{n=1}^{N_{\mathrm{state}}}
- \mathbf c_n^T(\dot{\mathbf H}-E_n\dot{\mathbf M})\mathbf c_n.
+ \mathbf C_n^T(\dot{\mathbf H}-E_n\dot{\mathbf M})\mathbf C_n.
  \label{eq:gradient}
 \end{equation}
 Here \(\dot{\mathbf H}\) and \(\dot{\mathbf M}\) are the directional derivatives of the structure Hamiltonian and overlap matrices, and \(\dot{\mathcal E}\) is the corresponding energy derivative. Structure response first enters the second derivative.
@@ -173,37 +173,37 @@ Derivatives in the reduced coordinates follow from the orbital map in eq~\eqref{
 \end{equation}
 where \(D\) and \(D^2\) denote first and second differentials, \(\mathbf u\) and \(\mathbf v\) are reduced orbital directions, and all differentials are evaluated at \(\mathbf p=0\). The preparation-map contribution is included in the orbital curvature action.
 
-Collect the selected eigenvectors in \(\mathbf C=(\mathbf c_1,\ldots,\mathbf c_{N_{\mathrm{state}}})\). Differentiation of \(\mathbf C^T\mathbf M\mathbf C=\mathbf I\) fixes the symmetric selected-space component of their response. We choose the internal gauge
+Collect the selected eigenvectors in \(\mathbf C_{\mathrm{sel}}=(\mathbf C_1,\ldots,\mathbf C_{N_{\mathrm{state}}})\). Differentiation of \(\mathbf C_{\mathrm{sel}}^T\mathbf M\mathbf C_{\mathrm{sel}}=\mathbf I\) fixes the symmetric selected-space component of their response. We choose the internal gauge
 \begin{equation}
- \dot{\mathbf C}_g=-\tfrac12\mathbf C
- (\mathbf C^T\dot{\mathbf M}\mathbf C),\qquad
- \dot{\mathbf c}_n=\dot{\mathbf c}_{g,n}+\frac{\mathbf Z\mathbf q_n}{d_n},
+ \dot{\mathbf C}_{\mathrm{sel},g}=-\tfrac12\mathbf C_{\mathrm{sel}}
+ (\mathbf C_{\mathrm{sel}}^T\dot{\mathbf M}\mathbf C_{\mathrm{sel}}),\qquad
+ \dot{\mathbf C}_n=\dot{\mathbf C}_{g,n}+\frac{\mathbf Z\mathbf q_n}{d_n},
  \quad d_n=\sqrt{2/N_{\mathrm{state}}}.
  \label{eq:structurechart}
 \end{equation}
-Here \(\dot{\mathbf C}_g\) is the selected-space response required by normalization, \(\dot{\mathbf c}_{g,n}\) is its column for state \(n\), and \(\mathbf q_n\) contains the independent response coordinates for that state. The factor \(d_n\) accounts for the equal state weight. The matrix \(\mathbf Z\) spans the complement of the selected states and satisfies \(\mathbf C^T\mathbf M\mathbf Z=0\) and \(\mathbf Z^T\mathbf Z=\mathbf I\). Rotations within the selected equally weighted eigenspace leave the averaged energy unchanged and are excluded from the combined response vector \(\mathbf q=(\mathbf q_1^T,\ldots,\mathbf q_{N_{\mathrm{state}}}^T)^T\).
+Here \(\dot{\mathbf C}_{\mathrm{sel},g}\) is the selected-space response required by normalization, \(\dot{\mathbf C}_{g,n}\) is its column for state \(n\), and \(\mathbf q_n\) contains the independent response coordinates for that state. The factor \(d_n\) accounts for the equal state weight. The matrix \(\mathbf Z\) spans the complement of the selected states and satisfies \(\mathbf C_{\mathrm{sel}}^T\mathbf M\mathbf Z=0\) and \(\mathbf Z^T\mathbf Z=\mathbf I\). Rotations within the selected equally weighted eigenspace leave the averaged energy unchanged and are excluded from the combined response vector \(\mathbf q=(\mathbf q_1^T,\ldots,\mathbf q_{N_{\mathrm{state}}}^T)^T\).
 
 Writing \(\dot{\mathbf H}[\mathbf p]\) and \(\dot{\mathbf M}[\mathbf p]\) for orbital directional derivatives, differentiation of the generalized eigenproblem and projection with \(\mathbf Z^T\) give
 \begin{equation}
  \begin{aligned}
  (\mathcal H^{ss}[\mathbf q])_n&=\mathbf Z^T(\mathbf H-E_n\mathbf M)\mathbf Z\mathbf q_n,\\
  (\mathcal H^{so}[\mathbf p])_n&=d_n\mathbf Z^T\big[
- (\dot{\mathbf H}[\mathbf p]-E_n\dot{\mathbf M}[\mathbf p])\mathbf c_n
- +(\mathbf H-E_n\mathbf M)\dot{\mathbf c}_{g,n}[\mathbf p]\big],
+ (\dot{\mathbf H}[\mathbf p]-E_n\dot{\mathbf M}[\mathbf p])\mathbf C_n
+ +(\mathbf H-E_n\mathbf M)\dot{\mathbf C}_{g,n}[\mathbf p]\big],
  \end{aligned}
  \label{eq:coupling}
 \end{equation}
-where \(\mathcal H^{ss}\) is the structure curvature operator and \(\mathcal H^{so}\) maps an orbital direction to a structure-response forcing. The subscript \(n\) extracts the response for state \(n\). The first action is evaluated through Hamiltonian and overlap actions on \(\mathbf Z\mathbf q_n\). The derivative of the eigenvalue drops out because \(\mathbf Z^T\mathbf M\mathbf c_n=0\). The factors \(d_n\) absorb the state weights and the factor of two in the real-wave-function coefficient Hessian. The gauge term in eq~\eqref{eq:coupling} is essential for a moving nonorthogonal structure metric.
+where \(\mathcal H^{ss}\) is the structure curvature operator and \(\mathcal H^{so}\) maps an orbital direction to a structure-response forcing. The subscript \(n\) extracts the response for state \(n\). The first action is evaluated through Hamiltonian and overlap actions on \(\mathbf Z\mathbf q_n\). The derivative of the eigenvalue drops out because \(\mathbf Z^T\mathbf M\mathbf C_n=0\). The factors \(d_n\) absorb the state weights and the factor of two in the real-wave-function coefficient Hessian. The gauge term in eq~\eqref{eq:coupling} is essential for a moving nonorthogonal structure metric.
 
 Let \(\mathcal H^{oo}[\mathbf v]\) denote the orbital Hessian--vector product (HVP) after enforcing this selected-space normalization gauge and the orbital-map pullback, but before eliminating horizontal structure response. To define its bilinear form, introduce \(\mathbf K_n=\mathbf H-E_n\mathbf M\), \(\mathbf K_{n,u}=D\mathbf H[\mathbf u]-E_nD\mathbf M[\mathbf u]\), and \(\mathbf K_{n,uv}=D^2\mathbf H[\mathbf u,\mathbf v]-E_nD^2\mathbf M[\mathbf u,\mathbf v]\), with \(E_n\) held at its accepted-point value in these definitions. The second variation of the normalization-constrained energy gives
 \begin{equation}
  \begin{aligned}
  \mathbf u^T\mathcal H^{oo}[\mathbf v]=\frac{1}{N_{\mathrm{state}}}\sum_n\big\{&
- \mathbf c_n^T\mathbf K_{n,uv}\mathbf c_n
- +2\dot{\mathbf c}_{g,n}[\mathbf u]^T\mathbf K_{n,v}\mathbf c_n\\
- &+2\dot{\mathbf c}_{g,n}[\mathbf v]^T\mathbf K_{n,u}\mathbf c_n
- +2\dot{\mathbf c}_{g,n}[\mathbf u]^T\mathbf K_n
-       \dot{\mathbf c}_{g,n}[\mathbf v]\big\}.
+ \mathbf C_n^T\mathbf K_{n,uv}\mathbf C_n
+ +2\dot{\mathbf C}_{g,n}[\mathbf u]^T\mathbf K_{n,v}\mathbf C_n\\
+ &+2\dot{\mathbf C}_{g,n}[\mathbf v]^T\mathbf K_{n,u}\mathbf C_n
+ +2\dot{\mathbf C}_{g,n}[\mathbf u]^T\mathbf K_n
+       \dot{\mathbf C}_{g,n}[\mathbf v]\big\}.
  \end{aligned}
  \label{eq:orbitalblock}
 \end{equation}
