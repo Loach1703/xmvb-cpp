@@ -1,0 +1,14 @@
+Use case: scientific-educational.
+Create one polished, scientifically accurate Chinese computational chemistry explanatory illustration for an academic document, NOT a slide full of text. White background, landscape 3:2 layout, large legible labels, black typography, restrained navy blue and muted amber accents, clear thin directional connections. No 3D, no clipart, no watermark.
+Topic: the OLD XMVB4.0 contraction algorithm. It computes and reuses unique single-spin-string-pair kernels; combines one alpha-pair kernel with one beta-pair kernel into a complete determinant-pair H/S scalar; distributes weighted contributions of that scalar to the selected VB structure pairs. The crucial visual is three computational levels connected by branching and convergence, NOT generic boxes of prose.
+Top title verbatim: "XMVB 的结构矩阵元收缩".
+Three left-to-right column headings verbatim: "单自旋串对" ; "完整行列式对" ; "VB 结构对".
+LEFT COLUMN: two groups of reusable kernels. Upper blue group "α 串对" has two small cards A1 and A2. Lower amber group "β 串对" has two small cards B1 and B2. Cards can use simple occupancy-slot icons, but clarify the icons are spin strings, not molecular orbitals or atoms. Under these groups put the short label "共享单自旋核".
+MIDDLE COLUMN: four separate small cards, labeled "A1 × B1", "A1 × B2", "A2 × B1", "A2 × B2". Each is ONE complete determinant PAIR, not one determinant. Under each label show "Hμν, Sμν" with proper subscript styling. Draw exactly these incoming arrows: A1 to cards1,2; A2 to cards3,4; B1 to cards1,3; B2 to cards2,4. Blue and amber arrows distinguish their origin. This shows kernel reuse. Highlight the first middle card with stronger navy border.
+RIGHT COLUMN: two output cards labeled "结构对 (I, J)" and "结构对 (K, L)" containing "HIJ, SIJ" and "HKL, SKL" with subscripts. Draw highlighted arrows from middle card1 to BOTH output cards, indicating one determinant pair can contribute to multiple structure pairs. Draw subdued arrows from card2 to output1, card3 to output1 and output2, card4 to output2. Make arrows unambiguous and avoid excess crossings.
+Over first inter-column gap label "组合"; over second gap label "乘展开系数并累加".
+Bottom concise explanatory caption verbatim: "单自旋核复用 → 完整项对标量 → 结构对加权汇聚".
+Second smaller footnote verbatim: "仅示意部分连接；不需要保存完整行列式矩阵".
+Do not depict a dense determinant H/S matrix. No claim of exponential complexity removal. Prioritize instantly comprehensible visual grouping, precise arrows, excellent Chinese text, generous whitespace, publication-quality rather than marketing styling.
+
+Refinement: replace occupancy icons with same-spin bra/ket pair indices (a1,a1'), (a2,a2'), (b1,b1'), (b2,b2'); remove all spin-arrow icons. Preserve all graph connections. Generated and edited with the built-in image generation tool.

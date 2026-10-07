@@ -78,8 +78,8 @@ S_{IJ}\leftarrow S_{IJ}+d_{\mu I}d_{\nu J}S_{\mu\nu}.
 $$
 
 <figure>
-<img src="figures/xmvb_contraction.svg" alt="XMVB 的结构展开、共享单自旋核、完整项对组合和结构累加" />
-<figcaption>图 1　XMVB4.0 普通 RDM–VBSCF 的收缩路径。单自旋核由不同展开项共享；完整项对的 H/S 标量计算后，依结构归属和展开系数累加。图中省略了对称性、连接筛选及并行细节。</figcaption>
+<img src="figures/xmvb_contraction_generated.png" alt="单自旋串对核组合成完整行列式对标量，再加权汇聚到结构对的连接图" />
+<figcaption>图 1　XMVB4.0 的三个计算层级。每个完整行列式对选择一个 α 串对和一个 β 串对，组合得到 H/S 标量，再向所属结构对累加。左侧连线表示单自旋核的复用；右侧连线表示项对贡献的分发与汇聚。蓝色分支突出同一项对向多个结构对贡献的情形。仅画出部分允许连接，省略了对称性与筛选细节。</figcaption>
 </figure>
 
 在官方代码中，这三步分别对应 `Hamhd`（单自旋核）、`Hov1`（完整项对组合）和 `Hovstr1`（结构累加）。程序不需要保存完整的行列式 H/S 数值矩阵，但仍显式形成完整项对的标量，并通过结构归属表累加。下文将从这组求和式出发，讨论如何把项对组合与结构累加合并为直接的 spin-string 收缩。
