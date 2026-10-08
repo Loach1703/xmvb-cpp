@@ -6,7 +6,7 @@
 #include <vector>
 
 #include <Eigen/Core>
-#include <Eigen/Eigenvalues>
+#include "lapacke.h"
 
 #include "libcint/direct_shell.hpp"
 
@@ -181,25 +181,38 @@ RiAoFactorization build_libcint_ri_factorization(
       }
     }
   }
-  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> metric_solver(auxiliary_metric);
-  if (metric_solver.info() != Eigen::Success) {
-    throw std::runtime_error("failed to diagonalize the RI auxiliary metric");
+  const int n_auxiliary = result.n_auxiliary_functions;
+  Eigen::MatrixXd metric_factor = auxiliary_metric;
+  const lapack_int cholesky_info = LAPACKE_dpotrf(
+      LAPACK_COL_MAJOR, 'L', n_auxiliary, metric_factor.data(), n_auxiliary);
+  if (cholesky_info < 0) {
+    throw std::runtime_error("invalid RI auxiliary Cholesky argument");
   }
-
-  const auto eigenvalues = metric_solver.eigenvalues();
-  Eigen::MatrixXd inverse_sqrt_metric =
-      metric_solver.eigenvectors() *
-      eigenvalues.unaryExpr(
-          [metric_eigenvalue_cutoff](double eigenvalue) -> double {
-            if (eigenvalue <= metric_eigenvalue_cutoff) {
-              return 0.0;
-            }
-            return 1.0 / std::sqrt(eigenvalue);
-          }).asDiagonal() *
-      metric_solver.eigenvectors().transpose();
-  Eigen::MatrixXd whitened_ao_pair_factors(
-      result.n_auxiliary_functions,
-      result.n_packed_ao_pairs);
+  Eigen::MatrixXd whitener;
+  if (cholesky_info > 0) {
+    // Rank-revealing spectral factorization for a non-positive-definite
+    // auxiliary metric. Never form a dense symmetric inverse square root:
+    // discarded directions must not survive through cancellation errors.
+    metric_factor = auxiliary_metric;
+    Eigen::VectorXd eigenvalues(n_auxiliary);
+    const lapack_int info = LAPACKE_dsyevd(
+        LAPACK_COL_MAJOR, 'V', 'L', n_auxiliary,
+        metric_factor.data(), n_auxiliary, eigenvalues.data());
+    if (info != 0) {
+      throw std::runtime_error("failed to diagonalize the RI auxiliary metric");
+    }
+    const int rank = (eigenvalues.array() > metric_eigenvalue_cutoff).count();
+    if (rank == 0) {
+      throw std::runtime_error("RI auxiliary metric has no retained directions");
+    }
+    whitener = metric_factor.rightCols(rank).transpose();
+    for (int row = 0; row < rank; ++row) {
+      whitener.row(row) /= std::sqrt(eigenvalues[n_auxiliary - rank + row]);
+    }
+    result.n_auxiliary_functions = rank;
+  }
+  result.metric_whitened_ao_pair_factors.resize(
+      result.n_auxiliary_functions, result.n_packed_ao_pairs);
 
 #pragma omp parallel for schedule(static)
   for (int pair_column_offset = 0;
@@ -208,12 +221,17 @@ RiAoFactorization build_libcint_ri_factorization(
     const int block_column_count =
         std::min(kWhitenColumnBlockSize,
                  result.n_packed_ao_pairs - pair_column_offset);
-    whitened_ao_pair_factors.middleCols(pair_column_offset, block_column_count).noalias() =
-        inverse_sqrt_metric *
-        raw_ao_pair_factors.middleCols(pair_column_offset, block_column_count);
+    auto output = result.metric_whitened_ao_pair_factors.middleCols(
+        pair_column_offset, block_column_count);
+    const auto input = raw_ao_pair_factors.middleCols(
+        pair_column_offset, block_column_count);
+    if (cholesky_info == 0) {
+      output = metric_factor.triangularView<Eigen::Lower>().solve(input);
+    } else {
+      output.noalias() = whitener * input;
+    }
   }
-  result.auxiliary_metric_matrix = auxiliary_metric;
-  result.metric_whitened_ao_pair_factors = whitened_ao_pair_factors;
+  result.auxiliary_metric_matrix = std::move(auxiliary_metric);
   return result;
 }
 

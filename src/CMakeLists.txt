@@ -253,6 +253,12 @@ if (BUILD_TESTING)
     test_input_auxiliary_basis
     ${CMAKE_SOURCE_DIR}/tests/input/test_auxiliary_basis.cpp)
   target_link_libraries(test_input_auxiliary_basis PRIVATE xmvb_input_deck)
+
+  add_executable(test_libcint_ri ${CMAKE_SOURCE_DIR}/tests/vbscf/unit/test_libcint_ri.cpp)
+  target_link_libraries(test_libcint_ri PRIVATE xmvb_libcint)
+  add_test(NAME libcint_ri COMMAND test_libcint_ri)
+  set_tests_properties(libcint_ri PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(
     NAME input_auxiliary_basis
     COMMAND

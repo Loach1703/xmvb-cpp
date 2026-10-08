@@ -56,7 +56,8 @@ struct LibcintThreeCenterShellBlock {
   int auxiliary_ao_count = 0;
 
   /**
-   * @brief Raw libcint Cartesian block in `[left][right][auxiliary]` order.
+   * @brief Cartesian block in `[left][right][auxiliary]` order.
+   * Primary AOs are component-normalized; auxiliary AOs are radial-normalized.
    *
    * The flattened index is
    * `left + right * left_count + auxiliary * left_count * right_count`.

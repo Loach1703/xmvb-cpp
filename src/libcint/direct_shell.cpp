@@ -1,4 +1,5 @@
 #include "libcint/direct_shell.hpp"
+#include "libcint/shell_normalization.hpp"
 
 #include <cmath>
 #include <stdexcept>
@@ -182,6 +183,23 @@ LibcintDirectShellEvaluator::LibcintDirectShellEvaluator(
 
   ao_normalization_ = build_cartesian_ao_normalization(input_);
   auxiliary_ao_normalization_ = build_cartesian_ao_normalization(*auxiliary_input_);
+  // Auxiliary metric truncation is defined in unit-radial Cartesian AOs,
+  // matching PySCF. Primary orbitals remain component-wise unit normalized.
+  for (int shell = 0; shell < auxiliary_input_->n_shells; ++shell) {
+    const int l = auxiliary_input_->bas[shell * BAS_SLOTS + ANG_OF];
+    const int n_cart = cartesian_ao_count(l);
+    const int offset = shell_ao_offset(*auxiliary_input_, shell);
+    const int n_contractions = auxiliary_input_->bas[shell * BAS_SLOTS + NCTR_OF];
+    for (int contraction = 0; contraction < n_contractions; ++contraction) {
+      int component = 0;
+      for (int lx = l; lx >= 0; --lx) {
+        for (int ly = l - lx; ly >= 0; --ly) {
+          auxiliary_ao_normalization_[offset + contraction * n_cart + component++] *=
+              radial_cartesian_scale(lx, ly, l - lx - ly);
+        }
+      }
+    }
+  }
   combined_atm_.assign(input_.atm.begin(), input_.atm.end());
   combined_bas_ = build_combined_basis(input_, *auxiliary_input_);
   combined_env_ = build_combined_env(input_, *auxiliary_input_);
