@@ -5,6 +5,8 @@
 # production build file from accumulating test-specific wiring.
 
 set(_xmvb_vbscf_unit_targets
+  test_spinor_strings
+  test_spinor_projection
   test_active_two_electron_sparse
   test_accepted_pair_tile
   test_block_inverse_bfgs
@@ -45,6 +47,10 @@ foreach(target_name IN LISTS _xmvb_vbscf_unit_targets)
 endforeach()
 
 if (BUILD_TESTING)
+  add_test(NAME spinor_strings COMMAND test_spinor_strings)
+  add_test(NAME spinor_projection COMMAND test_spinor_projection)
+  set_tests_properties(spinor_strings spinor_projection PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME active_two_electron_sparse COMMAND test_active_two_electron_sparse)
   add_test(NAME accepted_pair_tile COMMAND test_accepted_pair_tile)
   add_test(NAME block_inverse_bfgs COMMAND test_block_inverse_bfgs)

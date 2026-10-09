@@ -2,7 +2,11 @@
 
 理论依据：[Two-Component VBSCF Theory](docs/jctc_2c_vbscf.tex)。
 
-状态：**计划阶段，尚未实现两分量计算。** 不将现有非正交 VBSCF、计算正交化或 scalar-relativistic 修正称为 2C-VBSCF。
+状态：**P0–P2 代数内核已实现，正在分阶段验收；尚不能进行分子两分量优化。** 不将现有非正交 VBSCF、计算正交化或 scalar-relativistic 修正称为 2C-VBSCF。
+
+首轮实现位于 `structures/spinor` 与 `orbitals/spinor`。结构映射目前由调用者显式提供，尚无物理结构字典生成器、输入解析、复数本征求解器、分子 X2C provider 或梯度/HVP。完整固定电子数 carrier 仍为组合规模；行数上限与 block workspace 预算仅防止越界分配，不解决大活性空间标度。
+
+2026-10-09：瀚海25任务 `278428`、`278430` 编译及验收通过；两项 spinor 测试及原有 scalar direct-CI 回归全部通过。奇电子时间反演已测试；等权简并子空间规范和 Kramers 结构字典闭包尚未实现，不将 P0/P2 的所有条目标为完成。
 
 命名：通用方法为 **2C-VBSCF**；采用明确的 X2C 有效哈密顿量时为 **X2C-VBSCF**。
 
@@ -61,30 +65,30 @@
 ### P0 — 独立微型参考与契约
 
 - [ ] 定义上述数据契约、字典及索引约定。
-- [ ] 建立独立稠密 fermion reference，仅用于小空间测试，不进入生产路径。
-- [ ] 建立 `(2o,2e)` 六维完整空间及任意三个结构的 fixtures。
-- [ ] fixtures 包含随机复数 h、符合 Hermitian/交换对称性的 Coulomb 张量、可逆非正交 spinor frame、稀疏结构映射，以及可控的零 occupied-subset overlap。
+- [x] 建立独立稠密 fermion reference，仅用于小空间测试，不进入生产路径。
+- [x] 建立 `(2o,2e)` 六维完整空间及任意三个结构的 fixtures。
+- [x] fixtures 包含确定性复数 h、符合 Hermitian/交换对称性的 Coulomb 张量、可逆非正交 spinor frame、稀疏结构映射，以及可控的零 occupied-subset overlap。
 - [ ] 增加一个奇电子微型模型与一个等权简并子空间模型，检验时间反演与子空间规范。
-- [ ] reference 用独立的显式创建／湮灭代数，不调用被测的 string link 或 exterior 内核。
+- [x] reference 用独立的显式创建／湮灭代数，不调用被测的 string link 或 exterior 内核。
 
 验收：fixtures 自身通过 Hermitian 性、粒子数、独立结构秩和已知解析极限检查；提供模型、种子、维数、Hamiltonian conventions 的记录。
 
 ### P1 — 通用 occupation-string 算子
 
-- [ ] 构造 A/B 多扇区 strings 与跨组创建／湮灭连接。
-- [ ] 实现复数 one-body block action，统一处理普通和 spin-mixing 矩阵元。
-- [ ] 实现 exact two-body action 与正确的 normal-ordering 减项。
-- [ ] 实现 RI 两次 one-body action 与 one-body counterterm，共享连接及 workspace。
-- [ ] 仅在确有共同代数时提取共享连接逻辑，不复制完整旧 sigma 再大量加条件分支。
+- [x] 构造 A/B 多扇区 strings 与跨组创建／湮灭连接。
+- [x] 实现复数 one-body block action，统一处理普通和 spin-mixing 矩阵元。
+- [x] 实现 exact normal-ordered two-body action。
+- [x] 实现 RI 两次 one-body action 与 one-body counterterm；辅助指标串行消费，复用共享 one-body 代数。
+- [x] 仅在确有共同代数时提取共享连接逻辑，不复制完整旧 sigma 再大量加条件分支。
 
 验收：所有列及随机 block 与 P0 reference 一致；覆盖跨组一步／两步转移、重复指标、对角项、Hermitian adjoint、不同 block width。RI 使用同一批 factors 重建的张量作为 reference，不能拿拟合误差判断内核错误。
 
 ### P2 — 非正交 exterior image 与 VB 精确投影
 
-- [ ] 实现复数 Gram/Cholesky computational frame。
-- [ ] 推广因子化 exterior transform，包含跨 A/B 分组的变换；不能只将旧左右两个独立 transform 改成复数。
-- [ ] 实现结构 `expand`、image transform、Hamiltonian action、conjugate-adjoint contraction。
-- [ ] 实现 H/S block action；任意所选结构的整个 image 均需被计算 carrier 容纳。
+- [x] 实现复数 Gram/Cholesky computational frame。
+- [x] 推广因子化 exterior transform，包含跨 A/B 分组的变换；不能只将旧左右两个独立 transform 改成复数。
+- [x] 实现结构 `expand`、image transform、Hamiltonian action、conjugate-adjoint contraction。
+- [x] 实现 H/S block action；任意所选结构的整个 image 均需被计算 carrier 容纳。
 - [ ] 支持固定 spinor frame 下的 Kramers-paired fixtures，并检查结构空间的时间反演闭包。
 
 验收：完整及任意三个结构的 H/S action 与独立非正交 reference 一致；投影前后 Rayleigh 商一致；不得依靠 selected-space 闭包假设。一般变换应覆盖原始结构支持以外的占据分量。

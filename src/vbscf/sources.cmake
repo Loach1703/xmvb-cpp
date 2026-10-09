@@ -15,6 +15,11 @@ set(XMVB_VBSCF_DETERMINANT_SOURCES
 )
 
 set(XMVB_VBSCF_STRUCTURE_SOURCES
+  vbscf/structures/spinor/strings.cpp
+  vbscf/structures/spinor/sigma.cpp
+  vbscf/structures/spinor/transform.cpp
+  vbscf/structures/spinor/basis.cpp
+  vbscf/structures/spinor/action.cpp
   vbscf/structures/analysis/spin.cpp
   vbscf/structures/assembly/action.cpp
   vbscf/structures/assembly/hamiltonian_overlap.cpp
@@ -32,6 +37,7 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
 )
 
 set(XMVB_VBSCF_ORBITAL_SOURCES
+  vbscf/orbitals/spinor/frame.cpp
   vbscf/orbitals/preparation/preparer.cpp
   vbscf/orbitals/pullback/operator.cpp
   vbscf/orbitals/gauge/localized.cpp
