@@ -1,0 +1,739 @@
+\documentclass[12pt]{article}
+% Layout and title block adapted from jctc_second_order.tex.
+% Pure theory manuscript: no implementation, benchmark, or priority claims.
+% ACS submission template for later template migration:
+% https://www.overleaf.com/latex/templates/latex-template-for-american-chemical-society-acs-journal-submissions/swszwgfqsshj
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,booktabs,longtable,array,xurl,hyperref}
+\urlstyle{same}
+\hypersetup{hidelinks}
+\setlength{\emergencystretch}{1em}
+\usepackage{newtxtext,newtxmath}
+\usepackage[numbers,sort&compress]{natbib}
+
+\DeclareMathOperator{\Tr}{Tr}
+\DeclareMathOperator{\range}{range}
+\DeclareMathOperator{\rank}{rank}
+\newcommand{\vb}{\mathrm{VB}}
+\newcommand{\orth}{\mathrm{orth}}
+
+\title{Two-Component Valence Bond Self-Consistent Field Theory}
+% Author metadata retained from the existing manuscript template.
+\author{Tao Xia, Suxin Yu, Wei Wu, Chen Zhou\textsuperscript{*}}
+\date{}
+
+\begin{document}
+\maketitle
+\begin{center}
+\small
+State Key Laboratory of Physical Chemistry of Solid Surfaces, Fujian Provincial Key Laboratory of Theoretical and Computational Chemistry, and College of Chemistry and Chemical Engineering, Xiamen University, Xiamen, Fujian 361005
+
+\medskip
+\textsuperscript{*}Email: \href{mailto:czhou1989@xmu.edu.cn}{czhou1989@xmu.edu.cn}
+\end{center}
+
+\section{THEORY}
+
+We formulate two-component valence bond self-consistent field (2C-VBSCF) theory as a variational optimization of nonorthogonal spinors and the coefficients of explicitly specified valence bond structures. The designation X2C-VBSCF refers to the specialization employing an exact-two-component (X2C) effective Hamiltonian. The multiconfigurational variational principle is shared with two-component complete active space self-consistent field (2C-CASSCF) theory,\cite{liao2024} whereas the structure space and the admissible orbital variations are defined by the VB ansatz. Nonorthogonality alone does not distinguish a spinor wave function from a scalar-orbital VB wave function.
+
+Throughout, \(\mu,\nu\) label spatial atomic orbitals (AOs), \(\sigma\in\{\alpha,\beta\}\) labels components relative to a fixed laboratory spin frame, \(p,q,r,s\) label spinors, \(I,J\) label VB structures, and \(n,m\) label electronic states. Orbital-coordinate indices are \(i,j\). Bold symbols denote finite-dimensional matrices or vectors. The superscript \(\dagger\) denotes the Hermitian adjoint. Nuclear coordinates are fixed, and orbital derivatives are taken with respect to real coordinates representing allowed complex coefficients. The equations describe a fixed electron number in a finite one-electron basis.
+
+\subsection{Nonorthogonal Spinors and Locality Constraints}
+
+The \(p\)th two-component spinor is
+\begin{equation}
+ u_p(\mathbf r)=\sum_\mu\chi_\mu(\mathbf r)
+ \begin{pmatrix}b_{\mu\alpha,p}\\b_{\mu\beta,p}\end{pmatrix}.
+ \label{eq:spinor}
+\end{equation}
+The two components may have different spatial dependence. Let \(\mathbf b\) collect their complex AO coefficients, with rows indexed by \((\mu,\sigma)\). In a component-major ordering, the one-electron metric is
+\begin{equation}
+ \boldsymbol\Omega=
+ \begin{pmatrix}\mathbf S&\mathbf 0\\\mathbf 0&\mathbf S\end{pmatrix},
+ \qquad S_{\mu\nu}=\langle\chi_\mu|\chi_\nu\rangle.
+ \label{eq:aometric}
+\end{equation}
+The spinor Gram matrix is
+\begin{equation}
+ \mathbf G=\mathbf b^\dagger\boldsymbol\Omega\mathbf b
+ =\mathbf b_\alpha^\dagger\mathbf S\mathbf b_\alpha
+  +\mathbf b_\beta^\dagger\mathbf S\mathbf b_\beta.
+ \label{eq:gram}
+\end{equation}
+Mutual orthogonality of the optimized spinors is not imposed.
+
+For a localized orbital label \(\ell\), two spinors \(u_{\ell 1},u_{\ell 2}\) provide the single-electron constituents of its spinor extension. In the collinear limit,
+\begin{equation}
+ u_{\ell 1}=\phi_\ell\alpha,
+ \qquad u_{\ell 2}=\phi_\ell\beta.
+ \label{eq:collinear}
+\end{equation}
+Outside this limit, the labels 1 and 2 are not physical spin projections. General 2C-VBSCF permits independent spinors; a Kramers-paired restriction is defined separately below.
+
+Strict locality is expressed by a prescribed AO support \(\mathcal A_\ell\):
+\begin{equation}
+ b_{\mu\sigma,\ell a}=0
+ \quad\text{for }\mu\notin\mathcal A_\ell,
+ \quad \sigma\in\{\alpha,\beta\},\quad a\in\{1,2\}.
+ \label{eq:support}
+\end{equation}
+Hybrid atomic orbitals (HAOs) use restricted supports, whereas overlap-enhanced orbitals (OEOs) use the full AO support. OEOs remain nonorthogonal variational orbitals. The support, any Kramers restriction, and any additional fixed coefficients are part of the definition of the variational manifold, not consequences of the energy functional.
+
+\subsection{Valence Bond Structure Construction}
+
+A VB structure specifies local charge occupations, a bonding or pairing pattern, and a spin-coupling parent. These structural data precede the orbital optimization.\cite{gerratt1997} For example, the continuation of a singlet pair between labels \(\ell\) and \(k\) is constructed from
+\begin{equation}
+ \hat P_{\ell k}^\dagger=
+ \frac{a^\dagger(u_{\ell1})a^\dagger(u_{k2})
+       -a^\dagger(u_{\ell2})a^\dagger(u_{k1})}{\sqrt2}.
+ \label{eq:singletpair}
+\end{equation}
+Products of specified pair operators, together with the required doubly occupied and unpaired constituents, generate the corresponding antisymmetric structures. Creation operators associated with nonorthogonal spinors obey
+\begin{equation}
+ \{a(u_p),a^\dagger(u_q)\}=G_{pq},
+ \qquad \{a^\dagger(u_p),a^\dagger(u_q)\}=0.
+ \label{eq:nonorthalgebra}
+\end{equation}
+Thus, their products enforce fermionic antisymmetry without assuming orthogonal orbitals.
+
+More generally, a selected structure is written as
+\begin{equation}
+ |\Phi_I(\mathbf b)\rangle
+ =\sum_{\mathcal I}B_{\mathcal I I}
+   u_{i_1}\wedge\cdots\wedge u_{i_N},
+ \qquad \mathcal I=(i_1<\cdots<i_N).
+ \label{eq:structure}
+\end{equation}
+The exterior product is normalized so that its overlap is the determinant of the occupied one-electron overlap matrix. The coefficients \(B_{\mathcal I I}\) are fixed by the specified occupation and spin-coupling construction, including fermionic signs and fixed combinatorial normalization factors. They are not independently varied CI coefficients. Coordinate-dependent normalization of individual structures is unnecessary; the many-electron normalization is imposed through the structure metric below.
+
+The wave function of state \(n\) is
+\begin{equation}
+ |\Psi_n\rangle=\sum_I c_{In}|\Phi_I(\mathbf b)\rangle.
+ \label{eq:wavefunction}
+\end{equation}
+The orbitals are shared among structures, while the coefficients \(\mathbf c_n\) are varied. Equation~\eqref{eq:structure} is an algebraic definition of the VB structures; it does not require pairwise matrix elements between all terms of their antisymmetric expansions.
+
+\subsubsection{Spin-Coupling Channels}
+
+For two singly occupied labels, the four parent channels are
+\begin{equation}
+ \begin{aligned}
+ |S_{\ell k}\rangle&=
+ (u_{\ell1}\wedge u_{k2}-u_{\ell2}\wedge u_{k1})/\sqrt2,\\
+ |T_{\ell k,0}\rangle&=
+ (u_{\ell1}\wedge u_{k2}+u_{\ell2}\wedge u_{k1})/\sqrt2,\\
+ |T_{\ell k,+}\rangle&=u_{\ell1}\wedge u_{k1},\\
+ |T_{\ell k,-}\rangle&=u_{\ell2}\wedge u_{k2}.
+ \end{aligned}
+ \label{eq:pairchannels}
+\end{equation}
+They reduce to the usual singlet and triplet components under Eq.~\eqref{eq:collinear}. For general spinors, these are parent labels rather than eigenvalues of physical total spin. The structure index may therefore be decomposed as \(I=(K,\gamma)\), where \(K\) denotes the charge and bonding pattern and \(\gamma\) denotes its retained spin-coupling channel.
+
+A fixed occupation pattern with \(n_s\) singly occupied labels has a complete spin space of dimension
+\begin{equation}
+ D_{\mathrm{spin}}=2^{n_s}.
+ \label{eq:spinspace}
+\end{equation}
+This space can be expressed in a spin-coupled basis. A selected subset defines a further variational restriction. Orbital spin mixing does not, in general, reproduce the entire omitted linear space. In particular, retaining only the highest spin-projection component of each parent multiplicity is not a complete treatment of spin--orbit mixing.
+
+\subsubsection{Time-Reversal Symmetry}
+
+For a real spatial AO basis, the one-electron time-reversal operator is
+\begin{equation}
+ \Theta=i\sigma_y\mathcal K,
+ \qquad \Theta^2=-1,
+ \label{eq:timereversal}
+\end{equation}
+where \(\mathcal K\) is complex conjugation. A Kramers-paired orbital restriction is
+\begin{equation}
+ u_{\ell2}=\Theta u_{\ell1}.
+ \label{eq:kramerspair}
+\end{equation}
+This is a distinct constrained model, not a requirement of general 2C-VBSCF. For time-reversal-symmetric Hamiltonians, symmetry preservation additionally requires the selected many-electron space to be closed under time reversal. In odd-electron systems the corresponding Kramers partners must be treated consistently, including equal weights when a partner pair is state averaged. Even-electron states do not acquire a general twofold degeneracy from this argument. Approximate spaces or unbalanced orbital optimization may otherwise break the symmetry.\cite{kasper2020}
+
+\subsection{Two-Component Hamiltonian}
+
+At fixed nuclear geometry, consider the effective Hamiltonian
+\begin{equation}
+ \hat H=E_{\mathrm{nuc}}+\sum_i\hat h_{\mathrm{eff}}^{2c}(i)
+                       +\sum_{i<j}r_{ij}^{-1}.
+ \label{eq:hamiltonian}
+\end{equation}
+The one-electron matrix admits a Pauli decomposition,
+\begin{equation}
+ \mathbf h^{2c}=\begin{pmatrix}
+ \mathbf h_0+\mathbf h_z&\mathbf h_x-i\mathbf h_y\\
+ \mathbf h_x+i\mathbf h_y&\mathbf h_0-\mathbf h_z
+ \end{pmatrix}.
+ \label{eq:pauli}
+\end{equation}
+The matrices \(\mathbf h_a\) include the numerical factors of the adopted convention. Off-diagonal component blocks mix spin projections relative to the fixed laboratory frame.
+
+In X2C-VBSCF, a specified effective one-electron model can be written as
+\begin{equation}
+ \mathbf h_{\mathrm{eff}}^{2c}
+ =\mathbf h^{\mathrm{X2C1e}}+\Delta\mathbf h^{\mathrm{AMF}},
+ \label{eq:x2cmodel}
+\end{equation}
+where \(\Delta\mathbf h^{\mathrm{AMF}}\) denotes a consistently defined atomic mean-field correction. One-electron X2C with bare Coulomb interactions is not the fully picture-changed Dirac--Coulomb Hamiltonian. The selected treatment of two-electron scalar and spin-dependent picture-change effects must be specified.\cite{knecht2022} Equation~\eqref{eq:hamiltonian} assumes a fixed effective operator during orbital optimization. If a mean-field spin--orbit operator is recomputed from the molecular variational density, its density dependence belongs in all energy derivatives; the fixed-operator formulas below then require the corresponding additional terms. Property operators likewise require a treatment consistent with the Hamiltonian approximation.
+
+In an orthonormal computational spinor basis, canonical operators give
+\begin{equation}
+ \hat H=E_{\mathrm{nuc}}+\sum_{pq}h_{pq}a_p^\dagger a_q
+       +\frac12\sum_{pqrs}g_{pqrs}a_p^\dagger a_r^\dagger a_s a_q,
+ \label{eq:secondquantized}
+\end{equation}
+with the density-product convention
+\begin{equation}
+ g_{pqrs}=(pq|rs)=\iint
+ [\widetilde u_p^\dagger(1)\widetilde u_q(1)]r_{12}^{-1}
+ [\widetilde u_r^\dagger(2)\widetilde u_s(2)]\,d1\,d2.
+ \label{eq:eri}
+\end{equation}
+For Coulomb interactions,
+\begin{equation}
+ h_{pq}^*=h_{qp},\qquad
+ g_{pqrs}=g_{rspq},\qquad g_{pqrs}^*=g_{qpsr}.
+ \label{eq:complexsymmetry}
+\end{equation}
+Independent reversal of either density pair is not a symmetry of general complex spinor integrals.
+
+\subsection{Variational Structure Equations and State Averaging}
+
+Define the structure Hamiltonian and metric by
+\begin{equation}
+ H_{IJ}=\langle\Phi_I|\hat H|\Phi_J\rangle,
+ \qquad M_{IJ}=\langle\Phi_I|\Phi_J\rangle.
+ \label{eq:structurematrices}
+\end{equation}
+The energy functional is
+\begin{equation}
+ E(\mathbf b,\mathbf c)=
+ \frac{\mathbf c^\dagger\mathbf H\mathbf c}
+      {\mathbf c^\dagger\mathbf M\mathbf c}.
+ \label{eq:rayleigh}
+\end{equation}
+Variation with respect to the complex structure coefficients yields
+\begin{equation}
+ \mathbf H\mathbf c_n=E_n\mathbf M\mathbf c_n,
+ \qquad \mathbf c_m^\dagger\mathbf M\mathbf c_n=\delta_{mn}.
+ \label{eq:generalizedeigenproblem}
+\end{equation}
+All equations involving \(\mathbf M^{-1}\) are understood on a locally fixed, linearly independent structure space. If the selected structures are dependent, a basis of their physical span must first be used; a singular metric cannot be treated as positive definite.
+
+For fixed nonnegative weights summing to unity, the state-averaged objective is
+\begin{equation}
+ \mathcal E(\mathbf b)=\sum_{n=1}^{n_{\mathrm{state}}}w_nE_n(\mathbf b),
+ \qquad \sum_nw_n=1.
+ \label{eq:stateaverage}
+\end{equation}
+Equal weights give \(w_n=1/n_{\mathrm{state}}\). The roots share spinors and retain mutually metric-orthonormal structure coefficients. Within an equally weighted degenerate manifold, the objective is invariant under unitary changes of the state basis. An unequal weighting of crossing roots need not define a differentiable orbital objective.
+
+\subsection{Exact Exterior Mapping and Structure Projection}
+
+Suppose the spinors entering the structure expansion are linearly independent. With a positive-definite Gram matrix, let
+\begin{equation}
+ \mathbf G=\mathbf R^\dagger\mathbf R,
+ \qquad \widetilde{\mathbf b}=\mathbf b\mathbf R^{-1},
+ \qquad \widetilde{\mathbf b}^\dagger\boldsymbol\Omega
+                  \widetilde{\mathbf b}=\mathbf I.
+ \label{eq:orthogonalization}
+\end{equation}
+The upper-triangular factor \(\mathbf R\) has positive real diagonal entries. This introduces an orthonormal computational basis without replacing the constrained physical orbitals by orthogonal variational orbitals.
+
+The induced \(N\)-electron exterior mapping and structure image are
+\begin{equation}
+ \mathbf T=\wedge^N\mathbf R,
+ \qquad \boldsymbol{\mathcal A}=\mathbf T\mathbf B.
+ \label{eq:exteriormap}
+\end{equation}
+Consequently,
+\begin{equation}
+ \boxed{\mathbf M=\boldsymbol{\mathcal A}^\dagger\boldsymbol{\mathcal A},
+ \qquad
+ \mathbf H=\boldsymbol{\mathcal A}^\dagger
+                 \mathbf H_{\orth}\boldsymbol{\mathcal A}.}
+ \label{eq:projectedmatrices}
+\end{equation}
+For any structure vector \(\mathbf v\),
+\begin{equation}
+ \mathbf H\mathbf v=
+ \boldsymbol{\mathcal A}^\dagger
+ \sigma_{\orth}(\boldsymbol{\mathcal A}\mathbf v),
+ \qquad
+ \mathbf M\mathbf v=
+ \boldsymbol{\mathcal A}^\dagger
+ \boldsymbol{\mathcal A}\mathbf v,
+ \label{eq:projectedaction}
+\end{equation}
+where \(\sigma_{\orth}(\mathbf Y)=\mathbf H_{\orth}\mathbf Y\).
+
+These identities hold for an arbitrary selected VB space. That space need not be invariant under the exterior mapping: only its complete image must be retained before the adjoint projection. If a projector \(\mathbf P\) truncates the computational carrier, exactness of the mapped selected space requires
+\begin{equation}
+ \mathbf P\boldsymbol{\mathcal A}=\boldsymbol{\mathcal A}.
+ \label{eq:carriercondition}
+\end{equation}
+Otherwise \(\boldsymbol{\mathcal A}^\dagger\mathbf P
+\mathbf H_{\orth}\mathbf P\boldsymbol{\mathcal A}\) generally describes a different variational space. Retaining the complete carrier is a sufficient condition. For a fixed-point projected energy, a smaller carrier containing the entire image is also sufficient, but its orbital derivatives require the corresponding derivative images as well.
+
+Exact linear dependence of the one-electron frame is distinct from a zero overlap between particular occupied subsets. The latter is compatible with a positive-definite \(\mathbf G\) and does not invalidate Eq.~\eqref{eq:projectedmatrices}. A singular \(\mathbf G\), in contrast, invalidates the invertible mapping in Eq.~\eqref{eq:orthogonalization}; the physical span and its structure representation must then be reconsidered rather than replacing the inverse without justification.
+
+\subsection{Occupation-String Contraction}
+
+Partition the orthogonal spinor labels into ordered sets \(A\) and \(B\), with every \(A\) label preceding every \(B\) label. The coefficient carrier can be organized as
+\begin{equation}
+ Y^{(n)}_{I_AJ_B},\qquad |I_A|=n,\quad |J_B|=N-n.
+ \label{eq:stringcarrier}
+\end{equation}
+Here \(I_A,J_B\) are unique occupied strings. They are storage groups, not physical \(\alpha\) and \(\beta\) sectors for arbitrary spinors. The full carrier dimension obeys
+\begin{equation}
+ D=\sum_n\binom{n_A}{n}\binom{n_B}{N-n}
+  =\binom{n_A+n_B}{N}.
+ \label{eq:carrierdimension}
+\end{equation}
+Terms with invalid occupations are zero. This grouping organizes the antisymmetric amplitudes but does not remove their combinatorial dimension. It avoids any requirement to evaluate a matrix element for every pair of full occupation combinations.
+
+For a globally ordered occupied set \(\mathcal I\), write
+\begin{equation}
+ \ell(p,\mathcal I)=\#\{i\in\mathcal I:i<p\}.
+ \label{eq:paritycount}
+\end{equation}
+Canonical annihilation and creation act as
+\begin{equation}
+ \begin{aligned}
+ a_q|\mathcal I\rangle
+ &=(-1)^{\ell(q,\mathcal I)}|\mathcal I\setminus\{q\}\rangle,
+ &&q\in\mathcal I,\\
+ a_p^\dagger|\mathcal J\rangle
+ &=(-1)^{\ell(p,\mathcal J)}|\mathcal J\cup\{p\}\rangle,
+ &&p\notin\mathcal J.
+ \end{aligned}
+ \label{eq:stringsigns}
+\end{equation}
+Disallowed operations yield zero. Let \(\mathcal E_{pq}\) denote the resulting string action of \(E_{pq}=a_p^\dagger a_q\). Then
+\begin{equation}
+ \sigma_1(\mathbf Y)=\sum_{pq}h_{pq}\mathcal E_{pq}\mathbf Y.
+ \label{eq:onebodyaction}
+\end{equation}
+Within-group substitutions preserve \(n\); cross-group substitutions change it by one. A general two-body term changes it by at most two. These are occupation connections, not a same-spin/opposite-spin classification.
+
+The Coulomb action is
+\begin{equation}
+ \sigma_2(\mathbf Y)=\frac12\sum_{pqrs}g_{pqrs}
+       \mathcal E^{(2)}_{pr;sq}\mathbf Y,
+ \label{eq:twobodyaction}
+\end{equation}
+where \(\mathcal E^{(2)}_{pr;sq}\) represents \(a_p^\dagger a_r^\dagger a_s a_q\). Its sign is obtained by applying the four operations from right to left and recomputing the parity on each updated occupied set. Equivalently,
+\begin{equation}
+ E_{pq}E_{rs}=\delta_{qr}E_{ps}
+              +a_p^\dagger a_r^\dagger a_s a_q.
+ \label{eq:normalordering}
+\end{equation}
+Equations~\eqref{eq:projectedaction}, \eqref{eq:onebodyaction}, and \eqref{eq:twobodyaction} give the direct occupation-string-to-structure contraction without a full occupation-pair Hamiltonian as an intermediate object.
+
+\subsection{Resolution-of-the-Identity Coulomb Factorization}
+
+For real AO Coulomb factors \(\mathsf B^P_{\mu\nu}\), the orthogonal-spinor factors are
+\begin{equation}
+ L^P_{pq}=\sum_{\sigma=\alpha,\beta}\sum_{\mu\nu}
+ \widetilde b_{\mu\sigma,p}^*\mathsf B^P_{\mu\nu}
+ \widetilde b_{\nu\sigma,q},
+ \qquad (\mathbf L^P)^\dagger=\mathbf L^P.
+ \label{eq:rifactors}
+\end{equation}
+The resolution-of-the-identity (RI) model defines
+\begin{equation}
+ g^{\mathrm{RI}}_{pqrs}=\sum_P L^P_{pq}L^P_{rs}.
+ \label{eq:riintegrals}
+\end{equation}
+There is no additional conjugation on the second factor in this density-product convention. The expression is exact for the specified RI Hamiltonian, not necessarily for the unfitted Coulomb operator.
+
+For a single-particle matrix \(\mathbf L\), define
+\(\widehat{\mathbf L}=\sum_{pq}L_{pq}E_{pq}\). Equation~\eqref{eq:normalordering} gives
+\begin{equation}
+ \boxed{\hat V_{\mathrm{RI}}=
+ \frac12\sum_P\left[
+ (\widehat{\mathbf L^P})^2-\widehat{(\mathbf L^P)^2}
+ \right].}
+ \label{eq:rioperator}
+\end{equation}
+The second term is the one-electron normal-ordering correction. Thus
+\begin{equation}
+ \sigma_{2,P}(\mathbf Y)=\frac12\left[
+ \widehat{\mathbf L^P}\big(\widehat{\mathbf L^P}\mathbf Y\big)
+ -\widehat{(\mathbf L^P)^2}\mathbf Y\right].
+ \label{eq:riaction}
+\end{equation}
+This factorization uses the same one-electron string connections as Eq.~\eqref{eq:onebodyaction}. It is an operator identity, not by itself a claim of a lower computational cost for every active space. General two-electron picture-changed interactions require their own compatible factorization or integral representation.
+
+\subsection{Orbital--Structure Redundancy}
+
+Let \(\boldsymbol\Phi\) denote the column map of structure functions, so that
+\(|\Psi\rangle=\boldsymbol\Phi\mathbf c\). A joint variation is
+\begin{equation}
+ \delta|\Psi\rangle=(\delta\boldsymbol\Phi)\mathbf c
+                    +\boldsymbol\Phi\delta\mathbf c.
+ \label{eq:jointvariation}
+\end{equation}
+An orbital variation preserves the entire selected structure span to first order if a matrix \(\mathbf F\) exists such that
+\begin{equation}
+ \delta\boldsymbol\Phi=\boldsymbol\Phi\mathbf F.
+ \label{eq:structuralgauge}
+\end{equation}
+The compensating variation \(\delta\mathbf c=-\mathbf F\mathbf c\) leaves the represented wave function unchanged. With
+\begin{equation}
+ P_{\vb}=\boldsymbol\Phi\mathbf M^{-1}\boldsymbol\Phi^\dagger,
+ \label{eq:vbprojector}
+\end{equation}
+the equivalent condition is
+\begin{equation}
+ (1-P_{\vb})\delta\boldsymbol\Phi=0.
+ \label{eq:gaugecriterion}
+\end{equation}
+Only variations satisfying the orbital support and other model constraints may be removed in this way. A full active-space expansion is invariant under invertible changes of basis within its active span. A selected VB expansion need not be invariant, so full-CAS active--active redundancy rules are not assumed.
+
+For a fixed local charge occupation with all spin channels retained, a local frame transformation
+\begin{equation}
+ (u_{\ell1},u_{\ell2})\longmapsto
+ (u_{\ell1},u_{\ell2})\mathbf U_\ell,
+ \qquad \mathbf U_\ell\in GL(2,\mathbb C),
+ \label{eq:localframe}
+\end{equation}
+acts within that occupation space. Occupations zero, one, and two transform as a scalar, the two-dimensional frame, and its exterior square, respectively. If a selected coupling set is not closed, the same transformation may be physical. For example, rotating only the two constituents at \(\ell\) by opposite phases gives
+\begin{equation}
+ |S_{\ell k}\rangle\longmapsto
+ \cos(\theta/2)|S_{\ell k}\rangle
+ +i\sin(\theta/2)|T_{\ell k,0}\rangle.
+ \label{eq:phaseexample}
+\end{equation}
+Independent spinor phase or normalization conventions therefore require closure or a compensating redefinition of the structure map; they cannot universally be classified as harmless gauge choices for a fixed selected dictionary.
+
+For real orbital coordinates \(\mathbf x\), a state-dependent horizontal tangent is
+\begin{equation}
+ |\zeta_i\rangle=(1-P_{\vb})\boldsymbol\Phi_i\mathbf c,
+ \qquad
+ \mathcal G_{ij}=\operatorname{Re}\langle\zeta_i|\zeta_j\rangle,
+ \label{eq:horizontalmetric}
+\end{equation}
+where \(\boldsymbol\Phi_i=\partial\boldsymbol\Phi/\partial x_i\). This positive-semidefinite metric measures orbital variations after the best first-order compensation within the structure space. A null direction at a particular state or orbital point is not necessarily a structural gauge valid throughout the manifold. Its rank must not be used to discard physical degrees of freedom without the distinction in Eq.~\eqref{eq:gaugecriterion}.
+
+\subsection{First-Order Orbital Derivatives}
+
+Choose a smooth local real coordinate chart \(\mathbf b(\mathbf x)\) satisfying all imposed constraints. It may include a justified quotient of redundant variations. Differentiating the Rayleigh quotient at a normalized state gives
+\begin{equation}
+ \delta E=\mathbf c^\dagger(\delta\mathbf H-E\delta\mathbf M)\mathbf c
+ +2\operatorname{Re}\left[
+ \delta\mathbf c^\dagger(\mathbf H-E\mathbf M)\mathbf c\right].
+ \label{eq:firstvariation}
+\end{equation}
+At a stationary structure solution, the second term vanishes. Define
+\begin{equation}
+ \mathbf H_i=\frac{\partial\mathbf H}{\partial x_i},\quad
+ \mathbf M_i=\frac{\partial\mathbf M}{\partial x_i},\quad
+ \mathbf R_i=\mathbf H_i-E\mathbf M_i.
+ \label{eq:derivativeoperators}
+\end{equation}
+The relaxed orbital gradient is
+\begin{equation}
+ \boxed{g_i=\mathbf c^\dagger\mathbf R_i\mathbf c
+ =2\operatorname{Re}\langle\boldsymbol\Phi_i\mathbf c|
+                              (\hat H-E)|\Psi\rangle.}
+ \label{eq:gradient}
+\end{equation}
+The second expression assumes the fixed physical Hamiltonian of Eq.~\eqref{eq:hamiltonian}. No explicit first-order structure response is needed for this gradient.
+
+In the projected representation,
+\begin{equation}
+ \begin{aligned}
+ \mathbf M_i&=\boldsymbol{\mathcal A}_i^\dagger\boldsymbol{\mathcal A}
+             +\boldsymbol{\mathcal A}^\dagger\boldsymbol{\mathcal A}_i,\\
+ \mathbf H_i&=\boldsymbol{\mathcal A}_i^\dagger\mathbf H_{\orth}\boldsymbol{\mathcal A}
+             +\boldsymbol{\mathcal A}^\dagger(\mathbf H_{\orth})_i\boldsymbol{\mathcal A}
+             +\boldsymbol{\mathcal A}^\dagger\mathbf H_{\orth}\boldsymbol{\mathcal A}_i.
+ \end{aligned}
+ \label{eq:projectedfirstderivatives}
+\end{equation}
+The computational-basis Hamiltonian varies with the spinor frame even when the underlying physical operator is fixed. Both image derivatives and the integral derivative must therefore be retained.
+
+\subsection{Structure Response and Relaxed Second Derivatives}
+
+For an isolated normalized eigenstate, set
+\begin{equation}
+ \mathbf K=\mathbf H-E\mathbf M.
+ \label{eq:shiftedoperator}
+\end{equation}
+Differentiation of Eq.~\eqref{eq:generalizedeigenproblem} yields
+\begin{equation}
+ \mathbf K\mathbf c_j=-\mathbf R_j\mathbf c+g_j\mathbf M\mathbf c,
+ \qquad
+ 2\operatorname{Re}(\mathbf c^\dagger\mathbf M\mathbf c_j)
+ =-\mathbf c^\dagger\mathbf M_j\mathbf c.
+ \label{eq:rawresponse}
+\end{equation}
+A phase gauge can be chosen locally so that
+\begin{equation}
+ \mathbf c_j=\mathbf q_j-\tfrac12m_j\mathbf c,
+ \qquad m_j=\mathbf c^\dagger\mathbf M_j\mathbf c,
+ \qquad \mathbf c^\dagger\mathbf M\mathbf q_j=0.
+ \label{eq:horizontalresponse}
+\end{equation}
+The horizontal response solves
+\begin{equation}
+ \boxed{\mathbf K\mathbf q_j
+ =-\mathbf R_j\mathbf c+g_j\mathbf M\mathbf c.}
+ \label{eq:response}
+\end{equation}
+The right-hand side is orthogonal to the null vector \(\mathbf c\), as required by \(\mathbf c^\dagger\mathbf R_j\mathbf c=g_j\). Solving this projected linear equation does not require the full structure spectrum.
+
+The exact relaxed orbital Hessian in the chosen chart is
+\begin{equation}
+ \boxed{
+ \begin{aligned}
+ (H_{\mathrm{rel}})_{ij}
+ &=\mathbf c^\dagger(\mathbf H_{ij}-E\mathbf M_{ij})\mathbf c
+   -g_jm_i-g_im_j\\
+ &\quad+2\operatorname{Re}(\mathbf q_j^\dagger\mathbf R_i\mathbf c).
+ \end{aligned}}
+ \label{eq:relaxedhessian}
+\end{equation}
+The metric terms arise from normalization in a moving nonorthogonal structure basis. They vanish at an orbital stationary point but are not omitted away from it. The second derivatives include the curvature of the chosen orbital parameterization; derivatives in a linear coefficient chart cannot simply be substituted into a curved constrained chart without the chain rule.
+
+For a direction \(\mathbf p\), an overdot denotes \(\sum_jp_j\partial_j\). Then
+\begin{equation}
+ \boxed{
+ (\mathbf H_{\mathrm{rel}}\mathbf p)_i
+ =\mathbf c^\dagger(\dot{\mathbf H}_i-E\dot{\mathbf M}_i
+                         -\dot E\mathbf M_i)\mathbf c
+ +2\operatorname{Re}(\dot{\mathbf c}^{\,\dagger}\mathbf R_i\mathbf c),
+ \qquad \dot E=\sum_jg_jp_j.}
+ \label{eq:hvp}
+\end{equation}
+This separates the orbital derivative of the fixed-coefficient operator from the structure relaxation.
+
+For interpretation only, a complete metric-orthonormal structure spectrum gives
+\begin{equation}
+ \mathbf q_j=-\sum_{m\ne n}\mathbf c_m
+ \frac{\mathbf c_m^\dagger\mathbf R_j\mathbf c_n}{E_m-E_n}.
+ \label{eq:spectralresponse}
+\end{equation}
+At an orbital stationary point the response contribution is
+\begin{equation}
+ (H_{\mathrm{resp}})_{ij}
+ =-2\operatorname{Re}\sum_{m\ne n}
+ \frac{(\mathbf c_m^\dagger\mathbf R_i\mathbf c_n)^*
+             (\mathbf c_m^\dagger\mathbf R_j\mathbf c_n)}{E_m-E_n}.
+ \label{eq:spectralcurvature}
+\end{equation}
+For an isolated lowest state this term is negative semidefinite. For excited states it need not have that sign. Equation~\eqref{eq:spectralresponse} explains the response but is not a requirement to retain the complete excited-state spectrum.
+
+\subsubsection{Coupled Orbital--Structure Form}
+
+At a joint stationary point, express the constrained Lagrangian Hessian in real orbital and horizontal structure coordinates as
+\begin{equation}
+ \begin{pmatrix}
+ \mathcal H^{oo}&\mathcal H^{os}\\
+ \mathcal H^{so}&\mathcal H^{ss}
+ \end{pmatrix}
+ \begin{pmatrix}\mathbf p\\\mathbf q\end{pmatrix}
+ =-\begin{pmatrix}\mathbf g\\\mathbf 0\end{pmatrix},
+ \qquad \mathcal H^{os}=(\mathcal H^{so})^{T}.
+ \label{eq:couplednewton}
+\end{equation}
+Complex coefficient variations are represented here by real and imaginary components. When the structure block is invertible on the retained tangent space, elimination gives
+\begin{equation}
+ \mathcal H_{\mathrm{rel}}
+ =\mathcal H^{oo}
+ -\mathcal H^{os}(\mathcal H^{ss})^{-1}\mathcal H^{so}.
+ \label{eq:schur}
+\end{equation}
+The inverse is restricted to that space, not the singular full coefficient space. This is the coupled multiconfigurational curvature underlying second-order optimization.\cite{sun2017} A convergent local Newton model additionally requires the usual smoothness and nonsingularity conditions; its existence does not guarantee globally rapid convergence from an arbitrary initial wave function.
+
+\subsubsection{State-Averaged Derivatives and Degenerate Manifolds}
+
+For smooth isolated roots and fixed weights,
+\begin{equation}
+ g_i^{\mathrm{SA}}=\sum_nw_ng_{i,n},\qquad
+ (H_{\mathrm{rel}}^{\mathrm{SA}})_{ij}
+ =\sum_nw_n(H_{\mathrm{rel},n})_{ij}.
+ \label{eq:saderivatives}
+\end{equation}
+A genuinely degenerate manifold must instead be differentiated as a subspace. Let \(\mathbf C_*\) collect an equally weighted manifold of \(r\) roots, with
+\(\mathbf C_*^\dagger\mathbf M\mathbf C_*=\mathbf I_r\). Its objective is
+\begin{equation}
+ \mathcal E_*=
+ \frac1r\Tr(\mathbf C_*^\dagger\mathbf H\mathbf C_*),
+ \label{eq:clusterobjective}
+\end{equation}
+which is invariant under \(\mathbf C_*\mapsto\mathbf C_*\mathbf U\) for unitary \(\mathbf U\). The complement is specified by
+\begin{equation}
+ \mathbf Q_* =\mathbf I-\mathbf C_*\mathbf C_*^\dagger\mathbf M.
+ \label{eq:clustercomplement}
+\end{equation}
+Response is resolved outside the entire manifold, with internal frame rotations treated as gauge. A gap to the excluded spectrum permits a smooth subspace response even when individual eigenvectors are not uniquely differentiable. Equal-weight Kramers partners are a relevant instance. The isolated-root denominators in Eq.~\eqref{eq:spectralresponse} must not be applied across an unresolved zero gap.
+
+\subsection{Differentiated Factorized Contractions}
+
+For a fixed structure input \(\mathbf v\), define
+\begin{equation}
+ \mathbf Y=\boldsymbol{\mathcal A}\mathbf v,
+ \qquad \mathbf Z=\mathbf H_{\orth}\mathbf Y.
+\end{equation}
+Their directional variations are
+\begin{equation}
+ \dot{\mathbf Y}=\dot{\boldsymbol{\mathcal A}}\mathbf v,
+ \qquad
+ \dot{\mathbf Z}=\dot{\mathbf H}_{\orth}\mathbf Y
+                +\mathbf H_{\orth}\dot{\mathbf Y}.
+\end{equation}
+Therefore
+\begin{equation}
+ \dot{\mathbf H}\mathbf v=
+ \dot{\boldsymbol{\mathcal A}}^\dagger\mathbf Z
+ +\boldsymbol{\mathcal A}^\dagger\dot{\mathbf Z}.
+ \label{eq:directionalaction}
+\end{equation}
+The derivative in Eq.~\eqref{eq:directionalaction} holds the structure input fixed; it is not yet the relaxed HVP in Eq.~\eqref{eq:hvp}.
+
+Differentiating the RI identity gives
+\begin{equation}
+ \dot{\hat V}_{\mathrm{RI}}=\frac12\sum_P
+ \left[
+ \widehat{\dot{\mathbf L}^P}\widehat{\mathbf L^P}
+ +\widehat{\mathbf L^P}\widehat{\dot{\mathbf L}^P}
+ -\widehat{\dot{\mathbf L}^P\mathbf L^P
+                    +\mathbf L^P\dot{\mathbf L}^P}
+ \right].
+ \label{eq:riderivative}
+\end{equation}
+The second directional derivative is
+\begin{equation}
+ \begin{aligned}
+ \ddot{\hat V}_{\mathrm{RI}}=\frac12\sum_P\big[&
+ \widehat{\ddot{\mathbf L}^P}\widehat{\mathbf L^P}
+ +2(\widehat{\dot{\mathbf L}^P})^2
+ +\widehat{\mathbf L^P}\widehat{\ddot{\mathbf L}^P}\\
+ &-\widehat{\ddot{\mathbf L}^P\mathbf L^P
+            +2\dot{\mathbf L}^P\dot{\mathbf L}^P
+            +\mathbf L^P\ddot{\mathbf L}^P}\big].
+ \end{aligned}
+ \label{eq:risecondderivative}
+\end{equation}
+Both identities follow the same ordering and normal-ordering conventions as the energy operator. They express energy and derivative contractions through factor derivatives and string actions, without an explicit high-order reduced-density tensor as a necessary intermediate.
+
+\subsection{Relation to Scalar VBSCF and Two-Component CASSCF}
+
+Restricting the spinors to Eq.~\eqref{eq:collinear}, removing spin-dependent Hamiltonian terms, and using the same parent dictionary recovers the corresponding scalar VBSCF ansatz. Merely switching off SOC while retaining unrestricted spinors and additional parent channels need not recover the same restricted scalar variational space.
+
+If the VB structures span the complete electron space of the same active spinor span, and the inactive-space and orbital restrictions coincide, 2C-VBSCF and 2C-CASSCF differ only by their representation of that space. Their energies are then identical for the same Hamiltonian and corresponding stationary solution. Selected structures and strict HAO supports introduce explicit restrictions. The variational upper-bound property applies to the adopted Hermitian effective Hamiltonian, not automatically to a different relativistic Hamiltonian or to the exact experimental energy.
+
+The chemical content of the method is retained in the occupation and coupling labels of Eq.~\eqref{eq:structure}, while the spinor variational parameters allow spatial and spin degrees of freedom to respond together. Quantitative structure interpretations remain tied to the chosen localized representation and weight definition; individual nonorthogonal structure coefficients are not basis-independent probabilities.
+
+\appendix
+\section{Differentiation of the Computational Spinor Frame}
+
+At fixed AO metric,
+\begin{equation}
+ \dot{\mathbf G}=\dot{\mathbf b}^{\,\dagger}\boldsymbol\Omega\mathbf b
+                 +\mathbf b^\dagger\boldsymbol\Omega\dot{\mathbf b}.
+ \label{eq:gramderivative}
+\end{equation}
+Writing \(\mathbf U=\dot{\mathbf R}\mathbf R^{-1}\) gives
+\begin{equation}
+ \mathbf U^\dagger+\mathbf U
+ =\mathbf R^{-\dagger}\dot{\mathbf G}\mathbf R^{-1}
+ \equiv\mathbf Z.
+ \label{eq:choleskyderivative}
+\end{equation}
+Because \(\mathbf U\) is upper triangular with real diagonal,
+\begin{equation}
+ U_{ij}=\begin{cases}
+ Z_{ij},&i<j,\\Z_{ii}/2,&i=j,\\0,&i>j,
+ \end{cases}
+ \qquad \dot{\mathbf R}=\mathbf U\mathbf R.
+ \label{eq:triangularderivative}
+\end{equation}
+Thus
+\begin{equation}
+ \dot{\widetilde{\mathbf b}}=
+ \dot{\mathbf b}\mathbf R^{-1}-\widetilde{\mathbf b}\mathbf U.
+ \label{eq:orthframe_derivative}
+\end{equation}
+The second derivative follows from
+\begin{equation}
+ \mathbf R^\dagger\ddot{\mathbf R}
+ +\ddot{\mathbf R}^{\,\dagger}\mathbf R
+ =\ddot{\mathbf G}-2\dot{\mathbf R}^{\,\dagger}\dot{\mathbf R},
+ \label{eq:secondcholesky}
+\end{equation}
+using the same triangular extraction. These relations assume a smooth positive-definite Gram matrix.
+
+For a decomposable exterior vector, the mapping derivative is
+\begin{equation}
+ \begin{aligned}
+ D(\wedge^N\mathbf R)[\dot{\mathbf R}]
+ (v_1\wedge\cdots\wedge v_N)
+ =\sum_{a=1}^{N}
+ (\mathbf Rv_1)\wedge\cdots\wedge
+ (\dot{\mathbf R}v_a)\wedge\cdots\wedge(\mathbf Rv_N).
+ \end{aligned}
+ \label{eq:exteriorderivative}
+\end{equation}
+Linearity extends this expression to all structure images. Its second derivative includes one \(\ddot{\mathbf R}\) insertion and all ordered pairs of \(\dot{\mathbf R}\) insertions on distinct factors. The fixed parent map gives
+\(\dot{\boldsymbol{\mathcal A}}=\dot{\mathbf T}\mathbf B\).
+
+For any fixed AO operator matrix \(\mathbf O\), its spinor representation and derivative are
+\begin{equation}
+ \widetilde{\mathbf O}=\widetilde{\mathbf b}^\dagger\mathbf O\widetilde{\mathbf b},
+ \qquad
+ \dot{\widetilde{\mathbf O}}=
+ \dot{\widetilde{\mathbf b}}^{\,\dagger}\mathbf O\widetilde{\mathbf b}
+ +\widetilde{\mathbf b}^\dagger\mathbf O\dot{\widetilde{\mathbf b}}.
+ \label{eq:operatortransformderivative}
+\end{equation}
+This applies to the one-electron matrix and the spin-diagonal AO matrices defining RI factors. The moving exterior image and the moving integral representation are differentiated together; they are two parts of the same change of physical nonorthogonal orbitals.
+
+\section{Normalization Terms in the Relaxed Hessian}
+
+Differentiating \(g_i=\mathbf c^\dagger\mathbf R_i\mathbf c\) gives
+\begin{equation}
+ \partial_jg_i=
+ \mathbf c^\dagger(\mathbf H_{ij}-E\mathbf M_{ij}-g_j\mathbf M_i)\mathbf c
+ +2\operatorname{Re}(\mathbf c_j^\dagger\mathbf R_i\mathbf c).
+\end{equation}
+Substitution of Eq.~\eqref{eq:horizontalresponse} yields
+\begin{equation}
+ 2\operatorname{Re}(\mathbf c_j^\dagger\mathbf R_i\mathbf c)
+ =2\operatorname{Re}(\mathbf q_j^\dagger\mathbf R_i\mathbf c)-m_jg_i,
+\end{equation}
+which proves Eq.~\eqref{eq:relaxedhessian}. The two normalization terms are distinct: one arises from differentiating the energy in \(\mathbf R_i\), and the other from the normalization component of the structure response. Their sum is symmetric in \(i,j\).
+
+\begin{thebibliography}{9}
+
+\bibitem{gerratt1997}
+Gerratt, J.; Cooper, D. L.; Karadakov, P. B.; Raimondi, M.
+Modern Valence Bond Theory.
+\textit{Chem. Soc. Rev.} \textbf{1997}, \textit{26}, 87--100.
+
+\bibitem{liao2024}
+Liao, C.; Hoyer, C. E.; Banerjee Ghosh, R.; Jenkins, A. J.; Knecht, S.; Frisch, M. J.; Li, X.
+Comparison of Variational and Perturbative Spin--Orbit Coupling within Two-Component CASSCF.
+\textit{J. Phys. Chem. A} \textbf{2024}, \textit{128}, 2498--2506.
+
+\bibitem{knecht2022}
+Knecht, S.; Repisky, M.; Jensen, H. J. Aa.; Saue, T.
+Exact Two-Component Hamiltonians for Relativistic Quantum Chemistry: Two-Electron Picture-Change Corrections Made Simple.
+\textit{J. Chem. Phys.} \textbf{2022}, \textit{157}, 114106.
+
+\bibitem{kasper2020}
+Kasper, J. M.; Jenkins, A. J.; Sun, S.; Li, X.
+Perspective on Kramers Symmetry Breaking and Restoration in Relativistic Electronic Structure Methods for Open-Shell Systems.
+\textit{J. Chem. Phys.} \textbf{2020}, \textit{153}, 090903.
+
+\bibitem{sun2017}
+Sun, Q.; Yang, J.; Chan, G. K.-L.
+A General Second Order Complete Active Space Self-Consistent-Field Solver for Large-Scale Systems.
+\textit{Chem. Phys. Lett.} \textbf{2017}, \textit{683}, 291--299.
+
+\end{thebibliography}
+\end{document}
