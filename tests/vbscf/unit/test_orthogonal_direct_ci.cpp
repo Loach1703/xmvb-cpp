@@ -690,6 +690,17 @@ void check_sigma_action() {
       (generator_action - delta_action_values).cwiseAbs().maxCoeff() < 2.0e-11,
       "direct-CI one-body generator action is inconsistent with the "
       "exterior derivative");
+  Eigen::MatrixXd batched_forward, batched_transpose;
+  const Eigen::MatrixXd generator_transpose = relative_orbital_direction.transpose();
+  sigma_action.apply_one_body_generators({
+      {action_values, relative_orbital_direction, &batched_forward},
+      {left_coefficients, generator_transpose, &batched_transpose}});
+  require((batched_forward - generator_action).cwiseAbs().maxCoeff() < 2.0e-12,
+          "batched generator changed the exterior derivative");
+  const Eigen::MatrixXd expected_transpose =
+      sigma_action.apply_one_body_generator(left_coefficients, generator_transpose);
+  require((batched_transpose - expected_transpose).cwiseAbs().maxCoeff() < 2.0e-12,
+          "batched generator mixed coefficient or generator views");
   Eigen::MatrixXd action_hamiltonian = sigma_action.apply(action_values);
   Eigen::MatrixXd delta_action_hamiltonian =
       sigma_action.apply(delta_action_values) +
@@ -1392,6 +1403,23 @@ void check_sigma_tile_boundary() {
   require(std::abs(adjoint.one_electron.cwiseProduct(integrals.one_electron).sum() -
                    coefficients.cwiseProduct(expected).sum()) < 2e-8,
           "tiled direct-CI adjoint differs from action bilinear form");
+#ifdef _OPENMP
+  omp_set_dynamic(1);
+  const auto dynamic_adjoint = action.integral_adjoint(coefficients, coefficients);
+  omp_set_dynamic(dynamic);
+  require((dynamic_adjoint.pair_kernel - adjoint.pair_kernel).norm() <
+              1e-11 * std::max(1.0, adjoint.pair_kernel.norm()),
+          "adjoint output ownership depends on the actual team size");
+  xmvb::vb::DirectCiIntegralAdjoint nested_adjoint;
+#pragma omp parallel num_threads(2)
+  {
+#pragma omp single
+    nested_adjoint = action.integral_adjoint(coefficients, coefficients);
+  }
+  require((nested_adjoint.one_electron - adjoint.one_electron).norm() <
+              1e-11 * std::max(1.0, adjoint.one_electron.norm()),
+          "nested adjoint differs from the shared-tile contraction");
+#endif
 }
 
 void check_distinct_spin_sigma_action() {

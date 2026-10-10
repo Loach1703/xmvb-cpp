@@ -1249,12 +1249,15 @@ StructureActionResult StructureAction::apply_integral_direction(
         block * n_unique_beta_, n_unique_beta_) =
         residual + state.energies[block] * orthogonal;
   }
-  Eigen::MatrixXd delta_spin_vectors =
-      direct_ci_->sigma.apply_one_body_generator(
-          spin_vectors,
-          relative_orbital_direction);
+  Eigen::MatrixXd delta_spin_vectors;
+  Eigen::MatrixXd delta_spin_overlaps;
+  const Eigen::MatrixXd transposed_relative_direction =
+      relative_orbital_direction.transpose();
+  direct_ci_->sigma.apply_one_body_generators({
+      {spin_vectors, relative_orbital_direction, &delta_spin_vectors},
+      {spin_vectors, transposed_relative_direction, &delta_spin_overlaps}});
 
-  Eigen::MatrixXd delta_spin_overlaps = delta_spin_vectors;
+  delta_spin_overlaps += delta_spin_vectors;
   Eigen::MatrixXd delta_spin_hamiltonians =
       direct_ci_->sigma.apply(delta_spin_vectors);
   delta_spin_hamiltonians += sigma_direction.apply(spin_vectors);
@@ -1262,16 +1265,8 @@ StructureActionResult StructureAction::apply_integral_direction(
     direct_ci_direction->coefficient_direction = delta_spin_vectors;
     direct_ci_direction->sigma_direction = delta_spin_hamiltonians;
   }
-  const Eigen::MatrixXd transposed_relative_direction =
-      relative_orbital_direction.transpose();
-  delta_spin_hamiltonians +=
-      direct_ci_->sigma.apply_one_body_generator(
-          spin_hamiltonians,
-          transposed_relative_direction);
-  delta_spin_overlaps +=
-      direct_ci_->sigma.apply_one_body_generator(
-          spin_vectors,
-          transposed_relative_direction);
+  delta_spin_hamiltonians += direct_ci_->sigma.apply_one_body_generator(
+      spin_hamiltonians, transposed_relative_direction);
   for (int block = 0; block < block_width; ++block) {
     Eigen::MatrixXd delta_hamiltonian_block =
         delta_spin_hamiltonians.middleCols(

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <vector>
 
@@ -15,6 +16,13 @@ namespace xmvb::vb {
 struct DirectCiIntegralAdjoint {
   Eigen::MatrixXd one_electron;
   Eigen::MatrixXd pair_kernel;
+};
+
+/** @brief One generator action; inputs are views, output is caller-owned. */
+struct DirectCiGeneratorRequest {
+  Eigen::Ref<const Eigen::MatrixXd> coefficients;
+  Eigen::Ref<const Eigen::MatrixXd> generator;
+  Eigen::MatrixXd* result;
 };
 
 /**
@@ -54,6 +62,12 @@ public:
   Eigen::MatrixXd apply_one_body_generator(
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       const Eigen::Ref<const Eigen::MatrixXd>& generator) const;
+
+  /** @brief Applies equally shaped generator requests in one parallel team.
+   * Inputs stay shared; each request must have a distinct, non-aliasing output.
+   */
+  void apply_one_body_generators(
+      std::initializer_list<DirectCiGeneratorRequest> requests) const;
 
   /**
    * @brief Differentiates `left.dot(H * right)` with respect to the integrals.

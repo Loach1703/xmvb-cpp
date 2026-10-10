@@ -1,6 +1,7 @@
 #include "vbscf/structures/orthogonal_ci/sigma.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <unordered_map>
@@ -492,59 +493,71 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
 Eigen::MatrixXd DirectCiSigmaAction::apply_one_body_generator(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
     const Eigen::Ref<const Eigen::MatrixXd>& generator) const {
+  Eigen::MatrixXd result;
+  apply_one_body_generators({{coefficients, generator, &result}});
+  return result;
+}
+
+void DirectCiSigmaAction::apply_one_body_generators(
+    std::initializer_list<DirectCiGeneratorRequest> requests) const {
   diagnostics::ScopedPhase phase(diagnostics::Phase::CiGenerator);
-  if (coefficients.rows() != n_alpha_ || coefficients.cols() <= 0 ||
-      coefficients.cols() % n_beta_ != 0 ||
-      generator.rows() != n_orbitals_ ||
-      generator.cols() != n_orbitals_ ||
-      !coefficients.allFinite() || !generator.allFinite()) {
-    throw std::invalid_argument(
-        "direct-CI one-body generator has incompatible dimensions");
+  if (requests.size() == 0) return;
+  const Eigen::Index columns = requests.begin()->coefficients.cols();
+  for (const auto& request : requests) {
+    if (request.result == nullptr || request.coefficients.rows() != n_alpha_ ||
+        columns <= 0 || columns % n_beta_ != 0 ||
+        request.coefficients.cols() != columns ||
+        request.generator.rows() != n_orbitals_ ||
+        request.generator.cols() != n_orbitals_ ||
+        !request.coefficients.allFinite() || !request.generator.allFinite()) {
+      throw std::invalid_argument(
+          "direct-CI generator requests have incompatible dimensions");
+    }
+    request.result->resize(n_alpha_, columns);
   }
-  const int block_width = static_cast<int>(coefficients.cols()) / n_beta_;
   const SpinConnections& beta_graph = beta_connections();
-  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(
-      n_alpha_, coefficients.cols());
-  const int work_items = block_width * n_alpha_ * n_beta_;
-  const int n_threads = std::max(
-      1,
-      std::min(effective_openmp_thread_count(), work_items));
+  const Eigen::Index work_items = columns * static_cast<Eigen::Index>(n_alpha_);
+  const int n_threads = bounded_openmp_thread_count(
+      effective_openmp_thread_count(), static_cast<std::size_t>(work_items));
 
 #pragma omp parallel for schedule(static) if(n_threads > 1) num_threads(n_threads)
-  for (int work = 0; work < work_items; ++work) {
+  for (Eigen::Index work = 0; work < work_items; ++work) {
     const int alpha = work % n_alpha_;
-    const int packed_column = work / n_alpha_;
+    const Eigen::Index packed_column = work / n_alpha_;
     const int beta = packed_column % n_beta_;
-    const int block = packed_column / n_beta_;
-    const int column = packed_column;
-    double value = 0.0;
-    for (const int orbital : alpha_->occupied[alpha]) {
-      value += generator(orbital, orbital) * coefficients(alpha, column);
+    const Eigen::Index block = packed_column / n_beta_;
+    const Eigen::Index column = packed_column;
+    for (const auto& request : requests) {
+      const auto& coefficients = request.coefficients;
+      const auto& generator = request.generator;
+      double value = 0.0;
+      for (const int orbital : alpha_->occupied[alpha]) {
+        value += generator(orbital, orbital) * coefficients(alpha, column);
+      }
+      for (const int orbital : beta_graph.occupied[beta]) {
+        value += generator(orbital, orbital) * coefficients(alpha, column);
+      }
+      const DensityConnections& alpha_singles = alpha_->singles[alpha];
+      for (std::size_t single = 0; single < alpha_singles.size(); ++single) {
+        value += alpha_singles.signs[single] *
+            generator(
+                alpha_singles.created_orbitals[single],
+                alpha_singles.annihilated_orbitals[single]) *
+            coefficients(alpha_singles.sources[single], column);
+      }
+      const DensityConnections& beta_singles = beta_graph.singles[beta];
+      for (std::size_t single = 0; single < beta_singles.size(); ++single) {
+        value += beta_singles.signs[single] *
+            generator(
+                beta_singles.created_orbitals[single],
+                beta_singles.annihilated_orbitals[single]) *
+            coefficients(
+                alpha,
+                block * n_beta_ + beta_singles.sources[single]);
+      }
+      (*request.result)(alpha, column) = value;
     }
-    for (const int orbital : beta_graph.occupied[beta]) {
-      value += generator(orbital, orbital) * coefficients(alpha, column);
-    }
-    const DensityConnections& alpha_singles = alpha_->singles[alpha];
-    for (std::size_t single = 0; single < alpha_singles.size(); ++single) {
-      value += alpha_singles.signs[single] *
-          generator(
-              alpha_singles.created_orbitals[single],
-              alpha_singles.annihilated_orbitals[single]) *
-          coefficients(alpha_singles.sources[single], column);
-    }
-    const DensityConnections& beta_singles = beta_graph.singles[beta];
-    for (std::size_t single = 0; single < beta_singles.size(); ++single) {
-      value += beta_singles.signs[single] *
-          generator(
-              beta_singles.created_orbitals[single],
-              beta_singles.annihilated_orbitals[single]) *
-          coefficients(
-              alpha,
-              block * n_beta_ + beta_singles.sources[single]);
-    }
-    result(alpha, column) = value;
   }
-  return result;
 }
 
 DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
@@ -560,49 +573,80 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
 
   const int n_pairs = static_cast<int>(pair_kernel_.rows());
   const int block_width = static_cast<int>(left.cols()) / n_beta_;
-  constexpr int kAlphaTile = 160;
-  const int maximum_rows = std::min(kAlphaTile, n_alpha_) * block_width;
-  const int n_alpha_tiles = (n_alpha_ + kAlphaTile - 1) / kAlphaTile;
-  const int work_items = n_beta_ * n_alpha_tiles;
+  // Flatten the contracted spin-string rows into two shared, bounded tiles.
+  // Each output block has one owner: no thread-private pair-square gradient
+  // and no serial reduction of those gradients are needed.
+  constexpr std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL;
+  const std::size_t bytes_per_row = 2ULL * n_pairs * sizeof(double);
+  if (bytes_per_row > workspace_bytes) {
+    throw std::runtime_error("one direct-CI adjoint row exceeds workspace budget");
+  }
+  const int block_tile = static_cast<int>(std::min<std::size_t>(
+      block_width, workspace_bytes / bytes_per_row));
+  const std::size_t bytes_per_alpha =
+      bytes_per_row * block_tile;
+  const int alpha_tile = static_cast<int>(std::min<std::size_t>(
+      n_alpha_, workspace_bytes / bytes_per_alpha));
+  const int rows_per_beta = alpha_tile * block_tile;
+  const int beta_tile = static_cast<int>(std::min<std::size_t>(
+      n_beta_, workspace_bytes / (bytes_per_alpha * alpha_tile)));
+  const int maximum_rows = rows_per_beta * beta_tile;
   const int n_threads = std::max(
       1,
-      std::min(effective_openmp_thread_count(), work_items));
-  std::vector<Eigen::MatrixXd> partial_effective_kernel(
-      n_threads,
-      Eigen::MatrixXd::Zero(n_pairs, n_pairs));
+      std::min(effective_openmp_thread_count(), std::max(beta_tile, n_pairs)));
+  // Among exact factorizations of the worker count, the most nearly square
+  // output grid minimizes repeated reads of these equally sized operands.
+  int row_parts = static_cast<int>(std::sqrt(n_threads));
+  while (n_threads % row_parts != 0) --row_parts;
+  const int column_parts = n_threads / row_parts;
+  Eigen::MatrixXd left_intermediate(maximum_rows, n_pairs);
+  Eigen::MatrixXd right_intermediate(maximum_rows, n_pairs);
+  Eigen::MatrixXd effective_kernel_adjoint = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
 
 #pragma omp parallel if(n_threads > 1) num_threads(n_threads)
   {
-    int thread = 0;
-#ifdef _OPENMP
-    thread = omp_get_thread_num();
-#endif
-    Eigen::MatrixXd left_intermediate(
-        maximum_rows, n_pairs);
-    Eigen::MatrixXd right_intermediate(
-        maximum_rows, n_pairs);
-    Eigen::MatrixXd& effective_kernel = partial_effective_kernel[thread];
-
+    for (int block_begin = 0; block_begin < block_width; block_begin += block_tile) {
+      const int block_count = std::min(block_tile, block_width - block_begin);
+      const auto left_block = left.middleCols(block_begin * n_beta_, block_count * n_beta_);
+      const auto right_block = right.middleCols(block_begin * n_beta_, block_count * n_beta_);
+      for (int alpha_begin = 0; alpha_begin < n_alpha_; alpha_begin += alpha_tile) {
+        const int alpha_count = std::min(alpha_tile, n_alpha_ - alpha_begin);
+        const int rows = alpha_count * block_count;
+        for (int beta_begin = 0; beta_begin < n_beta_; beta_begin += beta_tile) {
+          const int beta_count = std::min(beta_tile, n_beta_ - beta_begin);
 #pragma omp for schedule(static)
-    for (int work = 0; work < work_items; ++work) {
-      const int beta = work / n_alpha_tiles;
-      const int alpha_begin = (work % n_alpha_tiles) * kAlphaTile;
-      const int alpha_count = std::min(kAlphaTile, n_alpha_ - alpha_begin);
-      const int active_columns = alpha_count * block_width;
-      auto active_left = left_intermediate.topRows(active_columns);
-      auto active_right = right_intermediate.topRows(active_columns);
-      scatter_one_body_intermediate(
-          left, alpha_begin, alpha_count, beta, active_left);
-      scatter_one_body_intermediate(
-          right, alpha_begin, alpha_count, beta, active_right);
-      effective_kernel.noalias() += active_left.transpose() * active_right;
+          for (int beta = 0; beta < beta_count; ++beta) {
+            auto active_left = left_intermediate.middleRows(beta * rows, rows);
+            auto active_right = right_intermediate.middleRows(beta * rows, rows);
+            scatter_one_body_intermediate(
+                left_block, alpha_begin, alpha_count, beta_begin + beta, active_left);
+            scatter_one_body_intermediate(
+                right_block, alpha_begin, alpha_count, beta_begin + beta, active_right);
+          }
+          // The scatter barrier publishes every shared row before GEMM; the
+          // following barrier prevents overwriting the tile during contraction.
+#pragma omp for schedule(static)
+          for (int partition = 0; partition < n_threads; ++partition) {
+            const int row_partition = partition / column_parts;
+            const int column_partition = partition % column_parts;
+            const int row_first = static_cast<int>(
+                static_cast<std::int64_t>(n_pairs) * row_partition / row_parts);
+            const int row_end = static_cast<int>(
+                static_cast<std::int64_t>(n_pairs) * (row_partition + 1) / row_parts);
+            const int first = static_cast<int>(
+                static_cast<std::int64_t>(n_pairs) * column_partition / column_parts);
+            const int end = static_cast<int>(
+                static_cast<std::int64_t>(n_pairs) * (column_partition + 1) / column_parts);
+            if (first == end || row_first == row_end) continue;
+            effective_kernel_adjoint.block(
+                row_first, first, row_end - row_first, end - first).noalias() +=
+                left_intermediate.topRows(rows * beta_count)
+                    .middleCols(row_first, row_end - row_first).transpose() *
+                right_intermediate.topRows(rows * beta_count).middleCols(first, end - first);
+          }
+        }
+      }
     }
-  }
-
-  Eigen::MatrixXd effective_kernel_adjoint = Eigen::MatrixXd::Zero(
-      n_pairs, n_pairs);
-  for (const Eigen::MatrixXd& partial : partial_effective_kernel) {
-    effective_kernel_adjoint += partial;
   }
 
   Eigen::VectorXd absorbed_one_adjoint = Eigen::VectorXd::Zero(n_pairs);
