@@ -736,10 +736,52 @@ void check_ill_conditioned_representative(
             << view.size() << " -> " << space.reduced_size() << ")\n";
 }
 
-void check_metric_inverse_certificates(const OrbitalPreparationInput& input) {
+void check_metric_blocks(const OrbitalPreparationInput& input, bool active_span) {
+  const SparseParameterLayout layout(input);
+  const OrbitalPhysicalMetric metric(input, active_span);
+  const int n_occupied = (input.n_total_electrons - input.n_active_electrons) / 2 +
+      input.n_active_orbitals;
+  for (int orbital = 0; orbital < n_occupied; ++orbital) {
+    const int count = layout.orbital_coefficient_count(orbital);
+    std::vector<int> support(count);
+    Eigen::MatrixXd lift(count, 3);
+    for (int row = 0; row < count; ++row) {
+      support[row] = input.orbital_basis_index_table[
+          orbital * input.n_basis_functions + row] - 1;
+      for (int column = 0; column < 3; ++column)
+        lift(row, column) = std::sin((row + 0.3) * (column + 0.7));
+    }
+    Eigen::MatrixXd reference(3, 3);
+    for (int column = 0; column < 3; ++column) {
+      Eigen::VectorXd direction = Eigen::VectorXd::Zero(layout.size());
+      for (int row = 0; row < count; ++row)
+        direction[layout.packed_index(orbital, row)] = lift(row, column);
+      const Eigen::VectorXd image = metric.apply(layout, direction);
+      Eigen::VectorXd local_image(count);
+      for (int row = 0; row < count; ++row)
+        local_image[row] = image[layout.packed_index(orbital, row)];
+      reference.col(column) = lift.transpose() * local_image;
+    }
+    const Eigen::MatrixXd block = metric.orbital_block(orbital, support, lift);
+    require((block - reference).norm() < 1.0e-11 * std::max(1.0, reference.norm()),
+            "analytic metric block disagrees with full coupled action");
+    for (int column = 0; column < 3; ++column) {
+      Eigen::VectorXd direction = Eigen::VectorXd::Zero(layout.size());
+      for (int row = 0; row < count; ++row)
+        direction[layout.packed_index(orbital, row)] = lift(row, column);
+      require(std::abs(block(column, column) - metric.squared_norm(layout, direction)) <
+                  1.0e-11 * std::max(1.0, std::abs(block(column, column))),
+              "analytic metric block disagrees with independent feature norm");
+    }
+  }
+  std::cout << "analytic physical metric orbital blocks: passed\n";
+}
+
+void check_metric_inverse_certificates(const OrbitalPreparationInput& input,
+                                      bool active_span = false) {
   const SparseParameterLayout view(input);
   const Eigen::MatrixXd orbitals = dense(input);
-  const OrbitalChart space(input, view, orbitals, orbitals, nullptr, true);
+  const OrbitalChart space(input, view, orbitals, orbitals, nullptr, true, active_span);
   const NonredundantRetractionMetric metric(space, view, input);
   const Eigen::Index size = space.reduced_size();
   Eigen::MatrixXd gram(size, size);
@@ -1109,6 +1151,13 @@ int main() {
     check("full support", full, 14);
     check_metric_inverse_certificates(partial);
     check_metric_inverse_certificates(full);
+    auto oeo = full;
+    oeo.orbital_type = kOrbitalTypeOeo;
+    check_metric_inverse_certificates(oeo, true);
+    check_metric_blocks(partial, false);
+    check_metric_blocks(frozen, false);
+    check_metric_blocks(full, false);
+    check_metric_blocks(full, true);
     check_complete_oeo_active_subspace_gauge();
     check_truncated_newton_certificates();
     check_residual_driven_subspace(full);
@@ -1131,7 +1180,9 @@ int main() {
          {0,1,2,3,4,5}, {0,1,2,3,4,5}}, 2), 14);
     const Eigen::MatrixXd active = c.rightCols(2);
     check("no inactive orbitals", make_input(active, {{0,1,4}, {2,3,5}}, 0), 4);
+    check_metric_inverse_certificates(make_input(active, {{0,1,4}, {2,3,5}}, 0));
     check("inactive only", make_input(c.leftCols(2), {{0,2,3}, {1,2,3}}, 2), 4);
+    check_metric_inverse_certificates(make_input(c.leftCols(2), {{0,2,3}, {1,2,3}}, 2));
     Eigen::MatrixXd single = Eigen::MatrixXd::Identity(2, 2);
     check("all coordinates are scale gauge", make_input(single, {{0}, {1}}, 0), 0);
     return 0;

@@ -3934,3 +3934,84 @@ resolvable above roundoff. Replacing the residual on every iteration while
 retaining the old conjugacy recurrence is unnecessary and adds a second
 metric application per iteration. This change leaves the true-residual
 accuracy requirement unchanged.
+
+### 15.1 Analytic orbital-block preconditioning of the Riesz map
+
+The local chart normalization does not whiten the coupled physical metric.
+Let $\mathbf U_i$ denote the support-embedded chart lift for orbital $i$;
+its columns vary only that orbital. Define
+
+$$
+\mathbf H_i=\mathbf U_i^T\mathbf S\mathbf P\mathbf U_i,
+\qquad \mathbf W_i=\mathbf V^T\mathbf S\mathbf U_i,
+\qquad \kappa_i=(\mathbf K_I^{-1})_{ii}.
+$$
+
+Here $\mathbf U_i$ is used only as a mathematical embedding: the implementation
+contracts its support-local entries and does not allocate a full AO matrix
+for every orbital. Write $b_{ij}=B_{ij}$ and let $\mathbf w_{ij}^T$ be row $j$
+of $\mathbf W_i$. Setting all other orbital variations to zero in the ray
+metric gives the exact diagonal block for an inactive orbital,
+
+$$
+\mathbf G_{ii}=
+\left(\kappa_i+\sum_j\frac{b_{ij}^2}{\nu_j}\right)\mathbf H_i
++\sum_j\left(\frac{\kappa_i}{\nu_j}
+-\frac{b_{ij}^2}{\nu_j^2}\right)
+\mathbf w_{ij}\mathbf w_{ij}^T.
+$$
+
+For active orbital $j$, the corresponding exact block is
+
+$$
+\mathbf G_{jj}=\frac{\mathbf H_j}{\nu_j}
+-\frac{\mathbf w_{jj}\mathbf w_{jj}^T}{\nu_j^2}.
+$$
+
+Although an individual coefficient in the inactive rank-update sum may be
+negative, the entire block is positive definite on an injective quotient
+lift: it is a principal block of the positive-definite reduced Gram matrix.
+No clipping, empirical shift, or energy-Hessian surrogate is introduced.
+
+For the complete-active-space span metric, let
+$\mathbf L=\mathbf V^T\mathbf S\mathbf V$,
+$\mathbf R_i=\mathbf W_i^T\mathbf L^{-1}\mathbf W_i$, and
+$t_i=\mathbf b_i^T\mathbf L^{-1}\mathbf b_i$, where $\mathbf b_i^T$ is
+row $i$ of $\mathbf B$. The exact blocks are instead
+
+$$
+\mathbf G_{ii}=(\kappa_i+t_i)\mathbf H_i
++(\kappa_i-t_i)\mathbf R_i,
+\qquad
+\mathbf G_{jj}=(\mathbf L^{-1})_{jj}(\mathbf H_j-\mathbf R_j).
+$$
+
+These identities follow by splitting the projected-active variation into
+its inactive and inactive-orthogonal components, which are orthogonal under
+$\mathbf S$. They do not require mutually orthogonal input orbitals.
+
+Use the block-Jacobi matrix
+
+$$
+\mathbf Q=\operatorname{blockdiag}_i(\mathbf G_{ii})
+$$
+
+as a preconditioner for $\mathbf G\mathbf y=\mathbf b$. Local Cholesky
+factorizations are computed once on the first inverse solve at the accepted
+point; the analytic full-AO span dual norm requires none. PCG uses
+$\mathbf z=\mathbf Q^{-1}\mathbf r$, with recurrence coefficients
+
+$$
+\alpha_k=\frac{\mathbf r_k^T\mathbf z_k}
+{\mathbf p_k^T\mathbf G\mathbf p_k},\qquad
+\beta_k=\frac{\mathbf r_{k+1}^T\mathbf z_{k+1}}
+{\mathbf r_k^T\mathbf z_k}.
+$$
+
+The full metric action retains every off-diagonal coupling. The preconditioner
+changes only the iterative solution path, not the physical metric, inverse
+equation, or true-residual acceptance criterion above. Persistent additional
+storage is $O(\sum_i d_i^2)$ for local reduced sizes $d_i$, rather than
+$O((\sum_i d_i)^2)$ for a full reduced inverse. It is accepted-point shared
+storage, not a copy per OpenMP worker. This is a structured constant-factor
+acceleration, not a guaranteed condition-number improvement for every system.

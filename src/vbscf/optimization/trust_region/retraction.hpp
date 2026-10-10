@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <mutex>
 #include <Eigen/Core>
 
 #include "vbscf/orbitals/charts/chart.hpp"
@@ -40,8 +42,8 @@ public:
   /**
    * @brief Applies the inverse Riesz map without assembling the metric.
    *
-   * Solves @f$M y=b@f$ by conjugate gradients using matrix-free metric
-   * actions and recursive CG residuals. True residuals certify convergence;
+   * Solves @f$G y=b@f$ by PCG with exact orbital-diagonal metric blocks,
+   * matrix-free coupled actions and recursive residuals. True residuals certify convergence;
    * a residual gap or a complete Krylov cycle triggers a restart, which
    * continues only while the certified residual decreases above roundoff.
    */
@@ -65,6 +67,9 @@ private:
   const OrbitalChart& space_;
   const SparseParameterLayout& parameter_view_;
   OrbitalPhysicalMetric physical_metric_;
+  /** @brief Shared lazy factorization: analytic dual norms need no PCG blocks. */
+  mutable std::once_flag block_inverse_once_;
+  mutable std::function<Eigen::VectorXd(const Eigen::VectorXd&)> block_inverse_;
 };
 
 Eigen::VectorXd shrink_reduced_step_inside_trust_radius(

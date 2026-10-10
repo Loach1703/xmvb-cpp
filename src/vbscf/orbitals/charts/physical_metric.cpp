@@ -185,6 +185,69 @@ Eigen::VectorXd OrbitalPhysicalMetric::physical_feature(
   return feature;
 }
 
+Eigen::MatrixXd OrbitalPhysicalMetric::orbital_block(
+    int orbital, const std::vector<int>& support,
+    const Eigen::Ref<const Eigen::MatrixXd>& lift) const {
+  if (orbital < 0 || orbital >= n_inactive_ + n_active_ ||
+      lift.rows() != static_cast<Eigen::Index>(support.size()) || !lift.allFinite())
+    throw std::invalid_argument("invalid local physical metric lift");
+  const Eigen::Index size = lift.rows();
+  for (const int ao : support)
+    if (ao < 0 || ao >= n_basis_functions_)
+      throw std::invalid_argument("invalid local physical metric support");
+  Eigen::MatrixXd local_overlap(size, size);
+  Eigen::MatrixXd inactive_overlap(n_inactive_, size);
+  Eigen::MatrixXd active_overlap(n_active_, size);
+  for (Eigen::Index row = 0; row < size; ++row) {
+    const int ao = support[row];
+    for (Eigen::Index column = 0; column < size; ++column)
+      local_overlap(row, column) = overlap_(ao, support[column]);
+    for (int i = 0; i < n_inactive_; ++i)
+      inactive_overlap(i, row) = inactive_.col(i).dot(overlap_.col(ao));
+    for (int j = 0; j < n_active_; ++j)
+      active_overlap(j, row) = overlap_projected_active_(ao, j);
+  }
+  // H = U^T S P U and W = V^T S U. Only support-local matrices
+  // and occupied-by-local contractions are formed, never AO-by-AO copies.
+  const Eigen::MatrixXd projection = inactive_overlap * lift;
+  Eigen::MatrixXd horizontal = lift.transpose() * local_overlap * lift;
+  if (n_inactive_ > 0)
+    horizontal.noalias() -= projection.transpose() * inactive_inverse_ * projection;
+  const Eigen::MatrixXd rays = active_overlap * lift;
+  Eigen::MatrixXd block;
+  if (active_subspace_gauge_ && n_active_ > 0) {
+    const Eigen::MatrixXd ray_gram = rays.transpose() * active_inverse_ * rays;
+    if (orbital < n_inactive_) {
+      const double weight = inactive_inverse_(orbital, orbital);
+      const auto coupling = inactive_inverse_active_overlap_.row(orbital);
+      const double feedback = (coupling * active_inverse_ * coupling.transpose())(0, 0);
+      block = (weight + feedback) * horizontal + (weight - feedback) * ray_gram;
+    } else {
+      block = active_inverse_(orbital - n_inactive_, orbital - n_inactive_) *
+          (horizontal - ray_gram);
+    }
+  } else if (orbital < n_inactive_) {
+    const double weight = inactive_inverse_(orbital, orbital);
+    double horizontal_weight = weight;
+    Eigen::VectorXd ray_weights(n_active_);
+    for (int j = 0; j < n_active_; ++j) {
+      const double norm = projected_norm_squared_[j];
+      const double coupling = inactive_inverse_active_overlap_(orbital, j);
+      const double feedback = coupling * coupling / norm;
+      horizontal_weight += feedback;
+      ray_weights[j] = (weight - feedback) / norm;
+    }
+    block = horizontal_weight * horizontal;
+    if (n_active_ > 0)
+      block.noalias() += rays.transpose() * ray_weights.asDiagonal() * rays;
+  } else {
+    const int j = orbital - n_inactive_;
+    const double norm = projected_norm_squared_[j];
+    block = horizontal / norm - rays.row(j).transpose() * rays.row(j) / (norm * norm);
+  }
+  return (0.5 * (block + block.transpose())).eval();
+}
+
 bool OrbitalPhysicalMetric::has_full_support(const SparseParameterLayout& layout) const {
   for (int orbital = 0; orbital < n_inactive_ + n_active_; ++orbital) {
     if (layout.orbital_coefficient_count(orbital) != n_basis_functions_) return false;

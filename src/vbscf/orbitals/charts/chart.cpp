@@ -15,6 +15,7 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/SVD>
 #include "vbscf/orbitals/charts/partition.hpp"
+#include "vbscf/orbitals/charts/physical_metric.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/optimization/preconditioners/one_electron.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
@@ -570,6 +571,7 @@ OrbitalChart::OrbitalChart(
     for (int k = 0; k < nocc; ++k) {
       const auto& m = mappings[k];
       OrbitalProjector proj;
+      proj.orbital_index = m.orbital_index;
       proj.flat_indices.reserve(m.coefficient_count);
       proj.packed_indices.reserve(m.coefficient_count);
       proj.block_rows.reserve(m.coefficient_count);
@@ -1260,6 +1262,41 @@ Eigen::VectorXd OrbitalChart::augmented_hessian_diagonal() const {
     }
   }
   return diagonal;
+}
+
+std::function<Eigen::VectorXd(const Eigen::VectorXd&)>
+OrbitalChart::metric_block_inverse(const OrbitalPhysicalMetric& metric) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::MetricBlock);
+  struct Block {
+    int offset;
+    Eigen::MatrixXd inverse;
+  };
+  std::vector<Block> blocks;
+  for (const auto& group : block_bases_) {
+    for (const auto& orbital : group.orbitals) {
+      if (orbital.local_reduced_size == 0) continue;
+      std::vector<int> support(orbital.block_rows.size());
+      for (std::size_t row = 0; row < support.size(); ++row)
+        support[row] = group.basis_function_indices[orbital.block_rows[row]];
+      const Eigen::MatrixXd gram = metric.orbital_block(
+          orbital.orbital_index, support, orbital.tangent_basis);
+      Eigen::LLT<Eigen::MatrixXd> factor(gram);
+      if (factor.info() != Eigen::Success)
+        throw std::runtime_error("physical metric orbital block is not positive definite");
+      blocks.push_back({orbital.local_reduced_offset, factor.solve(
+          Eigen::MatrixXd::Identity(gram.rows(), gram.cols()))});
+      if (!blocks.back().inverse.allFinite())
+        throw std::runtime_error("non-finite physical metric block inverse");
+    }
+  }
+  return [blocks = std::move(blocks), size = reduced_size_](const Eigen::VectorXd& rhs) {
+    require_finite_vector_size(rhs, size, "physical metric block inverse input");
+    Eigen::VectorXd result(size);
+    for (const auto& block : blocks)
+      result.segment(block.offset, block.inverse.rows()).noalias() =
+          block.inverse * rhs.segment(block.offset, block.inverse.rows());
+    return result;
+  };
 }
 
 Eigen::VectorXd OrbitalChart::expand_step(

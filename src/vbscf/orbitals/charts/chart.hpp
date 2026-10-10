@@ -12,6 +12,7 @@
 namespace xmvb::vb {
 
 struct AnalyticOrbitalDiagonal;
+class OrbitalPhysicalMetric;
 
 /**
  * @brief Accepted-point quotient chart for VBSCF orbital optimization.
@@ -118,6 +119,10 @@ public:
   std::function<Eigen::VectorXd(const Eigen::VectorXd&)>
   shifted_block_inverse(double shift) const;
 
+  /** @brief Factors exact physical-metric orbital blocks for Riesz PCG. */
+  std::function<Eigen::VectorXd(const Eigen::VectorXd&)>
+  metric_block_inverse(const OrbitalPhysicalMetric& metric) const;
+
   /**
    * @brief Applies @f$(J^TDJ-\omega I)^{-1}@f$ in quotient coordinates.
    *
@@ -159,6 +164,7 @@ public:
 
 private:
   struct OrbitalProjector {
+    int orbital_index = 0;
     std::vector<int> flat_indices;
     std::vector<int> packed_indices;
     std::vector<int> block_rows;

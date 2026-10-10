@@ -11,6 +11,7 @@
 #endif
 
 #include "core/openmp.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 namespace xmvb::vb::detail {
 
@@ -20,6 +21,7 @@ void apply_exact_ao_pair_kernel(
     int n_bf,
     std::size_t n_active_pairs,
     ExactCtxPairMatrix* result) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoPairAction);
   if (result == nullptr) {
     throw std::invalid_argument("AO-pair result must not be null");
   }
@@ -31,7 +33,7 @@ void apply_exact_ao_pair_kernel(
   }
 
   const AoPairGraph& graph = ao.pair_graph;
-  result->setZero(
+  result->resize(
       static_cast<Eigen::Index>(n_bf_pairs),
       static_cast<Eigen::Index>(n_active_pairs));
 
@@ -52,20 +54,18 @@ void apply_exact_ao_pair_kernel(
         std::max(1, static_cast<int>(std::min<std::size_t>(
             graph.integral_count(),
             static_cast<std::size_t>(std::numeric_limits<int>::max())))));
-    std::vector<ExactCtxPairMatrix> partial_products;
-    partial_products.reserve(n_threads);
-    for (int thread = 0; thread < n_threads; ++thread) {
-      partial_products.emplace_back(
-          ExactCtxPairMatrix::Zero(
-              static_cast<Eigen::Index>(n_bf_pairs),
-              static_cast<Eigen::Index>(n_active_pairs)));
-    }
+    std::vector<ExactCtxPairMatrix> partial_products(n_threads);
 #pragma omp parallel num_threads(n_threads)
     {
       int thread = 0;
+      int team_size = 1;
 #ifdef _OPENMP
       thread = omp_get_thread_num();
+      team_size = omp_get_num_threads();
 #endif
+      partial_products[thread].setZero(
+          static_cast<Eigen::Index>(n_bf_pairs),
+          static_cast<Eigen::Index>(n_active_pairs));
       double* local_target = partial_products[thread].data();
 #pragma omp for schedule(static)
       for (std::ptrdiff_t integral_offset = 0;
@@ -96,21 +96,15 @@ void apply_exact_ao_pair_kernel(
           }
         }
       }
-    }
-    // Each integral-stream worker owns a complete private image because the
-    // canonical stream scatters to both AO-pair rows.  Reduce those images by
-    // output element: this preserves the deterministic thread-order sum while
-    // avoiding a serial pass over n_threads * n_ao_pairs * n_active_pairs.
-    // The reduction is outside the integral OpenMP region, so it can use the
-    // whole allocation without nested parallelism.
-    const Eigen::Index result_size = result->size();
-#pragma omp parallel for schedule(static) num_threads(n_threads)
-    for (Eigen::Index index = 0; index < result_size; ++index) {
-      double value = 0.0;
-      for (int thread = 0; thread < n_threads; ++thread) {
-        value += partial_products[thread].data()[index];
+      // The omp-for barrier completes all scatter images before reduction.
+      // Reuse the same team and sum only images produced by actual workers.
+#pragma omp for schedule(static) nowait
+      for (Eigen::Index index = 0; index < result->size(); ++index) {
+        double value = 0.0;
+        for (int worker = 0; worker < team_size; ++worker)
+          value += partial_products[worker].data()[index];
+        target[index] = value;
       }
-      target[index] = value;
     }
     return;
   }
@@ -126,16 +120,15 @@ void apply_exact_ao_pair_kernel(
   const auto row_boundaries =
       graph.balanced_row_boundaries(n_threads);
 
-#pragma omp parallel num_threads(n_threads)
-  {
-    int thread = 0;
-#ifdef _OPENMP
-    thread = omp_get_thread_num();
-#endif
-    for (std::size_t row = row_boundaries[thread];
-         row < row_boundaries[thread + 1];
+#pragma omp parallel for schedule(static) num_threads(n_threads)
+  for (int partition = 0; partition < n_threads; ++partition) {
+    for (std::size_t row = row_boundaries[partition];
+         row < row_boundaries[partition + 1];
          ++row) {
       double* target_row = target + row * n_active_pairs;
+      // Each output row has one owner. First-touch and clear it here rather
+      // than serially initializing the complete output before every action.
+      std::fill_n(target_row, n_active_pairs, 0.0);
       int edge = graph.row_offsets[row];
       const int end = graph.row_offsets[row + 1];
       for (; edge + 3 < end; edge += 4) {

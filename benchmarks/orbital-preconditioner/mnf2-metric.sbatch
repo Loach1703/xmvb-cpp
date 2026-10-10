@@ -29,9 +29,10 @@ mkdir -p "$root"
 hostname > "$root/node.txt"
 lscpu > "$root/cpu.txt"
 cmake --build "$source_dir/build" --target xmvb test_sparse_orbital_quotient \
-    test_coupled_structure test_shifted_metric_preconditioner -j16 > "$root/build.log" 2>&1
+    test_coupled_structure test_shifted_metric_preconditioner \
+    test_active_two_electron_sparse -j16 > "$root/build.log" 2>&1
 for threads in 1 8 32; do
-    for test in test_sparse_orbital_quotient test_coupled_structure test_shifted_metric_preconditioner; do
+    for test in test_sparse_orbital_quotient test_coupled_structure test_shifted_metric_preconditioner test_active_two_electron_sparse; do
         srun --exact --cpus-per-task="$threads" --cpu-bind=cores \
             env OMP_NUM_THREADS="$threads" "$source_dir/build/src/$test" \
             > "$root/$test-$threads.out" 2>&1

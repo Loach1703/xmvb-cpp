@@ -10,6 +10,7 @@
 #endif
 
 #include "core/openmp.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -174,6 +175,7 @@ std::vector<double> apply_ao_h1e_transpose(
     const double* adjoint,
     const AoIntegralInput& ao,
     int n_threads) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eTranspose);
   if (adjoint == nullptr) {
     throw std::invalid_argument("AO-H1E adjoint must not be null");
   }
@@ -213,6 +215,7 @@ void apply_ao_h1e_fused(
     AoH1eFusedWorkspace* workspace,
     std::vector<double>* forward,
     std::vector<double>* transpose) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
   if (source == nullptr || adjoint == nullptr ||
       workspace == nullptr || forward == nullptr || transpose == nullptr) {
     throw std::invalid_argument("AO-H1E fused buffers must not be null");

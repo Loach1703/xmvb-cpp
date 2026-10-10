@@ -41,6 +41,16 @@ class OrbitalPhysicalMetric {
       const SparseParameterLayout& layout,
       const Eigen::Ref<const Eigen::VectorXd>& packed_covector) const;
 
+  /**
+   * @brief Exact single-orbital diagonal block of the physical metric.
+   *
+   * Contracts the support-local lift analytically, including inactive--active
+   * feedback. No full reduced metric or per-column metric actions are needed.
+   */
+  Eigen::MatrixXd orbital_block(
+      int orbital, const std::vector<int>& support,
+      const Eigen::Ref<const Eigen::MatrixXd>& lift) const;
+
  private:
   Eigen::VectorXd physical_feature(
       const SparseParameterLayout& layout,

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 namespace xmvb::vb {
 
@@ -43,6 +44,7 @@ Eigen::VectorXd NonredundantRetractionMetric::tangent(
 
 Eigen::VectorXd NonredundantRetractionMetric::apply(
     const Eigen::VectorXd& reduced_step) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::MetricAction);
   return space_.project_reduced_gradient(
       physical_metric_.apply(
           parameter_view_, space_.expand_step(reduced_step)));
@@ -50,6 +52,7 @@ Eigen::VectorXd NonredundantRetractionMetric::apply(
 
 Eigen::VectorXd NonredundantRetractionMetric::solve(
     const Eigen::VectorXd& covector) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::MetricSolve);
   const Eigen::Index dimension = space_.reduced_size();
   if (covector.size() != dimension) {
     throw std::runtime_error(
@@ -62,6 +65,9 @@ Eigen::VectorXd NonredundantRetractionMetric::solve(
   if (dimension == 0 || covector.isZero()) {
     return Eigen::VectorXd::Zero(dimension);
   }
+  std::call_once(block_inverse_once_, [this] {
+    block_inverse_ = space_.metric_block_inverse(physical_metric_);
+  });
 
   const double right_hand_side_norm = covector.norm();
   const double relative_tolerance =
@@ -71,8 +77,9 @@ Eigen::VectorXd NonredundantRetractionMetric::solve(
 
   Eigen::VectorXd solution = Eigen::VectorXd::Zero(dimension);
   Eigen::VectorXd residual = covector;
-  Eigen::VectorXd direction = covector;
-  double residual_squared = covector.squaredNorm();
+  Eigen::VectorXd preconditioned = block_inverse_(residual);
+  Eigen::VectorXd direction = preconditioned;
+  double residual_product = residual.dot(preconditioned);
   double cycle_initial_residual_norm = right_hand_side_norm;
   Eigen::Index iteration_in_cycle = 0;
   while (true) {
@@ -81,26 +88,27 @@ Eigen::VectorXd NonredundantRetractionMetric::solve(
     if (!(curvature > 0.0) || !std::isfinite(curvature)) {
       // Finite-precision CG can lose conjugacy long before an SPD operator
       // loses positivity.  Restart from the explicitly recomputed residual;
-      // only failure of that steepest direction is evidence of a singular
-      // reduced metric.
-      direction = covector - apply(solution);
-      const double restarted_residual_norm = direction.norm();
+      // only failure of that preconditioned steepest direction is evidence
+      // of a singular reduced metric.
+      residual = covector - apply(solution);
+      const double restarted_residual_norm = residual.norm();
       if (restarted_residual_norm <= residual_tolerance) {
         return solution;
       }
+      preconditioned = block_inverse_(residual);
+      direction = preconditioned;
       metric_direction = apply(direction);
       curvature = direction.dot(metric_direction);
       if (!(curvature > 0.0) || !std::isfinite(curvature)) {
         throw std::runtime_error(
             "retraction metric is singular in reduced space");
       }
-      residual_squared = direction.squaredNorm();
-      residual = direction;
+      residual_product = residual.dot(preconditioned);
       cycle_initial_residual_norm = restarted_residual_norm;
       iteration_in_cycle = 0;
     }
 
-    const double step = residual_squared / curvature;
+    const double step = residual_product / curvature;
     if (!std::isfinite(step)) {
       throw std::runtime_error(
           "retraction metric solve produced a non-finite CG step");
@@ -136,20 +144,22 @@ Eigen::VectorXd NonredundantRetractionMetric::solve(
         throw std::runtime_error(
             "retraction metric CG stagnated above its residual tolerance");
       }
-      direction = residual;
-      residual_squared = residual.squaredNorm();
+      preconditioned = block_inverse_(residual);
+      direction = preconditioned;
+      residual_product = residual.dot(preconditioned);
       cycle_initial_residual_norm = true_residual_norm;
       iteration_in_cycle = 0;
       continue;
     }
-    const double next_residual_squared = residual.squaredNorm();
-    const double beta = next_residual_squared / residual_squared;
+    preconditioned = block_inverse_(residual);
+    const double next_residual_product = residual.dot(preconditioned);
+    const double beta = next_residual_product / residual_product;
     if (!std::isfinite(beta)) {
       throw std::runtime_error(
           "retraction metric solve produced a non-finite CG recurrence");
     }
-    direction = residual + beta * direction;
-    residual_squared = next_residual_squared;
+    direction = preconditioned + beta * direction;
+    residual_product = next_residual_product;
   }
 }
 
