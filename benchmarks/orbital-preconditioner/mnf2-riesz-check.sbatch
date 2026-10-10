@@ -57,3 +57,6 @@ if [[ "$capture_status" == 0 ]]; then
     srun --exact --cpus-per-task=1 gprofng display text -limit 40 -functions neo.er > functions.txt
     srun --exact --cpus-per-task=1 gprofng display text -limit 40 -calltree neo.er > calltree.txt
 fi
+srun --exact --cpus-per-task=1 python3 \
+    "$source_dir/benchmarks/orbital-preconditioner/vector-report.py" \
+    "$source_dir/build/compile_commands.json" "$root/sampled" ao_pair_operator.cpp

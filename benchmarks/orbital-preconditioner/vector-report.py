@@ -1,4 +1,4 @@
-"""Recompile the two edited kernels for GCC vectorization evidence, not timings."""
+"""Recompile selected kernels for GCC vectorization evidence, not timings."""
 import json
 import os
 from pathlib import Path
@@ -10,9 +10,13 @@ if not os.environ.get("SLURM_JOB_ID"):
     raise SystemExit("Run on a Slurm compute node")
 commands = json.loads(Path(sys.argv[1]).read_text())
 root = Path(sys.argv[2]).resolve()
-for name in ("sigma.cpp", "direct_shell.cpp"):
-    matches = [entry for entry in commands if entry["file"].endswith(
-        "/orthogonal_ci/sigma.cpp" if name == "sigma.cpp" else "/libcint/direct_shell.cpp")]
+kernels = {
+    "sigma.cpp": "/orthogonal_ci/sigma.cpp",
+    "direct_shell.cpp": "/libcint/direct_shell.cpp",
+    "ao_pair_operator.cpp": "/transformation/ao_pair_operator.cpp",
+}
+for name in sys.argv[3:] or kernels:
+    matches = [entry for entry in commands if entry["file"].endswith(kernels[name])]
     if len(matches) != 1:
         raise SystemExit(f"Expected one compile command for {name}")
     entry = matches[0]

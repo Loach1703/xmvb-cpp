@@ -141,6 +141,24 @@ int main() {
   require(
       compact_products.isApprox(csr_products, 1.0e-14),
       "compact unique-integral action differs from symmetric CSR action");
+  // Exercise SIMD lane tails and overwritten output independently of the
+  // integral-transform code, including widths larger than a vector register.
+  Eigen::Matrix3d reference_operator = Eigen::Matrix3d::Zero();
+  for (int row = 0; row < 3; ++row)
+    for (int edge = csr_graph.row_offsets[row]; edge < csr_graph.row_offsets[row + 1]; ++edge)
+      reference_operator(row, csr_graph.columns[edge]) += csr_graph.values[edge];
+  for (const int width : {0, 1, 2, 3, 4, 7, 8, 15, 16, 31, 32, 36, 64, 65}) {
+    xmvb::vb::ExactCtxPairMatrix inputs(3, width);
+    for (int row = 0; row < 3; ++row)
+      for (int column = 0; column < width; ++column)
+        inputs(row, column) = std::sin((row + 0.3) * (column + 0.7));
+    xmvb::vb::ExactCtxPairMatrix result =
+        xmvb::vb::ExactCtxPairMatrix::Constant(3, width, 1.0e20);
+    xmvb::vb::detail::apply_exact_ao_pair_kernel(
+        csr_input, inputs, compact_n_bf, width, &result);
+    require(result.isApprox(reference_operator * inputs, 2.0e-13),
+            "SIMD CSR action lost lane tails or output initialization");
+  }
   check_direction_block(csr_input);
   check_direction_block(compact_input);
 

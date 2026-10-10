@@ -14,6 +14,56 @@
 #include "vbscf/diagnostics/performance/phases.hpp"
 
 namespace xmvb::vb::detail {
+namespace {
+
+/**
+ * @brief Contracts disjoint CSR rows with shared inputs and no private image.
+ *
+ * One source implementation is compiled for supported x86 vector widths;
+ * the runtime selects an ISA supported by the executing compute node.
+ * This does not require node-specific global compiler flags or data replicas.
+ */
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+__attribute__((target_clones("avx512f", "avx2", "default")))
+#endif
+void contract_rows(const int* offsets, const int* columns, const double* values,
+                   const double* source, double* target, std::size_t width,
+                   std::size_t first_row, std::size_t end_row) {
+  for (std::size_t row = first_row; row < end_row; ++row) {
+    double* output = target + row * width;
+    std::fill_n(output, width, 0.0);
+    int edge = offsets[row];
+    const int end = offsets[row + 1];
+    for (; edge + 3 < end; edge += 4) {
+      const double* input0 = source + static_cast<std::size_t>(columns[edge]) * width;
+      const double* input1 = source + static_cast<std::size_t>(columns[edge + 1]) * width;
+      const double* input2 = source + static_cast<std::size_t>(columns[edge + 2]) * width;
+      const double* input3 = source + static_cast<std::size_t>(columns[edge + 3]) * width;
+      const double value0 = values[edge];
+      const double value1 = values[edge + 1];
+      const double value2 = values[edge + 2];
+      const double value3 = values[edge + 3];
+#pragma omp simd
+      for (std::size_t pair = 0; pair < width; ++pair) {
+        double sum = output[pair];
+        sum += value0 * input0[pair];
+        sum += value1 * input1[pair];
+        sum += value2 * input2[pair];
+        sum += value3 * input3[pair];
+        output[pair] = sum;
+      }
+    }
+    for (; edge < end; ++edge) {
+      const double* input = source + static_cast<std::size_t>(columns[edge]) * width;
+      const double value = values[edge];
+#pragma omp simd
+      for (std::size_t pair = 0; pair < width; ++pair)
+        output[pair] += value * input[pair];
+    }
+  }
+}
+
+}  // namespace
 
 void apply_exact_ao_pair_kernel(
     const AoIntegralInput& ao,
@@ -36,6 +86,7 @@ void apply_exact_ao_pair_kernel(
   result->resize(
       static_cast<Eigen::Index>(n_bf_pairs),
       static_cast<Eigen::Index>(n_active_pairs));
+  if (n_active_pairs == 0) return;
 
   int n_threads = 1;
 #ifdef _OPENMP
@@ -122,53 +173,9 @@ void apply_exact_ao_pair_kernel(
 
 #pragma omp parallel for schedule(static) num_threads(n_threads)
   for (int partition = 0; partition < n_threads; ++partition) {
-    for (std::size_t row = row_boundaries[partition];
-         row < row_boundaries[partition + 1];
-         ++row) {
-      double* target_row = target + row * n_active_pairs;
-      // Each output row has one owner. First-touch and clear it here rather
-      // than serially initializing the complete output before every action.
-      std::fill_n(target_row, n_active_pairs, 0.0);
-      int edge = graph.row_offsets[row];
-      const int end = graph.row_offsets[row + 1];
-      for (; edge + 3 < end; edge += 4) {
-        const int column_0 = graph.columns[edge];
-        const int column_1 = graph.columns[edge + 1];
-        const int column_2 = graph.columns[edge + 2];
-        const int column_3 = graph.columns[edge + 3];
-        const double value_0 = graph.values[edge];
-        const double value_1 = graph.values[edge + 1];
-        const double value_2 = graph.values[edge + 2];
-        const double value_3 = graph.values[edge + 3];
-        const double* source_0 =
-            source + static_cast<std::size_t>(column_0) * n_active_pairs;
-        const double* source_1 =
-            source + static_cast<std::size_t>(column_1) * n_active_pairs;
-        const double* source_2 =
-            source + static_cast<std::size_t>(column_2) * n_active_pairs;
-        const double* source_3 =
-            source + static_cast<std::size_t>(column_3) * n_active_pairs;
-#pragma omp simd
-        for (std::size_t pair = 0; pair < n_active_pairs; ++pair) {
-          double accumulated = target_row[pair];
-          accumulated += value_0 * source_0[pair];
-          accumulated += value_1 * source_1[pair];
-          accumulated += value_2 * source_2[pair];
-          accumulated += value_3 * source_3[pair];
-          target_row[pair] = accumulated;
-        }
-      }
-      for (; edge < end; ++edge) {
-        const int column = graph.columns[edge];
-        const double value = graph.values[edge];
-        const double* source_row =
-            source + static_cast<std::size_t>(column) * n_active_pairs;
-#pragma omp simd
-        for (std::size_t pair = 0; pair < n_active_pairs; ++pair) {
-          target_row[pair] += value * source_row[pair];
-        }
-      }
-    }
+    contract_rows(graph.row_offsets.data(), graph.columns.data(), graph.values.data(),
+                  source, target, n_active_pairs,
+                  row_boundaries[partition], row_boundaries[partition + 1]);
   }
 }
 
