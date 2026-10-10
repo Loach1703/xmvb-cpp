@@ -28,6 +28,10 @@ AoIntegralInput build_core_hamiltonian_only_ao_integral_input(
 
 AoIntegralInput build_materialized_ao_integral_input(
     MaterializedAoIntegralBuffers buffers) {
+  if (buffers.shard_count != 1 || buffers.shard_index != 0) {
+    throw std::invalid_argument(
+        "an ERI shard cannot be used as a complete AO integral input");
+  }
   if (buffers.n_basis_functions <= 0) {
     throw std::invalid_argument("n_basis_functions must be positive");
   }

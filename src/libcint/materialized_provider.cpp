@@ -1,6 +1,7 @@
 #include "libcint/materialized_provider.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -30,6 +31,10 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
   if (!(options.integral_tolerance >= 0.0)) {
     throw std::invalid_argument("integral_tolerance must be non-negative");
   }
+  if (options.shard_count <= 0 || options.shard_index < 0 ||
+      options.shard_index >= options.shard_count) {
+    throw std::invalid_argument("invalid integral shard index/count");
+  }
 
   LibcintDirectShellEvaluator evaluator(input);
   const int n_basis_functions = evaluator.n_basis_functions();
@@ -45,10 +50,17 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
 
   MaterializedAoIntegralBuffers buffers;
   buffers.n_basis_functions = n_basis_functions;
-  buffers.ao_core_hamiltonian_matrix =
-      Eigen::MatrixXd::Zero(n_basis_functions, n_basis_functions);
+  buffers.shard_index = options.shard_index;
+  buffers.shard_count = options.shard_count;
+  const bool build_core = options.include_core_hamiltonian && options.shard_index == 0;
+  if (build_core) {
+    buffers.ao_core_hamiltonian_matrix =
+        Eigen::MatrixXd::Zero(n_basis_functions, n_basis_functions);
+  }
 
-  if (n_threads <= 1) {
+  if (!build_core) {
+    // Workers allocate neither an AO-square matrix nor one-electron blocks.
+  } else if (n_threads <= 1) {
     for (int left_shell = 0; left_shell < n_shells; ++left_shell) {
       for (int right_shell = 0; right_shell <= left_shell; ++right_shell) {
         const auto core_h_block =
@@ -139,6 +151,22 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
         for (int shell_j = 0; shell_j <= shell_i; ++shell_j) {
           for (int shell_k = 0; shell_k <= shell_i; ++shell_k) {
             for (int shell_l = 0; shell_l <= shell_k; ++shell_l) {
+              // A Cartesian shell contains several AOs: shell-pair ordering
+              // cannot replace the AO canonical filters below. Assign the
+              // complete quartet tuple without pruning valid shell orderings.
+              if (options.shard_count > 1) {
+                std::uint64_t owner = shell_i;
+                owner = owner * n_shells + shell_j;
+                owner = owner * n_shells + shell_k;
+                owner = owner * n_shells + shell_l;
+                owner ^= owner >> 30;
+                owner *= UINT64_C(0xbf58476d1ce4e5b9);
+                owner ^= owner >> 27;
+                owner *= UINT64_C(0x94d049bb133111eb);
+                owner ^= owner >> 31;
+                if (owner % static_cast<std::uint64_t>(options.shard_count) !=
+                    static_cast<std::uint64_t>(options.shard_index)) continue;
+              }
               if (options.use_historical_shell_pair_prescreen) {
                 const double shell_pair_product =
                     shell_pair_maxima[pair_index(shell_i, shell_j)] *
@@ -200,7 +228,7 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
       n_ao_pairs != 0 &&
       n_ao_pairs > max_32_bit_graph_edges / n_ao_pairs;
 
-  if (symmetric_graph_can_exceed_32_bits) {
+  if (symmetric_graph_can_exceed_32_bits || options.shard_count > 1) {
     // A fully connected symmetric AO-pair CSR graph has n_ao_pairs^2
     // directed edges.  Once that can exceed INT_MAX, the downstream graph
     // keeps this once-symmetry-reduced integral stream instead.  Avoid the
@@ -243,10 +271,16 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
       shell_integral_offsets[shell_i + 1] = previous_offset + shell_count;
     }
     const std::size_t total_integral_count = shell_integral_offsets.back();
-    // This large-basis path is consumed as a once-symmetry-reduced stream;
-    // unlike the CSR path below, it is never expanded into directed edges.
-    // Reserving twice the final value count retained an unused O(N_ERI)
-    // allocation for the entire calculation.
+    // Count/fill materializes only owned integrals. There is no full integral
+    // staging buffer followed by scatter, or retained per-shell payload copy.
+    if (!symmetric_graph_can_exceed_32_bits) {
+      if (total_integral_count > std::numeric_limits<std::size_t>::max() / 2)
+        throw std::overflow_error("directed ERI capacity exceeds size_t");
+      // The shard's CSR builder expands this allocation in place. Reserving
+      // its final capacity prevents an old/new value-buffer overlap at resize;
+      // this is local shard capacity, never capacity for the complete operator.
+      buffers.two_electron_values.reserve(2 * total_integral_count);
+    }
     buffers.two_electron_values.resize(total_integral_count);
     buffers.left_pair_indices.resize(total_integral_count);
     buffers.right_pair_indices.resize(total_integral_count);
