@@ -1,4 +1,5 @@
 #include "vbscf/optimization/objective/function.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 #include <stdexcept>
 #include <utility>
@@ -132,6 +133,7 @@ VbScfObjective::evaluate_trial_energy_with_initial_eigenvectors(
     const Eigen::VectorXd& parameter_vector,
     bool canonicalize_sparse_gauge,
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::TrialForward);
   const auto iteration_start_time = std::chrono::steady_clock::now();
   OrbitalPreparationInput trial_orbitals = input_.orbital_preparation_input;
   layout_.unpack(parameter_vector, &trial_orbitals);
@@ -223,6 +225,7 @@ VbScfObjective::evaluate_trial_with_structure_guess(
 }
 
 void VbScfObjective::complete_trial(TrialEvaluation* evaluation) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::TrialGradient);
   if (evaluation == nullptr || !evaluation->valid ||
       evaluation->gradient_ready ||
       !evaluation->forward_evaluation.has_value()) {

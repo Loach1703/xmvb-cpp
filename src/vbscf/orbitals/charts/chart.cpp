@@ -19,6 +19,7 @@
 #include "vbscf/optimization/preconditioners/one_electron.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
 #include "vbscf/core/contracts/orbital_type.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 namespace xmvb::vb {
 
@@ -121,6 +122,7 @@ struct PositiveCurvatureBlock {
 
 PositiveCurvatureBlock build_positive_curvature_block(
     const Eigen::MatrixXd& curvature_block) {
+  diagnostics::ScopedPhase block_phase(diagnostics::Phase::BlockFactor);
   if (curvature_block.rows() == 0) {
     return {Eigen::MatrixXd::Zero(0, 0), Eigen::MatrixXd::Zero(0, 0)};
   }
@@ -132,7 +134,9 @@ PositiveCurvatureBlock build_positive_curvature_block(
 
   const Eigen::MatrixXd sym_block =
       0.5 * (curvature_block + curvature_block.transpose());
+  diagnostics::ScopedPhase eigen_phase(diagnostics::Phase::BlockEigen);
   Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(sym_block);
+  eigen_phase.stop();
   if (solver.info() != Eigen::Success ||
       !solver.eigenvalues().allFinite() ||
       !solver.eigenvectors().allFinite()) {
@@ -466,6 +470,7 @@ OrbitalChart::OrbitalChart(
     bool complete_active_space,
     const AnalyticOrbitalDiagonal* hessian_diagonal)
     : packed_parameter_size_(parameter_view.size()) {
+  diagnostics::ScopedPhase chart_phase(diagnostics::Phase::Chart);
   if (ao_effective_h1e != nullptr &&
       (ao_effective_h1e->rows() != input.n_basis_functions ||
        ao_effective_h1e->cols() != input.n_basis_functions)) {

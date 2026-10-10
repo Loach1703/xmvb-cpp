@@ -25,3 +25,32 @@ counts before interpreting timings. A batch exit code alone is not convergence.
 The implementation stores one full-AO projected model per chart, not one per
 orbital. Sparse supports use the same factored inactive span without allocating
 a full-AO model. Local curvature eigendecompositions remain unchanged.
+
+## Phase and memory audit
+
+Set `XMVB_PHASE_TIMING=1` to print aggregate CSV records to stderr on exit.
+Diagnostics are off by default. `chart` includes projection, curvature and
+block factorization; `block_factor` includes `block_eigen`. Do not sum these
+inclusive totals. Projection totals include common setup and per-orbital models.
+Trial totals include all objective trial calls, not just Armijo trials.
+The projector workspace record measures only owned matrix payload, not RSS.
+
+`phase-build.sbatch SOURCE_ROOT` builds `SOURCE_ROOT/baseline` and
+`SOURCE_ROOT/updated` in parallel with the same Release flags, debug symbols,
+and frame pointers. Both source trees must have the same timing instrumentation.
+For the pre-optimization baseline, instrument the standalone projected-model
+function rather than the new projector class; the measured operation is the same.
+
+`phase-run.sbatch SOURCE_ROOT` runs four independent pairs in parallel. Each
+pair evaluates baseline then updated on one exclusive node with the same CPU
+allocation. Native time/RSS runs are separate from heaptrack captures; the
+capture cases are 241/block-LBFGS and FeCl2/NEO. `phase-summary.py RUN_ROOT`
+prints the paired resources and phases as CSV.
+
+`phase-arena.sbatch SOURCE_ROOT` is an allocator ablation with
+`MALLOC_ARENA_MAX=1`, not a proposed application default. It can substantially
+slow multithreaded allocations and is not a production speed measurement.
+`phase-memory.sbatch CAPTURE_ROOT` generates exact-byte Massif output and peak
+allocation stacks from the saved heaptrack captures, on compute nodes.
+`memory-summary.py CAPTURE_ROOT` extracts exact peak heap bytes. Chart bytes at
+the global heap peak are not the chart's own maximum over its lifetime.

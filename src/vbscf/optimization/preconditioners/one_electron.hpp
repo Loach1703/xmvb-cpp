@@ -7,6 +7,7 @@
 
 #include <Eigen/Cholesky>
 #include <Eigen/Core>
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 namespace xmvb::vb {
 
@@ -29,6 +30,7 @@ class InactiveOrbitalProjector {
       const Eigen::Ref<const Eigen::MatrixXd>& s,
       const Eigen::Ref<const Eigen::MatrixXd>& fixed_inactive)
       : f_(f), s_(s), inactive_(fixed_inactive) {
+    diagnostics::ScopedPhase phase(diagnostics::Phase::Projection);
     if (f.rows() != f.cols() || s.rows() != f.rows() || s.cols() != f.cols() ||
         fixed_inactive.rows() != f.rows() || !f.allFinite() || !s.allFinite() ||
         !fixed_inactive.allFinite()) {
@@ -51,6 +53,13 @@ class InactiveOrbitalProjector {
     inverse_ = factor.solve(Eigen::MatrixXd::Identity(gram.rows(), gram.cols()));
   }
 
+  ~InactiveOrbitalProjector() {
+    Eigen::Index entries = weights_.size() + inverse_.size();
+    if (full_model_)
+      entries += full_model_->one_electron.size() + full_model_->overlap.size();
+    diagnostics::record_projector_bytes(entries * sizeof(double));
+  }
+
   /**
    * @brief Projects a local support, optionally excluding one inactive orbital.
    *
@@ -60,6 +69,7 @@ class InactiveOrbitalProjector {
    */
   ProjectedOrbitalSurrogate model(const std::vector<int>& support,
                                  int excluded = -1) {
+    diagnostics::ScopedPhase phase(diagnostics::Phase::Projection);
     if (excluded < -1 || excluded >= inactive_.cols())
       throw std::invalid_argument("invalid excluded inactive orbital");
     bool full_support = support.size() == static_cast<std::size_t>(f_.rows());
@@ -147,6 +157,7 @@ inline Eigen::MatrixXd normalized_orbital_curvature(
     const Eigen::MatrixXd& overlap,
     const Eigen::VectorXd& x,
     const Eigen::MatrixXd& tangent) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::Curvature);
   const Eigen::Index n = x.size();
   if (f.rows() != n || f.cols() != n || overlap.rows() != n ||
       overlap.cols() != n || tangent.rows() != n || !f.allFinite() ||
