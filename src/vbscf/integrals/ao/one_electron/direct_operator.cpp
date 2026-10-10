@@ -11,6 +11,7 @@
 
 #include "core/openmp.hpp"
 #include "vbscf/diagnostics/performance/phases.hpp"
+#include "vbscf/diagnostics/performance/workers.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -140,14 +141,17 @@ std::vector<double> apply_ao_h1e(
     const double* source,
     const AoIntegralInput& ao,
     int n_threads) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eForward);
   if (source == nullptr) {
     throw std::invalid_argument("AO-H1E source must not be null");
   }
   const std::size_t size = matrix_size(ao);
   const std::size_t n_integrals = ao.pair_graph.integral_count();
   n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = xmvb::openmp_chunk_size(n_integrals, n_threads);
   std::vector<std::vector<double>> partial(n_threads);
   std::vector<double> result(size);
+  diagnostics::WorkerLoopTimes work(n_threads);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
@@ -158,16 +162,20 @@ std::vector<double> apply_ao_h1e(
 #endif
     auto& local = partial[thread];
     local.assign(size, 0.0);
-#pragma omp for schedule(static)
+    work.start(thread);
+#pragma omp for schedule(dynamic, chunk) nowait
     for (std::ptrdiff_t offset = 0;
          offset < static_cast<std::ptrdiff_t>(n_integrals);
          ++offset) {
       accumulate_forward(make_terms(ao, offset), source, local.data());
     }
+    work.stop(thread);
+#pragma omp barrier
 #pragma omp for schedule(static) nowait
     for (std::size_t index = 0; index < size; ++index)
       result[index] = sum_element(partial, index, team_size);
   }
+  work.finish(diagnostics::Phase::AoH1eForward);
   return result;
 }
 
@@ -182,8 +190,10 @@ std::vector<double> apply_ao_h1e_transpose(
   const std::size_t size = matrix_size(ao);
   const std::size_t n_integrals = ao.pair_graph.integral_count();
   n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = xmvb::openmp_chunk_size(n_integrals, n_threads);
   std::vector<std::vector<double>> partial(n_threads);
   std::vector<double> result(size);
+  diagnostics::WorkerLoopTimes work(n_threads);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
@@ -194,16 +204,20 @@ std::vector<double> apply_ao_h1e_transpose(
 #endif
     auto& local = partial[thread];
     local.assign(size, 0.0);
-#pragma omp for schedule(static)
+    work.start(thread);
+#pragma omp for schedule(dynamic, chunk) nowait
     for (std::ptrdiff_t offset = 0;
          offset < static_cast<std::ptrdiff_t>(n_integrals);
          ++offset) {
       accumulate_transpose(make_terms(ao, offset), adjoint, local.data());
     }
+    work.stop(thread);
+#pragma omp barrier
 #pragma omp for schedule(static) nowait
     for (std::size_t index = 0; index < size; ++index)
       result[index] = sum_element(partial, index, team_size);
   }
+  work.finish(diagnostics::Phase::AoH1eTranspose);
   return result;
 }
 
@@ -223,10 +237,12 @@ void apply_ao_h1e_fused(
   const std::size_t size = matrix_size(ao);
   const std::size_t n_integrals = ao.pair_graph.integral_count();
   n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = xmvb::openmp_chunk_size(n_integrals, n_threads);
   workspace->forward.resize(n_threads);
   workspace->transpose.resize(n_threads);
   forward->resize(size);
   transpose->resize(size);
+  diagnostics::WorkerLoopTimes work(n_threads);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
@@ -239,7 +255,8 @@ void apply_ao_h1e_fused(
     auto& local_transpose = workspace->transpose[thread];
     local_forward.assign(size, 0.0);
     local_transpose.assign(size, 0.0);
-#pragma omp for schedule(static)
+    work.start(thread);
+#pragma omp for schedule(dynamic, chunk) nowait
     for (std::ptrdiff_t offset = 0;
          offset < static_cast<std::ptrdiff_t>(n_integrals);
          ++offset) {
@@ -247,12 +264,15 @@ void apply_ao_h1e_fused(
       accumulate_forward(terms, source, local_forward.data());
       accumulate_transpose(terms, adjoint, local_transpose.data());
     }
+    work.stop(thread);
+#pragma omp barrier
 #pragma omp for schedule(static) nowait
     for (std::size_t index = 0; index < size; ++index) {
       (*forward)[index] = sum_element(workspace->forward, index, team_size);
       (*transpose)[index] = sum_element(workspace->transpose, index, team_size);
     }
   }
+  work.finish(diagnostics::Phase::AoH1eFused);
 }
 
 void apply_ao_h1e_fused_batch(
@@ -273,6 +293,7 @@ void apply_ao_h1e_fused_batch(
   }
   const std::size_t n_integrals = ao.pair_graph.integral_count();
   n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = xmvb::openmp_chunk_size(n_integrals, n_threads);
   const Eigen::Index n_directions = sources.cols();
   using RowMatrix =
       Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
@@ -293,7 +314,7 @@ void apply_ao_h1e_fused_batch(
     RowMatrix& local_transpose = partial_transpose[thread];
     local_forward.setZero(size, n_directions);
     local_transpose.setZero(size, n_directions);
-#pragma omp for schedule(static)
+#pragma omp for schedule(dynamic, chunk)
     for (std::ptrdiff_t offset = 0;
          offset < static_cast<std::ptrdiff_t>(n_integrals);
          ++offset) {

@@ -13,6 +13,28 @@
 #include "core/openmp.hpp"
 
 namespace xmvb::vb {
+namespace {
+
+void order_ao_integrals_by_storage(AoPairGraph* graph) {
+  if (graph == nullptr) throw std::invalid_argument("null AO-pair graph");
+  if (!graph->has_row_graph()) return;
+  if (graph->integral_rows.size() != graph->integral_edges.size())
+    throw std::invalid_argument("inconsistent unique AO integral references");
+  // Primary CSR edges are injective. Sorting their existing references does
+  // not move or duplicate the large integral payload, nor change pair orientation.
+  std::sort(graph->integral_edges.begin(), graph->integral_edges.end());
+  std::size_t row = 0;
+  for (std::size_t index = 0; index < graph->integral_edges.size(); ++index) {
+    const int edge = graph->integral_edges[index];
+    while (row + 1 < graph->row_offsets.size() && graph->row_offsets[row + 1] <= edge)
+      ++row;
+    if (edge < 0 || row + 1 >= graph->row_offsets.size())
+      throw std::invalid_argument("unique integral points outside the CSR graph");
+    graph->integral_rows[index] = static_cast<int>(row);
+  }
+}
+
+}  // namespace
 
 std::vector<std::size_t> AoPairGraph::balanced_row_boundaries(
     int n_partitions) const {
@@ -269,6 +291,7 @@ AoPairGraph build_ao_pair_graph(
   graph.values = std::move(values);
   graph.integral_rows = std::move(left_pairs);
   graph.integral_edges = std::move(right_pairs);
+  order_ao_integrals_by_storage(&graph);
 
   return graph;
 }

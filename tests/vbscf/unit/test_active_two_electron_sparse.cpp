@@ -96,9 +96,9 @@ int main() {
   const xmvb::vb::AoPairGraph ordered_graph =
       xmvb::vb::build_ao_pair_graph(
           {2, 1, 2}, {0, 1, 2}, {1.25, -0.5, 3.0}, n_active);
-  constexpr std::array<int, 3> expected_left = {2, 1, 2};
-  constexpr std::array<int, 3> expected_right = {0, 1, 2};
-  constexpr std::array<double, 3> expected_values = {1.25, -0.5, 3.0};
+  constexpr std::array<int, 3> expected_left = {1, 2, 2};
+  constexpr std::array<int, 3> expected_right = {1, 0, 2};
+  constexpr std::array<double, 3> expected_values = {-0.5, 1.25, 3.0};
   require(ordered_graph.integral_count() == 3, "AO-pair graph lost an integral");
   for (std::size_t index = 0; index < ordered_graph.integral_count(); ++index) {
     const xmvb::vb::AoPairIntegral integral = ordered_graph.integral(index);
@@ -106,7 +106,9 @@ int main() {
         integral.left_pair == expected_left[index] &&
             integral.right_pair == expected_right[index] &&
             integral.value == expected_values[index],
-        "AO-pair graph changed unique-integral order");
+        "AO-pair storage traversal changed an integral or its orientation");
+    require(index == 0 || ordered_graph.integral_edges[index - 1] < ordered_graph.integral_edges[index],
+            "unique-integral CSR references are not strictly ordered");
   }
 
   // The large-AO representation keeps the canonical unique stream and omits

@@ -16,7 +16,7 @@ enum class Phase {
   SelectedDirection, ActiveBackward, OrbitalPullback, TwoElectronResponse,
   FixedPullback, StructureSolve, StructureAdjoint,
   NeoProjectedSolve, NeoPreconditioner, NeoBasis, NeoMetric,
-  MetricAction, MetricSolve, MetricBlock, AoPairAction, AoH1eFused, AoH1eTranspose, Count
+  MetricAction, MetricSolve, MetricBlock, AoPairAction, AoH1eFused, AoH1eTranspose, AoH1eForward, Count
 };
 
 /** @brief Opt-in wall/process-CPU totals. Nested scopes are not additive.
@@ -40,7 +40,7 @@ class PhaseTotals {
         "fixed_pullback", "structure_solve", "structure_adjoint",
         "neo_projected_solve", "neo_preconditioner", "neo_basis", "neo_metric",
         "metric_action", "metric_solve", "metric_block", "ao_pair_action",
-        "ao_h1e_fused", "ao_h1e_transpose"};
+        "ao_h1e_fused", "ao_h1e_transpose", "ao_h1e_forward"};
     static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Phase::Count));
     std::fprintf(stderr, "XMVB_PHASE,stage,calls,wall_seconds\n");
     for (std::size_t i = 0; i < calls.size(); ++i)
@@ -54,6 +54,18 @@ class PhaseTotals {
                        static_cast<double>(CLOCKS_PER_SEC));
     std::fprintf(stderr, "XMVB_WORKSPACE,projector_peak_payload_bytes,%llu\n",
                  projector_bytes.load(std::memory_order_relaxed));
+    std::fprintf(stderr, "XMVB_BALANCE,stage,calls,min_loop_seconds,max_loop_seconds,sum_loop_seconds,capacity_seconds,start_skew_seconds,critical_seconds\n");
+    for (std::size_t i = 0; i < calls.size(); ++i) {
+      if (worker_calls[i].load(std::memory_order_relaxed) == 0) continue;
+      std::fprintf(stderr, "XMVB_BALANCE,%s,%llu,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f\n", names[i],
+                   worker_calls[i].load(std::memory_order_relaxed),
+                   worker_min[i].load(std::memory_order_relaxed) * 1e-9,
+                   worker_max[i].load(std::memory_order_relaxed) * 1e-9,
+                   worker_sum[i].load(std::memory_order_relaxed) * 1e-9,
+                   worker_capacity[i].load(std::memory_order_relaxed) * 1e-9,
+                   worker_skew[i].load(std::memory_order_relaxed) * 1e-9,
+                   worker_critical[i].load(std::memory_order_relaxed) * 1e-9);
+    }
   }
 
   bool enabled = false;
@@ -61,6 +73,13 @@ class PhaseTotals {
   std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> calls{};
   std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> nanoseconds{};
   std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> cpu_ticks{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_calls{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_min{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_max{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_sum{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_capacity{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_skew{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_critical{};
 };
 
 inline PhaseTotals& phase_totals() {

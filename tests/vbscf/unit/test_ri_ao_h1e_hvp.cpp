@@ -266,6 +266,17 @@ void check_large_work_count_thread_bound() {
   require(
       xmvb::bounded_openmp_thread_count(32, 0) == 1,
       "empty work count did not select one OpenMP thread");
+  require(xmvb::openmp_work_pieces(10000, 16) == 256 &&
+              xmvb::openmp_chunk_size(10000, 16) == 40,
+          "dynamic chunk granularity is inconsistent");
+  require(xmvb::openmp_work_pieces(7, 32) == 7 &&
+              xmvb::openmp_chunk_size(0, 32) == 1,
+          "empty/small dynamic loops have invalid chunks");
+  const auto largest = std::numeric_limits<std::size_t>::max();
+  const auto pieces = xmvb::openmp_work_pieces(largest, std::numeric_limits<int>::max());
+  const auto chunk = xmvb::openmp_chunk_size(largest, std::numeric_limits<int>::max());
+  require(pieces > 0 && chunk > 0 && chunk == largest / pieces + (largest % pieces != 0),
+          "dynamic chunk calculation overflowed");
 }
 
 /** @brief Checks exact scalar/fused/block actions against a dense stencil. */

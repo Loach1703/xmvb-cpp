@@ -12,6 +12,7 @@
 
 #include "core/openmp.hpp"
 #include "vbscf/diagnostics/performance/phases.hpp"
+#include "vbscf/diagnostics/performance/workers.hpp"
 
 namespace xmvb::vb::detail {
 namespace {
@@ -175,15 +176,28 @@ void apply_exact_ao_pair_graph(
   }
 
   n_threads = std::min(n_threads, static_cast<int>(n_bf_pairs));
+  const int n_pieces = static_cast<int>(
+      openmp_work_pieces(n_bf_pairs, n_threads));
   const auto row_boundaries =
-      graph.balanced_row_boundaries(n_threads);
+      graph.balanced_row_boundaries(n_pieces);
 
-#pragma omp parallel for schedule(static) num_threads(n_threads)
-  for (int partition = 0; partition < n_threads; ++partition) {
-    contract_rows(graph.row_offsets.data(), graph.columns.data(), graph.values.data(),
-                  source, target, n_active_pairs,
-                  row_boundaries[partition], row_boundaries[partition + 1]);
+  diagnostics::WorkerLoopTimes work(n_threads);
+#pragma omp parallel num_threads(n_threads)
+  {
+    int worker = 0;
+#ifdef _OPENMP
+    worker = omp_get_thread_num();
+#endif
+    work.start(worker);
+#pragma omp for schedule(dynamic, 1) nowait
+    for (int partition = 0; partition < n_pieces; ++partition) {
+      contract_rows(graph.row_offsets.data(), graph.columns.data(), graph.values.data(),
+                    source, target, n_active_pairs,
+                    row_boundaries[partition], row_boundaries[partition + 1]);
+    }
+    work.stop(worker);
   }
+  work.finish(diagnostics::Phase::AoPairAction);
 }
 
 void apply_generated_pair_rows(

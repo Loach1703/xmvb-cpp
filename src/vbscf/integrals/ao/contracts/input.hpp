@@ -24,7 +24,7 @@ struct AoPairGraph {
   std::vector<int> row_offsets;
   std::vector<int> columns;
   std::vector<double> values;
-  /** CSR rows and edge offsets in original unique-integral order. */
+  /** Unique-integral CSR references ordered by storage position for locality. */
   std::vector<int> integral_rows;
   std::vector<int> integral_edges;
   /**

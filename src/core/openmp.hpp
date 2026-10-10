@@ -53,4 +53,25 @@ inline int bounded_openmp_thread_count(
       work_items));
 }
 
+/**
+ * @brief Number of shared work pieces for dynamic loop balancing.
+ *
+ * Up to workers squared pieces give each worker workers average pieces, so
+ * the nominal trailing-piece size is one worker share divided by workers.
+ * This is a resource-derived granularity, not a molecule-specific threshold.
+ * Actual benefit depends on loop cost and is verified by native benchmarks.
+ */
+inline std::size_t openmp_work_pieces(std::size_t work_items, int workers) {
+  if (workers <= 0) throw std::invalid_argument("OpenMP worker count must be positive");
+  if (work_items == 0) return 1;
+  const std::size_t p = workers;
+  return p > work_items / p ? work_items : std::min(work_items, p * p);
+}
+
+/** @brief Positive, overflow-safe chunk size for a dynamically balanced loop. */
+inline std::size_t openmp_chunk_size(std::size_t work_items, int workers) {
+  const auto pieces = openmp_work_pieces(work_items, workers);
+  return std::max<std::size_t>(1, work_items / pieces + (work_items % pieces != 0));
+}
+
 }  // namespace xmvb
