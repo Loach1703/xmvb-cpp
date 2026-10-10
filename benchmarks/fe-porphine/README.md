@@ -72,3 +72,12 @@ Slurm working directory containing `geometry.xyz`. The checkpoint molecule,
 geometry, spin, and AO basis are checked before use. `check-guess.sbatch` prepares
 the corrected frame, independently audits it, and evaluates quintet CASCI and
 one bounded block-LBFGS step; this is a guess diagnostic, not a convergence run.
+
+For convergence with the corrected saved frame, submit
+`sbatch converge.sbatch PREPARED_DIRECTORY SOURCE_SNAPSHOT`. Six independent
+32-core jobs compare ISCF=8 and 9 in all three spin sectors, with no shell
+timeout. The partition enforces a maximum of 15 days; the input's 1000-iteration
+safety limit remains. GNU-time wall time and process peak RSS, raw iteration
+logs, binary/input/orbital hashes, CPU and thread settings are saved separately
+for each method. Do not mistake the preparation diagnostic's expected exit 2
+at the one-step limit for a numerical failure of a convergence run.
