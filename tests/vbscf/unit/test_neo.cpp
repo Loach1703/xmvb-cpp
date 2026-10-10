@@ -12,6 +12,7 @@
 
 #include "vbscf/optimization/neo/problem.hpp"
 #include "vbscf/optimization/neo/solver.hpp"
+#include "vbscf/optimization/neo/symmetry.hpp"
 
 namespace {
 
@@ -562,6 +563,43 @@ void check_boundary_requires_curvature_certificate() {
           "boundary solve did not expand the curvature residual");
 }
 
+void check_projection_roundoff() {
+  constexpr Eigen::Index n = 37879;
+  Eigen::MatrixXd q(n, 2);
+  q.col(0).setConstant(1.0 / std::sqrt(static_cast<double>(n)));
+  q.col(1).setZero();
+  for (Eigen::Index i = 0; i < n - 1; ++i) {
+    q(i, 1) = (i % 2 == 0 ? 1.0 : -1.0) /
+        std::sqrt(static_cast<double>(n - 1));
+  }
+  Eigen::MatrixXd images = 5.0 * q;
+  images.col(1) += 1.14e-12 * q.col(0);
+  const Eigen::MatrixXd projected = q.transpose() * images;
+  const double bound = xmvb::vb::neo_detail::projection_skew_roundoff(
+      q, images, projected);
+  require((projected - projected.transpose()).norm() < bound,
+          "large-dimensional projection rejects a roundoff-sized defect");
+  const NeoProblem problem(
+      (q.col(0) + q.col(1)).eval(),
+      [&q](const Eigen::VectorXd& v) -> Eigen::VectorXd {
+        return 5.0 * v + 4.0 * q.col(1).dot(v) * q.col(1) +
+            1.14e-12 * q.col(1).dot(v) * q.col(0);
+      },
+      [](const Eigen::VectorXd& v) -> Eigen::VectorXd { return v; },
+      [](const Eigen::VectorXd& v) { return v.norm(); });
+  NeoOptions options;
+  options.require_curvature_certificate = false;
+  options.relative_residual_tolerance = 1e-10;
+  const NeoResult result = solve_neo(problem, options);
+  require(result.converged(),
+          "large-dimensional roundoff regression did not converge");
+  images.col(1) += 1e-4 * q.col(0);
+  const Eigen::MatrixXd invalid = q.transpose() * images;
+  require((invalid - invalid.transpose()).norm() >
+              xmvb::vb::neo_detail::projection_skew_roundoff(q, images, invalid),
+          "roundoff bound hides a materially nonsymmetric action");
+}
+
 void check_nonsymmetric_hessian_rejected() {
   Eigen::Matrix2d hessian;
   hessian << 2.0, 1.0,
@@ -602,6 +640,7 @@ int main() {
     check_anisotropic_dual_residual();
     check_coordinate_rescaling_invariance();
     check_boundary_requires_curvature_certificate();
+    check_projection_roundoff();
     check_nonsymmetric_hessian_rejected();
     return 0;
   } catch (const std::exception& error) {

@@ -13,6 +13,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "vbscf/optimization/trust_region/spectral.hpp"
+#include "vbscf/optimization/neo/symmetry.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -182,7 +183,10 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
     const double symmetry_factor = 256.0 *
         std::numeric_limits<double>::epsilon() *
         static_cast<double>(projected_metric_action.rows());
-    if (metric_skew.norm() > symmetry_factor * metric_scale) {
+    const double metric_threshold = symmetry_factor * metric_scale;
+    if (metric_skew.norm() > metric_threshold &&
+        metric_skew.norm() > metric_threshold +
+            neo_detail::projection_skew_roundoff(q, mq, projected_metric_action)) {
       throw std::runtime_error("NEO metric action is not symmetric");
     }
     const Eigen::MatrixXd projected_metric = 0.5 *
@@ -199,7 +203,11 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
     const Eigen::MatrixXd projected_skew =
         projected_action - projected_action.transpose();
     const double hessian_scale = std::max(1.0, projected_action.norm());
-    if (projected_skew.norm() > symmetry_factor * hessian_scale) {
+    const double base_threshold = symmetry_factor * hessian_scale;
+    const double projection_roundoff = projected_skew.norm() > base_threshold
+        ? neo_detail::projection_skew_roundoff(q, hq, projected_action)
+        : 0.0;
+    if (projected_skew.norm() > base_threshold + projection_roundoff) {
       // Re-evaluate the worst pair only on failure. This distinguishes a
       // reproducible bilinear defect from a mutable/nonrepeatable action,
       // without weakening the symmetry certificate or changing valid steps.
@@ -213,7 +221,8 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
               << "; dimension=" << dimension
               << "; subspace=" << q.cols()
               << "; skew_norm=" << projected_skew.norm()
-              << "; threshold=" << symmetry_factor * hessian_scale
+              << "; threshold=" << base_threshold + projection_roundoff
+              << "; projection_roundoff=" << projection_roundoff
               << "; action_scale=" << hessian_scale
               << "; worst_pair=" << i << ',' << j
               << "; bilinear_skew=" << projected_skew(i, j)
