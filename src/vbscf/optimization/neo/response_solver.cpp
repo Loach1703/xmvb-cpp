@@ -521,6 +521,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
   }
   while (true) {
     diagnostics::ScopedPhase projected_phase(diagnostics::Phase::NeoProjectedSolve);
+    diagnostics::ScopedPhase factor_phase(diagnostics::Phase::NeoProjectionFactor);
     ++result.iterations;
     const Eigen::MatrixXd& qo = orbital_basis_;
     const Eigen::MatrixXd& mo = orbital_metric_images_;
@@ -624,6 +625,9 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
         spectrum.eigenvectors() * projected.step;
     const Eigen::VectorXd q_coefficients =
         response_coefficients * p_coefficients;
+
+    factor_phase.stop();
+    diagnostics::ScopedPhase residual_phase(diagnostics::Phase::NeoProjectionResidual);
 
     result.step.orbital.noalias() = qo * p_coefficients;
     result.step.structure.noalias() = qs * q_coefficients;
@@ -773,6 +777,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
     }
 
     // Refine only the structure response required by the current candidate.
+    residual_phase.stop();
     projected_phase.stop();
     // Closing C Z = -B Q for every retained orbital basis column performs
     // response solves that do not enter p = Q y.  The complete coupled KKT
