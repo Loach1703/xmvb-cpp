@@ -425,7 +425,7 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_graph(
           dense_active_coefficients,
           n_basis_functions,
           n_active_orbitals);
-  result.dense_ao_pair_products = pair_products;
+  result.dense_ao_pair_products = std::move(pair_products);
   return result;
 }
 

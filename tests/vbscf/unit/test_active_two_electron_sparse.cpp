@@ -5,6 +5,9 @@
 #include <Eigen/Core>
 
 #include "vbscf/integrals/active/two_electron/construction/builder.hpp"
+#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
+#include "vbscf/integrals/active/two_electron/response/directional.hpp"
+#include "vbscf/integrals/active/two_electron/response/internal.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
 #include "vbscf/integrals/ao/pairs/two_electron_index.hpp"
 
@@ -14,6 +17,74 @@ void require(bool condition, const char* message) {
   if (!condition) {
     throw std::runtime_error(message);
   }
+}
+
+void check_direction_block(const xmvb::vb::AoIntegralInput& integrals) {
+  using namespace xmvb::vb;
+  Eigen::MatrixXd orbitals(2, 2);
+  orbitals << 1.0, 0.3, -0.2, 0.9;
+  std::vector<Eigen::MatrixXd> directions(3, Eigen::MatrixXd::Zero(2, 2));
+  directions[0] << 0.2, -0.4, 0.1, 0.3;
+  directions[1] << -0.3, 0.1, 0.5, -0.2;
+  ExactCtxPairMatrix pair_map;
+  detail::build_ao_pair_to_active_pair_coefficients(
+      orbitals, 2, 2, detail::build_active_pair_list(2), &pair_map);
+  ActiveSpaceTwoElectronResult accepted;
+  detail::apply_exact_ao_pair_kernel(
+      integrals, pair_map, 2, 3, &accepted.dense_ao_pair_products);
+  auto cache = build_exact_packed_active_two_electron_adjoint_cache(
+      {0.2, -0.1, 0.3, 0.4, -0.2, 0.5}, orbitals, integrals, 2, accepted);
+  std::vector<ExactCtxPairMatrix> products;
+  std::vector<Eigen::MatrixXd> fixed;
+  const auto batch = compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+      cache, directions, integrals, &products, &fixed);
+  const auto integral_only = compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+      cache, directions, integrals);
+  require(batch.isApprox(integral_only, 1e-13), "integral-only batch changed delta ERI");
+  for (int column = 0; column < 3; ++column) {
+    ExactPackedActiveTwoElectronDirectionalDerivativeWorkspace workspace;
+    std::vector<double> scalar;
+    compute_exact_packed_active_two_electron_integral_directional_derivative(
+        cache, directions[column], integrals, &workspace, &scalar);
+    require(batch.col(column).isApprox(Eigen::Map<const Eigen::VectorXd>(scalar.data(), scalar.size()), 1e-13),
+            "block exact ERI differs from scalar direction");
+    require(products[column].isApprox(workspace.directional_pair_products, 1e-13),
+            "block half transform differs from scalar image");
+    require(fixed[column].size() == 0, "resident batch returned a stale streamed adjoint");
+    ExactPackedActiveTwoElectronApplyWorkspace pullback;
+    Eigen::MatrixXd fused;
+    apply_exact_packed_active_two_electron_adjoint_hessian_vector_fused(
+        cache, directions[column], integrals, products[column], &pullback, &fused);
+    require(fused.isApprox(apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+                cache, directions[column], integrals), 1e-13),
+            "reusing block images changed orbital HVP");
+  }
+  if (!integrals.pair_graph.has_compact_integral_stream()) {
+    cache.accepted_pair_products = nullptr;
+    const auto streamed = compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+        cache, directions, integrals);
+    require(streamed.isApprox(batch, 1e-13), "shared accepted tiles changed delta ERI");
+    const auto with_adjoint = compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+        cache, directions, integrals, &products, &fixed);
+    require(with_adjoint.isApprox(batch, 1e-13), "streamed orbital batch changed delta ERI");
+    for (int column = 0; column < 3; ++column) {
+      require(products[column].size() == 0, "streamed batch retained a full directional image");
+      require(fixed[column].isApprox(apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+                  cache, directions[column], integrals), 1e-13),
+              "streamed batch returned an incorrect fixed adjoint");
+    }
+  }
+  const auto empty = compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+      cache, {}, integrals, &products, &fixed);
+  require(empty.cols() == 0 && products.empty() && fixed.empty(), "empty batch retained stale outputs");
+  bool rejected = false;
+  try {
+    compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+        cache, {Eigen::MatrixXd::Zero(1, 2)}, integrals);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected, "batch accepted a malformed direction");
 }
 
 }  // namespace
@@ -70,6 +141,8 @@ int main() {
   require(
       compact_products.isApprox(csr_products, 1.0e-14),
       "compact unique-integral action differs from symmetric CSR action");
+  check_direction_block(csr_input);
+  check_direction_block(compact_input);
 
   xmvb::vb::OrbitalPreparationResult orbitals;
   orbitals.active_sparse_row_offsets.resize(n_active + 1);

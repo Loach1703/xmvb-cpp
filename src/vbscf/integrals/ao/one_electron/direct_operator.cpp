@@ -122,19 +122,15 @@ inline void accumulate_transpose(
   target[t.li] -= t.value * adjoint[t.jk];
 }
 
-void reduce(
-    std::vector<std::vector<double>> partial,
-    std::vector<double>* result) {
-  if (partial.size() == 1) {
-    *result = std::move(partial.front());
-    return;
-  }
-  result->assign(partial.front().size(), 0.0);
-  for (const auto& local : partial) {
-    for (std::size_t index = 0; index < result->size(); ++index) {
-      (*result)[index] += local[index];
-    }
-  }
+/** @brief Thread-ordered reduction; output elements are owned by distinct workers. */
+double sum_element(
+    const std::vector<std::vector<double>>& partial,
+    std::size_t index,
+    int team_size) {
+  double sum = 0.0;
+  for (int thread = 0; thread < team_size; ++thread)
+    sum += partial[thread][index];
+  return sum;
 }
 
 }  // namespace
@@ -149,24 +145,28 @@ std::vector<double> apply_ao_h1e(
   const std::size_t size = matrix_size(ao);
   const std::size_t n_integrals = ao.pair_graph.integral_count();
   n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
-  std::vector<std::vector<double>> partial(
-      n_threads, std::vector<double>(size, 0.0));
+  std::vector<std::vector<double>> partial(n_threads);
+  std::vector<double> result(size);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
+    int team_size = 1;
 #ifdef _OPENMP
     thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
 #endif
     auto& local = partial[thread];
+    local.assign(size, 0.0);
 #pragma omp for schedule(static)
     for (std::ptrdiff_t offset = 0;
          offset < static_cast<std::ptrdiff_t>(n_integrals);
          ++offset) {
       accumulate_forward(make_terms(ao, offset), source, local.data());
     }
+#pragma omp for schedule(static) nowait
+    for (std::size_t index = 0; index < size; ++index)
+      result[index] = sum_element(partial, index, team_size);
   }
-  std::vector<double> result;
-  reduce(std::move(partial), &result);
   return result;
 }
 
@@ -180,24 +180,28 @@ std::vector<double> apply_ao_h1e_transpose(
   const std::size_t size = matrix_size(ao);
   const std::size_t n_integrals = ao.pair_graph.integral_count();
   n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
-  std::vector<std::vector<double>> partial(
-      n_threads, std::vector<double>(size, 0.0));
+  std::vector<std::vector<double>> partial(n_threads);
+  std::vector<double> result(size);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
+    int team_size = 1;
 #ifdef _OPENMP
     thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
 #endif
     auto& local = partial[thread];
+    local.assign(size, 0.0);
 #pragma omp for schedule(static)
     for (std::ptrdiff_t offset = 0;
          offset < static_cast<std::ptrdiff_t>(n_integrals);
          ++offset) {
       accumulate_transpose(make_terms(ao, offset), adjoint, local.data());
     }
+#pragma omp for schedule(static) nowait
+    for (std::size_t index = 0; index < size; ++index)
+      result[index] = sum_element(partial, index, team_size);
   }
-  std::vector<double> result;
-  reduce(std::move(partial), &result);
   return result;
 }
 
@@ -218,18 +222,20 @@ void apply_ao_h1e_fused(
   n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
   workspace->forward.resize(n_threads);
   workspace->transpose.resize(n_threads);
-  for (int thread = 0; thread < n_threads; ++thread) {
-    workspace->forward[thread].assign(size, 0.0);
-    workspace->transpose[thread].assign(size, 0.0);
-  }
+  forward->resize(size);
+  transpose->resize(size);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
+    int team_size = 1;
 #ifdef _OPENMP
     thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
 #endif
     auto& local_forward = workspace->forward[thread];
     auto& local_transpose = workspace->transpose[thread];
+    local_forward.assign(size, 0.0);
+    local_transpose.assign(size, 0.0);
 #pragma omp for schedule(static)
     for (std::ptrdiff_t offset = 0;
          offset < static_cast<std::ptrdiff_t>(n_integrals);
@@ -238,15 +244,10 @@ void apply_ao_h1e_fused(
       accumulate_forward(terms, source, local_forward.data());
       accumulate_transpose(terms, adjoint, local_transpose.data());
     }
-  }
-  forward->assign(size, 0.0);
-  transpose->assign(size, 0.0);
-  for (int thread = 0; thread < n_threads; ++thread) {
-    const auto& local_forward = workspace->forward[thread];
-    const auto& local_transpose = workspace->transpose[thread];
+#pragma omp for schedule(static) nowait
     for (std::size_t index = 0; index < size; ++index) {
-      (*forward)[index] += local_forward[index];
-      (*transpose)[index] += local_transpose[index];
+      (*forward)[index] = sum_element(workspace->forward, index, team_size);
+      (*transpose)[index] = sum_element(workspace->transpose, index, team_size);
     }
   }
 }
@@ -274,18 +275,21 @@ void apply_ao_h1e_fused_batch(
       Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
   const RowMatrix source_rows = sources;
   const RowMatrix adjoint_rows = adjoints;
-  std::vector<RowMatrix> partial_forward(
-      n_threads, RowMatrix::Zero(size, n_directions));
-  std::vector<RowMatrix> partial_transpose(
-      n_threads, RowMatrix::Zero(size, n_directions));
+  std::vector<RowMatrix> partial_forward(n_threads), partial_transpose(n_threads);
+  forward->resize(size, n_directions);
+  transpose->resize(size, n_directions);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
+    int team_size = 1;
 #ifdef _OPENMP
     thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
 #endif
     RowMatrix& local_forward = partial_forward[thread];
     RowMatrix& local_transpose = partial_transpose[thread];
+    local_forward.setZero(size, n_directions);
+    local_transpose.setZero(size, n_directions);
 #pragma omp for schedule(static)
     for (std::ptrdiff_t offset = 0;
          offset < static_cast<std::ptrdiff_t>(n_integrals);
@@ -322,15 +326,19 @@ void apply_ao_h1e_fused_batch(
             t.value * adjoint_rows(t.jk, direction);
       }
     }
+#pragma omp for schedule(static) nowait
+    for (std::size_t index = 0; index < size; ++index) {
+      for (Eigen::Index direction = 0; direction < n_directions; ++direction) {
+        double sum_forward = 0.0, sum_transpose = 0.0;
+        for (int worker = 0; worker < team_size; ++worker) {
+          sum_forward += partial_forward[worker](index, direction);
+          sum_transpose += partial_transpose[worker](index, direction);
+        }
+        (*forward)(index, direction) = sum_forward;
+        (*transpose)(index, direction) = sum_transpose;
+      }
+    }
   }
-  RowMatrix sum_forward = RowMatrix::Zero(size, n_directions);
-  RowMatrix sum_transpose = RowMatrix::Zero(size, n_directions);
-  for (int thread = 0; thread < n_threads; ++thread) {
-    sum_forward += partial_forward[thread];
-    sum_transpose += partial_transpose[thread];
-  }
-  *forward = sum_forward;
-  *transpose = sum_transpose;
 }
 
 }  // namespace xmvb::vb
