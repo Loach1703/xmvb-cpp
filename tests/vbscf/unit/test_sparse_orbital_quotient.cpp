@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -735,6 +736,37 @@ void check_ill_conditioned_representative(
             << view.size() << " -> " << space.reduced_size() << ")\n";
 }
 
+void check_metric_inverse_certificates(const OrbitalPreparationInput& input) {
+  const SparseParameterLayout view(input);
+  const Eigen::MatrixXd orbitals = dense(input);
+  const OrbitalChart space(input, view, orbitals, orbitals, nullptr, true);
+  const NonredundantRetractionMetric metric(space, view, input);
+  const Eigen::Index size = space.reduced_size();
+  Eigen::MatrixXd gram(size, size);
+  for (Eigen::Index column = 0; column < size; ++column)
+    gram.col(column) = metric.apply(Eigen::VectorXd::Unit(size, column));
+  const Eigen::LDLT<Eigen::MatrixXd> factor(gram);
+  require(factor.info() == Eigen::Success && factor.isPositive(),
+          "metric inverse fixture is not positive definite");
+  for (int sample = 0; sample < 6; ++sample) {
+    Eigen::VectorXd rhs(size);
+    for (Eigen::Index i = 0; i < size; ++i)
+      rhs[i] = std::sin((i + 1.0) * (sample + 0.7));
+    for (const double scale : {1.0e-8, 1.0, 1.0e8}) {
+      const Eigen::VectorXd covector = scale * rhs;
+      const Eigen::VectorXd solution = metric.solve(covector);
+      require((covector - metric.apply(solution)).norm() <=
+                  std::sqrt(std::numeric_limits<double>::epsilon()) * covector.norm(),
+              "metric inverse accepted without its original true-residual certificate");
+      const Eigen::VectorXd reference = factor.solve(covector);
+      require((solution - reference).norm() <=
+                  1.0e-7 * reference.norm(),
+              "certified metric inverse disagrees with dense reference");
+    }
+  }
+  std::cout << "metric inverse true-residual certificates and RHS scaling: passed\n";
+}
+
 class DenseTestHvp final : public ReducedHvp {
  public:
   explicit DenseTestHvp(Eigen::MatrixXd hessian)
@@ -1075,6 +1107,8 @@ int main() {
     auto full = make_input(c, {{0,1,2,3,4,5}, {0,1,2,3,4,5},
                                {0,1,2,3,4,5}, {0,1,2,3,4,5}}, 2);
     check("full support", full, 14);
+    check_metric_inverse_certificates(partial);
+    check_metric_inverse_certificates(full);
     check_complete_oeo_active_subspace_gauge();
     check_truncated_newton_certificates();
     check_residual_driven_subspace(full);

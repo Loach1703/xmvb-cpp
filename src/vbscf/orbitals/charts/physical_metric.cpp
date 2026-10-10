@@ -64,6 +64,9 @@ OrbitalPhysicalMetric::OrbitalPhysicalMetric(const OrbitalPreparationInput& inpu
     if (!inactive_inverse_.allFinite()) {
       throw std::runtime_error("non-finite inactive metric inverse");
     }
+    if (!active_subspace_gauge_ || n_active_ == 0)
+      overlap_times_inactive_inverse_.noalias() =
+          overlap_ * inactive_ * inactive_inverse_;
     complement_.noalias() -=
         inactive_ * inactive_inverse_ * inactive_.transpose() * overlap_;
     Eigen::LLT<Eigen::MatrixXd> inactive_factor(inactive_metric);
@@ -277,16 +280,15 @@ Eigen::VectorXd OrbitalPhysicalMetric::apply(
     }
   }
 
-  const Eigen::MatrixXd horizontal_inactive = complement_ * delta_inactive;
   Eigen::MatrixXd inactive_cotangent = Eigen::MatrixXd::Zero(
       n_basis_functions_, n_inactive_);
-  if (n_inactive_ > 0) {
-    inactive_cotangent.noalias() =
-        overlap_ * horizontal_inactive * inactive_inverse_;
-  }
   Eigen::MatrixXd active_cotangent = Eigen::MatrixXd::Zero(
       n_basis_functions_, n_active_);
   if (active_subspace_gauge_ && n_active_ > 0) {
+    const Eigen::MatrixXd horizontal_inactive = complement_ * delta_inactive;
+    if (n_inactive_ > 0)
+      inactive_cotangent.noalias() =
+          overlap_ * horizontal_inactive * inactive_inverse_;
     Eigen::MatrixXd delta = complement_ * delta_active;
     if (n_inactive_ > 0) {
       delta.noalias() -= horizontal_inactive * inactive_inverse_active_overlap_;
@@ -301,38 +303,49 @@ Eigen::VectorXd OrbitalPhysicalMetric::apply(
           weighted * inactive_inverse_active_overlap_.transpose();
       inactive_cotangent.noalias() -= overlap_active_ *
           (inactive_inverse_times_inactive_transpose_ * weighted).transpose();
+      inactive_cotangent =
+          (complement_.transpose() * inactive_cotangent).eval();
     }
   } else {
-    // All active rays share the same inactive projector and AO overlap.
-    // Contract their columns together rather than streaming those matrices
-    // once per ray. Only orbital-sized temporaries are needed; no worker
-    // receives a private AO matrix or inverse metric.
-    Eigen::MatrixXd delta_rays = complement_ * delta_active;
+    // S-orthogonal projection gives P^T S P = S P. Its inactive complement
+    // can therefore be applied with the shared rank-n_inactive factor, not
+    // repeated dense AO projections. The ray metric separates horizontal
+    // active motion from the inactive feedback; see the metric derivation.
+    Eigen::MatrixXd weighted_inactive = overlap_ * delta_inactive;
+    Eigen::MatrixXd weighted_rays = overlap_ * delta_active;
     if (n_inactive_ > 0) {
-      delta_rays.noalias() -=
-          horizontal_inactive * inactive_inverse_active_overlap_;
-      delta_rays.noalias() -= inactive_times_inverse_ *
-          (horizontal_inactive.transpose() * overlap_active_);
+      const Eigen::MatrixXd inactive_projection =
+          inactive_.transpose() * weighted_inactive;
+      const Eigen::MatrixXd active_projection =
+          inactive_.transpose() * weighted_rays;
+      weighted_inactive.noalias() -=
+          overlap_times_inactive_inverse_ * inactive_projection;
+      weighted_rays.noalias() -=
+          overlap_times_inactive_inverse_ * active_projection;
+      if (n_active_ > 0)
+        weighted_rays.noalias() -=
+            weighted_inactive * inactive_inverse_active_overlap_;
     }
-    Eigen::MatrixXd weighted_rays = overlap_ * delta_rays;
     for (int active = 0; active < n_active_; ++active) {
       const double norm_squared = projected_norm_squared_[active];
       const auto overlap_ray = overlap_projected_active_.col(active);
       weighted_rays.col(active).noalias() -= overlap_ray *
-          (overlap_ray.dot(delta_rays.col(active)) / norm_squared);
+          (projected_active_.col(active).dot(weighted_rays.col(active)) / norm_squared);
       weighted_rays.col(active) /= norm_squared;
     }
-    active_cotangent.noalias() = complement_.transpose() * weighted_rays;
+    active_cotangent.swap(weighted_rays);
     if (n_inactive_ > 0) {
-      inactive_cotangent.noalias() -=
-          weighted_rays * inactive_inverse_active_overlap_.transpose();
-      inactive_cotangent.noalias() -= overlap_active_ *
-          (inactive_inverse_times_inactive_transpose_ * weighted_rays).transpose();
+      if (n_active_ > 0) {
+        Eigen::MatrixXd feedback =
+            projected_active_.transpose() * weighted_inactive;
+        feedback.array().colwise() /= projected_norm_squared_.array();
+        weighted_inactive.noalias() += overlap_projected_active_ * feedback;
+      }
+      inactive_cotangent.noalias() = weighted_inactive * inactive_inverse_;
+      if (n_active_ > 0)
+        inactive_cotangent.noalias() -=
+            active_cotangent * inactive_inverse_active_overlap_.transpose();
     }
-  }
-  if (n_inactive_ > 0) {
-    inactive_cotangent =
-        (complement_.transpose() * inactive_cotangent).eval();
   }
   Eigen::VectorXd packed_action = Eigen::VectorXd::Zero(layout.size());
   for (int orbital = 0; orbital < n_inactive_ + n_active_; ++orbital) {

@@ -41,10 +41,9 @@ public:
    * @brief Applies the inverse Riesz map without assembling the metric.
    *
    * Solves @f$M y=b@f$ by conjugate gradients using matrix-free metric
-   * actions. True residuals certify convergence.  When finite-precision loss
-   * of conjugacy prevents the exact-arithmetic n-step property, the solve
-   * restarts after a complete Krylov cycle and continues while the certified
-   * residual still decreases above roundoff.
+   * actions and recursive CG residuals. True residuals certify convergence;
+   * a residual gap or a complete Krylov cycle triggers a restart, which
+   * continues only while the certified residual decreases above roundoff.
    */
   Eigen::VectorXd solve(const Eigen::VectorXd& covector) const;
 

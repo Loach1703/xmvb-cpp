@@ -3824,3 +3824,113 @@ The implementation compares this analytic expression with the independently
 solved reduced metric on the complete-OEO regression fixture. AO whitening
 here is a coordinate operation for evaluating a norm, not an orthogonal
 orbital-rotation update.
+
+## 15. Factored ray-metric action and certified inverse
+
+For individual active-orbital rays, the same physical metric can be applied
+without repeatedly forming their projected variations and then backpropagating
+through the full AO projector. Let $\mathbf I$ and $\mathbf A$ contain the
+inactive and active orbital coefficients, respectively, and define
+
+$$
+\mathbf K_I=\mathbf I^T\mathbf S\mathbf I,\qquad
+\mathbf P=\mathbf 1-\mathbf I\mathbf K_I^{-1}\mathbf I^T\mathbf S,
+\qquad \mathbf V=\mathbf P\mathbf A,
+\qquad \mathbf B=\mathbf K_I^{-1}\mathbf I^T\mathbf S\mathbf A.
+$$
+
+Here $\mathbf S$ is the AO overlap, $\mathbf V$ contains the projected
+active orbitals, and $\mathbf B$ describes the inactive component of the
+unprojected active orbitals. Write $\nu_j=\mathbf v_j^T\mathbf S\mathbf v_j$
+and $\mathbf D=\operatorname{diag}(\nu_j^{-1})$. For coefficient variations
+$\delta\mathbf I$ and $\delta\mathbf A$, introduce
+
+$$
+\mathbf X=\mathbf P\delta\mathbf I,\qquad
+\mathbf Z=\mathbf P\delta\mathbf A-\mathbf X\mathbf B,
+\qquad \mathbf W=\mathbf X^T\mathbf S\mathbf V.
+$$
+
+The projected-active variation is
+
+$$
+\delta\mathbf V=\mathbf Z-\mathbf I\mathbf K_I^{-1}\mathbf W.
+$$
+
+Since $\mathbf I^T\mathbf S\mathbf Z=0$ and
+$\mathbf I^T\mathbf S\mathbf V=0$, its inactive and horizontal components
+are orthogonal in the AO metric. The squared physical length therefore becomes
+
+$$
+\|\delta\mathbf I,\delta\mathbf A\|_{\mathrm{ray}}^2
+=\operatorname{tr}(\mathbf K_I^{-1}\mathbf X^T\mathbf S\mathbf X)
++\sum_j\left[
+\frac{\mathbf z_j^T\mathbf S\mathbf z_j
+      +\mathbf w_j^T\mathbf K_I^{-1}\mathbf w_j}{\nu_j}
+-\frac{(\mathbf v_j^T\mathbf S\mathbf z_j)^2}{\nu_j^2}
+\right],
+$$
+
+where $\mathbf w_j$ is column $j$ of $\mathbf W$. Define the weighted
+horizontal variations and ray cotangents by
+
+$$
+\mathbf C_I=\mathbf S\mathbf P\delta\mathbf I,\qquad
+\mathbf C_A=\mathbf S\mathbf P\delta\mathbf A-\mathbf C_I\mathbf B,
+$$
+
+$$
+\mathbf Q_j=\frac{1}{\nu_j}\left[
+\mathbf C_{A,j}-\mathbf S\mathbf v_j
+\frac{\mathbf v_j^T\mathbf C_{A,j}}{\nu_j}\right].
+$$
+
+Differentiating half the squared length gives the ambient metric action
+
+$$
+\mathbf F_A=\mathbf Q,\qquad
+\mathbf F_I=
+\left(\mathbf C_I+\mathbf S\mathbf V\mathbf D\mathbf V^T\mathbf C_I\right)
+\mathbf K_I^{-1}-\mathbf Q\mathbf B^T.
+$$
+
+These are cotangent images of the input variation, not energy gradients.
+Restricting the images to the allowed AO coefficients and applying the chart
+adjoint gives exactly the original reduced metric. This identity retains
+inactive--active coupling and does not assume orthogonal active orbitals or
+a complete selected-structure space.
+
+The identity $\mathbf P^T\mathbf S\mathbf P=\mathbf S\mathbf P$ eliminates
+the repeated transpose-projector applications. For either variation matrix
+$\mathbf T$, evaluate
+
+$$
+\mathbf S\mathbf P\mathbf T
+=\mathbf S\mathbf T
+-\left(\mathbf S\mathbf I\mathbf K_I^{-1}\right)
+ \left(\mathbf I^T\mathbf S\mathbf T\right).
+$$
+
+The accepted-point factor in parentheses needs only $n_{\mathrm{bf}}n_I$
+entries and is shared across inverse solves. The leading AO-matrix work is
+$O(n_{\mathrm{bf}}^2(n_I+n_A))$, followed by orbital-space contractions.
+This is a constant-factor reduction in metric-action work, not a claim of
+lower asymptotic scaling when the occupied space grows with the AO basis.
+No reduced metric or inverse metric is assembled, and no AO-square copy is
+allocated per worker.
+
+For the inverse Riesz map, solve $\mathbf G\mathbf y=\mathbf b$ by CG using
+the standard recursive residual between certification points. Accept only if
+
+$$
+\|\mathbf b-\mathbf G\mathbf y\|_2
+\leq\sqrt{\epsilon_{\mathrm{mach}}}\,\|\mathbf b\|_2.
+$$
+
+The recursive residual is never an acceptance certificate. Recompute the
+true residual when recursive convergence is indicated or a full Krylov cycle
+is completed; restart if the certificate fails and continued decrease is
+resolvable above roundoff. Replacing the residual on every iteration while
+retaining the old conjugacy recurrence is unnecessary and adds a second
+metric application per iteration. This change leaves the true-residual
+accuracy requirement unchanged.

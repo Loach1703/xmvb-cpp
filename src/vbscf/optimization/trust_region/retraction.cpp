@@ -70,6 +70,7 @@ Eigen::VectorXd NonredundantRetractionMetric::solve(
       relative_tolerance * right_hand_side_norm;
 
   Eigen::VectorXd solution = Eigen::VectorXd::Zero(dimension);
+  Eigen::VectorXd residual = covector;
   Eigen::VectorXd direction = covector;
   double residual_squared = covector.squaredNorm();
   double cycle_initial_residual_norm = right_hand_side_norm;
@@ -94,6 +95,7 @@ Eigen::VectorXd NonredundantRetractionMetric::solve(
             "retraction metric is singular in reduced space");
       }
       residual_squared = direction.squaredNorm();
+      residual = direction;
       cycle_initial_residual_norm = restarted_residual_norm;
       iteration_in_cycle = 0;
     }
@@ -105,28 +107,28 @@ Eigen::VectorXd NonredundantRetractionMetric::solve(
     }
     solution.noalias() += step * direction;
 
-    // Recompute the true residual: recursively updated CG residuals can hide
-    // loss of accuracy for an ill-conditioned pullback metric.
-    const Eigen::VectorXd next_residual = covector - apply(solution);
-    const double next_residual_norm = next_residual.norm();
+    // Preserve the CG recurrence between certifications. Replacing its
+    // residual by b-Gx on every iteration introduces fresh rounding errors
+    // into the conjugacy recurrence and also doubles metric applications.
+    residual.noalias() -= step * metric_direction;
+    const double next_residual_norm = residual.norm();
     if (!std::isfinite(next_residual_norm)) {
       throw std::runtime_error(
           "retraction metric solve produced a non-finite residual");
     }
-    if (next_residual_norm <= residual_tolerance) {
-      return solution;
-    }
-
-    const double next_residual_squared = next_residual.squaredNorm();
     ++iteration_in_cycle;
-    if (iteration_in_cycle == dimension) {
-      // The n-step termination property of CG holds only in exact arithmetic.
-      // Recomputed residuals deliberately trade exact conjugacy for a truthful
-      // certificate, so an ill-conditioned but nonsingular metric can require
-      // another Krylov cycle.  Continue only when the completed cycle made a
-      // decrease resolvable in working precision.
+    if (next_residual_norm <= residual_tolerance ||
+        iteration_in_cycle == dimension) {
+      // Recursive residuals never certify acceptance. Check the same true
+      // residual tolerance as before, and restart if a residual gap remains.
+      residual = covector - apply(solution);
+      const double true_residual_norm = residual.norm();
+      if (!std::isfinite(true_residual_norm)) {
+        throw std::runtime_error("retraction metric CG has a non-finite true residual");
+      }
+      if (true_residual_norm <= residual_tolerance) return solution;
       const double resolved_decrease =
-          cycle_initial_residual_norm - next_residual_norm;
+          cycle_initial_residual_norm - true_residual_norm;
       const double roundoff_decrease =
           std::numeric_limits<double>::epsilon() *
           std::max(cycle_initial_residual_norm, right_hand_side_norm);
@@ -134,18 +136,19 @@ Eigen::VectorXd NonredundantRetractionMetric::solve(
         throw std::runtime_error(
             "retraction metric CG stagnated above its residual tolerance");
       }
-      direction = next_residual;
-      residual_squared = next_residual_squared;
-      cycle_initial_residual_norm = next_residual_norm;
+      direction = residual;
+      residual_squared = residual.squaredNorm();
+      cycle_initial_residual_norm = true_residual_norm;
       iteration_in_cycle = 0;
       continue;
     }
+    const double next_residual_squared = residual.squaredNorm();
     const double beta = next_residual_squared / residual_squared;
     if (!std::isfinite(beta)) {
       throw std::runtime_error(
           "retraction metric solve produced a non-finite CG recurrence");
     }
-    direction = next_residual + beta * direction;
+    direction = residual + beta * direction;
     residual_squared = next_residual_squared;
   }
 }
