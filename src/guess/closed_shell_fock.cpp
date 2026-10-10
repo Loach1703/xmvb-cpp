@@ -10,7 +10,7 @@ Eigen::MatrixXd ClosedShellFockBuilder::build(
     const Eigen::Ref<const Eigen::MatrixXd>& density_projector,
     const AoIntegralInput& ao_integral_input) const {
   // The closed-shell projector and inactive VB density have the same 2J-K
-  // convention. Share the exact forward operator, including its MPI service.
+  // convention. Share the exact forward operator and its bounded OpenMP workspace.
   const int n_bf = ao_integral_input.n_basis_functions;
   if (n_bf <= 0 || density_projector.rows() != n_bf || density_projector.cols() != n_bf)
     throw std::invalid_argument("invalid closed-shell density dimensions");

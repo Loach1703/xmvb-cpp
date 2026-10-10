@@ -4,7 +4,6 @@
 #include <utility>
 #include <vector>
 
-#include "vbscf/integrals/ao/contracts/service.hpp"
 
 namespace xmvb::vb::detail {
 namespace {
@@ -32,22 +31,6 @@ double coefficient(const Eigen::Ref<const Eigen::MatrixXd>& c, int i, int j, int
 
 }  // namespace
 
-void build_ao_pair_coefficient_rows(const AoPairGraph& graph,
-    const Eigen::Ref<const Eigen::MatrixXd>& c, Eigen::Index begin,
-    Eigen::Index count, ExactCtxPairMatrix* result) {
-  validate(graph, c, begin, count);
-  if (!result) throw std::invalid_argument("null coefficient row result");
-  const auto pairs = active_pairs(c.cols());
-  result->resize(count, pairs.size());
-#pragma omp parallel for schedule(static)
-  for (Eigen::Index row = 0; row < count; ++row) {
-    const int i = graph.pair_first[begin + row], j = graph.pair_second[begin + row];
-#pragma omp simd
-    for (Eigen::Index p = 0; p < static_cast<Eigen::Index>(pairs.size()); ++p)
-      (*result)(row, p) = coefficient(c, i, j, pairs[p].first, pairs[p].second);
-  }
-}
-
 void apply_generated_ao_pair_rows(const AoIntegralInput& ao,
     const Eigen::Ref<const Eigen::MatrixXd>& c, const Eigen::MatrixXd* d,
     Eigen::Index begin, Eigen::Index count, ExactCtxPairMatrix* image,
@@ -58,10 +41,6 @@ void apply_generated_ao_pair_rows(const AoIntegralInput& ao,
       c.rows() != ao.n_basis_functions ||
       (d && (d->rows() != c.rows() || d->cols() != c.cols())))
     throw std::invalid_argument("invalid generated AO-pair output or direction");
-  if (graph.service && !graph.service->dispatching()) {
-    graph.service->generated(ao, c, d, begin, count, image, directional);
-    return;
-  }
   const auto pairs = active_pairs(c.cols());
   image->setZero(count, pairs.size());
   if (directional) directional->setZero(count, pairs.size());

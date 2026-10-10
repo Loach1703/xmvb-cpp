@@ -17,9 +17,6 @@ namespace xmvb::vb {
  */
 struct MaterializedAoIntegralBuffers {
   int n_basis_functions = 0;
-  /** @brief Ownership metadata; a shard is not a complete AO integral input. */
-  int shard_index = 0;
-  int shard_count = 1;
   Eigen::MatrixXd ao_core_hamiltonian_matrix;
   std::vector<int> left_pair_indices;
   std::vector<int> right_pair_indices;

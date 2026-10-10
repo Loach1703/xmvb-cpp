@@ -2,7 +2,6 @@
 #include <algorithm>
 #include <atomic>
 #include <iostream>
-#include <map>
 #include <stdexcept>
 
 extern "C" {
@@ -10,7 +9,6 @@ extern "C" {
 }
 
 #include "libcint/ri_provider.hpp"
-#include "libcint/materialized_provider.hpp"
 #include "libcint/direct_shell.hpp"
 #include "libcint/shell_normalization.hpp"
 
@@ -104,101 +102,11 @@ void check_shell_workspace() {
   }
 }
 
-/** @brief Each canonical ERI has exactly one owner, including empty shards. */
-void check_integral_shards() {
-  auto input = make_input(3);
-  const int counts[] = {1, 3, 6};
-  int start = 0;
-  for (int shell = 0; shell < 3; ++shell) {
-    input.bas[shell * BAS_SLOTS + ANG_OF] = shell;
-    input.env[input.bas[shell * BAS_SLOTS + PTR_COEFF]] =
-        xmvb::vb::shell_normalization(shell, 1.0);
-    input.basidx[2 * shell] = start;
-    input.basidx[2 * shell + 1] = counts[shell];
-    start += counts[shell];
-  }
-  xmvb::vb::LibcintMaterializedIntegralProvider provider;
-  xmvb::vb::LibcintMaterializedIntegralProviderOptions full_options;
-  full_options.use_historical_shell_pair_prescreen = false;
-  const auto full = provider.build(input, full_options);
-  using Key = std::pair<int, int>;
-  std::map<Key, double> reference;
-  for (std::size_t i = 0; i < full.two_electron_values.size(); ++i)
-    require(reference.emplace(Key{full.left_pair_indices[i], full.right_pair_indices[i]},
-                              full.two_electron_values[i]).second,
-            "duplicate canonical integral in reference");
-  // Independent complete Cartesian shell traversal: no provider ownership or
-  // shell-order filtering. This catches shell-vs-AO canonical-order mistakes.
-  xmvb::vb::LibcintDirectShellEvaluator evaluator(input);
-  std::map<Key, double> direct;
-  xmvb::vb::LibcintShellWorkspace workspace;
-  for (int si = 0; si < 3; ++si)
-    for (int sj = 0; sj < 3; ++sj)
-      for (int sk = 0; sk < 3; ++sk)
-        for (int sl = 0; sl < 3; ++sl) {
-          const auto& quartet = evaluator.evaluate_two_electron_shell_quartet(si, sj, sk, sl, workspace);
-          for (int li = 0; li < counts[si]; ++li)
-            for (int lj = 0; lj < counts[sj]; ++lj)
-              for (int lk = 0; lk < counts[sk]; ++lk)
-                for (int ll = 0; ll < counts[sl]; ++ll) {
-                  const int i = input.basidx[2 * si] + li;
-                  const int j = input.basidx[2 * sj] + lj;
-                  const int k = input.basidx[2 * sk] + lk;
-                  const int l = input.basidx[2 * sl] + ll;
-                  if (j > i || k > i || l > k || (i == k && l > j)) continue;
-                  const auto index = li + counts[si] * (lj + counts[sj] * (lk + counts[sk] * ll));
-                  const double value = quartet.values[index];
-                  if (std::abs(value) < full_options.integral_tolerance) continue;
-                  require(direct.emplace(Key{i * (i + 1) / 2 + j, k * (k + 1) / 2 + l}, value).second,
-                          "duplicate integral in independent Cartesian traversal");
-                }
-        }
-  require(direct == reference, "provider differs from complete Cartesian reference");
-  for (int n_shards : {1, 2, 3, 16}) {
-    std::map<Key, double> combined;
-    for (int owner = 0; owner < n_shards; ++owner) {
-      xmvb::vb::LibcintMaterializedIntegralProviderOptions options;
-      options.shard_count = n_shards;
-      options.shard_index = owner;
-      options.include_core_hamiltonian = false;
-      options.use_historical_shell_pair_prescreen = false;
-      const auto shard = provider.build(input, options);
-      require(shard.ao_core_hamiltonian_matrix.size() == 0,
-              "worker retained core Hamiltonian");
-      for (std::size_t i = 0; i < shard.two_electron_values.size(); ++i)
-        require(combined.emplace(Key{shard.left_pair_indices[i], shard.right_pair_indices[i]},
-                                 shard.two_electron_values[i]).second,
-                "canonical integral has multiple shard owners");
-    }
-    require(combined == reference, "shards do not exactly reproduce all reference ERIs");
-  }
-  for (const auto bounds : {Key{-1, 2}, Key{2, 2}, Key{0, 0}}) {
-    xmvb::vb::LibcintMaterializedIntegralProviderOptions options;
-    options.shard_index = bounds.first;
-    options.shard_count = bounds.second;
-    bool rejected = false;
-    try { provider.build(input, options); }
-    catch (const std::invalid_argument&) { rejected = true; }
-    require(rejected, "invalid shard ownership was accepted");
-  }
-  xmvb::vb::LibcintMaterializedIntegralProviderOptions options;
-  options.shard_count = 2;
-  bool rejected = false;
-  try {
-    xmvb::vb::build_materialized_ao_integral_input(provider.build(input, options));
-  } catch (const std::invalid_argument&) { rejected = true; }
-  require(rejected, "partial ERIs were accepted by the complete-input loader");
-  options.shard_index = 1;
-  require(provider.build(input, options).ao_core_hamiltonian_matrix.size() == 0,
-          "non-root shard allocated a core Hamiltonian by default");
-}
-
 }  // namespace
 
 int main() {
   try {
     check_shell_workspace();
-    check_integral_shards();
     constexpr double pi = 3.14159265358979323846;
     using xmvb::vb::radial_cartesian_scale;
     require(radial_cartesian_scale(0,0,0) == 1.0, "s normalization");

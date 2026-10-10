@@ -4,19 +4,6 @@
 # have been defined.
 
 get_property(_xmvb_targets_before_dev_tools DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
-option(XMVB_BUILD_MPI_CHECK "Build distributed integral ownership checks." OFF)
-if (XMVB_BUILD_MPI_CHECK)
-  find_package(MPI REQUIRED COMPONENTS CXX)
-  add_executable(check_integral_shards tools/check_integral_shards.cpp)
-  target_link_libraries(check_integral_shards PRIVATE
-    xmvb_input_deck xmvb_libcint xmvb_vbscf MPI::MPI_CXX)
-  add_dependencies(check_integral_shards xmvb_assets)
-  if (XMVB_ENABLE_MPI)
-    add_executable(check_integral_service tools/check_integral_service.cpp)
-    target_link_libraries(check_integral_service PRIVATE xmvb_mpi xmvb_input_deck xmvb_guess)
-    add_dependencies(check_integral_service xmvb_assets)
-  endif()
-endif()
 add_executable(check_orbital_gradient
   tools/check_orbital_gradient.cpp)
 target_link_libraries(check_orbital_gradient

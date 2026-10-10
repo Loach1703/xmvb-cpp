@@ -1,5 +1,4 @@
 #include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
-#include "vbscf/integrals/ao/contracts/service.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -141,8 +140,6 @@ std::vector<double> apply_ao_h1e(
     const double* source,
     const AoIntegralInput& ao,
     int n_threads) {
-  if (auto* service = ao.pair_graph.service; service && !service->dispatching())
-    return service->h1e(ao, source, false);
   if (source == nullptr) {
     throw std::invalid_argument("AO-H1E source must not be null");
   }
@@ -178,8 +175,6 @@ std::vector<double> apply_ao_h1e_transpose(
     const double* adjoint,
     const AoIntegralInput& ao,
     int n_threads) {
-  if (auto* service = ao.pair_graph.service; service && !service->dispatching())
-    return service->h1e(ao, adjoint, true);
   diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eTranspose);
   if (adjoint == nullptr) {
     throw std::invalid_argument("AO-H1E adjoint must not be null");
@@ -220,10 +215,6 @@ void apply_ao_h1e_fused(
     AoH1eFusedWorkspace* workspace,
     std::vector<double>* forward,
     std::vector<double>* transpose) {
-  if (auto* service = ao.pair_graph.service; service && !service->dispatching()) {
-    service->fused(ao, source, adjoint, forward, transpose);
-    return;
-  }
   diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
   if (source == nullptr || adjoint == nullptr ||
       workspace == nullptr || forward == nullptr || transpose == nullptr) {
@@ -271,21 +262,6 @@ void apply_ao_h1e_fused_batch(
     int n_threads,
     Eigen::MatrixXd* forward,
     Eigen::MatrixXd* transpose) {
-  if (auto* service = ao.pair_graph.service; service && !service->dispatching()) {
-    if (!forward || !transpose || sources.rows() != adjoints.rows() ||
-        sources.cols() != adjoints.cols() ||
-        sources.rows() != static_cast<Eigen::Index>(matrix_size(ao)))
-      throw std::invalid_argument("invalid distributed AO-H1E batch dimensions");
-    forward->resize(sources.rows(), sources.cols());
-    transpose->resize(sources.rows(), sources.cols());
-    std::vector<double> f, t;
-    for (Eigen::Index column = 0; column < sources.cols(); ++column) {
-      service->fused(ao, sources.col(column).data(), adjoints.col(column).data(), &f, &t);
-      forward->col(column) = Eigen::Map<const Eigen::VectorXd>(f.data(), f.size());
-      transpose->col(column) = Eigen::Map<const Eigen::VectorXd>(t.data(), t.size());
-    }
-    return;
-  }
   if (forward == nullptr || transpose == nullptr) {
     throw std::invalid_argument("AO-H1E batch outputs must not be null");
   }

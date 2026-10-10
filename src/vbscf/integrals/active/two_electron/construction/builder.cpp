@@ -565,39 +565,6 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_sparse(
   return result;
 }
 
-/** @brief Root-only packed tensor assembled from reduced, bounded pair-row tiles. */
-ActiveSpaceTwoElectronResult build_streamed_active_integrals(
-    const AoIntegralInput& ao, Eigen::MatrixXd c) {
-  const Eigen::Index pairs = c.cols() * (c.cols() + 1) / 2;
-  const Eigen::Index ao_pairs = c.rows() * (c.rows() + 1) / 2;
-  constexpr Eigen::Index elements = 8 * 1024 * 1024 / sizeof(double);
-  if (pairs > elements)
-    throw std::invalid_argument("active-pair row exceeds exact tile budget");
-  const Eigen::Index rows_per_tile = std::max<Eigen::Index>(1, elements / pairs);
-  const Eigen::Index columns_per_tile = std::max<Eigen::Index>(1, std::min(pairs, elements / pairs));
-  ActiveSpaceTwoElectronResult result;
-  result.dense_active_coefficients = std::move(c);
-  result.packed_active_two_electron_integrals.assign(pairs * (pairs + 1) / 2, 0.0);
-  ExactCtxPairMatrix coefficients, products;
-  Eigen::MatrixXd contraction;
-  for (Eigen::Index begin = 0; begin < ao_pairs; begin += rows_per_tile) {
-    const Eigen::Index rows = std::min(rows_per_tile, ao_pairs - begin);
-    detail::build_ao_pair_coefficient_rows(ao.pair_graph, result.dense_active_coefficients,
-        begin, rows, &coefficients);
-    detail::apply_generated_ao_pair_rows(ao, result.dense_active_coefficients,
-        nullptr, begin, rows, &products, nullptr);
-    for (Eigen::Index left = 0; left < pairs; left += columns_per_tile) {
-      const Eigen::Index columns = std::min(columns_per_tile, pairs - left);
-      contraction.noalias() = coefficients.middleCols(left, columns).transpose() * products;
-      for (Eigen::Index i = 0; i < columns; ++i)
-        for (Eigen::Index j = 0; j <= left + i; ++j)
-          result.packed_active_two_electron_integrals[(left + i) * (left + i + 1) / 2 + j]
-              += contraction(i, j);
-    }
-  }
-  return result;
-}
-
 }  // namespace
 
 ActiveSpaceTwoElectronResult ActiveSpaceTwoElectronBuilder::build(
@@ -632,10 +599,6 @@ ActiveSpaceTwoElectronResult ActiveSpaceTwoElectronBuilder::build(
         n_active_orbitals);
   }
 
-  if (ao_integral_input.pair_graph.service)
-    return build_streamed_active_integrals(ao_integral_input,
-        copy_row_major_buffer_to_matrix(build_dense_active_coefficients(
-            orbital_preparation_result, n_bf, n_active_orbitals), n_bf, n_active_orbitals));
   const auto sparse_pair_coefficients =
       build_sparse_ao_pair_coefficients(
           orbital_preparation_result.active_sparse_row_offsets,

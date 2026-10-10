@@ -8,18 +8,14 @@ namespace xmvb::vb {
 struct LibcintMaterializedIntegralProviderOptions {
   double integral_tolerance = 1.0e-10;
   bool use_historical_shell_pair_prescreen = true;
-  /** @brief Disjoint canonical shell-quartet ownership, selected before libcint. */
-  int shard_index = 0;
-  int shard_count = 1;
-  /** @brief Materialize the core Hamiltonian on shard zero only, when requested. */
-  bool include_core_hamiltonian = true;
 };
 
 /**
- * @brief Generates complete or disjoint canonical AO ERIs with libcint.
+ * @brief Correctness-first C++ materialized AO integral provider backed by libcint.
  *
- * Quartet ownership precedes evaluation and allocation. A sharded result
- * must be consumed by distributed contractions, not a complete-input loader.
+ * This provider rebuilds the historical `HHF / ggf / g2eidx` buffer contract
+ * directly from `LibcintInput` so numerical
+ * kernels can be compared without changing their downstream interfaces.
  */
 class LibcintMaterializedIntegralProvider {
 public:
