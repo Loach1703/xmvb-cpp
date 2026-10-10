@@ -13,18 +13,27 @@ benchmark design, not evidence that NEO is faster.
 | AO basis | Repository cc-pVDZ, Cartesian in all calculations |
 | Integrals | Exact libcint; no RI approximation |
 | Structure solver | Davidson |
-| Initial orbitals | Same saved quintet-ROHF-derived DMET-style frame in all nine runs |
+| Initial orbitals | Shared quintet-ROHF frame preserving its complete occupied space |
 | Convergence | Projected gradient infinity norm 1e-3; energy change 1e-7 Eh |
 | Resources | Hanhai25 Slurm; independent 32-core jobs, parallel array (up to 45) |
 | Safety limits | 1000 iterations; 2 hours per method; incomplete runs explicitly marked |
 
-Geometry and the ten-impurity-plus-one-bath initial-space construction are
-based on the [public PySCF Fe-porphine example](https://github.com/pyscf/pyscf.github.io/blob/master/examples/mcscf/33-make_init_guess/18-dmet_cas_for_feporph.py).
-Here ten spherical Fe 3d/4d projectors are embedded in the complete Cartesian
-AO space; the Cartesian d-shell trace components are not added as impurity
-orbitals. Density diagonalization separates the inactive, bath, and external
-spaces, followed by blockwise Fock canonicalization. No frozen-4d preoptimization
-is used. The saved Gram residual and bath occupations document the construction.
+Geometry and the Fe 3d/4d projector choice originate from the
+[public PySCF Fe-porphine example](https://github.com/pyscf/pyscf.github.io/blob/master/examples/mcscf/33-make_init_guess/18-dmet_cas_for_feporph.py).
+Ten spherical d projectors are embedded in the complete Cartesian AO space.
+Within the ROHF occupation sectors, the two closed and five virtual directions
+with the largest projector weights are selected, together with all four singly
+occupied orbitals. The remaining 89 closed orbitals form the core. Separate
+core, active, and external Fock canonicalization preserves these spaces.
+Consequently, the quintet initial CAS contains the ROHF determinant. Its lowest
+CI energy must not exceed the ROHF energy. The saved audit checks orthonormality,
+core population, and containment of the complete occupied space.
+
+The original DMET-style guess did not preserve that containment: roughly two
+reference electrons were outside its core-plus-active space, and the core
+included singly occupied weight. Results using that historical frame must not
+be interpreted as results from the corrected initial guess. The original
+algorithm has been replaced, not retained as an alternate preparation route.
 
 This is **not a literal reproduction** of the spherical-AO, spatial-symmetry
 restricted state benchmarks in Kreplin, Knowles, and Werner, *J. Chem. Phys.*
@@ -56,3 +65,10 @@ seconds, peak RSS in MiB, and state/active-space identity. Retrieve Slurm
 accounting with `sacct` after completion. Add a PySCF CASSCF comparison using
 the exported `initial_mo.npy`, the same Cartesian basis and spin sector before
 making claims relative to an external CASSCF implementation.
+
+To reuse the converged reference without repeating ROHF, run
+`prepare.py SOURCE_SNAPSHOT /absolute/path/to/quintet_rohf.chk` inside a fresh
+Slurm working directory containing `geometry.xyz`. The checkpoint molecule,
+geometry, spin, and AO basis are checked before use. `check-guess.sbatch` prepares
+the corrected frame, independently audits it, and evaluates quintet CASCI and
+one bounded block-LBFGS step; this is a guess diagnostic, not a convergence run.

@@ -1,7 +1,9 @@
-"""Export a fixed CAS(8e,11o) DMET-style guess on a Slurm compute node.
+"""Export an occupied-space-preserving CAS(8e,11o) guess on Slurm.
 
-Ten spherical Fe 3d/4d projectors and one bath orbital define the initial
-active space. All runs read the same frame, including across multiplicities.
+Fe 3d/4d projectors select two closed and five virtual orbitals. All four
+ROHF singly occupied orbitals enter the active space. All runs read the same
+frame, including across multiplicities. An optional saved ROHF checkpoint
+avoids repeating SCF; it must match this molecule and AO basis.
 The primary AO basis is Cartesian, matching xmvb-cpp, not the published
 spherical-basis benchmark. No orbitals or spatial irreducible representations
 are frozen. See README.md for the comparison's scope.
@@ -16,7 +18,7 @@ import sys
 assert os.environ.get("SLURM_JOB_ID"), "Run on a Slurm compute node"
 import numpy as np
 from scipy import linalg
-from pyscf import gto, lib, lo, scf
+from pyscf import gto, lib, scf
 from pyscf.gto.basis import parse_gaussian
 from pyscf.tools import molden
 
@@ -35,14 +37,26 @@ mf = scf.ROHF(mol)
 mf.chkfile = "quintet_rohf.chk"
 mf.conv_tol = 1e-10
 mf.max_cycle = 200
-mf.kernel()
-if not mf.converged:
-    mf = mf.newton()
-    mf.max_cycle = 100
+if len(sys.argv) > 2:
+    saved_mol, saved = scf.chkfile.load_scf(sys.argv[2])
+    assert saved_mol.cart == mol.cart and saved_mol.spin == mol.spin
+    assert saved_mol.charge == mol.charge and saved_mol._basis == mol._basis
+    assert saved_mol.atom_charges().tolist() == mol.atom_charges().tolist()
+    assert np.max(np.abs(saved_mol.atom_coords() - mol.atom_coords())) < 1e-10
+    assert saved["mo_coeff"].shape == (mol.nao_nr(), mol.nao_nr())
+    mf.mo_coeff, mf.mo_occ = saved["mo_coeff"], saved["mo_occ"]
+    mf.mo_energy, mf.e_tot = saved["mo_energy"], saved["e_tot"]
+    mf.converged = True
+    import shutil
+    shutil.copyfile(sys.argv[2], mf.chkfile)
+else:
     mf.kernel()
+    if not mf.converged:
+        mf = mf.newton()
+        mf.max_cycle = 100
+        mf.kernel()
 assert mf.converged, "Do not export an unconverged ROHF guess"
 s = mf.get_ovlp()
-orth = lo.orth.orth_ao(mol, method="meta_lowdin", s=s)
 spherical = mol.copy()
 spherical.cart = False
 spherical.build(False, False)
@@ -50,19 +64,27 @@ indices = spherical.search_ao_label(["Fe 3d", "Fe 4d"])
 assert len(indices) == 10, "Expected two five-dimensional spherical d shells"
 # Retain the full Cartesian AO space while using exactly ten d projectors.
 imp = mol.cart2sph_coeff()[:, indices]
-q, _ = linalg.qr(orth.T @ s @ imp, mode="full")
-frame = orth @ q
-dm = np.asarray(mf.make_rdm1())
-if dm.ndim == 3:
-    dm = dm.sum(axis=0)
-d = frame.T @ s @ dm @ s @ frame
-occ_imp, ui = linalg.eigh(d[:10, :10])
-occ_env, ue = linalg.eigh(d[10:, 10:])
-imp = frame[:, :10] @ ui[:, ::-1]
-env = frame[:, 10:] @ ue[:, ::-1]
+values, vectors = linalg.eigh(imp.T @ s @ imp)
+assert values.min() > 0
+imp = imp @ (vectors / np.sqrt(values))
+closed = mf.mo_coeff[:, mf.mo_occ == 2]
+singly = mf.mo_coeff[:, mf.mo_occ == 1]
+virtual = mf.mo_coeff[:, mf.mo_occ == 0]
+assert closed.shape[1] == 91 and singly.shape[1] == 4
+
+
+def select(block, count):
+    """Select the largest Fe-projector weights within one occupation sector."""
+    projection = imp.T @ s @ block
+    weights, rotation = linalg.eigh(projection.T @ projection)
+    ordered = block @ rotation[:, ::-1]
+    return ordered[:, :count], ordered[:, count:], weights[::-1]
+
+
+active_closed, core, closed_weights = select(closed, 2)
+active_virtual, external, virtual_weights = select(virtual, 5)
 n_core = (mol.nelectron - 8) // 2
-blocks = [env[:, :n_core], np.column_stack((imp, env[:, n_core:n_core+1])),
-          env[:, n_core+1:]]
+blocks = [core, np.column_stack((active_closed, singly, active_virtual)), external]
 sc = s @ mf.mo_coeff
 fock = (sc * mf.mo_energy) @ sc.T
 canonical = []
@@ -72,6 +94,13 @@ for block in blocks:
 mo = np.column_stack(canonical)
 error = float(np.max(np.abs(mo.T @ s @ mo - np.eye(mo.shape[1]))))
 assert error < 1e-7
+occupied = mf.mo_coeff[:, mf.mo_occ > 0]
+occupied_leakage = float(occupied.shape[1] - np.sum(
+    (mo[:, :n_core + 11].T @ s @ occupied) ** 2))
+core_population = float(np.sum(
+    (mo[:, :n_core].T @ s @ mf.mo_coeff) ** 2 * mf.mo_occ[None, :]))
+assert abs(occupied_leakage) < 1e-7
+assert abs(core_population - 2 * n_core) < 1e-7
 np.save("initial_mo.npy", mo)
 molden.from_mo(mol, "initial.molden", mo)
 n_bf = mol.nao_nr()
@@ -86,7 +115,7 @@ for i in range(n_orb):
 gus.append("$END")
 for name, multiplicity in (("singlet", 1), ("triplet", 3), ("quintet", 5)):
     for iscf in (5, 8, 9):
-        lines = [f"Fe porphine {name}; shared quintet DMET initial frame", "$CTRL",
+        lines = [f"Fe porphine {name}; shared occupied-preserving ROHF frame", "$CTRL",
                  f"vbscf basis=cc-pvdz int=libcint ncharge=0 nmul={multiplicity}",
                  "nao=11 nae=8 str=full orbtyp=oeo frgtyp=atom guess=read",
                  f"iscf={iscf} eigensolver=davidson itmax=1000 molden iprint=3",
@@ -97,8 +126,10 @@ for name, multiplicity in (("singlet", 1), ("triplet", 3), ("quintet", 5)):
 audit = dict(electrons=186, n_bf=n_bf, inactive_orbitals=n_core,
              active_electrons=8, active_orbitals=11, cartesian=True,
              rohf_energy=float(mf.e_tot), orbital_gram_error=error,
-             impurity_occupations=occ_imp[::-1].tolist(),
-             environment_boundary_occupations=occ_env[::-1][n_core-2:n_core+3].tolist(),
+             selected_closed_projector_weights=closed_weights[:2].tolist(),
+             selected_virtual_projector_weights=virtual_weights[:5].tolist(),
+             core_population=core_population,
+             occupied_leakage=occupied_leakage,
              pyscf_version=__import__("pyscf").__version__,
              initial_mo_sha256=hashlib.sha256(Path("initial_mo.npy").read_bytes()).hexdigest(),
              basis_sha256=hashlib.sha256(basis_path.read_bytes()).hexdigest())
