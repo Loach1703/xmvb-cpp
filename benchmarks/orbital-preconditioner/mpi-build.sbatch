@@ -26,13 +26,14 @@ cmake -S "$source_dir" -B "$source_dir/build" -G Ninja \
     '-UMPI_*' \
     -DCMAKE_BUILD_TYPE=Release '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -g1 -fno-omit-frame-pointer' \
     -DBUILD_TESTING=ON -DXMVB_BUILD_DEV_TARGETS=ON -DXMVB_BUILD_MPI_CHECK=ON \
+    -DXMVB_ENABLE_MPI=ON \
     -DCMAKE_PREFIX_PATH="$dependencies" \
     -DCMAKE_C_COMPILER="$dependencies/bin/cc" \
     -DCMAKE_CXX_COMPILER="$dependencies/bin/c++" \
     -DCMAKE_Fortran_COMPILER="$dependencies/bin/gfortran" \
     -DMPI_CXX_COMPILER=/opt/openmpi/5.0.9-ucx/bin/mpicxx \
     '-DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined -Wl,-rpath-link,/usr/lib/x86_64-linux-gnu -Wl,-rpath-link,/usr/lpp/mmfs/lib'
-cmake --build "$source_dir/build" --target xmvb check_integral_shards \
+cmake --build "$source_dir/build" --target xmvb check_integral_shards check_integral_service \
     test_libcint_ri test_active_two_electron_sparse -j16
 for threads in 1 8 32; do
     for test in test_libcint_ri test_active_two_electron_sparse; do

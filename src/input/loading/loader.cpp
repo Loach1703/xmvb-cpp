@@ -22,6 +22,7 @@
 #include "libcint/materialized_provider.hpp"
 #include "libcint/ri_provider.hpp"
 #include "libcint/materialized_input.hpp"
+#include "vbscf/integrals/ao/contracts/service.hpp"
 #include "guess/initial.hpp"
 #include "vbscf/structures/expansion/expander.hpp"
 #include "vbscf/structures/selection/subspace/selector.hpp"
@@ -665,9 +666,15 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
 
   const auto ao_integral_provider_start_time = std::chrono::steady_clock::now();
   MaterializedAoIntegralBuffers ao_integral_buffers;
+  if (IntegralService::current && use_standard_ri_two_electron_mode)
+    throw std::runtime_error("MPI RI integral consumers are not implemented");
   if (!use_standard_ri_two_electron_mode) {
-    LibcintMaterializedIntegralProvider provider;
-    ao_integral_buffers = provider.build(result.libcint_input);
+    if (IntegralService::current) {
+      result.ao_integral_input = IntegralService::current->build(result.libcint_input);
+    } else {
+      LibcintMaterializedIntegralProvider provider;
+      ao_integral_buffers = provider.build(result.libcint_input);
+    }
   }
   load_result.ao_integral_provider_seconds =
       std::chrono::duration<double>(
@@ -680,7 +687,7 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
     result.ao_integral_input = build_core_hamiltonian_only_ao_integral_input(
         static_topology.n_basis_functions,
         core_hamiltonian_matrix);
-  } else {
+  } else if (!IntegralService::current) {
     result.ao_integral_input = build_materialized_ao_integral_input(
         std::move(ao_integral_buffers));
   }

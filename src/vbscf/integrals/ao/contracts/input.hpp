@@ -7,6 +7,8 @@
 
 namespace xmvb::vb {
 
+class IntegralService;
+
 struct AoPairIntegral {
   int left_pair;
   int right_pair;
@@ -21,6 +23,8 @@ struct AoPairIntegral {
  * space retain the canonical permutationally unique integral stream instead.
  */
 struct AoPairGraph {
+  /** @brief Root-only distributed dispatcher; its session outlives the input. */
+  IntegralService* service = nullptr;
   std::vector<int> row_offsets;
   std::vector<int> columns;
   std::vector<double> values;

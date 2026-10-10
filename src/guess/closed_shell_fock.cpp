@@ -135,6 +135,8 @@ void symmetrize_in_place(Eigen::MatrixXd* matrix) {
 Eigen::MatrixXd ClosedShellFockBuilder::build(
     const Eigen::Ref<const Eigen::MatrixXd>& density_projector,
     const AoIntegralInput& ao_integral_input) const {
+  if (ao_integral_input.pair_graph.service)
+    throw std::runtime_error("MPI closed-shell guess contraction is not implemented; use GUESS=READ");
   const int n_basis_functions = ao_integral_input.n_basis_functions;
   if (n_basis_functions <= 0) {
     throw std::invalid_argument("n_basis_functions must be positive");

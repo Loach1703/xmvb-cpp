@@ -13,6 +13,7 @@
 #include "vbscf/core/storage/eigen.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
 
 namespace xmvb::vb {
 
@@ -244,82 +245,14 @@ std::vector<double> apply_sparse_ao_integral_matrix(
     std::size_t n_active_pairs) {
   const std::size_t n_ao_pairs =
       n_basis_functions * (n_basis_functions + 1) / 2;
-  const bool valid_row_graph =
-      graph.has_row_graph() &&
-      graph.row_offsets.size() == n_ao_pairs + 1 &&
-      graph.columns.size() == graph.values.size();
-  const bool valid_compact_stream =
-      graph.has_compact_integral_stream() &&
-      graph.integral_rows.size() == graph.integral_columns.size() &&
-      graph.integral_rows.size() == graph.integral_values.size();
-  if (!valid_row_graph && !valid_compact_stream) {
-    throw std::invalid_argument("invalid AO-pair graph");
-  }
-  std::vector<std::vector<double>> partial_pair_gradients;
-
-  int n_threads = 1;
-#ifdef _OPENMP
-  n_threads = xmvb::effective_openmp_thread_count();
-#endif
-  partial_pair_gradients.assign(
-      n_threads,
-      std::vector<double>(n_ao_pairs * n_active_pairs, 0.0));
-
-#pragma omp parallel num_threads(n_threads)
-  {
-    int thread_index = 0;
-#ifdef _OPENMP
-    thread_index = omp_get_thread_num();
-#endif
-    auto& local_pair_gradients =
-        partial_pair_gradients[thread_index];
-
-#pragma omp for schedule(guided, 256)
-    for (std::ptrdiff_t integral_offset = 0;
-         integral_offset < static_cast<std::ptrdiff_t>(graph.integral_count());
-         ++integral_offset) {
-      const AoPairIntegral eri = graph.integral(integral_offset);
-      const std::size_t left_pair_index = eri.left_pair;
-      const std::size_t right_pair_index = eri.right_pair;
-      const double ao_integral_value = eri.value;
-      const double* right_row =
-          transformed_pair_coefficients.data() +
-          right_pair_index * n_active_pairs;
-      double* left_gradient_row =
-          local_pair_gradients.data() +
-          left_pair_index * n_active_pairs;
-      for (std::size_t active_pair_index = 0;
-           active_pair_index < n_active_pairs;
-           ++active_pair_index) {
-        left_gradient_row[active_pair_index] +=
-            ao_integral_value * right_row[active_pair_index];
-      }
-
-      if (left_pair_index != right_pair_index) {
-        const double* left_row =
-            transformed_pair_coefficients.data() +
-            left_pair_index * n_active_pairs;
-        double* right_gradient_row =
-            local_pair_gradients.data() +
-            right_pair_index * n_active_pairs;
-        for (std::size_t active_pair_index = 0;
-             active_pair_index < n_active_pairs;
-             ++active_pair_index) {
-          right_gradient_row[active_pair_index] +=
-              ao_integral_value * left_row[active_pair_index];
-        }
-      }
-    }
-  }
-
-  std::vector<double> pair_gradients(n_ao_pairs * n_active_pairs, 0.0);
-  for (const auto& partial_pair_gradient : partial_pair_gradients) {
-    for (std::size_t index = 0; index < pair_gradients.size(); ++index) {
-      pair_gradients[index] += partial_pair_gradient[index];
-    }
-  }
-
-  return pair_gradients;
+  if (transformed_pair_coefficients.size() != n_ao_pairs * n_active_pairs)
+    throw std::invalid_argument("pair adjoint shape mismatch");
+  const Eigen::Map<const ExactCtxPairMatrix> source(
+      transformed_pair_coefficients.data(), n_ao_pairs, n_active_pairs);
+  ExactCtxPairMatrix result;
+  detail::apply_exact_ao_pair_graph(graph, source, n_basis_functions, n_active_pairs, &result);
+  if (result.size() == 0) return {};
+  return std::vector<double>(result.data(), result.data() + result.size());
 }
 
 std::vector<double> backpropagate_pair_coefficients_to_dense_active_coefficients(

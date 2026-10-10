@@ -11,6 +11,7 @@
 #endif
 
 #include "core/openmp.hpp"
+#include "vbscf/integrals/ao/contracts/service.hpp"
 #include "vbscf/diagnostics/performance/phases.hpp"
 
 namespace xmvb::vb::detail {
@@ -71,6 +72,21 @@ void apply_exact_ao_pair_kernel(
     int n_bf,
     std::size_t n_active_pairs,
     ExactCtxPairMatrix* result) {
+  if (n_bf != ao.n_basis_functions)
+    throw std::invalid_argument("AO-pair basis dimension mismatch");
+  apply_exact_ao_pair_graph(ao.pair_graph, coefficients, n_bf, n_active_pairs, result);
+}
+
+void apply_exact_ao_pair_graph(
+    const AoPairGraph& graph, const Eigen::Ref<const ExactCtxPairMatrix>& coefficients,
+    int n_bf, std::size_t n_active_pairs, ExactCtxPairMatrix* result) {
+  if (auto* service = graph.service; service && !service->dispatching()) {
+    if (!result || n_bf <= 0 ||
+        coefficients.cols() != static_cast<Eigen::Index>(n_active_pairs))
+      throw std::invalid_argument("invalid distributed AO-pair dimensions");
+    service->pair(graph, n_bf, coefficients, result);
+    return;
+  }
   diagnostics::ScopedPhase phase(diagnostics::Phase::AoPairAction);
   if (result == nullptr) {
     throw std::invalid_argument("AO-pair result must not be null");
@@ -82,7 +98,6 @@ void apply_exact_ao_pair_kernel(
     throw std::invalid_argument("AO-pair coefficient shape mismatch");
   }
 
-  const AoPairGraph& graph = ao.pair_graph;
   result->resize(
       static_cast<Eigen::Index>(n_bf_pairs),
       static_cast<Eigen::Index>(n_active_pairs));
@@ -188,6 +203,8 @@ void apply_generated_pair_rows(
     Eigen::Index row_count,
     ExactCtxPairMatrix* pair_products,
     ExactCtxPairMatrix* directional_pair_products) {
+  if (ao.pair_graph.service)
+    throw std::runtime_error("MPI generated-row contraction is not implemented");
   if (pair_products == nullptr) {
     throw std::invalid_argument("generated AO-pair result must not be null");
   }

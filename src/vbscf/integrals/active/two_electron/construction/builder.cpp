@@ -590,6 +590,8 @@ ActiveSpaceTwoElectronResult ActiveSpaceTwoElectronBuilder::build(
         n_active_orbitals);
   }
 
+  if (ao_integral_input.pair_graph.service)
+    throw std::runtime_error("MPI sparse active-integral construction is not implemented");
   const auto sparse_pair_coefficients =
       build_sparse_ao_pair_coefficients(
           orbital_preparation_result.active_sparse_row_offsets,

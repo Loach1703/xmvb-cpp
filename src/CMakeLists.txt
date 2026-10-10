@@ -194,6 +194,14 @@ add_executable(xmvb
   cli/options.cpp
   cli/run.cpp)
 set_target_properties(xmvb PROPERTIES OUTPUT_NAME xmvb-cpp.exe)
+option(XMVB_ENABLE_MPI "Enable root-only SCF with sharded integral workers." OFF)
+if (XMVB_ENABLE_MPI)
+  find_package(MPI REQUIRED COMPONENTS CXX)
+  add_library(xmvb_mpi STATIC parallel/mpi.cpp)
+  target_link_libraries(xmvb_mpi PUBLIC xmvb_libcint xmvb_vbscf MPI::MPI_CXX)
+  target_link_libraries(xmvb PRIVATE xmvb_mpi)
+  target_compile_definitions(xmvb PRIVATE XMVB_ENABLE_MPI=1)
+endif()
 target_link_libraries(xmvb
   PRIVATE
     xmvb_input
