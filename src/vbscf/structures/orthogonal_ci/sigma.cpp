@@ -256,8 +256,8 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
   if (alpha_begin < 0 || alpha_count <= 0 ||
       alpha_begin + alpha_count > n_alpha_ ||
       beta_target < 0 || beta_target >= n_beta_ ||
-      intermediate.rows() != hamiltonian_pair_kernel_.rows() ||
-      intermediate.cols() != active_columns) {
+      intermediate.rows() != active_columns ||
+      intermediate.cols() != hamiltonian_pair_kernel_.rows()) {
     throw std::invalid_argument(
         "direct-CI scatter intermediate has incompatible dimensions");
   }
@@ -266,13 +266,13 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
   const auto add_beta_link = [&] (
       int beta_source, int pair, double sign) {
     for (int block = 0; block < block_width; ++block) {
-      intermediate.row(pair)
+      intermediate.col(pair)
           .segment(block * alpha_count, alpha_count)
           .noalias() += sign * coefficients.block(
               alpha_begin,
               block * n_beta_ + beta_source,
               alpha_count,
-              1).transpose();
+              1);
     }
   };
   for (const int occupied : beta_graph.occupied[beta_target]) {
@@ -294,7 +294,7 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
     const auto add_alpha_link = [&] (
         int alpha_source, int pair, double sign) {
       for (int block = 0; block < block_width; ++block) {
-        intermediate(pair, block * alpha_count + local_alpha) +=
+        intermediate(block * alpha_count + local_alpha, pair) +=
             sign * coefficients(
                 alpha_source, block * n_beta_ + beta_target);
       }
@@ -347,19 +347,22 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
               static_cast<int>(kWorkspaceBytes /
                   std::max<std::size_t>(bytes_per_alpha, 1)))));
   const int maximum_columns = alpha_tile * block_width;
-  std::vector<Eigen::MatrixXd> partial_sigma(
-      n_threads,
-      Eigen::MatrixXd::Zero(maximum_columns, n_beta_));
+  std::vector<Eigen::MatrixXd> partial_sigma(n_threads);
 
 #pragma omp parallel if(n_threads > 1) num_threads(n_threads)
   {
     int thread = 0;
+    int team_size = 1;
 #ifdef _OPENMP
     thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
 #endif
-    Eigen::MatrixXd intermediate(n_pairs, maximum_columns);
-    Eigen::MatrixXd transformed(n_pairs, maximum_columns);
+    // Strings are the contiguous axis, matching coefficient columns. Both
+    // scatter/gather and BLAS now consume contiguous string segments.
+    Eigen::MatrixXd intermediate(maximum_columns, n_pairs);
+    Eigen::MatrixXd transformed(maximum_columns, n_pairs);
     Eigen::MatrixXd& beta_reduction = partial_sigma[thread];
+    beta_reduction.resize(maximum_columns, n_beta_);
 
     for (int alpha_begin = 0;
          alpha_begin < n_alpha_;
@@ -370,7 +373,7 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
 
 #pragma omp for schedule(static)
       for (int beta_target = 0; beta_target < n_beta_; ++beta_target) {
-        auto active_intermediate = intermediate.leftCols(active_columns);
+        auto active_intermediate = intermediate.topRows(active_columns);
         scatter_one_body_intermediate(
             coefficients,
             alpha_begin,
@@ -378,9 +381,9 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
             beta_target,
             active_intermediate);
 
-        auto active_transformed = transformed.leftCols(active_columns);
+        auto active_transformed = transformed.topRows(active_columns);
         active_transformed.noalias() =
-            hamiltonian_pair_kernel_ * active_intermediate;
+            active_intermediate * hamiltonian_pair_kernel_.transpose();
 
         // Alpha links write one beta column owned by this loop iteration, so
         // no synchronization is required.
@@ -393,7 +396,7 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
             for (int block = 0; block < block_width; ++block) {
               sigma(alpha_source, block * n_beta_ + beta_target) +=
                   sign * active_transformed(
-                      pair, block * alpha_count + local_alpha);
+                      block * alpha_count + local_alpha, pair);
             }
           };
           for (const int occupied : alpha_.occupied[alpha_target]) {
@@ -416,9 +419,11 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
         // beta targets.  Accumulate them in one bounded buffer per thread.
         const auto gather_beta_link = [&] (
             int beta_source, int pair, double sign) {
+          const double* source = active_transformed.col(pair).data();
+          double* target = beta_reduction.col(beta_source).data();
+#pragma omp simd
           for (int column = 0; column < active_columns; ++column) {
-            beta_reduction(column, beta_source) +=
-                sign * active_transformed(pair, column);
+            target[column] += sign * source[column];
           }
         };
         for (const int occupied : beta_graph.occupied[beta_target]) {
@@ -446,7 +451,7 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
             const int row = block * alpha_count + local_alpha;
             double value = 0.0;
             for (int source_thread = 0;
-                 source_thread < n_threads;
+                 source_thread < team_size;
                  ++source_thread) {
               value += partial_sigma[source_thread](row, beta);
             }
@@ -532,6 +537,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
   const int n_pairs = static_cast<int>(pair_kernel_.rows());
   const int block_width = static_cast<int>(left.cols()) / n_beta_;
   constexpr int kAlphaTile = 160;
+  const int maximum_rows = std::min(kAlphaTile, n_alpha_) * block_width;
   const int n_alpha_tiles = (n_alpha_ + kAlphaTile - 1) / kAlphaTile;
   const int work_items = n_beta_ * n_alpha_tiles;
   const int n_threads = std::max(
@@ -548,9 +554,9 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
     thread = omp_get_thread_num();
 #endif
     Eigen::MatrixXd left_intermediate(
-        n_pairs, kAlphaTile * block_width);
+        maximum_rows, n_pairs);
     Eigen::MatrixXd right_intermediate(
-        n_pairs, kAlphaTile * block_width);
+        maximum_rows, n_pairs);
     Eigen::MatrixXd& effective_kernel = partial_effective_kernel[thread];
 
 #pragma omp for schedule(static)
@@ -559,13 +565,13 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
       const int alpha_begin = (work % n_alpha_tiles) * kAlphaTile;
       const int alpha_count = std::min(kAlphaTile, n_alpha_ - alpha_begin);
       const int active_columns = alpha_count * block_width;
-      auto active_left = left_intermediate.leftCols(active_columns);
-      auto active_right = right_intermediate.leftCols(active_columns);
+      auto active_left = left_intermediate.topRows(active_columns);
+      auto active_right = right_intermediate.topRows(active_columns);
       scatter_one_body_intermediate(
           left, alpha_begin, alpha_count, beta, active_left);
       scatter_one_body_intermediate(
           right, alpha_begin, alpha_count, beta, active_right);
-      effective_kernel.noalias() += active_left * active_right.transpose();
+      effective_kernel.noalias() += active_left.transpose() * active_right;
     }
   }
 

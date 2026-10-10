@@ -142,11 +142,12 @@ int main(int argc, char** argv) {
 
     const auto two_electron_lookup =
         build_two_electron_lookup(input.ao_integral_input);
-    const auto quartet = evaluator.evaluate_two_electron_shell_quartet(
+    xmvb::vb::LibcintShellWorkspace workspace;
+    const auto& quartet = evaluator.evaluate_two_electron_shell_quartet(
         options.two_shell_i,
         options.two_shell_j,
         options.two_shell_k,
-        options.two_shell_l);
+        options.two_shell_l, workspace);
 
     double max_eri_abs_diff = 0.0;
     double max_eri_abs_value = 0.0;

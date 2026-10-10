@@ -100,6 +100,7 @@ private:
   Eigen::MatrixXd build_hamiltonian_pair_kernel(
       const OrthogonalActiveIntegrals& integrals,
       int n_electrons) const;
+  /** @brief Scatter into (block_width * alpha_count, orbital_pairs), strings contiguous. */
   void scatter_one_body_intermediate(
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       int alpha_begin,

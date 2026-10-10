@@ -103,6 +103,7 @@ RiAoFactorization build_libcint_ri_factorization(
 
   RiAoFactorization result;
   LibcintDirectShellEvaluator evaluator(primary_input, auxiliary_input);
+  LibcintShellWorkspace workspace;
 
   result.n_basis_functions = evaluator.n_basis_functions();
   result.n_auxiliary_functions = evaluator.n_auxiliary_basis_functions();
@@ -118,8 +119,8 @@ RiAoFactorization build_libcint_ri_factorization(
   auxiliary_metric.setZero();
   for (int left_shell = 0; left_shell < auxiliary_input.n_shells; ++left_shell) {
     for (int right_shell = 0; right_shell <= left_shell; ++right_shell) {
-      const auto block =
-          evaluator.evaluate_auxiliary_metric_shell_pair(left_shell, right_shell);
+      const auto& block =
+          evaluator.evaluate_auxiliary_metric_shell_pair(left_shell, right_shell, workspace);
       for (int column = 0; column < block.right_ao_count; ++column) {
         const int global_column = block.right_ao_offset + column;
         for (int row = 0; row < block.left_ao_count; ++row) {
@@ -148,8 +149,9 @@ RiAoFactorization build_libcint_ri_factorization(
         for (int auxiliary_shell = 0;
              auxiliary_shell < auxiliary_input.n_shells;
              ++auxiliary_shell) {
-          const auto block =
-              evaluator.evaluate_three_center_shell_block(left_shell, right_shell, auxiliary_shell);
+          const auto& block =
+              evaluator.evaluate_three_center_shell_block(
+                  left_shell, right_shell, auxiliary_shell, workspace);
           scatter_three_center_shell_block(
               block,
               &raw_ao_pair_factors);
@@ -164,17 +166,17 @@ RiAoFactorization build_libcint_ri_factorization(
 
 #pragma omp parallel
     {
-      LibcintDirectShellEvaluator local_evaluator(primary_input, auxiliary_input);
+      LibcintShellWorkspace local_workspace;
 #pragma omp for schedule(dynamic)
       for (std::ptrdiff_t task_index = 0;
            task_index < static_cast<std::ptrdiff_t>(three_center_tasks.size());
            ++task_index) {
         const auto& task = three_center_tasks[task_index];
-        const auto block =
-            local_evaluator.evaluate_three_center_shell_block(
+        const auto& block =
+            evaluator.evaluate_three_center_shell_block(
                 task.primary_left_shell,
                 task.primary_right_shell,
-                task.auxiliary_shell);
+                task.auxiliary_shell, local_workspace);
         scatter_three_center_shell_block(
             block,
             &raw_ao_pair_factors);

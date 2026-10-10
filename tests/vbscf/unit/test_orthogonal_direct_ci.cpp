@@ -1,4 +1,6 @@
 #include <cmath>
+#include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -7,6 +9,10 @@
 
 #include <Eigen/Core>
 #include <Eigen/LU>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
@@ -1318,6 +1324,53 @@ void check_sigma_action() {
       "streamed overlap action differs from the dense reference");
 }
 
+/** @brief Exercise partial final tiles and multiple RHS with a known spectrum. */
+void check_sigma_tile_boundary() {
+  constexpr int n_orbitals = 10;
+  constexpr int block_width = 2;
+  const auto spin = complete_space(n_orbitals, 4); // 210 strings, tile limit 160.
+  xmvb::vb::OrthogonalActiveIntegrals integrals;
+  integrals.one_electron = Eigen::MatrixXd::Zero(n_orbitals, n_orbitals);
+  for (int i = 0; i < n_orbitals; ++i)
+    integrals.one_electron(i, i) = 0.17 * (i + 1);
+  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  integrals.pair_kernel = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
+  const xmvb::vb::DirectCiSigmaAction action(spin, spin, integrals);
+  const int n_strings = static_cast<int>(spin.size());
+  Eigen::MatrixXd coefficients(n_strings, block_width * n_strings);
+  Eigen::VectorXd energies = Eigen::VectorXd::Zero(n_strings);
+  for (int i = 0; i < n_strings; ++i)
+    for (int orbital : spin[i]) energies[i] += integrals.one_electron(orbital, orbital);
+  Eigen::MatrixXd expected(coefficients.rows(), coefficients.cols());
+  for (int j = 0; j < coefficients.cols(); ++j)
+    for (int i = 0; i < coefficients.rows(); ++i) {
+      coefficients(i, j) = std::sin(0.031 * (i + 1) * (j + 2));
+      expected(i, j) = (energies[i] + energies[j % n_strings]) * coefficients(i, j);
+    }
+  require((action.apply(coefficients) - expected).cwiseAbs().maxCoeff() < 2e-12,
+          "direct-CI partial tile or RHS packing differs from known spectrum");
+#ifdef _OPENMP
+  const int dynamic = omp_get_dynamic();
+  omp_set_dynamic(1);
+  const Eigen::MatrixXd dynamic_result = action.apply(coefficients);
+  omp_set_dynamic(dynamic);
+  require((dynamic_result - expected).cwiseAbs().maxCoeff() < 2e-12,
+          "direct-CI dynamic team reduction differs from known spectrum");
+  Eigen::MatrixXd nested_result;
+#pragma omp parallel num_threads(2)
+  {
+#pragma omp single
+    nested_result = action.apply(coefficients);
+  }
+  require((nested_result - expected).cwiseAbs().maxCoeff() < 2e-12,
+          "direct-CI nested team reduction differs from known spectrum");
+#endif
+  const auto adjoint = action.integral_adjoint(coefficients, coefficients);
+  require(std::abs(adjoint.one_electron.cwiseProduct(integrals.one_electron).sum() -
+                   coefficients.cwiseProduct(expected).sum()) < 2e-8,
+          "tiled direct-CI adjoint differs from action bilinear form");
+}
+
 void check_distinct_spin_sigma_action() {
   constexpr int n_orbitals = 4;
   constexpr int block_width = 2;
@@ -1589,13 +1642,59 @@ void check_demand_driven_structure_diagonal() {
       "zero Davidson Jacobi overlap was not rejected explicitly");
 }
 
+/** @brief Bounded kernel timings; keep separate from convergence benchmarks. */
+void benchmark_sigma() {
+  using Clock = std::chrono::steady_clock;
+  std::cout << "kernel,n_orbitals,n_strings,block_width,calls,wall_seconds,checksum\n"
+            << std::setprecision(17);
+  for (int n_orbitals : {6, 11}) {
+    const auto spin = complete_space(n_orbitals, n_orbitals / 2);
+    const int n_strings = static_cast<int>(spin.size());
+    const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+    xmvb::vb::OrthogonalActiveIntegrals integrals;
+    integrals.one_electron = Eigen::MatrixXd::Identity(n_orbitals, n_orbitals);
+    Eigen::MatrixXd factors(7, n_pairs);
+    for (int j = 0; j < n_pairs; ++j)
+      for (int i = 0; i < factors.rows(); ++i)
+        factors(i, j) = 0.07 * std::sin(0.17 * (i + 1) * (j + 2));
+    integrals.pair_kernel = factors.transpose() * factors;
+    const xmvb::vb::DirectCiSigmaAction action(spin, spin, integrals);
+    for (int width : {1, 4}) {
+      Eigen::MatrixXd coefficients(n_strings, width * n_strings);
+      for (int j = 0; j < coefficients.cols(); ++j)
+        for (int i = 0; i < coefficients.rows(); ++i)
+          coefficients(i, j) = std::sin(0.031 * (i + 1) * (j + 2));
+      double checksum = action.apply(coefficients).squaredNorm(); // warmup
+      constexpr int repeats = 5;
+      auto start = Clock::now();
+      for (int repeat = 0; repeat < repeats; ++repeat)
+        checksum += action.apply(coefficients).squaredNorm();
+      const double wall = std::chrono::duration<double>(Clock::now() - start).count();
+      std::cout << "sigma," << n_orbitals << ',' << n_strings << ',' << width
+                << ',' << repeats << ',' << wall << ',' << checksum << '\n';
+      start = Clock::now();
+      const auto adjoint = action.integral_adjoint(coefficients, coefficients);
+      const double adjoint_wall = std::chrono::duration<double>(Clock::now() - start).count();
+      std::cout << "adjoint," << n_orbitals << ',' << n_strings << ',' << width
+                << ",1," << adjoint_wall << ','
+                << adjoint.one_electron.squaredNorm() + adjoint.pair_kernel.squaredNorm()
+                << '\n';
+    }
+  }
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--benchmark") {
+      benchmark_sigma();
+      return 0;
+    }
     check_exterior_transform();
     check_planner();
     check_sigma_action();
+    check_sigma_tile_boundary();
     check_distinct_spin_sigma_action();
     check_demand_driven_structure_diagonal();
     std::cout << "orthogonal direct-CI planner and exterior transform: passed\n";
