@@ -1,6 +1,7 @@
 #include <array>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 #include <Eigen/Core>
 
@@ -196,5 +197,32 @@ int main() {
   require(
       result.dense_ao_pair_products.size() == 0,
       "memory-bounded active-ERI path retained dense AO-pair products");
+  // One off-diagonal AO edge contributes through both orientations to a
+  // diagonal active-pair element: 2 * K(0,1) * B(0,0) * B(1,0) = 8.
+  integrals.pair_graph = xmvb::vb::build_ao_pair_graph({0}, {1}, {2.0}, n_active);
+  orbitals.active_sparse_orbital_indices[1] = 0;
+  const auto mixed = builder.build(integrals, orbitals, n_active);
+  require(mixed.dense_ao_pair_products.size() == 0,
+          "mixed-pair regression did not exercise sparse construction");
+  if (std::abs(mixed.packed_active_two_electron_integrals.front() - 8.0) >= 1e-14)
+    throw std::runtime_error("sparse active diagonal: expected 8, got " +
+        std::to_string(mixed.packed_active_two_electron_integrals.front()));
+  // A 64-orbital packed tensor is about 16.5 MiB. Its sparse accumulator
+  // must not become 32 full copies just because OMP_NUM_THREADS=32.
+  constexpr int large_active = 64;
+  xmvb::vb::OrbitalPreparationResult large_orbitals;
+  for (int i = 0; i < large_active; ++i) {
+    large_orbitals.active_sparse_row_offsets.push_back(i);
+    large_orbitals.active_sparse_orbital_indices.push_back(i == 1 ? 0 : i);
+    large_orbitals.active_sparse_values.push_back(1.0);
+  }
+  large_orbitals.active_sparse_row_offsets.push_back(large_active);
+  xmvb::vb::AoIntegralInput large_integrals;
+  large_integrals.n_basis_functions = large_active;
+  large_integrals.pair_graph = xmvb::vb::build_ao_pair_graph({0}, {1}, {2.0}, large_active);
+  const auto large_result = builder.build(large_integrals, large_orbitals, large_active);
+  require(large_result.dense_ao_pair_products.size() == 0 &&
+          std::abs(large_result.packed_active_two_electron_integrals.front() - 8.0) < 1e-14,
+          "bounded large sparse accumulator changed the active integral");
   return 0;
 }

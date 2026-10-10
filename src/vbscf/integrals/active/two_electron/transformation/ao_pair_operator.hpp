@@ -9,6 +9,17 @@
 
 namespace xmvb::vb::detail {
 
+/** @brief Generate only the requested coefficient rows from compact orbital factors. */
+void build_ao_pair_coefficient_rows(
+    const AoPairGraph&, const Eigen::Ref<const Eigen::MatrixXd>&,
+    Eigen::Index row_begin, Eigen::Index row_count, ExactCtxPairMatrix*);
+
+/** @brief Exact accepted/directional row contraction, also used by integral workers. */
+void apply_generated_ao_pair_rows(
+    const AoIntegralInput&, const Eigen::Ref<const Eigen::MatrixXd>&,
+    const Eigen::MatrixXd*, Eigen::Index row_begin, Eigen::Index row_count,
+    ExactCtxPairMatrix*, ExactCtxPairMatrix*);
+
 /** @brief Shared CSR contraction for forward, directional and backward consumers. */
 void apply_exact_ao_pair_graph(
     const AoPairGraph& graph,

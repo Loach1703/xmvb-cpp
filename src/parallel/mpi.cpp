@@ -17,7 +17,7 @@
 
 namespace xmvb::parallel {
 namespace {
-enum Command { Stop, Build, Pair, Forward, Transpose, Fused };
+enum Command { Stop, Build, Pair, Forward, Transpose, Fused, Generated };
 constexpr std::size_t tile_bytes = 8 * 1024 * 1024;
 constexpr std::size_t h1e_private_bytes = 32 * 1024 * 1024;
 
@@ -89,6 +89,9 @@ MpiSession::~MpiSession() {
   if (rank_ == 0 && size_ > 1)
     std::cerr << "XMVB_MPI_ACTIONS," << commands_ << ",seconds," << action_seconds_
               << ",peak_tile_bytes," << peak_tile_bytes_ << '\n';
+  if (rank_ == 0 && size_ > 1)
+    std::cerr << "XMVB_MPI_GENERATED," << generated_commands_
+              << ",directional," << generated_direction_commands_ << '\n';
   MPI_Finalize();
 }
 
@@ -136,6 +139,8 @@ bool MpiSession::run_workers() {
         receive(header[0], header[1], header[2]);
         if (header[0] == Pair)
           execute_pair(worker_.pair_graph, worker_.n_basis_functions, header[1], header[2]);
+        else if (header[0] == Generated)
+          execute_generated(worker_, header[1], header[2]);
         else execute(header[0], worker_, header[1], header[2]);
       }
     }
@@ -153,6 +158,13 @@ void MpiSession::receive(int command, int rows, int columns) {
   const int count = rows * columns;
   source_.resize(count);
   MPI_Bcast(source_.data(), count, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  if (command == Generated) {
+    MPI_Bcast(generated_args_, 3, MPI_INT, 0, MPI_COMM_WORLD);
+    if (generated_args_[2]) {
+      direction_factors_.resize(rows, columns);
+      MPI_Bcast(direction_factors_.data(), count, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    }
+  }
   if (command == Fused) {
     adjoint_.resize(count);
     MPI_Bcast(adjoint_.data(), count, MPI_DOUBLE, 0, MPI_COMM_WORLD);
@@ -247,6 +259,65 @@ void MpiSession::pair(const vb::AoPairGraph& graph, int n_bf, const Eigen::Ref<c
     execute_pair(graph, n_bf, rows, columns);
     result->middleCols(begin, columns) = pair_image_;
     ++commands_;
+    action_seconds_ += MPI_Wtime() - start;
+  }
+}
+
+void MpiSession::execute_generated(const vb::AoIntegralInput& ao, int n_bf, int n_active) {
+  const std::size_t pairs = static_cast<std::size_t>(n_active) * (n_active + 1) / 2;
+  if (generated_args_[1] <= 0 ||
+      static_cast<std::size_t>(generated_args_[1]) > tile_bytes / sizeof(double) / pairs)
+    throw std::invalid_argument("MPI generated image exceeds tile bound");
+  dispatching_ = true;
+  try {
+    const auto c = Eigen::Map<const Eigen::MatrixXd>(source_.data(), n_bf, n_active);
+    vb::detail::apply_generated_ao_pair_rows(ao, c,
+        generated_args_[2] ? &direction_factors_ : nullptr,
+        generated_args_[0], generated_args_[1], &pair_image_,
+        generated_args_[2] ? &directional_image_ : nullptr);
+    MPI_Reduce(rank_ == 0 ? MPI_IN_PLACE : pair_image_.data(),
+        rank_ == 0 ? pair_image_.data() : nullptr, pair_image_.size(),
+        MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (generated_args_[2])
+      MPI_Reduce(rank_ == 0 ? MPI_IN_PLACE : directional_image_.data(),
+          rank_ == 0 ? directional_image_.data() : nullptr, directional_image_.size(),
+          MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    peak_tile_bytes_ = std::max(peak_tile_bytes_, pairs * generated_args_[1] * sizeof(double));
+    dispatching_ = false;
+  } catch (...) { MPI_Abort(MPI_COMM_WORLD, 2); throw; }
+}
+
+void MpiSession::generated(const vb::AoIntegralInput& ao,
+    const Eigen::Ref<const Eigen::MatrixXd>& c, const Eigen::MatrixXd* d,
+    Eigen::Index begin, Eigen::Index count, vb::PairMatrix* image,
+    vb::PairMatrix* directional) {
+  main_thread();
+  const Eigen::Index pairs = c.cols() * (c.cols() + 1) / 2;
+  if (!image || c.size() <= 0 || c.size() > static_cast<Eigen::Index>(tile_bytes / sizeof(double)) ||
+      pairs <= 0 || pairs > static_cast<Eigen::Index>(tile_bytes / sizeof(double)) ||
+      begin < 0 || count < 0 || begin + count > std::numeric_limits<int>::max() ||
+      (d != nullptr) != (directional != nullptr))
+    throw std::invalid_argument("invalid or oversized MPI generated factors");
+  image->resize(count, pairs);
+  if (directional) directional->resize(count, pairs);
+  const Eigen::Index tile_rows = tile_bytes / sizeof(double) / pairs;
+  for (Eigen::Index offset = 0; offset < count; offset += tile_rows) {
+    const double start = MPI_Wtime();
+    const Eigen::Index rows = std::min(tile_rows, count - offset);
+    source_.resize(c.size());
+    Eigen::Map<Eigen::MatrixXd>(source_.data(), c.rows(), c.cols()) = c;
+    if (d) direction_factors_ = *d;
+    generated_args_[0] = begin + offset;
+    generated_args_[1] = rows;
+    generated_args_[2] = d != nullptr;
+    send(Generated, c.rows(), c.cols());
+    receive(Generated, c.rows(), c.cols());
+    execute_generated(ao, c.rows(), c.cols());
+    image->middleRows(offset, rows) = pair_image_;
+    if (directional) directional->middleRows(offset, rows) = directional_image_;
+    ++commands_;
+    ++generated_commands_;
+    if (d) ++generated_direction_commands_;
     action_seconds_ += MPI_Wtime() - start;
   }
 }

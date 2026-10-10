@@ -20,6 +20,10 @@ public:
                      std::vector<double>*, std::vector<double>*) = 0;
   virtual void pair(const AoPairGraph&, int n_bf, const Eigen::Ref<const PairMatrix>&,
                     PairMatrix*) = 0;
+  /** @brief Contract orbital factors into bounded AO-pair row images. */
+  virtual void generated(const AoIntegralInput&, const Eigen::Ref<const Eigen::MatrixXd>&,
+                         const Eigen::MatrixXd*, Eigen::Index, Eigen::Index,
+                         PairMatrix*, PairMatrix*) = 0;
   /** @brief Set by the MPI session only; null in ordinary single-process runs. */
   inline static IntegralService* current = nullptr;
 };

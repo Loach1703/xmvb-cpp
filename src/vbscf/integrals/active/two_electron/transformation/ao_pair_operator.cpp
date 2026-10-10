@@ -203,8 +203,6 @@ void apply_generated_pair_rows(
     Eigen::Index row_count,
     ExactCtxPairMatrix* pair_products,
     ExactCtxPairMatrix* directional_pair_products) {
-  if (ao.pair_graph.service)
-    throw std::runtime_error("MPI generated-row contraction is not implemented");
   if (pair_products == nullptr) {
     throw std::invalid_argument("generated AO-pair result must not be null");
   }
@@ -231,62 +229,8 @@ void apply_generated_pair_rows(
       (build_direction != (directional_pair_products != nullptr))) {
     throw std::invalid_argument("generated AO-pair row dimensions are inconsistent");
   }
-  const AoPairGraph& graph = ao.pair_graph;
-  if (graph.row_offsets.size() != static_cast<std::size_t>(n_bf_pairs + 1) ||
-      graph.columns.size() != graph.values.size() ||
-      graph.values.size() !=
-          static_cast<std::size_t>(graph.row_offsets.back())) {
-    throw std::invalid_argument("invalid AO-pair graph");
-  }
-
-  pair_products->setZero(row_count, n_active_pairs);
-  if (directional_pair_products != nullptr) {
-    directional_pair_products->setZero(row_count, n_active_pairs);
-  }
-#pragma omp parallel for schedule(dynamic, 1)
-  for (Eigen::Index local_row = 0; local_row < row_count; ++local_row) {
-    const Eigen::Index target_row = row_begin + local_row;
-    const int edge_begin = graph.row_offsets[target_row];
-    const int edge_end = graph.row_offsets[target_row + 1];
-    for (int edge = edge_begin; edge < edge_end; ++edge) {
-      const Eigen::Index source_row = graph.columns[edge];
-      const int first_bf = cache.ao_pair_first_indices[source_row];
-      const int second_bf = cache.ao_pair_second_indices[source_row];
-      const double integral = graph.values[edge];
-      for (Eigen::Index active_pair = 0;
-           active_pair < n_active_pairs;
-           ++active_pair) {
-        const int first_active = cache.active_pair_first_indices[active_pair];
-        const int second_active = cache.active_pair_second_indices[active_pair];
-        double coefficient =
-            dense_active_coefficients(first_bf, first_active) *
-            dense_active_coefficients(second_bf, second_active);
-        if (first_bf != second_bf) {
-          coefficient +=
-              dense_active_coefficients(second_bf, first_active) *
-              dense_active_coefficients(first_bf, second_active);
-        }
-        (*pair_products)(local_row, active_pair) += integral * coefficient;
-
-        if (build_direction) {
-          double mixed =
-              (*dense_active_direction)(first_bf, first_active) *
-                  dense_active_coefficients(second_bf, second_active) +
-              dense_active_coefficients(first_bf, first_active) *
-                  (*dense_active_direction)(second_bf, second_active);
-          if (first_bf != second_bf) {
-            mixed +=
-                (*dense_active_direction)(second_bf, first_active) *
-                    dense_active_coefficients(first_bf, second_active) +
-                dense_active_coefficients(second_bf, first_active) *
-                    (*dense_active_direction)(first_bf, second_active);
-          }
-          (*directional_pair_products)(local_row, active_pair) +=
-              integral * mixed;
-        }
-      }
-    }
-  }
+  apply_generated_ao_pair_rows(ao, dense_active_coefficients, dense_active_direction,
+      row_begin, row_count, pair_products, directional_pair_products);
 }
 
 }  // namespace xmvb::vb::detail

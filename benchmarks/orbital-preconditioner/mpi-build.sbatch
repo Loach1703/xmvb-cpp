@@ -33,11 +33,15 @@ cmake -S "$source_dir" -B "$source_dir/build" -G Ninja \
     -DCMAKE_Fortran_COMPILER="$dependencies/bin/gfortran" \
     -DMPI_CXX_COMPILER=/opt/openmpi/5.0.9-ucx/bin/mpicxx \
     '-DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined -Wl,-rpath-link,/usr/lib/x86_64-linux-gnu -Wl,-rpath-link,/usr/lpp/mmfs/lib'
-cmake --build "$source_dir/build" --target xmvb check_integral_shards check_integral_service \
+build_args=()
+[[ "${2:-}" != clean ]] || build_args=(--clean-first)
+cmake --build "$source_dir/build" "${build_args[@]}" --target xmvb check_integral_shards check_integral_service \
     test_libcint_ri test_active_two_electron_sparse -j16
 for threads in 1 8 32; do
     for test in test_libcint_ri test_active_two_electron_sparse; do
         srun --exact --cpus-per-task="$threads" --cpu-bind=cores \
-            env OMP_NUM_THREADS="$threads" "$source_dir/build/src/$test"
+            env OMP_NUM_THREADS="$threads" /usr/bin/time -v \
+            -o "$SLURM_SUBMIT_DIR/mpi-unit-$SLURM_JOB_ID-$test-$threads.time" \
+            "$source_dir/build/src/$test"
     done
 done

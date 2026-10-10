@@ -279,7 +279,7 @@ std::vector<SparseActivePairCoefficient> build_sparse_active_pair_row(
           {TwoElectronIndexer::packed_pair_index(
                first_active_orbital,
                second_active_orbital),
-           coefficient});
+           coefficient * (first_active_orbital == second_active_orbital ? 2.0 : 1.0)});
     }
   }
 
@@ -450,9 +450,13 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_sparse(
   n_threads = xmvb::effective_openmp_thread_count();
 #endif
 
-  std::vector<std::vector<double>> partial_packed_integrals(
-      n_threads,
-      std::vector<double>(packed_size, 0.0));
+  // Preserve sparse support arithmetic without multiplying a large packed
+  // tensor by the OpenMP team size. A single large image becomes the result.
+  constexpr std::size_t private_elements = 32 * 1024 * 1024 / sizeof(double);
+  n_threads = std::min(n_threads,
+      static_cast<int>(std::max<std::size_t>(1, private_elements / packed_size)));
+  std::vector<std::vector<double>> partial_packed_integrals(n_threads);
+  for (auto& partial : partial_packed_integrals) partial.assign(packed_size, 0.0);
 
 #pragma omp parallel num_threads(n_threads)
   {
@@ -532,19 +536,24 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_sparse(
                   left_active_pair_index,
                   right_active_pair_index);
           local_packed_integrals[packed_index] +=
-              ao_integral_value * coefficient;
+              ao_integral_value * coefficient *
+              (left_active_pair_index == right_active_pair_index ? 2.0 : 1.0);
         }
       }
     }
   }
 
-  std::vector<double> packed_active_two_electron_integrals(packed_size, 0.0);
-  for (const auto& partial_integrals : partial_packed_integrals) {
-    for (std::size_t integral_index = 0;
-         integral_index < packed_active_two_electron_integrals.size();
-         ++integral_index) {
-      packed_active_two_electron_integrals[integral_index] +=
-          partial_integrals[integral_index];
+  std::vector<double> packed_active_two_electron_integrals;
+  if (n_threads == 1) {
+    packed_active_two_electron_integrals = std::move(partial_packed_integrals.front());
+  } else {
+    packed_active_two_electron_integrals.assign(packed_size, 0.0);
+    for (const auto& partial_integrals : partial_packed_integrals) {
+      for (std::size_t integral_index = 0;
+           integral_index < packed_active_two_electron_integrals.size();
+           ++integral_index) {
+        packed_active_two_electron_integrals[integral_index] += partial_integrals[integral_index];
+      }
     }
   }
 
@@ -553,6 +562,39 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_sparse(
       std::move(packed_active_two_electron_integrals);
   result.dense_active_coefficients =
       std::move(dense_active_coefficients);
+  return result;
+}
+
+/** @brief Root-only packed tensor assembled from reduced, bounded pair-row tiles. */
+ActiveSpaceTwoElectronResult build_streamed_active_integrals(
+    const AoIntegralInput& ao, Eigen::MatrixXd c) {
+  const Eigen::Index pairs = c.cols() * (c.cols() + 1) / 2;
+  const Eigen::Index ao_pairs = c.rows() * (c.rows() + 1) / 2;
+  constexpr Eigen::Index elements = 8 * 1024 * 1024 / sizeof(double);
+  if (pairs > elements)
+    throw std::invalid_argument("active-pair row exceeds exact tile budget");
+  const Eigen::Index rows_per_tile = std::max<Eigen::Index>(1, elements / pairs);
+  const Eigen::Index columns_per_tile = std::max<Eigen::Index>(1, std::min(pairs, elements / pairs));
+  ActiveSpaceTwoElectronResult result;
+  result.dense_active_coefficients = std::move(c);
+  result.packed_active_two_electron_integrals.assign(pairs * (pairs + 1) / 2, 0.0);
+  ExactCtxPairMatrix coefficients, products;
+  Eigen::MatrixXd contraction;
+  for (Eigen::Index begin = 0; begin < ao_pairs; begin += rows_per_tile) {
+    const Eigen::Index rows = std::min(rows_per_tile, ao_pairs - begin);
+    detail::build_ao_pair_coefficient_rows(ao.pair_graph, result.dense_active_coefficients,
+        begin, rows, &coefficients);
+    detail::apply_generated_ao_pair_rows(ao, result.dense_active_coefficients,
+        nullptr, begin, rows, &products, nullptr);
+    for (Eigen::Index left = 0; left < pairs; left += columns_per_tile) {
+      const Eigen::Index columns = std::min(columns_per_tile, pairs - left);
+      contraction.noalias() = coefficients.middleCols(left, columns).transpose() * products;
+      for (Eigen::Index i = 0; i < columns; ++i)
+        for (Eigen::Index j = 0; j <= left + i; ++j)
+          result.packed_active_two_electron_integrals[(left + i) * (left + i + 1) / 2 + j]
+              += contraction(i, j);
+    }
+  }
   return result;
 }
 
@@ -591,7 +633,9 @@ ActiveSpaceTwoElectronResult ActiveSpaceTwoElectronBuilder::build(
   }
 
   if (ao_integral_input.pair_graph.service)
-    throw std::runtime_error("MPI sparse active-integral construction is not implemented");
+    return build_streamed_active_integrals(ao_integral_input,
+        copy_row_major_buffer_to_matrix(build_dense_active_coefficients(
+            orbital_preparation_result, n_bf, n_active_orbitals), n_bf, n_active_orbitals));
   const auto sparse_pair_coefficients =
       build_sparse_ao_pair_coefficients(
           orbital_preparation_result.active_sparse_row_offsets,
