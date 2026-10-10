@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
@@ -25,6 +25,15 @@ public:
   DirectCiSigmaAction(
       const std::vector<std::vector<int>>& alpha_determinants,
       const std::vector<std::vector<int>>& beta_determinants,
+      const OrthogonalActiveIntegrals& integrals);
+
+  /** @brief Reuses immutable spin-string links for another integral kernel.
+   *
+   * Orbitals must have the same ordering and count as the reference action.
+   * Only the numerical integral kernels are rebuilt; links are shared, not copied.
+   */
+  DirectCiSigmaAction(
+      const DirectCiSigmaAction& reference,
       const OrthogonalActiveIntegrals& integrals);
 
   /**
@@ -69,6 +78,7 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       const Eigen::Ref<const Eigen::MatrixXd>& right) const;
 
+  /** @brief Numerical matrices plus referenced links, not exclusively owned bytes. */
   std::size_t dynamic_bytes() const noexcept;
 
 private:
@@ -114,8 +124,8 @@ private:
   int n_beta_ = 0;
   Eigen::MatrixXd pair_kernel_;
   Eigen::MatrixXd hamiltonian_pair_kernel_;
-  SpinConnections alpha_;
-  std::optional<SpinConnections> distinct_beta_;
+  std::shared_ptr<const SpinConnections> alpha_;
+  std::shared_ptr<const SpinConnections> distinct_beta_;
 };
 
 }  // namespace xmvb::vb

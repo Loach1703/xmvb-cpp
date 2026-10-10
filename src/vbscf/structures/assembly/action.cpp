@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "core/openmp.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 #include "vbscf/determinants/pairs/accepted_action.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
@@ -379,8 +380,6 @@ DeterminantPairScalars evaluate_spin_product_pair(
 
 struct StructureAction::OrthogonalDirectCiData {
   OrthogonalActiveIntegrals integrals;
-  std::vector<std::vector<int>> alpha_determinants;
-  std::optional<std::vector<std::vector<int>>> distinct_beta_determinants;
   ExteriorOrbitalTransform alpha_transform;
   std::unique_ptr<ExteriorOrbitalTransform> distinct_beta_transform;
   DirectCiSigmaAction sigma;
@@ -397,12 +396,6 @@ struct StructureAction::OrthogonalDirectCiData {
             active_one_electron,
             active_two_electron,
             n_active_orbitals)),
-        alpha_determinants(alpha_determinants),
-        distinct_beta_determinants(
-            beta_determinants == alpha_determinants
-                ? std::nullopt
-                : std::optional<std::vector<std::vector<int>>>(
-                      beta_determinants)),
         alpha_transform(alpha_determinants, integrals.orbital_transform),
         distinct_beta_transform(
             beta_determinants == alpha_determinants
@@ -411,12 +404,6 @@ struct StructureAction::OrthogonalDirectCiData {
                       beta_determinants,
                       integrals.orbital_transform)),
         sigma(alpha_determinants, beta_determinants, integrals) {}
-
-  const std::vector<std::vector<int>>& beta_determinants() const noexcept {
-    return distinct_beta_determinants
-        ? *distinct_beta_determinants
-        : alpha_determinants;
-  }
 
   const ExteriorOrbitalTransform& beta_transform() const noexcept {
     return distinct_beta_transform
@@ -438,18 +425,6 @@ struct StructureAction::OrthogonalDirectCiData {
              ? distinct_beta_transform->dynamic_bytes()
              : 0) +
         sigma.dynamic_bytes();
-    const auto determinant_bytes = [](const auto& determinants) {
-      std::size_t result =
-          determinants.capacity() * sizeof(std::vector<int>);
-      for (const auto& determinant : determinants) {
-        result += determinant.capacity() * sizeof(int);
-      }
-      return result;
-    };
-    bytes += determinant_bytes(alpha_determinants);
-    if (distinct_beta_determinants) {
-      bytes += determinant_bytes(*distinct_beta_determinants);
-    }
     return bytes;
   }
 };
@@ -1208,6 +1183,7 @@ StructureActionResult StructureAction::apply_integral_direction(
     const std::vector<double>& one_electron_direction,
     const std::vector<double>& packed_two_electron_direction,
     StructureIntegralDirection* direct_ci_direction) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiIntegralDirection);
   if (!direct_ci_) {
     throw std::logic_error(
         "integral-direction action requires orthogonal direct CI");
@@ -1231,8 +1207,7 @@ StructureActionResult StructureAction::apply_integral_direction(
           packed_two_electron_direction,
           n_active_orbitals);
   const DirectCiSigmaAction sigma_direction(
-      direct_ci_->alpha_determinants,
-      direct_ci_->beta_determinants(),
+      direct_ci_->sigma,
       integral_direction);
   const Eigen::MatrixXd inverse_orbital_transform =
       direct_ci_->integrals.orbital_transform
@@ -1502,8 +1477,7 @@ StructureAction::active_integral_adjoint_direction(
     beta_transform_direction = direct_ci_->beta_transform().direction(
         integral_direction.orbital_transform);
     sigma_direction = std::make_unique<DirectCiSigmaAction>(
-        direct_ci_->alpha_determinants,
-        direct_ci_->beta_determinants(),
+        direct_ci_->sigma,
         integral_direction);
   }
 

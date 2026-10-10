@@ -52,6 +52,10 @@ cp "$baseline" "$root/baseline.exe"
 variants=(baseline-8 current-8 baseline-16 current-16 baseline-32 current-32 baseline-passive-16 current-passive-16 baseline-1 current-1)
 if [[ "${3:-}" == isolated ]]; then
     variants=(baseline-8 current-8 baseline-16 current-16 baseline-32 current-32 baseline-1 current-1)
+elif [[ "${3:-}" == reverse ]]; then
+    # Reverse matched pairs to check order/background-load effects, without
+    # another costly single-thread calibration.
+    variants=(current-32 baseline-32 current-16 baseline-16 current-8 baseline-8)
 fi
 for variant in "${variants[@]}"; do
     threads="${variant##*-}"

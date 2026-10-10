@@ -389,6 +389,29 @@ void check_sigma_action() {
     }
   }
 
+  const xmvb::vb::DirectCiSigmaAction shared_direction(
+      sigma_action, orthogonal_direction);
+  require((shared_direction.apply(coefficients) - sigma_direction.apply(coefficients))
+              .cwiseAbs().maxCoeff() < 2.0e-12,
+          "shared spin-string links changed the directional sigma action");
+  const auto surviving_direction = [&] {
+    const xmvb::vb::DirectCiSigmaAction temporary(alpha, beta, orthogonal);
+    return xmvb::vb::DirectCiSigmaAction(temporary, orthogonal_direction);
+  }();
+  require((surviving_direction.apply(coefficients) - sigma_direction.apply(coefficients))
+              .cwiseAbs().maxCoeff() < 2.0e-12,
+          "shared spin-string links did not survive their original action");
+  const xmvb::vb::DirectCiSigmaAction equal_spin_action(alpha, alpha, orthogonal);
+  const xmvb::vb::DirectCiSigmaAction equal_spin_direction(
+      equal_spin_action, orthogonal_direction);
+  const xmvb::vb::DirectCiSigmaAction equal_spin_reference(
+      alpha, alpha, orthogonal_direction);
+  const Eigen::MatrixXd equal_spin_values = Eigen::MatrixXd::Ones(
+      alpha.size(), 2 * alpha.size());
+  require((equal_spin_direction.apply(equal_spin_values) -
+           equal_spin_reference.apply(equal_spin_values)).cwiseAbs().maxCoeff() < 2.0e-12,
+          "shared alpha/beta links changed the equal-spin sigma action");
+
   Eigen::MatrixXd left_coefficients(coefficients.rows(), coefficients.cols());
   for (int column = 0; column < left_coefficients.cols(); ++column) {
     for (int row = 0; row < left_coefficients.rows(); ++row) {

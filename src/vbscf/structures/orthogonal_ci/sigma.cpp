@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include "core/openmp.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 #include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
 #include "vbscf/structures/orthogonal_ci/planner.hpp"
 
@@ -117,15 +118,36 @@ DirectCiSigmaAction::DirectCiSigmaAction(
                        beta_determinants.front().size());
   hamiltonian_pair_kernel_ =
       build_hamiltonian_pair_kernel(integrals, n_electrons);
-  alpha_ = build_spin_connections(alpha_determinants);
+  alpha_ = std::make_shared<const SpinConnections>(
+      build_spin_connections(alpha_determinants));
   if (beta_determinants != alpha_determinants) {
-    distinct_beta_.emplace(build_spin_connections(beta_determinants));
+    distinct_beta_ = std::make_shared<const SpinConnections>(
+        build_spin_connections(beta_determinants));
   }
+}
+
+DirectCiSigmaAction::DirectCiSigmaAction(
+    const DirectCiSigmaAction& reference,
+    const OrthogonalActiveIntegrals& integrals)
+    : n_orbitals_(reference.n_orbitals_),
+      n_alpha_(reference.n_alpha_),
+      n_beta_(reference.n_beta_),
+      pair_kernel_(integrals.pair_kernel),
+      alpha_(reference.alpha_),
+      distinct_beta_(reference.distinct_beta_) {
+  if (integrals.one_electron.rows() != n_orbitals_ ||
+      integrals.pair_kernel.rows() != reference.pair_kernel_.rows()) {
+    throw std::invalid_argument("direct-CI shared links have incompatible orbitals");
+  }
+  const int n_electrons = static_cast<int>(
+      alpha_->occupied.front().size() + beta_connections().occupied.front().size());
+  hamiltonian_pair_kernel_ = build_hamiltonian_pair_kernel(integrals, n_electrons);
 }
 
 DirectCiSigmaAction::SpinConnections
 DirectCiSigmaAction::build_spin_connections(
     const std::vector<std::vector<int>>& determinants) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiConnections);
   const int dimension = static_cast<int>(determinants.size());
   std::vector<std::uint64_t> masks(dimension);
   std::unordered_map<std::uint64_t, int> index_by_mask;
@@ -241,7 +263,7 @@ Eigen::MatrixXd DirectCiSigmaAction::build_hamiltonian_pair_kernel(
 
 const DirectCiSigmaAction::SpinConnections&
 DirectCiSigmaAction::beta_connections() const noexcept {
-  return distinct_beta_.has_value() ? *distinct_beta_ : alpha_;
+  return distinct_beta_ ? *distinct_beta_ : *alpha_;
 }
 
 void DirectCiSigmaAction::scatter_one_body_intermediate(
@@ -299,13 +321,13 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
                 alpha_source, block * n_beta_ + beta_target);
       }
     };
-    for (const int occupied : alpha_.occupied[alpha_target]) {
+    for (const int occupied : alpha_->occupied[alpha_target]) {
       add_alpha_link(
           alpha_target,
           TwoElectronIndexer::packed_pair_index(occupied, occupied),
           1.0);
     }
-    const DensityConnections& alpha_singles = alpha_.singles[alpha_target];
+    const DensityConnections& alpha_singles = alpha_->singles[alpha_target];
     for (std::size_t link = 0; link < alpha_singles.size(); ++link) {
       add_alpha_link(
           alpha_singles.sources[link],
@@ -317,6 +339,7 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
 
 Eigen::MatrixXd DirectCiSigmaAction::apply(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiSigma);
   if (coefficients.rows() != n_alpha_ || coefficients.cols() <= 0 ||
       coefficients.cols() % n_beta_ != 0) {
     throw std::invalid_argument(
@@ -399,14 +422,14 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
                       block * alpha_count + local_alpha, pair);
             }
           };
-          for (const int occupied : alpha_.occupied[alpha_target]) {
+          for (const int occupied : alpha_->occupied[alpha_target]) {
             gather_alpha_link(
                 alpha_target,
                 TwoElectronIndexer::packed_pair_index(occupied, occupied),
                 1.0);
           }
         const DensityConnections& alpha_singles =
-              alpha_.singles[alpha_target];
+              alpha_->singles[alpha_target];
           for (std::size_t link = 0; link < alpha_singles.size(); ++link) {
             gather_alpha_link(
                 alpha_singles.sources[link],
@@ -469,6 +492,7 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
 Eigen::MatrixXd DirectCiSigmaAction::apply_one_body_generator(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
     const Eigen::Ref<const Eigen::MatrixXd>& generator) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiGenerator);
   if (coefficients.rows() != n_alpha_ || coefficients.cols() <= 0 ||
       coefficients.cols() % n_beta_ != 0 ||
       generator.rows() != n_orbitals_ ||
@@ -494,13 +518,13 @@ Eigen::MatrixXd DirectCiSigmaAction::apply_one_body_generator(
     const int block = packed_column / n_beta_;
     const int column = packed_column;
     double value = 0.0;
-    for (const int orbital : alpha_.occupied[alpha]) {
+    for (const int orbital : alpha_->occupied[alpha]) {
       value += generator(orbital, orbital) * coefficients(alpha, column);
     }
     for (const int orbital : beta_graph.occupied[beta]) {
       value += generator(orbital, orbital) * coefficients(alpha, column);
     }
-    const DensityConnections& alpha_singles = alpha_.singles[alpha];
+    const DensityConnections& alpha_singles = alpha_->singles[alpha];
     for (std::size_t single = 0; single < alpha_singles.size(); ++single) {
       value += alpha_singles.signs[single] *
           generator(
@@ -597,7 +621,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
       0.25 * (effective_kernel_adjoint +
               effective_kernel_adjoint.transpose());
   const int n_electrons =
-      static_cast<int>(alpha_.occupied.front().size() +
+      static_cast<int>(alpha_->occupied.front().size() +
                        beta_connections().occupied.front().size());
   for (int row = 0; row < n_orbitals_; ++row) {
     for (int column = 0; column <= row; ++column) {
@@ -660,13 +684,13 @@ Eigen::MatrixXd DirectCiSigmaAction::one_body_generator_adjoint(
       }
       const double diagonal_weight =
           left_value * right(alpha, column);
-      for (const int orbital : alpha_.occupied[alpha]) {
+      for (const int orbital : alpha_->occupied[alpha]) {
         density(orbital, orbital) += diagonal_weight;
       }
       for (const int orbital : beta_graph.occupied[beta]) {
         density(orbital, orbital) += diagonal_weight;
       }
-      const DensityConnections& alpha_singles = alpha_.singles[alpha];
+      const DensityConnections& alpha_singles = alpha_->singles[alpha];
       for (std::size_t link = 0; link < alpha_singles.size(); ++link) {
         density(
             alpha_singles.annihilated_orbitals[link],
@@ -713,8 +737,8 @@ std::size_t DirectCiSigmaAction::dynamic_bytes() const noexcept {
   };
   std::size_t bytes = static_cast<std::size_t>(
       pair_kernel_.size() + hamiltonian_pair_kernel_.size()) * sizeof(double) +
-      spin_bytes(alpha_);
-  if (distinct_beta_.has_value()) {
+      spin_bytes(*alpha_);
+  if (distinct_beta_) {
     bytes += spin_bytes(*distinct_beta_);
   }
   return bytes;

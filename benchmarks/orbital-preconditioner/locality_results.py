@@ -50,12 +50,14 @@ for directory in sorted(args.root.iterdir()):
                      l3_domains=len({item["l3"] for item in topology}),
                      cpus=" ".join(map(str, affinity["selected"])),
                      **{phase: phases[phase] for phase in ["ao_pair_action", "ao_h1e_fused", "ao_h1e_transpose", "selected_direction", "metric_solve"]}))
+if not rows:
+    raise RuntimeError("no converged native runs found")
 ones = {row["variant"].split("-")[0]: row for row in rows if row["threads"] == 1}
-fallback = next(iter(ones.values()))
+fallback = next(iter(ones.values()), None)
 for row in rows:
     one = ones.get(row["variant"].split("-")[0], fallback)
-    row["speedup"] = one["wall"] / row["wall"]
-    row["parallel_efficiency"] = row["speedup"] / row["threads"]
+    row["speedup"] = one["wall"] / row["wall"] if one else ""
+    row["parallel_efficiency"] = row["speedup"] / row["threads"] if one else ""
 args.output.parent.mkdir(parents=True, exist_ok=True)
 with args.output.open("w", newline="") as stream:
     writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
