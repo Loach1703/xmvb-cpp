@@ -1,0 +1,54 @@
+# Fe-porphine optimizer benchmark
+
+Purpose: compare conventional L-BFGS (ISCF=5), block-LBFGS (8), and NEO (9)
+without changing the orbital initial guess or variational space. This is a
+benchmark design, not evidence that NEO is faster.
+
+| Setting | Value |
+|---|---|
+| Molecule | Neutral Fe-porphine, 37 atoms, 186 electrons |
+| States | Singlet, triplet, quintet, separate state-specific calculations |
+| Active space | 8 electrons in 11 orbitals; complete spin-adapted VB space |
+| Orbitals | OEO; no frozen orbitals or spatial symmetry restriction |
+| AO basis | Repository cc-pVDZ, Cartesian in all calculations |
+| Integrals | Exact libcint; no RI approximation |
+| Structure solver | Davidson |
+| Initial orbitals | Same saved quintet-ROHF-derived DMET-style frame in all nine runs |
+| Convergence | Projected gradient infinity norm 1e-3; energy change 1e-7 Eh |
+| Resources | Hanhai25 Slurm; one 32-core allocation, methods run sequentially |
+| Safety limits | 1000 iterations; 2 hours per method; incomplete runs explicitly marked |
+
+Geometry and the ten-impurity-plus-one-bath initial-space construction are
+based on the [public PySCF Fe-porphine example](https://github.com/pyscf/pyscf.github.io/blob/master/examples/mcscf/33-make_init_guess/18-dmet_cas_for_feporph.py).
+Here ten spherical Fe 3d/4d projectors are embedded in the complete Cartesian
+AO space; the Cartesian d-shell trace components are not added as impurity
+orbitals. Density diagonalization separates the inactive, bath, and external
+spaces, followed by blockwise Fock canonicalization. No frozen-4d preoptimization
+is used. The saved Gram residual and bath occupations document the construction.
+
+This is **not a literal reproduction** of the spherical-AO, spatial-symmetry
+restricted state benchmarks in Kreplin, Knowles, and Werner, *J. Chem. Phys.*
+**2019**, *150*, 194106. In particular, the triplet is not constrained to B1g.
+Different minima or active-space character must be reported, not counted as
+an optimizer speedup. The shared quintet initial frame may have different
+initial energies in different spin sectors; only comparisons within a sector
+have identical initial energies.
+
+FeCl3 CAS(9e,12o) is deferred until its original geometry is verified. Do not
+substitute an assumed Fe–Cl bond length and call it the literature benchmark.
+
+## Run and evaluate
+
+Transfer a clean source snapshot and these files to Hanhai25. From the run
+directory, submit `sbatch run.sbatch /absolute/path/to/source-snapshot`.
+Compilation and orbital preparation run inside the allocation. Source revision
+and benchmark script hashes are saved at submission; binary/input hashes,
+CPU, affinity, raw output, exit status, GNU-time wall/RSS and Slurm job ID are
+retained. A zero exit code alone is not a convergence certificate.
+
+Report, per state and optimizer: convergence status, final energy, final
+gradient and energy change, outer steps, orbital/structure actions, wall
+seconds, peak RSS in MiB, and state/active-space identity. Retrieve Slurm
+accounting with `sacct` after completion. Add a PySCF CASSCF comparison using
+the exported `initial_mo.npy`, the same Cartesian basis and spin sector before
+making claims relative to an external CASSCF implementation.
