@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=fe-porphine-optimizers
+#SBATCH --job-name=fe-porphine-prepare
 #SBATCH --partition=CPU-256C768GB
 #SBATCH --qos=qos_cpu-256c768gb
 #SBATCH --account=taoxia
@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=192G
-#SBATCH --time=24:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=slurm-%j.out
 #SBATCH --error=slurm-%j.err
 
@@ -66,30 +66,5 @@ srun --cpu-bind=cores /usr/bin/time -v -o prepare.time \
     /home/guqqgroup/taoxia/conda-envs/pyscf/bin/python -u prepare.py "$source_dir" \
     > prepare.out 2> prepare.err
 printf '%s PREPARE END\n' "$(date -Is)" >> progress.txt
-export PATH="$dependencies/bin:$PATH" CONDA_PREFIX="$dependencies"
-export LD_LIBRARY_PATH="$dependencies/lib:${LD_LIBRARY_PATH:-}"
-exe="$source_dir/build/src/xmvb-cpp.exe"
-sha256sum "$exe" > binary.sha256
-printf 'state,iscf,exit_code\n' > exit_codes.csv
-for state in singlet triplet quintet; do
-    for iscf in 5 8 9; do
-        label="$state-iscf$iscf"
-        mkdir -p "$label"
-        cp "$label.xmi" "$label/input.xmi"
-        sha256sum "$label.xmi" >> inputs.sha256
-        printf '%s START %s\n' "$(date -Is)" "$label" >> progress.txt
-        status=0
-        (
-            cd "$label"
-            # The safety bound is wall time, not a 30-step truncation. A timed-out
-            # calculation remains an incomplete result, never a speedup claim.
-            srun --cpu-bind=cores /usr/bin/time -v -o resource.time \
-                timeout --signal=TERM --kill-after=60s 2h "$exe" input.xmi \
-                --gradient-tolerance 1e-3 --energy-tolerance 1e-7 \
-                > output.out 2> run.err
-        ) || status=$?
-        printf '%s,%s,%s\n' "$state" "$iscf" "$status" >> exit_codes.csv
-        printf '%s END %s %s\n' "$(date -Is)" "$label" "$status" >> progress.txt
-    done
-done
+sha256sum "$source_dir/build/src/xmvb-cpp.exe" > binary.sha256
 date -Is > finished.txt

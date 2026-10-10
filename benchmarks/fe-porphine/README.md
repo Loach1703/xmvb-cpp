@@ -15,7 +15,7 @@ benchmark design, not evidence that NEO is faster.
 | Structure solver | Davidson |
 | Initial orbitals | Same saved quintet-ROHF-derived DMET-style frame in all nine runs |
 | Convergence | Projected gradient infinity norm 1e-3; energy change 1e-7 Eh |
-| Resources | Hanhai25 Slurm; one 32-core allocation, methods run sequentially |
+| Resources | Hanhai25 Slurm; independent 32-core jobs, parallel array (up to 45) |
 | Safety limits | 1000 iterations; 2 hours per method; incomplete runs explicitly marked |
 
 Geometry and the ten-impurity-plus-one-bath initial-space construction are
@@ -41,7 +41,11 @@ substitute an assumed Fe–Cl bond length and call it the literature benchmark.
 
 Transfer a clean source snapshot and these files to Hanhai25. From the run
 directory, submit `sbatch run.sbatch /absolute/path/to/source-snapshot`.
-Compilation and orbital preparation run inside the allocation. Source revision
+This job only compiles and prepares the shared initial orbitals. Submit
+`sbatch --dependency=afterok:PREP_JOB_ID run-one.sbatch /absolute/path/to/job-PREP_JOB_ID /absolute/path/to/source-snapshot`
+to run all nine calculations in parallel; verify current account limits before
+submission. Never serialize independent optimizer comparisons by default.
+Compilation and orbital preparation run inside their allocation. Source revision
 and benchmark script hashes are saved at submission; binary/input hashes,
 CPU, affinity, raw output, exit status, GNU-time wall/RSS and Slurm job ID are
 retained. A zero exit code alone is not a convergence certificate.
