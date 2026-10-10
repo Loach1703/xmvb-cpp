@@ -303,29 +303,31 @@ Eigen::VectorXd OrbitalPhysicalMetric::apply(
           (inactive_inverse_times_inactive_transpose_ * weighted).transpose();
     }
   } else {
+    // All active rays share the same inactive projector and AO overlap.
+    // Contract their columns together rather than streaming those matrices
+    // once per ray. Only orbital-sized temporaries are needed; no worker
+    // receives a private AO matrix or inverse metric.
+    Eigen::MatrixXd delta_rays = complement_ * delta_active;
+    if (n_inactive_ > 0) {
+      delta_rays.noalias() -=
+          horizontal_inactive * inactive_inverse_active_overlap_;
+      delta_rays.noalias() -= inactive_times_inverse_ *
+          (horizontal_inactive.transpose() * overlap_active_);
+    }
+    Eigen::MatrixXd weighted_rays = overlap_ * delta_rays;
     for (int active = 0; active < n_active_; ++active) {
-      Eigen::VectorXd delta_ray = complement_ * delta_active.col(active);
-      if (n_inactive_ > 0) {
-        delta_ray.noalias() -= horizontal_inactive *
-            inactive_inverse_active_overlap_.col(active);
-        delta_ray.noalias() -= inactive_times_inverse_ *
-            (horizontal_inactive.transpose() * overlap_active_.col(active));
-      }
       const double norm_squared = projected_norm_squared_[active];
       const auto overlap_ray = overlap_projected_active_.col(active);
-      const Eigen::VectorXd weighted_ray_cotangent =
-          (overlap_ * delta_ray - overlap_ray *
-           (overlap_ray.dot(delta_ray) / norm_squared)) / norm_squared;
-      active_cotangent.col(active).noalias() +=
-          complement_.transpose() * weighted_ray_cotangent;
-      if (n_inactive_ > 0) {
-        inactive_cotangent.noalias() -= weighted_ray_cotangent *
-            inactive_inverse_active_overlap_.col(active).transpose();
-        inactive_cotangent.noalias() -=
-            overlap_active_.col(active) *
-            (inactive_inverse_times_inactive_transpose_ *
-             weighted_ray_cotangent).transpose();
-      }
+      weighted_rays.col(active).noalias() -= overlap_ray *
+          (overlap_ray.dot(delta_rays.col(active)) / norm_squared);
+      weighted_rays.col(active) /= norm_squared;
+    }
+    active_cotangent.noalias() = complement_.transpose() * weighted_rays;
+    if (n_inactive_ > 0) {
+      inactive_cotangent.noalias() -=
+          weighted_rays * inactive_inverse_active_overlap_.transpose();
+      inactive_cotangent.noalias() -= overlap_active_ *
+          (inactive_inverse_times_inactive_transpose_ * weighted_rays).transpose();
     }
   }
   if (n_inactive_ > 0) {

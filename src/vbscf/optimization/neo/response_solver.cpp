@@ -1,4 +1,5 @@
 #include "vbscf/optimization/neo/response_solver.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -260,6 +261,7 @@ Eigen::VectorXd ResponseNeoProblem::apply_orbital_checked(
 
 Eigen::VectorXd ResponseNeoProblem::apply_orbital_metric(
     const Eigen::VectorXd& direction) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::NeoMetric);
   return apply_orbital_checked(
       apply_orbital_metric_, direction,
       "response NEO orbital metric returned an invalid vector");
@@ -267,6 +269,7 @@ Eigen::VectorXd ResponseNeoProblem::apply_orbital_metric(
 
 double ResponseNeoProblem::orbital_dual_norm(
     const Eigen::VectorXd& covector) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::NeoMetric);
   if (covector.size() != orbital_size() || !covector.allFinite()) {
     throw std::invalid_argument(
         "invalid orbital covector passed to response NEO dual norm");
@@ -283,6 +286,7 @@ Eigen::VectorXd ResponseNeoProblem::apply_orbital_preconditioner(
     const Eigen::VectorXd& covector,
     double shift,
     double relative_residual_target) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::NeoPreconditioner);
   if (!apply_orbital_preconditioner_) {
     throw std::logic_error("response NEO has no orbital preconditioner");
   }
@@ -329,6 +333,7 @@ bool ResponseNeoWorkspace::append_orbital(
     Eigen::VectorXd direction,
     int* actions,
     int* orbital_actions) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::NeoBasis);
   if (!orthonormalize(&direction, orbital_basis_)) return false;
   const Eigen::VectorXd metric = problem_.apply_orbital_metric(direction);
   const ResponseNeoDirection image =
@@ -452,6 +457,7 @@ bool ResponseNeoWorkspace::append_structure_block(
 }
 
 ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::NeoSolve);
   if (!(options.trust_radius > 0.0) ||
       !std::isfinite(options.trust_radius) ||
       !(options.relative_residual_tolerance > 0.0) ||
@@ -514,6 +520,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
         &result.orbital_actions);
   }
   while (true) {
+    diagnostics::ScopedPhase projected_phase(diagnostics::Phase::NeoProjectedSolve);
     ++result.iterations;
     const Eigen::MatrixXd& qo = orbital_basis_;
     const Eigen::MatrixXd& mo = orbital_metric_images_;
@@ -766,6 +773,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
     }
 
     // Refine only the structure response required by the current candidate.
+    projected_phase.stop();
     // Closing C Z = -B Q for every retained orbital basis column performs
     // response solves that do not enter p = Q y.  The complete coupled KKT
     // residual below certifies the direction-local response without that

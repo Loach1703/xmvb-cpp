@@ -1,4 +1,5 @@
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 #include "vbscf/derivatives/hessian/exact/apply_internal.hpp"
 
@@ -168,6 +169,7 @@ StructureResponseBlock ExactHvpOperator::solve_structure_response_block(
 StructureResponseBlock ExactHvpOperator::State::solve_structure_response_block(
     const std::vector<Eigen::MatrixXd>& scaled_structure_forcing,
     double relative_residual_tolerance) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::StructureSolve);
   if (scaled_structure_forcing.empty() ||
       !(relative_residual_tolerance > 0.0) ||
       relative_residual_tolerance >= 1.0 ||
@@ -292,6 +294,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
     const PrecomputedDirection* precomputed_direction,
     OrbitalCouplingAction* coupling_output) const {
+  diagnostics::ScopedPhase apply_phase(diagnostics::Phase::HvpApply);
   const auto apply_start_time = std::chrono::steady_clock::now();
   auto record_apply_wall_time = [&]() {
     ++apply_timing_totals_.apply_count;
@@ -323,6 +326,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
   }
 
   const auto core_setup_start_time = std::chrono::steady_clock::now();
+  diagnostics::ScopedPhase setup_phase(diagnostics::Phase::HvpSetup);
   const Eigen::VectorXd local_packed_direction =
       precomputed_direction == nullptr
           ? nonredundant_space_->expand_step(reduced_direction)
@@ -372,6 +376,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       orbital_preparation_directional_result.delta_active_auxiliary_orbitals;
   apply_timing_totals_.core_setup_wall_time_seconds +=
       detail::exact_hvp_elapsed_seconds(core_setup_start_time);
+  setup_phase.stop();
   // `F11` and `delta F11` are explicitly symmetrized in the AO-H1E builder, so
   // the directional active-space matrix gradient only needs the two distinct
   // left contractions `delta F11 * T_active` and `F11 * delta T_active`.
@@ -403,6 +408,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
   } else {
     const auto ao_effective_one_electron_fused_start_time =
         std::chrono::steady_clock::now();
+    diagnostics::ScopedPhase phase(diagnostics::Phase::AoResponse);
     if (accepted_ri_factorization_ != nullptr) {
       ao_h1e_symmetrized_gradient_workspace_ =
           total_ao_effective_one_electron_direction +
@@ -510,6 +516,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
 
     const auto active_space_integrals_start_time =
         std::chrono::steady_clock::now();
+    diagnostics::ScopedPhase active_direction_phase(diagnostics::Phase::ActiveDirection);
     const ActiveSpaceIntegralDirectionView active_space_integral_direction =
         precomputed_outer_response != nullptr
         ? ActiveSpaceIntegralDirectionView{
@@ -538,6 +545,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
 
     const auto structure_matrices_start_time =
         std::chrono::steady_clock::now();
+    active_direction_phase.stop();
+    diagnostics::ScopedPhase selected_direction_phase(diagnostics::Phase::SelectedDirection);
     const StructureAction* accepted_structure_action =
         outer_response_context()
             .selected_state_eigen_response_operator.structure_action;
@@ -739,6 +748,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     }
 
     const auto active_gradient_start_time = std::chrono::steady_clock::now();
+    selected_direction_phase.stop();
+    diagnostics::ScopedPhase backward_phase(diagnostics::Phase::ActiveBackward);
     ActiveSpaceGradientDirection directional_active_space_gradient;
     if (direct_active_gradient) {
       if (!accepted_point_context_->structure_adjoint_state.has_value()) {
@@ -840,6 +851,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
 
     const auto orbital_pullback_start_time =
         std::chrono::steady_clock::now();
+    backward_phase.stop();
+    diagnostics::ScopedPhase pullback_phase(diagnostics::Phase::OrbitalPullback);
     const std::vector<double> outer_response_orbital_value_gradient =
         build_orbital_value_gradient_from_active_space_gradient_direction(
             *current_input_,
@@ -884,6 +897,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
         delta_active_times_hho_symmetric;
     const auto active_two_electron_start_time =
         std::chrono::steady_clock::now();
+    diagnostics::ScopedPhase phase(diagnostics::Phase::TwoElectronResponse);
     if (accepted_ri_two_electron_cache_.has_value()) {
       accepted_exact_two_electron_apply_workspace_
           .dense_active_gradient_direction =
@@ -977,6 +991,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           ao_matrix_size) {
     const auto fixed_upstream_pullback_start_time =
         std::chrono::steady_clock::now();
+    diagnostics::ScopedPhase phase(diagnostics::Phase::FixedPullback);
     const std::vector<double> fixed_upstream_orbital_value_gradient =
         apply_fixed_upstream_orbital_pullback_direction(
             current_input_->orbital_preparation_input,
@@ -1020,6 +1035,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
 Eigen::VectorXd ExactHvpOperator::State::apply_structure_response_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficient_response,
     const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::StructureAdjoint);
   const int n_structures = accepted_point_context_->n_structures;
   const int n_states = static_cast<int>(
       accepted_point_context_->selected_state_indices.size());

@@ -18,7 +18,7 @@ def read(path):
 writer = csv.writer(sys.stdout)
 writer.writerow(["case", "variant", "node", "converged", "steps", "energy_Eh",
                  "wall_s", "peak_RSS_MiB", "stage", "calls", "stage_wall_s",
-                 "projector_peak_payload_bytes"])
+                 "projector_peak_payload_bytes", "stage_cpu_s", "stage_cpu_per_wall"])
 for case in sorted(Path(sys.argv[1]).iterdir()):
     if not case.is_dir():
         continue
@@ -38,5 +38,9 @@ for case in sorted(Path(sys.argv[1]).iterdir()):
                   f"{seconds:.2f}" if wall else "",
                   f"{int(rss) / 1024:.1f}" if rss else ""]
         payload = field(r"XMVB_WORKSPACE,projector_peak_payload_bytes,(\d+)", diagnostics)
+        cpu = dict(re.findall(r"XMVB_CPU,(\w+),([\d.]+)", diagnostics))
         for stage, calls, duration in re.findall(r"XMVB_PHASE,(\w+),(\d+),([\d.]+)", diagnostics):
-            writer.writerow([*common, stage, calls, duration, payload])
+            stage_cpu = cpu.get(stage, "")
+            ratio = float(stage_cpu) / float(duration) if stage_cpu and float(duration) > 0 else None
+            writer.writerow([*common, stage, calls, duration, payload, stage_cpu,
+                             f"{ratio:.3f}" if ratio is not None else ""])
