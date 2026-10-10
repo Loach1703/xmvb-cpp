@@ -1,6 +1,8 @@
 #include <cmath>
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 #include <Eigen/Cholesky>
 
@@ -9,6 +11,82 @@
 namespace {
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
+}
+
+// Independent reference: factor the explicitly retained columns for each target.
+xmvb::vb::ProjectedOrbitalSurrogate reference_model(
+    const Eigen::MatrixXd& f, const Eigen::MatrixXd& s,
+    const Eigen::MatrixXd& fixed, const std::vector<int>& support) {
+  Eigen::MatrixXd p = Eigen::MatrixXd::Zero(f.rows(), support.size());
+  for (std::size_t j = 0; j < support.size(); ++j) p(support[j], j) = 1.0;
+  if (fixed.cols() > 0) {
+    const Eigen::MatrixXd sc = s * fixed;
+    const Eigen::MatrixXd gram = fixed.transpose() * sc;
+    const Eigen::MatrixXd weights = gram.ldlt().solve(sc.transpose() * p);
+    p.noalias() -= fixed * weights;
+  }
+  xmvb::vb::ProjectedOrbitalSurrogate result;
+  result.one_electron = p.transpose() * f * p;
+  result.overlap = p.transpose() * s * p;
+  return result;
+}
+
+Eigen::MatrixXd exclude_column(const Eigen::MatrixXd& fixed, int excluded) {
+  if (excluded < 0) return fixed;
+  Eigen::MatrixXd retained(fixed.rows(), fixed.cols() - 1);
+  retained.leftCols(excluded) = fixed.leftCols(excluded);
+  retained.rightCols(fixed.cols() - excluded - 1) =
+      fixed.rightCols(fixed.cols() - excluded - 1);
+  return retained;
+}
+
+void check_shared_projector(const Eigen::MatrixXd& f, const Eigen::MatrixXd& s,
+                            const Eigen::MatrixXd& fixed) {
+  xmvb::vb::InactiveOrbitalProjector projector(f, s, fixed);
+  // Include reordered full support: it must not be mistaken for the identity.
+  for (const auto& support : std::vector<std::vector<int>>{
+           {0, 1, 2, 3, 4, 5}, {5, 4, 3, 2, 1, 0}, {0, 2, 4, 5}}) {
+    for (int excluded = -1; excluded < fixed.cols(); ++excluded) {
+      const auto actual = projector.model(support, excluded);
+      const auto expected = reference_model(f, s, exclude_column(fixed, excluded), support);
+      require((actual.one_electron - expected.one_electron).norm() < 1e-11 &&
+              (actual.overlap - expected.overlap).norm() < 1e-11,
+              "shared full/sparse projector differs from independent leave-one-out factorization");
+    }
+  }
+}
+
+void benchmark_projector() {
+  constexpr int n_bf = 469, n_inactive = 89, n_active = 11;
+  const Eigen::MatrixXd a = 0.02 * Eigen::MatrixXd::Random(n_bf, n_bf);
+  const Eigen::MatrixXd s = Eigen::MatrixXd::Identity(n_bf, n_bf) + a.transpose() * a;
+  const Eigen::MatrixXd f = (0.5 * (a + a.transpose())).eval();
+  const Eigen::MatrixXd fixed = Eigen::MatrixXd::Identity(n_bf, n_inactive) +
+                               0.01 * Eigen::MatrixXd::Random(n_bf, n_inactive);
+  std::vector<int> support(n_bf);
+  for (int j = 0; j < n_bf; ++j) support[j] = j;
+  const auto start = std::chrono::steady_clock::now();
+  double reference_checksum = 0.0;
+  for (int j = 0; j < n_inactive + n_active; ++j) {
+    const auto model = reference_model(f, s, exclude_column(fixed, j < n_inactive ? j : -1), support);
+    reference_checksum += model.one_electron.squaredNorm() + model.overlap.squaredNorm();
+  }
+  const auto middle = std::chrono::steady_clock::now();
+  xmvb::vb::InactiveOrbitalProjector projector(f, s, fixed);
+  double shared_checksum = 0.0;
+  for (int j = 0; j < n_inactive + n_active; ++j) {
+    const auto model = projector.model(support, j < n_inactive ? j : -1);
+    shared_checksum += model.one_electron.squaredNorm() + model.overlap.squaredNorm();
+  }
+  const auto end = std::chrono::steady_clock::now();
+  require(std::abs(reference_checksum - shared_checksum) < 1e-10 * std::abs(reference_checksum),
+          "projector benchmark checksum mismatch");
+  std::cout << "projector n_bf=" << n_bf << " n_inactive=" << n_inactive
+            << " n_active=" << n_active
+            << " independent_seconds=" << std::chrono::duration<double>(middle - start).count()
+            << " shared_seconds=" << std::chrono::duration<double>(end - middle).count()
+            << " checksum_relative_error=" << std::abs(reference_checksum - shared_checksum) /
+                                                std::abs(reference_checksum) << '\n';
 }
 
 double occupied_energy(const Eigen::MatrixXd& f, const Eigen::MatrixXd& s,
@@ -90,8 +168,12 @@ void check_closed_shell_differential(const Eigen::MatrixXd& core,
 }
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--benchmark") {
+      benchmark_projector();
+      return 0;
+    }
     constexpr int n = 6;
     Eigen::MatrixXd f(n, n), a(n, n);
     for (int j = 0; j < n; ++j) for (int i = 0; i < n; ++i) {
@@ -104,6 +186,9 @@ int main() {
     Eigen::VectorXd c(n);
     c << 0.3, -0.1, 0.7, 0.2, 0.9, -0.3;
     const std::vector<int> full_support{0, 1, 2, 3, 4, 5};
+    check_shared_projector(f, s, fixed);
+    check_shared_projector(f, s, fixed.leftCols(1));
+    check_shared_projector(f, s, Eigen::MatrixXd::Zero(n, 0));
     const auto model = xmvb::vb::projected_orbital_surrogate(f, s, fixed, full_support);
     check(f, s, fixed, full_support, c, Eigen::MatrixXd::Identity(n, n));
     require((model.one_electron * fixed).norm() < 1e-12 &&

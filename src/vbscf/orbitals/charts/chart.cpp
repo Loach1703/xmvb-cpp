@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -507,6 +508,9 @@ OrbitalChart::OrbitalChart(
   }
   const Eigen::MatrixXd stable_inactive_span_basis =
       build_stable_inactive_span_basis(global_inactive_orbitals, ao_overlap);
+  std::optional<InactiveOrbitalProjector> inactive_projector;
+  if (ao_effective_h1e != nullptr && hessian_diagonal == nullptr)
+    inactive_projector.emplace(*ao_effective_h1e, ao_overlap, global_inactive_orbitals);
   const bool use_active_subspace_gauge =
       complete_active_space && input.orbital_type == kOrbitalTypeOeo;
   active_subspace_gauge_ = use_active_subspace_gauge;
@@ -826,18 +830,11 @@ OrbitalChart::OrbitalChart(
       } else if (ao_effective_h1e != nullptr && proj.local_reduced_size > 0) {
         const auto& stored_rows = m.block_row_for_slot;
         const bool inactive_target = m.orbital_index < n_inactive;
-        Eigen::MatrixXd fixed_inactive(input.n_basis_functions,
-            n_inactive - (inactive_target ? 1 : 0));
-        int fixed_column = 0;
-        for (int j = 0; j < n_inactive; ++j) {
-          if (j != m.orbital_index)
-            fixed_inactive.col(fixed_column++) = global_inactive_orbitals.col(j);
-        }
         std::vector<int> stored_support(stored_rows.size());
         for (std::size_t j = 0; j < stored_rows.size(); ++j)
           stored_support[j] = bf_indices[stored_rows[j]];
-        const auto surrogate = projected_orbital_surrogate(
-            *ao_effective_h1e, ao_overlap, fixed_inactive, stored_support);
+        const auto surrogate = inactive_projector->model(
+            stored_support, inactive_target ? m.orbital_index : -1);
         Eigen::VectorXd stored_x(stored_rows.size());
         for (Eigen::Index j = 0; j < stored_x.size(); ++j)
           stored_x[j] = input.orbital_value_table[
