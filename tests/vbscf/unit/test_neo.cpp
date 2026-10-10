@@ -574,7 +574,12 @@ void check_nonsymmetric_hessian_rejected() {
   bool rejected = false;
   try {
     (void)solve_neo(dense_problem(hessian, metric, gradient), options);
-  } catch (const std::runtime_error&) {
+  } catch (const std::runtime_error& error) {
+    const std::string message = error.what();
+    require(message.find("skew_norm=") != std::string::npos &&
+            message.find("threshold=") != std::string::npos &&
+            message.find("repeated_bilinear_skew=") != std::string::npos,
+            "nonsymmetric Hessian failure lacks reproducibility diagnostics");
     rejected = true;
   }
   require(rejected, "materially nonsymmetric Hessian action was accepted");

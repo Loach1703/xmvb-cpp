@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -199,7 +200,32 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
         projected_action - projected_action.transpose();
     const double hessian_scale = std::max(1.0, projected_action.norm());
     if (projected_skew.norm() > symmetry_factor * hessian_scale) {
-      throw std::runtime_error("NEO Hessian action is not symmetric");
+      // Re-evaluate the worst pair only on failure. This distinguishes a
+      // reproducible bilinear defect from a mutable/nonrepeatable action,
+      // without weakening the symmetry certificate or changing valid steps.
+      Eigen::Index i, j;
+      projected_skew.cwiseAbs().maxCoeff(&i, &j);
+      const Eigen::VectorXd hi = problem.apply_hessian(q.col(i));
+      const Eigen::VectorXd hj = problem.apply_hessian(q.col(j));
+      std::ostringstream message;
+      message.precision(17);
+      message << "NEO Hessian action is not symmetric"
+              << "; dimension=" << dimension
+              << "; subspace=" << q.cols()
+              << "; skew_norm=" << projected_skew.norm()
+              << "; threshold=" << symmetry_factor * hessian_scale
+              << "; action_scale=" << hessian_scale
+              << "; worst_pair=" << i << ',' << j
+              << "; bilinear_skew=" << projected_skew(i, j)
+              << "; repeated_bilinear_skew="
+              << q.col(i).dot(hj) - q.col(j).dot(hi)
+              << "; repeat_error_i=" << (hi - hq.col(i)).norm()
+              << "; repeat_error_j=" << (hj - hq.col(j)).norm()
+              << "; image_norm_i=" << hi.norm()
+              << "; image_norm_j=" << hj.norm()
+              << "; basis_orthogonality_error="
+              << (q.transpose() * q - Eigen::MatrixXd::Identity(q.cols(), q.cols())).norm();
+      throw std::runtime_error(message.str());
     }
     const Eigen::MatrixXd projected_hessian = whitening.transpose() *
         (0.5 * (projected_action + projected_action.transpose())) * whitening;
