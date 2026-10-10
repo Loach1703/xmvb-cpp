@@ -6,8 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --exclusive
-#SBATCH --mem=96G
+#SBATCH --mem=16G
 #SBATCH --time=15-00:00:00
 #SBATCH --output=thread-scaling-%j.out
 #SBATCH --error=thread-scaling-%j.err
@@ -29,6 +28,7 @@ root="$SLURM_SUBMIT_DIR/thread-scaling-$SLURM_JOB_ID"
 mkdir -p "$root"
 hostname > "$root/node.txt"
 lscpu > "$root/cpu.txt"
+cat /proc/loadavg > "$root/load-start.txt"
 module list > "$root/modules.txt" 2>&1
 env | sort > "$root/environment.txt"
 cp "$SLURM_SUBMIT_DIR/thread-scaling.sbatch" "$root/"
@@ -39,6 +39,7 @@ for threads in 1 8 32; do
     cp "$source_dir/testdata/vbscf/241_vb.xmi" input.xmi
     sha256sum "$exe" input.xmi > hashes.txt
     export OMP_NUM_THREADS="$threads"
+    cat /proc/loadavg > load.txt
     srun --exact --ntasks=1 --cpus-per-task="$threads" --cpu-bind=cores \
         env XMVB_PHASE_TIMING=1 /usr/bin/time -v -o resource.time \
         "$exe" input.xmi --optimizer-backend neo \
