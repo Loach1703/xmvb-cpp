@@ -33,26 +33,28 @@ constexpr Eigen::Index kMaximumOrbitalCouplingBatchColumns = 8;
 
 Eigen::Index bounded_orbital_coupling_width(
     Eigen::Index requested,
-    int n_basis_functions,
-    int n_active_orbitals,
+    const OrbitalPreparationInput& input,
     int n_structures,
     int n_states) {
-  const std::size_t n_bf = static_cast<std::size_t>(n_basis_functions);
-  const std::size_t n_active = static_cast<std::size_t>(n_active_orbitals);
+  const std::size_t n_bf = input.n_basis_functions;
+  const std::size_t n_active = input.n_active_orbitals;
   const std::size_t ao_matrix = n_bf * n_bf;
   const std::size_t ao_pairs = n_bf * (n_bf + 1ULL) / 2ULL;
   const std::size_t active_pairs =
       n_active * (n_active + 1ULL) / 2ULL;
   const std::size_t packed_active_two_electron =
       active_pairs * (active_pairs + 1ULL) / 2ULL;
-  // Four AO matrices cover the two batch inputs and two batch outputs. The
-  // remaining terms bound the exact-2e directional pair products and their
-  // fixed-adjoint image, dense active direction, packed active 2e direction,
-  // and selected-state forcing retained for one column. RI allocates less,
-  // so this bound remains conservative for both integral representations.
+  const std::size_t workers = effective_openmp_thread_count();
+  // Per column: two inputs, two outputs, two shared interleaved channels,
+  // one retained density direction, and two AO reductions per worker.
+  // Include copied tangent contexts, active directions, exact pair images,
+  // and selected-state forcing. RI uses less. This limits the column-dependent
+  // workspace, not total process RSS or resident accepted-point caches.
+  // A single column is the irreducible working-set floor when it exceeds 256 MiB.
   const std::size_t elements_per_column =
-      4ULL * ao_matrix + 2ULL * ao_pairs * active_pairs +
-      n_bf * n_active +
+      (7ULL + 2ULL * workers) * ao_matrix +
+      3ULL * n_bf * input.n_orbitals + 3ULL * n_bf * n_active +
+      2ULL * ao_pairs * active_pairs + 2ULL * workers +
       packed_active_two_electron +
       static_cast<std::size_t>(n_structures) *
           static_cast<std::size_t>(n_states);
@@ -85,7 +87,21 @@ OrbitalCouplingBlockAction ExactHvpOperator::apply_orbital_coupling_batch(
 Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch(
     const Eigen::Ref<const Eigen::MatrixXd>& reduced_directions,
     HvpComponents components) const {
-  return apply_reduced_batch_impl(reduced_directions, components, nullptr);
+  if (reduced_directions.rows() != nonredundant_space_->reduced_size() ||
+      !reduced_directions.allFinite()) {
+    throw std::invalid_argument("HVP block has incompatible dimensions or values");
+  }
+  const Eigen::Index chunk_width = bounded_orbital_coupling_width(
+      reduced_directions.cols(), current_input_->orbital_preparation_input,
+      accepted_point_context_->n_structures,
+      static_cast<int>(accepted_point_context_->selected_state_indices.size()));
+  Eigen::MatrixXd result(reduced_directions.rows(), reduced_directions.cols());
+  for (Eigen::Index first = 0; first < reduced_directions.cols(); first += chunk_width) {
+    const Eigen::Index width = std::min(chunk_width, reduced_directions.cols() - first);
+    result.middleCols(first, width) = apply_reduced_batch_impl(
+        reduced_directions.middleCols(first, width), components, nullptr);
+  }
+  return result;
 }
 
 OrbitalCouplingBlockAction
@@ -101,8 +117,7 @@ ExactHvpOperator::State::apply_orbital_coupling_batch(
       accepted_point_context_->selected_state_indices.size());
   const Eigen::Index chunk_width = bounded_orbital_coupling_width(
       reduced_directions.cols(),
-      current_input_->orbital_preparation_input.n_basis_functions,
-      current_input_->orbital_preparation_input.n_active_orbitals,
+      current_input_->orbital_preparation_input,
       accepted_point_context_->n_structures,
       static_cast<int>(n_states));
 
@@ -239,20 +254,14 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
               encoded_adjoint.data(), ao_matrix_size);
     }
   } else {
-    apply_ao_h1e_fused_batch(
+    apply_symmetric_ao_h1e_fused_batch(
         inactive_density_columns,
         symmetrized_pullback_columns,
         current_input_->ao_integral_input,
         effective_openmp_thread_count(),
+        &ao_h1e_batch_workspace_,
         &delta_h1e_columns,
         &inactive_density_gradient_columns);
-    for (Eigen::Index column = 0; column < n_directions; ++column) {
-      Eigen::Map<Eigen::MatrixXd> delta_h1e(
-          delta_h1e_columns.col(column).data(),
-          n_basis_functions,
-          n_basis_functions);
-      detail::symmetrize_exact_ao_h1e_forward(delta_h1e);
-    }
   }
   const double batch_h1e_seconds =
       detail::exact_hvp_elapsed_seconds(batch_h1e_start_time);

@@ -9,20 +9,6 @@
 
 namespace xmvb::vb::detail {
 
-void symmetrize_exact_ao_h1e_forward(
-    Eigen::Ref<Eigen::MatrixXd> delta_h1e) {
-  if (delta_h1e.rows() != delta_h1e.cols()) {
-    throw std::invalid_argument(
-        "AO-H1E forward response must be a square matrix");
-  }
-  for (Eigen::Index row = 0; row < delta_h1e.rows(); ++row) {
-    for (Eigen::Index column = 0; column <= row; ++column) {
-      delta_h1e(row, column) += delta_h1e(column, row);
-      delta_h1e(column, row) = delta_h1e(row, column);
-    }
-  }
-}
-
 void apply_fused_exact_ao_one_electron_response(
     const Eigen::MatrixXd& density,
     const Eigen::MatrixXd& gradient,

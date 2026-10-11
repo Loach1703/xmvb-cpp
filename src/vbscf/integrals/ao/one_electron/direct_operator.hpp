@@ -15,6 +15,14 @@ struct AoH1eSymmetricWorkspace {
   std::vector<Channels> partial;
 };
 
+/** @brief Reused interleaved batch inputs and AO-sized worker reductions. */
+struct AoH1eBatchWorkspace {
+  using Channels = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+  Channels sources;
+  std::vector<Channels> partial;
+  std::vector<Eigen::VectorXd> coulomb;
+};
+
 /**
  * @brief Applies two symmetric AO sources with a common two-lane stencil.
  *
@@ -40,12 +48,19 @@ std::vector<double> apply_ao_h1e_transpose(
     const AoIntegralInput& ao,
     int n_threads);
 
-/** @brief Applies the fused operator to several independent directions. */
-void apply_ao_h1e_fused_batch(
+/**
+ * @brief Applies symmetric sources to several directions in one ERI sweep.
+ *
+ * Columns are flattened symmetric AO matrices. Output conventions match
+ * apply_symmetric_ao_h1e_fused: complete forward and half physical adjoint.
+ * The integral stream and packed source channels are shared by all workers.
+ */
+void apply_symmetric_ao_h1e_fused_batch(
     const Eigen::Ref<const Eigen::MatrixXd>& sources,
     const Eigen::Ref<const Eigen::MatrixXd>& adjoints,
     const AoIntegralInput& ao,
     int n_threads,
+    AoH1eBatchWorkspace* workspace,
     Eigen::MatrixXd* forward,
     Eigen::MatrixXd* transpose);
 

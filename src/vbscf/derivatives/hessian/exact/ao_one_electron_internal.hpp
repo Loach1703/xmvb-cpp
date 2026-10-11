@@ -11,10 +11,6 @@ struct AoH1eSymmetricWorkspace;
 
 namespace detail {
 
-/** Restores the symmetric AO matrix represented by the direct kernel output. */
-void symmetrize_exact_ao_h1e_forward(
-    Eigen::Ref<Eigen::MatrixXd> delta_h1e);
-
 /**
  * Applies the AO effective-one-electron forward derivative and its transpose
  * pullback in one pass over the accepted AO integral representation.
