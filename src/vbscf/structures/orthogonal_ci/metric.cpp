@@ -26,28 +26,13 @@ std::uint64_t occupation_mask(const std::vector<int>& string) {
 
 }  // namespace
 
-StructureMetricInverse::StructureMetricInverse(
+std::vector<std::vector<int>> StructureMetricInverse::occupation_groups(
     const StructureAction& action,
     const std::vector<std::vector<int>>& alpha_strings,
-    const std::vector<std::vector<int>>& beta_strings,
-    bool complete_space,
-    std::size_t factor_byte_limit,
-    std::size_t workspace_byte_limit)
-    : action_(&action) {
-  if (!complete_space || !action.storage().orthogonal_direct_ci)
-    throw std::invalid_argument("factorized metric inverse requires a complete spin sector");
+    const std::vector<std::vector<int>>& beta_strings) {
   if (alpha_strings.size() != static_cast<std::size_t>(action.n_unique_alpha_) ||
       beta_strings.size() != static_cast<std::size_t>(action.n_unique_beta_))
     throw std::invalid_argument("structure metric spin dimensions disagree");
-  const std::size_t n = action.n_structures_;
-  const std::size_t n_products = alpha_strings.size() * beta_strings.size();
-  const std::size_t column_bytes = (n_products + 4 * n) * sizeof(double);
-  if (column_bytes == 0 || workspace_byte_limit < column_bytes)
-    throw std::length_error("structure metric workspace cannot hold one carrier column");
-  chunk_width_ = static_cast<int>(std::min<std::size_t>(
-      workspace_byte_limit / column_bytes,
-      std::numeric_limits<int>::max() / action.n_unique_beta_));
-
   using Pattern = std::pair<std::uint64_t, std::uint64_t>;
   std::vector<std::uint64_t> alpha_masks, beta_masks;
   for (const auto& string : alpha_strings) alpha_masks.push_back(occupation_mask(string));
@@ -69,9 +54,54 @@ StructureMetricInverse::StructureMetricInverse(
     }
     groups[occupation].push_back(structure);
   }
+  std::vector<std::vector<int>> result;
+  result.reserve(groups.size());
+  for (auto& group : groups) result.push_back(std::move(group.second));
+  return result;
+}
+
+bool StructureMetricInverse::fits(
+    const StructureAction& action,
+    const std::vector<std::vector<int>>& alpha_strings,
+    const std::vector<std::vector<int>>& beta_strings,
+    std::size_t factor_byte_limit,
+    std::size_t workspace_byte_limit) {
+  if (!action.storage().orthogonal_direct_ci) return false;
+  const std::size_t column_bytes =
+      (alpha_strings.size() * beta_strings.size() +
+       4 * static_cast<std::size_t>(action.n_structures_)) * sizeof(double);
+  if (column_bytes == 0 || column_bytes > workspace_byte_limit) return false;
+  std::size_t bytes = 0;
+  for (const auto& group : occupation_groups(action, alpha_strings, beta_strings)) {
+    const std::size_t d = group.size();
+    if (d > (factor_byte_limit - bytes) / sizeof(double) / d) return false;
+    bytes += d * d * sizeof(double);
+  }
+  return true;
+}
+
+StructureMetricInverse::StructureMetricInverse(
+    const StructureAction& action,
+    const std::vector<std::vector<int>>& alpha_strings,
+    const std::vector<std::vector<int>>& beta_strings,
+    bool complete_space,
+    std::size_t factor_byte_limit,
+    std::size_t workspace_byte_limit)
+    : action_(&action) {
+  if (!complete_space || !action.storage().orthogonal_direct_ci)
+    throw std::invalid_argument("factorized metric inverse requires a complete spin sector");
+  auto groups = occupation_groups(action, alpha_strings, beta_strings);
+  const std::size_t n = action.n_structures_;
+  const std::size_t column_bytes =
+      (alpha_strings.size() * beta_strings.size() + 4 * n) * sizeof(double);
+  if (column_bytes == 0 || workspace_byte_limit < column_bytes)
+    throw std::length_error("structure metric workspace cannot hold one carrier column");
+  chunk_width_ = static_cast<int>(std::min<std::size_t>(
+      workspace_byte_limit / column_bytes,
+      std::numeric_limits<int>::max() / action.n_unique_beta_));
   // Admit all factor storage before allocating any dense block.
   for (const auto& group : groups) {
-    const std::size_t d = group.second.size();
+    const std::size_t d = group.size();
     if (d > (factor_byte_limit - factor_bytes_) / sizeof(double) / d)
       throw std::length_error("spin-recoupling factors exceed their byte budget");
     factor_bytes_ += d * d * sizeof(double);
@@ -80,12 +110,12 @@ StructureMetricInverse::StructureMetricInverse(
   std::vector<int> group_id(n), local_id(n);
   for (auto& group : groups) {
     const int index = static_cast<int>(blocks_.size());
-    const int d = static_cast<int>(group.second.size());
+    const int d = static_cast<int>(group.size());
     for (int local = 0; local < d; ++local) {
-      group_id[group.second[local]] = index;
-      local_id[group.second[local]] = local;
+      group_id[group[local]] = index;
+      local_id[group[local]] = local;
     }
-    blocks_.push_back({std::move(group.second), Eigen::MatrixXd::Zero(d, d)});
+    blocks_.push_back({std::move(group), Eigen::MatrixXd::Zero(d, d)});
     max_block_size_ = std::max(max_block_size_, d);
   }
   // C_0^T C_0 from sparse spin-product rows; never form the dense C_0 or Gram.

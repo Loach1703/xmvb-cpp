@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include <Eigen/Core>
@@ -15,6 +16,20 @@ namespace xmvb::core {
 struct EigenResponseOptions {
   int max_iterations;
   double relative_residual_tolerance;
+};
+
+/** @brief Fixed symmetric inverse preconditioner on each response complement.
+ * The action must be linear, finite and positive definite on the complement
+ * of the corresponding overlap image. It replaces Jacobi on the unresolved
+ * complement, but retains resolved recycle spectral modes and the recycled
+ * Galerkin initial solution. The lower bound applies on that complement; it
+ * only schedules true residual checks and never replaces the original
+ * bordered certificate.
+ */
+struct EigenResponsePreconditioner {
+  std::function<Eigen::VectorXd(
+      const Eigen::Ref<const Eigen::VectorXd>&, Eigen::Index)> apply;
+  double minimum_eigenvalue = 0.0;
 };
 
 /** @brief Unconditional Galerkin action of one frozen recycle space. */
@@ -61,7 +76,12 @@ public:
    */
   Eigen::VectorXd apply_absolute_spectral_preconditioner(
       const Eigen::Ref<const Eigen::VectorXd>& right_hand_side,
-      const Eigen::Ref<const Eigen::VectorXd>& jacobi_inverse) const;
+      const Eigen::Ref<const Eigen::VectorXd>& jacobi_inverse,
+      const EigenResponsePreconditioner* preconditioner = nullptr,
+      Eigen::Index state = 0) const;
+
+  /** @brief SPD bound after replacing resolved recycle modes by their spectra. */
+  double preconditioner_lower_bound(double complement_lower_bound) const;
 
   /**
    * @brief Applies the frozen symmetric Galerkin inverse to any finite RHS.
@@ -206,7 +226,8 @@ EigenResponseResult solve_generalized_eigen_response(
     const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected,
     const EigenResponseOptions& options,
     const std::vector<EigenResponseRecycleSpace*>& recycle_spaces = {},
-    const Eigen::MatrixXd* selected_residuals = nullptr);
+    const Eigen::MatrixXd* selected_residuals = nullptr,
+    const EigenResponsePreconditioner* preconditioner = nullptr);
 
 /**
  * @brief Evaluates isolated-root response in fixed common Galerkin spaces.

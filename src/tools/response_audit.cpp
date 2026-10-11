@@ -218,6 +218,25 @@ void audit_structure_response(
             return xmvb::core::GeneralizedEigenActionResult{
                 std::move(image.hamiltonian), std::move(image.overlap)};
           };
+      // Use the identical production MINRES recurrence and certificate. This
+      // separates metric conditioning from the preceding PCG control.
+      const xmvb::core::EigenResponsePreconditioner metric_preconditioner{
+          [&](const Eigen::Ref<const Eigen::VectorXd>& residual, Eigen::Index) -> Eigen::VectorXd {
+            const Eigen::MatrixXd column = residual;
+            return precondition(column).col(0);
+          },
+          1.0 / m.trace()};
+      const auto metric_response = xmvb::core::solve_generalized_eigen_response(
+          reference_action, h.diagonal(), m.diagonal(),
+          Eigen::VectorXd::Constant(rhs.cols(), energy),
+          c.replicate(1, rhs.cols()), mc.replicate(1, rhs.cols()),
+          -rhs, Eigen::MatrixXd::Zero(n, rhs.cols()), {n + 1, tolerance},
+          {}, nullptr, &metric_preconditioner);
+      std::cout << "metric_minres_control_iterations = ";
+      for (int count : metric_response.iterations) std::cout << count << ',';
+      std::cout << "\nmetric_minres_control_block_actions = " << metric_response.block_actions
+                << "\nmetric_minres_control_relative_residual = "
+                << metric_response.relative_residual_norms.maxCoeff() << '\n';
       try {
         const auto jacobi_response = xmvb::core::solve_generalized_eigen_response(
             reference_action, h.diagonal(), m.diagonal(),

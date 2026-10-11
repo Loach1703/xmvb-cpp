@@ -34,11 +34,24 @@ public:
   std::size_t block_count() const noexcept { return blocks_.size(); }
   int max_block_size() const noexcept { return max_block_size_; }
 
+  /** @brief Plans factor/workspace admission without allocating dense blocks. */
+  static bool fits(
+      const StructureAction& action,
+      const std::vector<std::vector<int>>& alpha_strings,
+      const std::vector<std::vector<int>>& beta_strings,
+      std::size_t factor_byte_limit,
+      std::size_t workspace_byte_limit);
+
 private:
   struct Block {
     std::vector<int> indices;
     Eigen::MatrixXd lower;
   };
+
+  static std::vector<std::vector<int>> occupation_groups(
+      const StructureAction& action,
+      const std::vector<std::vector<int>>& alpha_strings,
+      const std::vector<std::vector<int>>& beta_strings);
 
   Eigen::MatrixXd solve_spin(const Eigen::Ref<const Eigen::MatrixXd>& rhs) const;
   const StructureAction* action_;

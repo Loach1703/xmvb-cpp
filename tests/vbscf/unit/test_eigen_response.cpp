@@ -1216,6 +1216,37 @@ int main(int argc, char** argv) {
       delta_hamiltonian_selected,
       delta_overlap_selected,
       options);
+  // A state-specific constrained overlap inverse is singular only along its
+  // removed gauge. Excited roots also check an indefinite response operator;
+  // no ground-state-only PCG assumption enters this MINRES interface.
+  const Eigen::MatrixXd inverse_overlap = overlap.partialPivLu().inverse();
+  const xmvb::core::EigenResponsePreconditioner metric_preconditioner{
+      [&](const Eigen::Ref<const Eigen::VectorXd>& rhs, Eigen::Index state) -> Eigen::VectorXd {
+        const auto c = eigenvectors.col(state);
+        return inverse_overlap * rhs - c * c.dot(rhs) / c.dot(overlap * c);
+      },
+      1.0 / overlap.trace()};
+  const auto metric_response = xmvb::core::solve_generalized_eigen_response(
+      action, hamiltonian.diagonal(), overlap.diagonal(), eigenvalues,
+      eigenvectors, overlap * eigenvectors, delta_hamiltonian_selected,
+      delta_overlap_selected, options, {}, nullptr, &metric_preconditioner);
+  if ((metric_response.eigenvector_response - response.eigenvector_response).norm() > 1.0e-5 ||
+      metric_response.relative_residual_norms.maxCoeff() > options.relative_residual_tolerance) {
+    std::cerr << "custom response metric disagrees with certified Jacobi response\n";
+    return 1;
+  }
+  auto invalid_preconditioner = metric_preconditioner;
+  invalid_preconditioner.minimum_eigenvalue = 0.0;
+  bool rejected_bound = false;
+  try {
+    xmvb::core::solve_generalized_eigen_response(
+        action, hamiltonian.diagonal(), overlap.diagonal(), eigenvalues,
+        eigenvectors, overlap * eigenvectors, delta_hamiltonian_selected,
+        delta_overlap_selected, options, {}, nullptr, &invalid_preconditioner);
+  } catch (const std::invalid_argument&) {
+    rejected_bound = true;
+  }
+  if (!rejected_bound) return 1;
   std::vector<xmvb::core::EigenResponseRecycleSpace> recycle_storage(
       roots.size());
   std::vector<xmvb::core::EigenResponseRecycleSpace*> recycle_spaces;
@@ -1229,6 +1260,28 @@ int main(int argc, char** argv) {
       action, hamiltonian.diagonal(), overlap.diagonal(), eigenvalues,
       eigenvectors, overlap * eigenvectors, delta_hamiltonian_selected,
       delta_overlap_selected, options, recycle_spaces);
+  const auto recycled_metric_response = xmvb::core::solve_generalized_eigen_response(
+      action, hamiltonian.diagonal(), overlap.diagonal(), eigenvalues,
+      eigenvectors, overlap * eigenvectors, delta_hamiltonian_selected,
+      delta_overlap_selected, options, recycle_spaces, nullptr, &metric_preconditioner);
+  if ((recycled_metric_response.eigenvector_response - response.eigenvector_response).norm() > 1.0e-5 ||
+      recycled_metric_response.relative_residual_norms.maxCoeff() > options.relative_residual_tolerance)
+    return 1;
+  // A different RHS exercises the spectral/complement action rather than an
+  // already solved Galerkin RHS. Certify the symmetric positive pairing.
+  for (Eigen::Index state = 0; state < eigenvectors.cols(); ++state) {
+    Eigen::VectorXd u = directional_test_matrix(n).col(0);
+    Eigen::VectorXd v = directional_test_matrix(n).col(1);
+    const Eigen::VectorXd normal = (overlap * eigenvectors.col(state)).normalized();
+    u.noalias() -= normal * normal.dot(u);
+    v.noalias() -= normal * normal.dot(v);
+    const auto pu = recycle_storage[state].apply_absolute_spectral_preconditioner(
+        u, Eigen::VectorXd::Ones(n), &metric_preconditioner, state);
+    const auto pv = recycle_storage[state].apply_absolute_spectral_preconditioner(
+        v, Eigen::VectorXd::Ones(n), &metric_preconditioner, state);
+    if (!(u.dot(pu) > 0.0) || std::abs(u.dot(pv) - v.dot(pu)) > 1.0e-10)
+      return 1;
+  }
   const auto spectral_response =
       xmvb::core::solve_generalized_eigen_response_from_full_spectrum(
           action,

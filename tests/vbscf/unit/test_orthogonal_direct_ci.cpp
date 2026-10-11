@@ -1363,6 +1363,10 @@ void check_sigma_action() {
       full_terms, product_dimension, topology, packed_overlap,
       one_electron, two_electron, n_orbitals, &full_diagonal);
   const std::size_t one_column_bytes = 5 * product_dimension * sizeof(double);
+  require(xmvb::vb::StructureMetricInverse::fits(
+      full_action, topology.alpha_reuse_table.unique_determinants,
+      topology.beta_reuse_table.unique_determinants, 65536, one_column_bytes),
+      "structure metric planner rejected an affordable block factorization");
   const xmvb::vb::StructureMetricInverse full_metric(
       full_action, topology.alpha_reuse_table.unique_determinants,
       topology.beta_reuse_table.unique_determinants, true, 65536, one_column_bytes);
@@ -1379,6 +1383,12 @@ void check_sigma_action() {
               full_metric.max_block_size() == 6 && full_metric.block_count() == 19,
           "spin metric lost its occupation-block representation");
   for (bool factor_limit : {true, false}) {
+    require(!xmvb::vb::StructureMetricInverse::fits(
+        full_action, topology.alpha_reuse_table.unique_determinants,
+        topology.beta_reuse_table.unique_determinants,
+        factor_limit ? 0 : 65536,
+        factor_limit ? one_column_bytes : one_column_bytes - 1),
+        "structure metric planner ignored its byte budget");
     bool rejected = false;
     try {
       const xmvb::vb::StructureMetricInverse invalid(

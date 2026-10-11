@@ -154,17 +154,28 @@ Eigen::MatrixXd build_inverse_preconditioner(
 Eigen::VectorXd apply_response_preconditioner_column(
     const Eigen::Ref<const Eigen::VectorXd>& residual,
     const Eigen::Ref<const Eigen::VectorXd>& jacobi_inverse,
-    EigenResponseRecycleSpace* recycle) {
-  return recycle != nullptr && recycle->size() > 0
-      ? recycle->apply_absolute_spectral_preconditioner(
-            residual, jacobi_inverse)
-      : (jacobi_inverse.array() * residual.array()).matrix();
+    EigenResponseRecycleSpace* recycle,
+    const EigenResponsePreconditioner* preconditioner = nullptr,
+    Eigen::Index state = 0) {
+  if (recycle != nullptr && recycle->size() > 0) {
+    return recycle->apply_absolute_spectral_preconditioner(
+        residual, jacobi_inverse, preconditioner, state);
+  }
+  if (preconditioner != nullptr) {
+    Eigen::VectorXd result = preconditioner->apply(residual, state);
+    if (result.size() != residual.size() || !result.allFinite()) {
+      throw std::runtime_error("response inverse preconditioner returned invalid values");
+    }
+    return result;
+  }
+  return (jacobi_inverse.array() * residual.array()).matrix();
 }
 
 Eigen::MatrixXd apply_response_preconditioner(
     const Eigen::Ref<const Eigen::MatrixXd>& residuals,
     const Eigen::Ref<const Eigen::MatrixXd>& jacobi_inverse,
-    const std::vector<EigenResponseRecycleSpace*>& recycle_spaces) {
+    const std::vector<EigenResponseRecycleSpace*>& recycle_spaces,
+    const EigenResponsePreconditioner* preconditioner = nullptr) {
   if (residuals.rows() != jacobi_inverse.rows() ||
       residuals.cols() != jacobi_inverse.cols() ||
       (!recycle_spaces.empty() &&
@@ -178,7 +189,8 @@ Eigen::MatrixXd apply_response_preconditioner(
         ? nullptr
         : recycle_spaces[static_cast<std::size_t>(state)];
     result.col(state) = apply_response_preconditioner_column(
-        residuals.col(state), jacobi_inverse.col(state), recycle);
+        residuals.col(state), jacobi_inverse.col(state), recycle,
+        preconditioner, state);
   }
   return result;
 }
@@ -273,7 +285,9 @@ const Eigen::MatrixXd& EigenResponseRecycleSpace::projected_operator() const {
 Eigen::VectorXd
 EigenResponseRecycleSpace::apply_absolute_spectral_preconditioner(
     const Eigen::Ref<const Eigen::VectorXd>& right_hand_side,
-    const Eigen::Ref<const Eigen::VectorXd>& jacobi_inverse) const {
+    const Eigen::Ref<const Eigen::VectorXd>& jacobi_inverse,
+    const EigenResponsePreconditioner* preconditioner,
+    Eigen::Index state) const {
   if (right_hand_side.size() != dimension() ||
       jacobi_inverse.size() != dimension() ||
       !right_hand_side.allFinite() || !jacobi_inverse.allFinite() ||
@@ -281,24 +295,42 @@ EigenResponseRecycleSpace::apply_absolute_spectral_preconditioner(
     throw std::invalid_argument(
         "response spectral preconditioner inputs are invalid");
   }
-  if (size() == 0) {
-    return jacobi_inverse.array() * right_hand_side.array();
-  }
+  const auto complement_inverse = [&](const Eigen::VectorXd& rhs) -> Eigen::VectorXd {
+    Eigen::VectorXd result = preconditioner != nullptr
+        ? preconditioner->apply(rhs, state)
+        : (jacobi_inverse.array() * rhs.array()).matrix().eval();
+    if (result.size() != rhs.size() || !result.allFinite())
+      throw std::runtime_error("response inverse preconditioner returned invalid values");
+    return result;
+  };
+  if (size() == 0) return complement_inverse(right_hand_side);
   prepare_projected_inverse();
   if (spectral_preconditioner_basis_.cols() == 0) {
-    return jacobi_inverse.array() * right_hand_side.array();
+    return complement_inverse(right_hand_side);
   }
   const Eigen::VectorXd spectral_coordinates =
       spectral_preconditioner_basis_.transpose() * right_hand_side;
   Eigen::VectorXd complement = right_hand_side -
       spectral_preconditioner_basis_ * spectral_coordinates;
-  Eigen::VectorXd result = jacobi_inverse.array() * complement.array();
+  Eigen::VectorXd result = complement_inverse(complement);
   result.noalias() -= spectral_preconditioner_basis_ *
       (spectral_preconditioner_basis_.transpose() * result);
   result.noalias() += spectral_preconditioner_basis_ *
       (spectral_preconditioner_inverse_eigenvalues_.array() *
        spectral_coordinates.array()).matrix();
   return result;
+}
+
+double EigenResponseRecycleSpace::preconditioner_lower_bound(
+    double complement_lower_bound) const {
+  if (!(complement_lower_bound > 0.0) || !std::isfinite(complement_lower_bound))
+    throw std::invalid_argument("response complement spectral bound is invalid");
+  if (size() == 0) return complement_lower_bound;
+  prepare_projected_inverse();
+  return spectral_preconditioner_inverse_eigenvalues_.size() == 0
+      ? complement_lower_bound
+      : std::min(complement_lower_bound,
+                 spectral_preconditioner_inverse_eigenvalues_.minCoeff());
 }
 
 void EigenResponseRecycleSpace::clear() {
@@ -652,7 +684,14 @@ EigenResponseResult solve_generalized_eigen_response(
     const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected,
     const EigenResponseOptions& options,
     const std::vector<EigenResponseRecycleSpace*>& recycle_spaces,
-    const Eigen::MatrixXd* selected_residuals) {
+    const Eigen::MatrixXd* selected_residuals,
+    const EigenResponsePreconditioner* preconditioner) {
+  if (preconditioner != nullptr &&
+      (!preconditioner->apply ||
+       !std::isfinite(preconditioner->minimum_eigenvalue) ||
+       !(preconditioner->minimum_eigenvalue > 0.0))) {
+    throw std::invalid_argument("response inverse preconditioner needs an action and positive spectral bound");
+  }
   validate_inputs(
       hamiltonian_diagonal,
       overlap_diagonal,
@@ -772,9 +811,14 @@ EigenResponseResult solve_generalized_eigen_response(
     // MINRES estimates ||r||_{P}, while the candidate contract is Euclidean.
     // Since ||r||_2 <= ||r||_{P}/sqrt(min_i P_ii), this sufficient trigger
     // cannot claim a Euclidean tolerance before a true-residual check.
+    double inverse_lower_bound = preconditioner != nullptr
+        ? preconditioner->minimum_eigenvalue
+        : inverse_preconditioner.col(state).minCoeff();
+    if (!recycle_spaces.empty() && recycle_spaces[static_cast<std::size_t>(state)] != nullptr)
+      inverse_lower_bound = recycle_spaces[static_cast<std::size_t>(state)]
+          ->preconditioner_lower_bound(inverse_lower_bound);
     preconditioned_absolute_targets[state] =
-        correctable_absolute_targets[state] *
-        std::sqrt(inverse_preconditioner.col(state).minCoeff());
+        correctable_absolute_targets[state] * std::sqrt(inverse_lower_bound);
   }
 
   for (Eigen::Index state = 0; state < n_selected; ++state) {
@@ -844,7 +888,7 @@ EigenResponseResult solve_generalized_eigen_response(
   }
 
   w_new = apply_response_preconditioner(
-      v_new, inverse_preconditioner, recycle_spaces);
+      v_new, inverse_preconditioner, recycle_spaces, preconditioner);
   project_selected_roots(&w_new, root_units);
   for (Eigen::Index state = 0; state < n_selected; ++state) {
     if (rhs_norms[state] == 0.0) {
@@ -913,7 +957,8 @@ EigenResponseResult solve_generalized_eigen_response(
           v_new.col(state), inverse_preconditioner.col(state),
           recycle_spaces.empty()
               ? nullptr
-              : recycle_spaces[static_cast<std::size_t>(state)]);
+              : recycle_spaces[static_cast<std::size_t>(state)],
+          preconditioner, state);
       w_new.col(state).noalias() -= root_units.col(state) *
           root_units.col(state).dot(w_new.col(state));
       const double beta_squared = v_new.col(state).dot(w_new.col(state));
@@ -1058,7 +1103,8 @@ EigenResponseResult solve_generalized_eigen_response(
             v_new.col(state), inverse_preconditioner.col(state),
             recycle_spaces.empty()
                 ? nullptr
-                : recycle_spaces[static_cast<std::size_t>(state)]);
+                : recycle_spaces[static_cast<std::size_t>(state)],
+            preconditioner, state);
         w_new.col(state).noalias() -= root_units.col(state) *
             root_units.col(state).dot(w_new.col(state));
         p_older.col(state).setZero();
