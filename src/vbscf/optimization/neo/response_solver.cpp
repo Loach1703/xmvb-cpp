@@ -500,7 +500,7 @@ bool ResponseNeoWorkspace::append_structure_block(
 
 void ResponseNeoWorkspace::update_newton_factor(bool leading_unchanged) {
   if (!leading_unchanged) {
-    Eigen::LLT<Eigen::MatrixXd> factor(spectrum_vectors_);
+    Eigen::LLT<Eigen::MatrixXd> factor(spectral_model_);
     model_positive_ = factor.info() == Eigen::Success;
     if (model_positive_) newton_factor_ = factor.matrixU();
     return;
@@ -508,14 +508,14 @@ void ResponseNeoWorkspace::update_newton_factor(bool leading_unchanged) {
   // A nonpositive leading principal block cannot become positive by bordering.
   if (!model_positive_) return;
   const Eigen::Index previous = newton_factor_.rows();
-  const Eigen::Index size = spectrum_vectors_.rows();
+  const Eigen::Index size = spectral_model_.rows();
   newton_factor_.conservativeResize(size, size);
   newton_factor_.bottomRows(size - previous).setZero();
   for (Eigen::Index column = previous; column < size; ++column) {
     const Eigen::VectorXd border = newton_factor_.topLeftCorner(column, column)
         .transpose().triangularView<Eigen::Lower>()
-        .solve(spectrum_vectors_.row(column).head(column).transpose());
-    const double pivot = spectrum_vectors_(column, column) - border.squaredNorm();
+        .solve(spectral_model_.row(column).head(column).transpose());
+    const double pivot = spectral_model_(column, column) - border.squaredNorm();
     if (!(pivot > 0.0) || !std::isfinite(pivot)) {
       model_positive_ = false;
       return;
@@ -525,17 +525,47 @@ void ResponseNeoWorkspace::update_newton_factor(bool leading_unchanged) {
   }
 }
 
-bool ResponseNeoWorkspace::ensure_model_spectrum() {
+bool ResponseNeoWorkspace::ensure_model_spectrum(bool curvature_only) {
   if (spectrum_ready_) return true;
+  const auto purpose = curvature_only ? diagnostics::Phase::NeoCurvatureSpectrum :
+      model_positive_ ? diagnostics::Phase::NeoBoundarySpectrum :
+                        diagnostics::Phase::NeoIndefiniteSpectrum;
+  diagnostics::ScopedPhase purpose_phase(purpose);
+  diagnostics::record_matrix_shape(purpose, spectral_model_.rows(), spectral_model_.cols());
   diagnostics::ScopedPhase phase(diagnostics::Phase::NeoSpectrum);
-  const lapack_int size = static_cast<lapack_int>(spectrum_vectors_.rows());
+  const lapack_int size = static_cast<lapack_int>(spectral_model_.rows());
   diagnostics::record_matrix_shape(diagnostics::Phase::NeoSpectrum, size, size);
   spectrum_values_.resize(size);
-  if (LAPACKE_dsyevd(LAPACK_COL_MAJOR, 'V', 'L', size,
-      spectrum_vectors_.data(), size, spectrum_values_.data()) != 0) return false;
-  spectral_gradient_.noalias() = spectrum_vectors_.transpose() * white_gradient_;
+  Eigen::VectorXd off_diagonal(std::max<lapack_int>(1, size - 1));
+  reflector_coefficients_.resize(std::max<lapack_int>(1, size - 1));
+  // Match DSYEVD's safe-range scaling before tridiagonal reduction.
+  const double magnitude = spectral_model_.cwiseAbs().maxCoeff();
+  const double safe = std::numeric_limits<double>::min() /
+                      std::numeric_limits<double>::epsilon();
+  const double lower = std::sqrt(safe), upper = std::sqrt(1.0 / safe);
+  const double scale = magnitude > 0.0 && magnitude < lower ? lower / magnitude :
+                       magnitude > upper ? upper / magnitude : 1.0;
+  if (scale != 1.0) spectral_model_ *= scale;
+  if (LAPACKE_dsytrd(LAPACK_COL_MAJOR, 'L', size, spectral_model_.data(),
+      size, spectrum_values_.data(), off_diagonal.data(),
+      reflector_coefficients_.data()) != 0) return false;
+  tridiagonal_vectors_.resize(size, size);
+  if (LAPACKE_dstedc(LAPACK_COL_MAJOR, 'I', size, spectrum_values_.data(),
+      off_diagonal.data(), tridiagonal_vectors_.data(), size) != 0) return false;
+  if (scale != 1.0) spectrum_values_ /= scale;
+  Eigen::VectorXd tridiagonal_gradient = white_gradient_;
+  if (!apply_spectral_reflectors(&tridiagonal_gradient, true)) return false;
+  spectral_gradient_.noalias() = tridiagonal_vectors_.transpose() * tridiagonal_gradient;
   spectrum_ready_ = true;
   return true;
+}
+
+bool ResponseNeoWorkspace::apply_spectral_reflectors(
+    Eigen::VectorXd* vector, bool transpose) const {
+  const lapack_int size = static_cast<lapack_int>(spectral_model_.rows());
+  return LAPACKE_dormtr(LAPACK_COL_MAJOR, 'L', 'L', transpose ? 'T' : 'N',
+      size, 1, spectral_model_.data(), size, reflector_coefficients_.data(),
+      vector->data(), size) == 0 && vector->allFinite();
 }
 
 ResponseNeoResult ResponseNeoWorkspace::solve(
@@ -732,10 +762,10 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
         observe_model(qo, a, relaxed);
       }
       extend_whitened_block(a, whitening_, &whitened_orbital_);
-      spectrum_vectors_ = whitened_orbital_;
+      spectral_model_ = whitened_orbital_;
       if (qs.cols() != 0) {
         const Eigen::MatrixXd white_coupling = b * whitening_;
-        spectrum_vectors_.noalias() -= white_coupling.transpose() *
+        spectral_model_.noalias() -= white_coupling.transpose() *
             (structure_inverse_ * white_coupling);
       }
       const Eigen::VectorXd gradient =
@@ -769,7 +799,11 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
       }
       projected = solve_spectral_trust_region(
           spectrum_values_, spectral_gradient_, options.trust_radius);
-      white_step.noalias() = spectrum_vectors_ * projected.step;
+      white_step.noalias() = tridiagonal_vectors_ * projected.step;
+      if (!apply_spectral_reflectors(&white_step, false)) {
+        result.stop_reason = NeoStopReason::NumericalFailure;
+        return result;
+      }
     }
     const Eigen::VectorXd p_coefficients = whitening * white_step;
     const Eigen::VectorXd q_coefficients =
@@ -867,9 +901,10 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
     // their five full-space image contractions, but evaluate them for every
     // final candidate and whenever the solver requires a curvature certificate.
     const auto measure_curvature = [&] {
-      if (!ensure_model_spectrum()) return false;
-      const Eigen::VectorXd minimum_coefficients = whitening *
-          spectrum_vectors_.col(0);
+      if (!ensure_model_spectrum(true)) return false;
+      Eigen::VectorXd minimum_white = tridiagonal_vectors_.col(0);
+      if (!apply_spectral_reflectors(&minimum_white, false)) return false;
+      const Eigen::VectorXd minimum_coefficients = whitening * minimum_white;
       result.minimum_curvature_orbital.noalias() =
           qo * minimum_coefficients;
       const Eigen::VectorXd minimum_structure =

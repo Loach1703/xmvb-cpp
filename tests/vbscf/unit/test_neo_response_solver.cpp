@@ -8,6 +8,7 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
+#include <Eigen/QR>
 
 #include "vbscf/optimization/neo/response_solver.hpp"
 #include "vbscf/optimization/trust_region/spectral.hpp"
@@ -1001,6 +1002,52 @@ void check_exact_core_inverse_response_span() {
                           gradient, options.trust_radius, result);
 }
 
+/** @brief Checks implicit spectral lifts above LAPACK's small-matrix crossover. */
+void check_implicit_spectral_lifts() {
+  constexpr Eigen::Index n = 32;
+  Eigen::MatrixXd seed(n, n);
+  for (Eigen::Index i = 0; i < n; ++i)
+    for (Eigen::Index j = 0; j < n; ++j)
+      seed(i, j) = std::sin(static_cast<double>((i + 1) * (j + 3))) +
+                   (i == j ? 2.0 : 0.0);
+  const Eigen::MatrixXd rotation = seed.householderQr().householderQ();
+  const Eigen::VectorXd v = Eigen::VectorXd::LinSpaced(n, -0.3, 0.4);
+  const Eigen::MatrixXd metric = Eigen::MatrixXd::Identity(n, n) + v * v.transpose();
+  const Eigen::MatrixXd factor = metric.llt().matrixU();
+  Eigen::VectorXd values = Eigen::VectorXd::LinSpaced(n, 2.0, 7.0);
+  values.head(2).setConstant(-1.0);
+  const Eigen::MatrixXd a = factor.transpose() * rotation * values.asDiagonal() *
+                            rotation.transpose() * factor;
+  const Eigen::MatrixXd b(0, n), c(0, 0);
+  for (const bool hard_case : {false, true}) {
+    Eigen::VectorXd rhs = Eigen::VectorXd::LinSpaced(n, 0.05, 0.1);
+    if (hard_case) rhs.head(2).setZero();
+    const Eigen::VectorXd gradient = factor.transpose() * rotation * rhs;
+    NeoOptions options;
+    options.trust_radius = hard_case ? 2.0 : 0.2;
+    options.relative_residual_tolerance = 1e-12;
+    options.require_curvature_certificate = true;
+    const auto result = xmvb::vb::solve_response_neo(
+        dense_problem(a, b, c, metric, gradient), options);
+    const auto reference = xmvb::vb::solve_spectral_trust_region(
+        values, rhs, options.trust_radius);
+    const Eigen::VectorXd expected = factor.triangularView<Eigen::Upper>()
+        .solve(rotation * reference.step);
+    const auto energy = [&](const Eigen::VectorXd& p) {
+      return gradient.dot(p) + 0.5 * p.dot(a * p);
+    };
+    require(std::abs(energy(result.step.orbital) - energy(expected)) < 1e-9,
+            "implicit spectral lift changed the trust-region minimum");
+    if (!hard_case)
+      require_close(result.step.orbital, expected, 1e-9,
+                    "implicit spectral lift changed the regular boundary step");
+    const auto& u = result.minimum_curvature_orbital;
+    require(std::abs(u.dot(a * u) / u.dot(metric * u) + 1.0) < 1e-9,
+            "implicit spectral lift lost the lowest generalized Ritz direction");
+    verify_coupled_residual(a, b, c, metric, gradient, options.trust_radius, result);
+  }
+}
+
 void check_positive_interior_defers_spectrum() {
   const Eigen::Index n = 8;
   const Eigen::MatrixXd a = Eigen::VectorXd::LinSpaced(n, 1.0, 8.0).asDiagonal();
@@ -1120,6 +1167,7 @@ int main() {
     check_trial_response_within_physical_budget();
     check_changed_trial_refreshes_structure_response();
     check_positive_interior_defers_spectrum();
+    check_implicit_spectral_lifts();
     check_exact_core_inverse_response_span();
     check_spd_structure_and_explicit_schur();
     check_anisotropic_coupled_dual_residual();

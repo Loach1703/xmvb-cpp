@@ -199,7 +199,9 @@ private:
   /** @brief Extends the positive projected factor when its leading block is fixed. */
   void update_newton_factor(bool leading_unchanged);
   /** @brief Computes the projected spectrum only for boundary or Ritz diagnostics. */
-  bool ensure_model_spectrum();
+  bool ensure_model_spectrum(bool curvature_only = false);
+  /** @brief Applies the projected Householder basis to one vector, never all eigenvectors. */
+  bool apply_spectral_reflectors(Eigen::VectorXd* vector, bool transpose) const;
   bool append_orbital(
       Eigen::VectorXd direction,
       int* actions,
@@ -246,8 +248,11 @@ private:
   Eigen::VectorXd white_gradient_;
   bool model_positive_ = false;
   bool spectrum_ready_ = false;
-  /** @brief Projected model until spectral decomposition, then its eigenvectors. */
-  Eigen::MatrixXd spectrum_vectors_;
+  /** @brief Projected model until reduction, then compact Householder reflectors. */
+  Eigen::MatrixXd spectral_model_;
+  /** @brief Eigenvectors of the tridiagonal model, without a dense backtransform. */
+  Eigen::MatrixXd tridiagonal_vectors_;
+  Eigen::VectorXd reflector_coefficients_;
   Eigen::VectorXd spectrum_values_;
   Eigen::VectorXd spectral_gradient_;
   Eigen::Index metric_size_ = -1;
