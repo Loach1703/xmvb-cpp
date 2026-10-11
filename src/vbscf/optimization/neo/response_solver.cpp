@@ -468,7 +468,8 @@ bool ResponseNeoWorkspace::append_structure_block(
   return true;
 }
 
-ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
+ResponseNeoResult ResponseNeoWorkspace::solve(
+    const NeoOptions& options, bool allow_early_trial) {
   diagnostics::ScopedPhase phase(diagnostics::Phase::NeoSolve);
   if (!(options.trust_radius > 0.0) ||
       !std::isfinite(options.trust_radius) ||
@@ -831,6 +832,29 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
       }
       result.stop_reason = NeoStopReason::Converged;
       return result;
+    }
+
+    // CIAH's early-start test applies to the normalized augmented vector,
+    // not the unscaled Newton residual. For [1, alpha*p, alpha*q], the top
+    // AH equation gives alpha^2 = lambda / (-g^T p). The orbital trust
+    // metric yields normalization sqrt(1 + alpha^2 p^T G p); the structure
+    // coordinates have no trust penalty. This candidate is NOT certified.
+    // Three directions and the 2.5 start threshold follow PySCF mc1step;
+    // exact energy/gradient keyframes decide whether it is usable.
+    const double descent = -problem_.orbital_gradient().dot(result.step.orbital);
+    if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
+        result.boundary && result.shift > 0.0 && descent > 0.0 &&
+        qo.cols() >= 3 && basis_size > trial_basis_size_) {
+      const double augmented_scale = std::sqrt(result.shift / descent);
+      const double augmented_residual = result.residual_norm * augmented_scale /
+          std::hypot(1.0, augmented_scale * result.step_norm);
+      if (augmented_residual < 2.5) {
+        trial_basis_size_ = basis_size;
+        result.stop_reason = NeoStopReason::TrialReady;
+        diagnostics::neo_trace("early_trial", "residual=%.17g,augmented_residual=%.17g,target=%.17g",
+            result.residual_norm, augmented_residual, kkt_residual_target);
+        return result;
+      }
     }
 
     if (basis_size >= maximum_dimension) {

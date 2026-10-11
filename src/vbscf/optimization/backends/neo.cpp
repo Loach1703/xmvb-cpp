@@ -140,7 +140,7 @@ bool build_accepted_neo_keyframe(
       objective->second_order_context()
           ->structure_solve_accuracy
           .response_backward_error_tolerance(selected_energy_scale);
-  std::function<ResponseNeoResult(const NeoOptions&)> solve_step;
+  std::function<ResponseNeoResult(const NeoOptions&, bool)> solve_step;
   if (use_structure_response) {
     auto problem = std::make_shared<ResponseNeoProblem>(
         reduced_gradient,
@@ -224,10 +224,10 @@ bool build_accepted_neo_keyframe(
     auto workspace = std::make_shared<ResponseNeoWorkspace>(*problem);
     solve_step = [problem = std::move(problem),
                   workspace = std::move(workspace)](
-                     const NeoOptions& neo_options) {
+                     const NeoOptions& neo_options, bool allow_early_trial) {
       // The workspace stores a reference; retain its immutable problem here.
       static_cast<void>(problem);
-      return workspace->solve(neo_options);
+      return workspace->solve(neo_options, allow_early_trial);
     };
   } else {
     HvpComponents core_components;
@@ -249,7 +249,7 @@ bool build_accepted_neo_keyframe(
           return chart.apply_inverse_reduced_block_preconditioner(residual);
         });
     solve_step = [problem = std::move(problem)](
-                     const NeoOptions& neo_options) {
+                     const NeoOptions& neo_options, bool) {
       const NeoResult core = solve_neo(*problem, neo_options);
       ResponseNeoResult result;
       result.step = {core.step, Eigen::VectorXd{}};
@@ -279,6 +279,7 @@ bool build_accepted_neo_keyframe(
 
   diagnostics::neo_trace_context.keyframe = record->accepted_iteration_index;
   diagnostics::neo_trace_context.attempt = 0;
+  bool allow_early_trial = physical_gradient_norm > 3.0 * options.gradient_tolerance;
   while (true) {
     ++diagnostics::neo_trace_context.attempt;
     const double trial_radius = *trust_radius;
@@ -292,12 +293,12 @@ bool build_accepted_neo_keyframe(
     neo_options.absolute_residual_tolerance = options.gradient_tolerance;
     neo_options.maximum_subspace_dimension = 0;
     neo_options.require_curvature_certificate = false;
-    const ResponseNeoResult step = solve_step(neo_options);
+    const ResponseNeoResult step = solve_step(neo_options, allow_early_trial);
     record->micro_iterations += step.iterations;
     record->coupled_block_actions += step.coupled_actions;
     record->orbital_hvp_actions += step.orbital_actions;
     record->structure_response_actions += step.structure_actions;
-    if (!step.converged()) {
+    if (!step.converged() && !step.trial_ready()) {
       result->termination_reason = "neo_microproblem_not_converged";
       return false;
     }
@@ -345,7 +346,41 @@ bool build_accepted_neo_keyframe(
       continue;
     }
 
+    if (step.trial_ready()) {
+      // Validate a real relaxed gradient before accepting an approximate
+      // coupled step. Compare invariant physical norms at their own points:
+      // reduced coordinate vectors at different charts are not comparable.
+      objective->complete_trial(&trial);
+      const auto& preparation = trial.gradient_result.orbital_preparation_result;
+      const int n_inactive = (accepted_orbitals.n_total_electrons -
+                              accepted_orbitals.n_active_electrons) / 2;
+      const OrbitalChart trial_chart(
+          trial.orbital_preparation_input, parameter_view,
+          preparation.auxiliary_orbital_matrix.leftCols(
+              n_inactive + accepted_orbitals.n_active_orbitals),
+          preparation.physical_orbital_frame.normalized_orbital_matrix,
+          nullptr, false, objective->input().complete_active_space);
+      const auto trial_gradient = trial_chart.project_gradient(trial.gradient);
+      const NonredundantRetractionMetric trial_metric(
+          trial_chart, parameter_view, trial.orbital_preparation_input);
+      const double trial_norm = trial_metric.dual_norm(trial_gradient.reduced_gradient);
+      const double predicted_norm = orbital_metric.dual_norm(
+          reduced_gradient + step.hessian_step.orbital);
+      // PySCF's factor-three gradient trust guard, applied to physical norms.
+      // This is a magnitude check, not a claimed vector-transport identity.
+      const bool reliable = trial_norm <= 3.0 * std::max({
+          physical_gradient_norm, predicted_norm, options.gradient_tolerance});
+      diagnostics::neo_trace("keyframe", "actual_gradient=%.17g,predicted_gradient=%.17g,reliable=%d",
+          trial_norm, predicted_norm, static_cast<int>(reliable));
+      if (!reliable) {
+        ++record->rejected_trial_count;
+        allow_early_trial = false;
+        continue;  // Refine the retained model at the SAME radius.
+      }
+    }
+
     record->kkt_residual_norm = step.residual_norm;
+    record->approximate_step = step.trial_ready();
     record->kkt_residual_target = step.residual_target;
     record->orbital_step_norm = step.step_norm;
     record->shift = step.shift;
@@ -445,7 +480,7 @@ BackendRunResult run_neo_backend(
       break;
     }
 
-    objective->complete_trial(&accepted.trial);
+    if (!accepted.trial.gradient_ready) objective->complete_trial(&accepted.trial);
     accepted.parameters =
         parameter_view.pack(accepted.trial.orbital_preparation_input);
     gradient = accepted.trial.gradient;

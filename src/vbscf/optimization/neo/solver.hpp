@@ -9,6 +9,8 @@ namespace xmvb::vb {
 /** @brief Termination state of a matrix-free NEO microiteration. */
 enum class NeoStopReason {
   Converged,
+  /** Approximate candidate requiring nonlinear keyframe validation. */
+  TrialReady,
   SubspaceLimit,
   NumericalFailure,
   NegativeCurvature,

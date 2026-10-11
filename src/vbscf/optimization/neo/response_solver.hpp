@@ -147,6 +147,9 @@ struct ResponseNeoResult {
   bool converged() const noexcept {
     return stop_reason == NeoStopReason::Converged;
   }
+  bool trial_ready() const noexcept {
+    return stop_reason == NeoStopReason::TrialReady;
+  }
 };
 
 /**
@@ -169,8 +172,11 @@ public:
         structure_basis_(problem.structure_size(), 0),
         structure_orbital_images_(problem.orbital_size(), 0),
         structure_structure_images_(problem.structure_size(), 0) {}
-  /** @brief Solves one trust-region subproblem using the cached subspace. */
-  ResponseNeoResult solve(const NeoOptions& options);
+  /**
+   * @brief Solves using cached images, or yields an approximate boundary trial.
+   * @param allow_early_trial Enables CIAH early start; TrialReady is not Converged.
+   */
+  ResponseNeoResult solve(const NeoOptions& options, bool allow_early_trial = false);
 
   Eigen::Index orbital_basis_size() const noexcept {
     return orbital_basis_.cols();
@@ -226,6 +232,8 @@ private:
   Eigen::Index model_structure_size_ = -1;
   /** @brief Fixed accepted-point gradient norm, independent of the radius. */
   double gradient_norm_ = -1.0;
+  /** @brief A rejected early candidate must gain a direction before yielding again. */
+  Eigen::Index trial_basis_size_ = -1;
   Eigen::Index orbital_canonical_ = 0;
   Eigen::Index structure_canonical_ = 0;
 };

@@ -700,10 +700,47 @@ void check_incomplete_structure_basis_cannot_certify_global_curvature() {
           "incomplete structure response falsely certified global curvature");
 }
 
+void check_early_trial_is_not_certified_and_resumes() {
+  Eigen::Matrix<double, 6, 6> a = Eigen::Matrix<double, 6, 6>::Zero();
+  a.diagonal() << 1.0, 2.0, 4.0, 8.0, 16.0, 32.0;
+  const Eigen::MatrixXd b(0, 6), c(0, 0);
+  const auto metric = Eigen::Matrix<double, 6, 6>::Identity().eval();
+  const Eigen::VectorXd gradient = Eigen::VectorXd::Ones(6);
+  const auto problem = dense_problem(a, b, c, metric, gradient);
+  ResponseNeoWorkspace workspace(problem);
+  NeoOptions options;
+  options.trust_radius = 0.1;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.require_curvature_certificate = false;
+  const auto early = workspace.solve(options, true);
+  require(early.trial_ready() && !early.converged(),
+          "early trial falsely reported Newton convergence");
+  require(early.residual_norm > early.residual_target,
+          "early-trial fixture already satisfies the strict certificate");
+  require(workspace.orbital_basis_size() == 3,
+          "early trial did not start after three orbital directions");
+  int retained = static_cast<int>(workspace.orbital_basis_size());
+  options.trust_radius *= 0.5;
+  const auto retry = workspace.solve(options, true);
+  require(workspace.orbital_basis_size() > retained,
+          "rejected early trial yielded again without refining its subspace");
+  require(retry.orbital_actions == workspace.orbital_basis_size() - retained,
+          "early radius retry repeated retained HVPs");
+  retained = static_cast<int>(workspace.orbital_basis_size());
+  const auto resumed = workspace.solve(options);
+  verify_coupled_residual(a, b, c, metric, gradient, options.trust_radius, resumed);
+  require(resumed.orbital_actions == workspace.orbital_basis_size() - retained,
+          "resuming an early trial repeated retained HVPs");
+  require_close(resumed.step.orbital,
+      explicit_orbital_step(a, metric, gradient, options.trust_radius),
+      2.0e-9, "resumed early trial changed the strict trust-region solution");
+}
+
 }  // namespace
 
 int main() {
   try {
+    check_early_trial_is_not_certified_and_resumes();
     check_spd_structure_and_explicit_schur();
     check_anisotropic_coupled_dual_residual();
     check_negative_relaxed_curvature();

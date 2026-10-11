@@ -124,6 +124,8 @@ struct NeoIterationRecord {
   double orbital_step_norm = 0.0;
   double shift = 0.0;
 
+  /** Nonlinear-validated candidate, not a certified coupled Newton solve. */
+  bool approximate_step = false;
   bool global_curvature_certified = false;
   bool reached_boundary = false;
 };
