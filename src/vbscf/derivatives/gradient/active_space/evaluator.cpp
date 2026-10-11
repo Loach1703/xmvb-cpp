@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -167,15 +168,17 @@ xmvb::core::DavidsonResult solve_selected_structure_roots(
     int n_roots,
     StructureSolveAccuracy structure_solve_accuracy,
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors,
-    const xmvb::core::GeneralizedEigensolver& generalized_eigensolver) {
+    const xmvb::core::GeneralizedEigensolver& generalized_eigensolver,
+    std::function<double(const Eigen::VectorXd&, double)> physical_residual_norm = {}) {
   structure_solve_accuracy.validate();
-  const xmvb::core::DavidsonOptions options =
+  xmvb::core::DavidsonOptions options =
       xmvb::core::make_davidson_options(
           n_structures,
           n_roots,
           structure_solve_accuracy.energy_tolerance,
           structure_solve_accuracy.gradient_tolerance,
           structure_solve_accuracy.stationarity_tolerance());
+  options.physical_residual_norm = std::move(physical_residual_norm);
   const bool can_recycle =
       initial_eigenvectors.rows() == n_structures &&
       initial_eigenvectors.cols() >= n_roots &&
@@ -364,6 +367,12 @@ void solve_structure_problem(
               std::move(images.overlap)};
         };
     stage_start_time = std::chrono::steady_clock::now();
+    std::function<double(const Eigen::VectorXd&, double)> physical_residual;
+    if (input.complete_active_space && structure_action.storage().orthogonal_direct_ci) {
+      physical_residual = [&structure_action](const Eigen::VectorXd& coefficients, double energy) {
+        return structure_action.complete_space_residual_norm(coefficients, energy);
+      };
+    }
     retain_davidson_result(
         solve_selected_structure_roots(
             action,
@@ -373,7 +382,8 @@ void solve_structure_problem(
             n_roots,
             structure_solve_accuracy,
             initial_eigenvectors,
-            generalized_eigensolver),
+            generalized_eigensolver,
+            std::move(physical_residual)),
         context);
   }
   context->eigensolver_wall_time_seconds =

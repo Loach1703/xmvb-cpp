@@ -1375,6 +1375,18 @@ void check_sigma_action() {
     for (int row = 0; row < metric_rhs.rows(); ++row)
       metric_rhs(row, column) = std::sin(0.19 * (row + 1) * (column + 2));
   const Eigen::MatrixXd metric_solution = full_metric.apply(metric_rhs);
+  for (int column = 0; column < metric_rhs.cols(); ++column) {
+    const Eigen::VectorXd coefficients = metric_rhs.col(column);
+    const double energy = 0.2 * (column + 1);
+    const auto images = full_action.apply(coefficients);
+    const Eigen::MatrixXd residual = images.hamiltonian - energy * images.overlap;
+    const double reference = std::sqrt(
+        residual.col(0).dot(full_metric.apply(residual).col(0)) /
+        coefficients.dot(images.overlap.col(0)));
+    require(std::abs(full_action.complete_space_residual_norm(coefficients, energy) - reference) <
+                1e-10 * std::max(1.0, reference),
+            "orthogonal carrier residual differs from the physical dual metric");
+  }
   const Eigen::MatrixXd reference_metric_solution = full_overlap.partialPivLu().solve(metric_rhs);
   require((metric_solution - reference_metric_solution).cwiseAbs().maxCoeff() < 3.0e-11 &&
               (full_action.apply(metric_solution).overlap - metric_rhs).cwiseAbs().maxCoeff() < 3.0e-11,

@@ -1069,6 +1069,19 @@ Eigen::MatrixXd StructureAction::orthogonalize_structure_block(
   return orthogonal;
 }
 
+double StructureAction::complete_space_residual_norm(
+    const Eigen::Ref<const Eigen::VectorXd>& coefficients, double energy) const {
+  if (!direct_ci_ || coefficients.size() != n_structures_ ||
+      !coefficients.allFinite() || !std::isfinite(energy))
+    throw std::invalid_argument("invalid complete-space Ritz residual input");
+  const Eigen::MatrixXd carrier = orthogonalize_structure_block(coefficients);
+  const double norm = carrier.stableNorm();
+  if (!(norm > 0.0))
+    throw std::runtime_error("complete-space Ritz state has zero physical norm");
+  const Eigen::MatrixXd residual = direct_ci_->sigma.apply(carrier) - energy * carrier;
+  return residual.stableNorm() / norm;
+}
+
 void StructureAction::inverse_orbital_transform(Eigen::MatrixXd* spin_products) const {
   if (!direct_ci_ || spin_products == nullptr ||
       spin_products->rows() != n_unique_alpha_ ||

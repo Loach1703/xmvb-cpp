@@ -211,6 +211,14 @@ public:
   Eigen::MatrixXd orthogonalize_structure_block(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
 
+  /** @brief Physical Ritz residual in the orthogonal spin-string carrier.
+   * Valid as a structure-space certificate only for a complete variational
+   * spin sector, not an arbitrary selected structure subspace. The caller
+   * must establish this completeness. Uses one carrier column, no dense M.
+   */
+  double complete_space_residual_norm(
+      const Eigen::Ref<const Eigen::VectorXd>& coefficients, double energy) const;
+
   /** @brief Applies inverse exterior transforms to packed spin products in place. */
   void inverse_orbital_transform(Eigen::MatrixXd* spin_products) const;
   /** @brief Applies inverse-adjoint exterior transforms to spin products in place. */

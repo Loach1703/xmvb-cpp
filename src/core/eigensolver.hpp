@@ -55,6 +55,12 @@ struct DavidsonOptions {
    * orbital-gradient error (which also depends on gaps and coupling).
    */
   double stationarity_tolerance;
+  /** @brief Optional invariant residual norm for a normalized Ritz state.
+   * Called only after the algebraic and energy checks pass. This allows an
+   * operator to certify the residual in its physical representation without
+   * constructing or inverting a dense overlap matrix.
+   */
+  std::function<double(const Eigen::VectorXd&, double)> physical_residual_norm = {};
 };
 
 /**

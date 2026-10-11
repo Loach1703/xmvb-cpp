@@ -533,7 +533,13 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
       if (relative_residual <= required_residual &&
           stationarity_residual <= options.stationarity_tolerance &&
           (ritz_energy_stable || independently_certified)) {
-        continue;
+        if (!options.physical_residual_norm) continue;
+        const double physical_residual = options.physical_residual_norm(
+            root_vectors.col(root), eigenvalue);
+        if (!std::isfinite(physical_residual) || physical_residual < 0.0)
+          throw std::runtime_error("Davidson physical residual norm is invalid");
+        result.stationarity_residual_norms[root] = physical_residual;
+        if (physical_residual <= options.stationarity_tolerance) continue;
       }
       converged = false;
       corrections.col(n_corrections) = precondition_residual(

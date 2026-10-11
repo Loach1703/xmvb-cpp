@@ -245,6 +245,44 @@ bool run_recycled_case() {
   return passed;
 }
 
+bool run_physical_residual_case() {
+  constexpr double scale = 1.0e-4;
+  const Eigen::Vector3d energies(1.0, 2.0, 4.0);
+  const Eigen::Matrix3d h = scale * scale * energies.asDiagonal();
+  const Eigen::Matrix3d m = scale * scale * Eigen::Matrix3d::Identity();
+  const xmvb::core::GeneralizedEigenAction action =
+      [h, m](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
+        return xmvb::core::GeneralizedEigenActionResult{h * vectors, m * vectors};
+      };
+  Eigen::Matrix<double, 3, 2> initial;
+  initial << 1.0 / scale, 0.0,
+             1.0e-4 / scale, 0.0,
+             0.0, 1.0 / scale;
+  auto options = xmvb::core::make_davidson_options(3, 1, 1e-7, 1e-3, 1e-7);
+  const auto physical_residual = [energies, scale](const Eigen::VectorXd& coefficients, double energy) {
+    const Eigen::VectorXd state = scale * coefficients;
+    return (energies.array() * state.array() - energy * state.array()).matrix().norm() /
+        state.norm();
+  };
+  const xmvb::core::GeneralizedEigensolver solver;
+  const auto algebraic = solver.solve_davidson(action, h.diagonal(), m.diagonal(), initial, options);
+  const Eigen::Map<const Eigen::VectorXd> old_root(algebraic.eigenpairs.eigenvector_matrix.data(), 3);
+  const double old_error = physical_residual(old_root, algebraic.eigenpairs.eigenvalues[0]);
+  int certificates = 0;
+  options.physical_residual_norm = [&](const Eigen::VectorXd& coefficients, double energy) {
+    ++certificates;
+    return physical_residual(coefficients, energy);
+  };
+  const auto certified = solver.solve_davidson(action, h.diagonal(), m.diagonal(), initial, options);
+  const Eigen::Map<const Eigen::VectorXd> new_root(certified.eigenpairs.eigenvector_matrix.data(), 3);
+  const double new_error = physical_residual(new_root, certified.eigenpairs.eigenvalues[0]);
+  const bool passed = algebraic.iterations == 1 && old_error > options.stationarity_tolerance &&
+      certified.iterations > 1 && certificates > 0 && new_error <= options.stationarity_tolerance;
+  std::cout << "physical residual old=" << old_error << " certified=" << new_error
+            << (passed ? " PASS\n" : " FAIL\n");
+  return passed;
+}
+
 bool run_outer_accuracy_case() {
   constexpr int dimension = 400;
   constexpr int n_roots = 2;
@@ -427,6 +465,7 @@ int main() {
       passed;
   passed = run_recycled_case() && passed;
   passed = run_outer_accuracy_case() && passed;
+  passed = run_physical_residual_case() && passed;
   passed = run_bounded_multiroot_restart_case() && passed;
   std::cout << (passed ? "ALL PASSED\n" : "SOME FAILED\n");
   return passed ? 0 : 1;

@@ -612,7 +612,14 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
             problem_.operator_relative_accuracy());
         if ((b.transpose() - projected_adjoint).stableNorm() >
             adjoint_tolerance * adjoint_scale) {
-          throw std::runtime_error("response NEO coupling blocks are not adjoints");
+          std::ostringstream detail;
+          detail.precision(17);
+          detail << "response NEO coupling blocks are not adjoints: relative defect="
+                 << (b.transpose() - projected_adjoint).stableNorm() / adjoint_scale
+                 << ", tolerance=" << adjoint_tolerance
+                 << ", orbital size=" << b.cols()
+                 << ", structure size=" << b.rows();
+          throw std::runtime_error(detail.str());
         }
         b = 0.5 * (b + projected_adjoint.transpose());
         if (structure_null_vectors_.cols() != 0) {

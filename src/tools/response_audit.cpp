@@ -49,6 +49,26 @@ void audit_structure_response(
             << "\nstructure_overlap_condition = "
             << metric_spectrum.eigenvalues()[n - 1] / metric_spectrum.eigenvalues()[0]
             << '\n';
+  const Eigen::LLT<Eigen::MatrixXd> root_metric(m);
+  if (root_metric.info() != Eigen::Success)
+    throw std::runtime_error("diagnostic root metric factorization failed");
+  for (Eigen::Index state = 0; state < context.selected_state_eigenvectors.cols(); ++state) {
+    const Eigen::VectorXd c = context.selected_state_eigenvectors.col(state);
+    const double energy = context.selected_state_energies[state];
+    const Eigen::VectorXd residual = (h - energy * m) * c;
+    const double norm2 = c.dot(m * c);
+    const double pairing = residual.dot(root_metric.solve(residual));
+    if (!(norm2 > 0.0) || !(pairing >= 0.0))
+      throw std::runtime_error("diagnostic root norm or residual is invalid");
+    std::cout << "root_certificate_state = " << state
+              << "\nroot_energy = " << energy
+              << "\nroot_coefficient_norm = " << c.norm()
+              << "\nroot_metric_norm = " << std::sqrt(norm2)
+              << "\nroot_coordinate_residual = " << residual.norm()
+              << "\nroot_coefficient_scaled_residual = " << residual.norm() / c.norm()
+              << "\nroot_physical_residual = " << std::sqrt(pairing / norm2)
+              << '\n';
+  }
   // Separate spin recoupling from the exterior orbital transform. Distinct
   // spatial occupation patterns are orthogonal before that transform.
   Eigen::VectorXd first = Eigen::VectorXd::Zero(n);
