@@ -1,4 +1,5 @@
 #include "vbscf/optimization/preconditioners/shifted_metric.hpp"
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -37,6 +38,8 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
   }
   if (covector.isZero()) return Eigen::VectorXd::Zero(covector.size());
   if (shift == 0.0 || relative_residual_target >= 1.0) {
+    diagnostics::neo_trace("precondition", "iterations=0,shift=%.17g,budget=%.17g,reason=block",
+        shift, relative_residual_target);
     return checked_action(
         apply_block_inverse, covector,
         "shifted block inverse returned an invalid vector");
@@ -87,7 +90,11 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
   Eigen::VectorXd best_solution = preconditioned;
   double best_residual = residual_norm(
       covector - apply_shifted(best_solution));
-  if (best_residual <= target) return best_solution;
+  if (best_residual <= target) {
+    diagnostics::neo_trace("precondition", "iterations=0,shift=%.17g,budget=%.17g,residual_ratio=%.17g,reason=initial",
+        shift, relative_residual_target, best_residual / rhs_norm);
+    return best_solution;
+  }
 
   for (Eigen::Index iteration = 0;
        iteration < covector.size(); ++iteration) {
@@ -117,7 +124,12 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
       best_residual = current_residual_norm;
       best_solution = solution;
     }
-    if (current_residual_norm <= target) return solution;
+    if (current_residual_norm <= target) {
+      diagnostics::neo_trace("precondition", "iterations=%ld,shift=%.17g,budget=%.17g,residual_ratio=%.17g,reason=converged",
+          static_cast<long>(iteration + 1), shift, relative_residual_target,
+          current_residual_norm / rhs_norm);
+      return solution;
+    }
     if (!(next_pairing > 0.0)) {
       throw std::runtime_error(
           "shifted-metric preconditioner lost positive definiteness");
@@ -128,6 +140,9 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
   }
   // Preconditioning is not an acceptance test. Return the best positive
   // model direction even if the outer target was unreachable here.
+  diagnostics::neo_trace("precondition", "iterations=%ld,shift=%.17g,budget=%.17g,residual_ratio=%.17g,reason=dimension",
+      static_cast<long>(covector.size()), shift, relative_residual_target,
+      best_residual / rhs_norm);
   return best_solution;
 }
 

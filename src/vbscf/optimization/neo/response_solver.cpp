@@ -1,5 +1,6 @@
 #include "vbscf/optimization/neo/response_solver.hpp"
 #include "vbscf/diagnostics/performance/phases.hpp"
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -22,13 +23,16 @@ namespace {
 
 bool orthonormalize(
     Eigen::VectorXd* direction,
-    const Eigen::Ref<const Eigen::MatrixXd>& basis) {
+    const Eigen::Ref<const Eigen::MatrixXd>& basis,
+    double* retained_fraction = nullptr) {
+  if (retained_fraction) *retained_fraction = 0.0;
   const double initial_norm = direction->stableNorm();
   if (!(initial_norm > 0.0) || !std::isfinite(initial_norm)) return false;
   for (int pass = 0; pass < 2; ++pass) {
     direction->noalias() -= basis * (basis.transpose() * *direction);
   }
   const double norm = direction->stableNorm();
+  if (retained_fraction) *retained_fraction = norm / initial_norm;
   const double threshold = 64.0 * std::numeric_limits<double>::epsilon() *
       initial_norm;
   if (!(norm > threshold) || !std::isfinite(norm)) return false;
@@ -335,7 +339,14 @@ bool ResponseNeoWorkspace::append_orbital(
     int* actions,
     int* orbital_actions) {
   diagnostics::ScopedPhase phase(diagnostics::Phase::NeoBasis);
-  if (!orthonormalize(&direction, orbital_basis_)) return false;
+  double retained_fraction = 0.0;
+  const bool independent = orthonormalize(
+      &direction, orbital_basis_,
+      diagnostics::neo_trace_enabled() ? &retained_fraction : nullptr);
+  diagnostics::neo_trace("basis", "source=%s,independent=%d,retained=%.17g,size=%ld",
+      diagnostics::neo_trace_context.source, static_cast<int>(independent),
+      retained_fraction, static_cast<long>(orbital_basis_.cols()));
+  if (!independent) return false;
   const Eigen::VectorXd metric = problem_.apply_orbital_metric(direction);
   const ResponseNeoDirection image =
       problem_.apply_orbital_coupling(direction);
@@ -496,6 +507,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
   result.minimum_curvature_orbital = result.step.orbital;
 
   if (orbital_basis_.cols() == 0) {
+    diagnostics::neo_trace_context.source = "initial";
     Eigen::VectorXd first =
         problem_.initial_orbital_guess().size() == problem_.orbital_size()
             ? problem_.initial_orbital_guess()
@@ -687,6 +699,13 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
     result.residual_norm = std::hypot(
         orbital_residual_norm, structure_residual_norm);
     result.residual_target = kkt_residual_target;
+    diagnostics::neo_trace("candidate",
+        "micro=%d,no=%ld,ns=%ld,hvp=%d,structure=%d,ro=%.17g,rs=%.17g,target=%.17g,shift=%.17g,radius=%.17g,step=%.17g,boundary=%d",
+        result.iterations, static_cast<long>(qo.cols()),
+        static_cast<long>(qs.cols()), result.orbital_actions,
+        result.structure_actions, orbital_residual_norm, structure_residual_norm,
+        kkt_residual_target, result.shift, options.trust_radius, result.step_norm,
+        static_cast<int>(result.boundary));
     result.predicted_reduction =
         -problem_.orbital_gradient().dot(result.step.orbital) -
         0.5 * (result.step.orbital.dot(result.hessian_step.orbital) +
@@ -778,6 +797,9 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
           const double corrected_norm = std::hypot(
               problem_.orbital_dual_norm(corrected_orbital),
               corrected_structure.stableNorm());
+          diagnostics::neo_trace("response_check", "before=%.17g,after=%.17g,target=%.17g,retained=%d",
+              result.residual_norm, corrected_norm, kkt_residual_target,
+              static_cast<int>(corrected_norm > kkt_residual_target));
           if (corrected_norm > kkt_residual_target) {
             const int basis_size = static_cast<int>(
                 orbital_basis_.cols() + structure_basis_.cols());
@@ -824,6 +846,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
     // residual below certifies the direction-local response without that
     // basis-wide work.
     bool expanded = false;
+    diagnostics::neo_trace_context.source = "structure_residual";
     if (!stationary && structure_residual_norm >= orbital_residual_norm) {
       const bool add_curvature = need_curvature_certificate &&
           curvature_structure.stableNorm() > curvature_structure_target;
@@ -838,11 +861,13 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
     if (!expanded && need_curvature_certificate &&
         curvature_structure.stableNorm() >
         curvature_structure_target) {
+      diagnostics::neo_trace_context.source = "structure_curvature";
       expanded = append_structure(
           -curvature_structure, &result.coupled_actions,
           &result.structure_actions);
     }
     if (!expanded && !stationary) {
+      diagnostics::neo_trace_context.source = "orbital_residual";
       expanded = append_orbital(
           preconditioned_orbital(
               problem_, -result.kkt_residual.orbital,
@@ -853,6 +878,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
           &result.orbital_actions);
     }
     if (!expanded && !stationary && structure_residual_norm > 0.0) {
+      diagnostics::neo_trace_context.source = "structure_residual";
       expanded = append_structure(
           -result.kkt_residual.structure, &result.coupled_actions,
           &result.structure_actions);
@@ -860,6 +886,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
     if (!expanded && need_curvature_certificate &&
         curvature_orbital.stableNorm() >
         curvature_orbital_target) {
+      diagnostics::neo_trace_context.source = "orbital_curvature";
       expanded = append_orbital(
           preconditioned_orbital(
               problem_, -curvature_orbital,
@@ -870,6 +897,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
           &result.orbital_actions);
     }
     while (!expanded && orbital_canonical_ < problem_.orbital_size()) {
+      diagnostics::neo_trace_context.source = "orbital_canonical";
       Eigen::VectorXd direction =
           Eigen::VectorXd::Zero(problem_.orbital_size());
       direction[orbital_canonical_++] = 1.0;
@@ -878,6 +906,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
           &result.orbital_actions);
     }
     while (!expanded && structure_canonical_ < problem_.structure_size()) {
+      diagnostics::neo_trace_context.source = "structure_canonical";
       Eigen::VectorXd direction =
           Eigen::VectorXd::Zero(problem_.structure_size());
       direction[structure_canonical_++] = 1.0;
@@ -885,6 +914,10 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
           std::move(direction), &result.coupled_actions,
           &result.structure_actions);
     }
+    diagnostics::neo_trace("expand", "source=%s,success=%d,no=%ld,ns=%ld",
+        diagnostics::neo_trace_context.source, static_cast<int>(expanded),
+        static_cast<long>(orbital_basis_.cols()),
+        static_cast<long>(structure_basis_.cols()));
     if (!expanded) {
       if (!need_curvature_certificate && !stationary) measure_curvature();
       result.stop_reason = NeoStopReason::NumericalFailure;

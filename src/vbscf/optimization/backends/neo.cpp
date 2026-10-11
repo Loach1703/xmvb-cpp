@@ -1,4 +1,5 @@
 #include "vbscf/optimization/backends/neo.hpp"
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -276,7 +277,10 @@ bool build_accepted_neo_keyframe(
     };
   }
 
+  diagnostics::neo_trace_context.keyframe = record->accepted_iteration_index;
+  diagnostics::neo_trace_context.attempt = 0;
   while (true) {
+    ++diagnostics::neo_trace_context.attempt;
     const double trial_radius = *trust_radius;
     NeoOptions neo_options;
     neo_options.trust_radius = trial_radius;
@@ -325,6 +329,12 @@ bool build_accepted_neo_keyframe(
         step.boundary,
         trial_radius,
         options.minimum_step_size);
+    diagnostics::neo_trace("trial",
+        "radius=%.17g,next_radius=%.17g,hvp=%d,structure=%d,accepted=%d,rho=%.17g,predicted=%.17g,actual=%.17g",
+        trial_radius, globalization.next_radius, step.orbital_actions,
+        step.structure_actions, static_cast<int>(globalization.accepted),
+        globalization.rho, globalization.predicted_reduction,
+        globalization.actual_reduction);
     if (!globalization.accepted) {
       ++record->rejected_trial_count;
       if (!(globalization.next_radius < *trust_radius)) {
