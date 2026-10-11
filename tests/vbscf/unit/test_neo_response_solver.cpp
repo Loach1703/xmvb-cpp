@@ -761,15 +761,15 @@ void check_historical_interior_trial_preserves_physical_certificate() {
                 "historical trial changed the certified Newton solution");
 }
 
-void check_trial_defers_structure_certificate() {
+void check_trial_seeds_candidate_structure_response() {
   int response_calls = 0;
   const ResponseNeoProblem problem(
       Eigen::VectorXd::Ones(1), 1,
       [](const Eigen::VectorXd& p) {
-        return ResponseNeoDirection{2 * p, 0.1 * p};
+        return ResponseNeoDirection{2 * p, p};
       },
       [](const Eigen::VectorXd& q) {
-        return ResponseNeoDirection{0.1 * q, q};
+        return ResponseNeoDirection{q, q};
       },
       [](const Eigen::VectorXd& p) { return p; },
       [](const Eigen::VectorXd& r) { return r.norm(); },
@@ -779,19 +779,99 @@ void check_trial_defers_structure_certificate() {
         return Eigen::VectorXd(-r);
       });
   NeoOptions options;
+  options.trust_radius = 2.0;
   options.relative_residual_tolerance = 0.1;
   options.require_curvature_certificate = false;
   ResponseNeoWorkspace workspace(problem);
   const auto trial = workspace.solve(options, true);
-  require(trial.trial_ready() && !trial.converged() && response_calls == 0,
-          "nonlinear trial paid for or claimed exact structure certification");
+  require(trial.trial_ready() && !trial.converged() && response_calls == 1,
+          "nonlinear trial did not sample exactly one candidate response");
+  require(workspace.orbital_basis_size() == 1 &&
+              workspace.structure_basis_size() == 1,
+          "candidate response unnecessarily expanded the orbital basis");
+  require_close(trial.step.orbital, Eigen::VectorXd::Constant(1, -1.0),
+                1e-12, "trial omitted the Schur curvature correction");
+  require_close(trial.step.structure, -trial.step.orbital, 1e-12,
+                "trial structure response is inconsistent with its orbital step");
   const auto certified = workspace.solve(options);
-  require(certified.converged() && response_calls == 1 &&
+  require(certified.converged() && response_calls <= 2 &&
               certified.residual_norm <= certified.residual_target,
           "strict continuation bypassed the structure response certificate");
   require_close(certified.kkt_residual.structure,
-                0.1 * certified.step.orbital + certified.step.structure, 1e-12,
+                certified.step.orbital + certified.step.structure, 1e-12,
                 "deferred certificate returned an inconsistent structure residual");
+}
+
+void check_trial_response_within_physical_budget() {
+  int responses = 0;
+  const ResponseNeoProblem problem(
+      Eigen::VectorXd::Ones(1), 1,
+      [](const Eigen::VectorXd& p) {
+        return ResponseNeoDirection{2 * p, 0.1 * p};
+      },
+      [](const Eigen::VectorXd& q) {
+        return ResponseNeoDirection{0.1 * q, q};
+      },
+      [](const Eigen::VectorXd& p) { return p; },
+      [](const Eigen::VectorXd& r) { return r.norm(); }, {}, {}, 0.0, {},
+      [&responses](const Eigen::VectorXd& r) {
+        ++responses;
+        return Eigen::VectorXd(-r);
+      });
+  NeoOptions options;
+  options.relative_residual_tolerance = 0.1;
+  options.require_curvature_certificate = false;
+  ResponseNeoWorkspace workspace(problem);
+  const auto trial = workspace.solve(options, true);
+  require(trial.trial_ready() && responses == 1 &&
+              workspace.structure_basis_size() == 0,
+          "response below the physical error budget changed the approximate model");
+  const auto certified = workspace.solve(options);
+  require(certified.converged() && responses == 2 &&
+              certified.residual_norm <= certified.residual_target,
+          "approximate response budget weakened the final KKT certificate");
+}
+
+void check_changed_trial_refreshes_structure_response() {
+  const Eigen::Matrix2d a = Eigen::Vector2d(3.0, 5.0).asDiagonal();
+  const Eigen::Matrix2d b = Eigen::Matrix2d::Identity();
+  const Eigen::Matrix2d c = Eigen::Vector2d(1.0, 2.0).asDiagonal();
+  const Eigen::Vector2d gradient(1.0, 2.0);
+  int responses = 0;
+  const ResponseNeoProblem problem(
+      gradient, 2,
+      [a, b](const Eigen::VectorXd& p) {
+        return ResponseNeoDirection{a * p, b * p};
+      },
+      [b, c](const Eigen::VectorXd& q) {
+        return ResponseNeoDirection{b.transpose() * q, c * q};
+      },
+      [](const Eigen::VectorXd& p) { return p; },
+      [](const Eigen::VectorXd& r) { return r.norm(); }, {}, {}, 0.0, {},
+      [c, &responses](const Eigen::VectorXd& r) {
+        ++responses;
+        return Eigen::VectorXd(-c.ldlt().solve(r));
+      });
+  NeoOptions options;
+  options.trust_radius = 2.0;
+  options.absolute_residual_tolerance = 1e-12;
+  options.relative_residual_tolerance = 1e-12;
+  options.require_curvature_certificate = false;
+  ResponseNeoWorkspace workspace(problem);
+  const auto first = workspace.solve(options, true);
+  require(first.trial_ready() && responses == 1 &&
+              workspace.structure_basis_size() == 1,
+          "initial approximate candidate did not sample its own response");
+  const auto second = workspace.solve(options, true);
+  require(second.trial_ready() && responses == 2 &&
+              workspace.structure_basis_size() == 2,
+          "changed orbital candidate reused an incomplete structure response");
+  require_close(second.step.orbital,
+                -(a - b.transpose() * c.ldlt().solve(b)).ldlt().solve(gradient),
+                1e-11, "refreshed candidate omitted relaxed curvature");
+  const auto certified = workspace.solve(options);
+  verify_coupled_residual(a, b, c, Eigen::Matrix2d::Identity(), gradient,
+                          options.trust_radius, certified);
 }
 
 void check_physical_mismatch_seeds_response(double scale) {
@@ -918,7 +998,9 @@ int main() {
     check_candidate_observation_preserves_solve();
     check_early_trial_is_not_certified_and_resumes();
     check_historical_interior_trial_preserves_physical_certificate();
-    check_trial_defers_structure_certificate();
+    check_trial_seeds_candidate_structure_response();
+    check_trial_response_within_physical_budget();
+    check_changed_trial_refreshes_structure_response();
     check_spd_structure_and_explicit_schur();
     check_anisotropic_coupled_dual_residual();
     check_negative_relaxed_curvature();

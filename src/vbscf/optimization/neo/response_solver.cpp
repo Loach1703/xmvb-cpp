@@ -828,30 +828,37 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
     const bool required_curvature_converged =
         !need_curvature_certificate || curvature_converged;
     const double descent = -problem_.orbital_gradient().dot(result.step.orbital);
-    // Decide whether a nonlinear trial is ready before paying for an exact
-    // residual response. TrialReady never claims physical KKT convergence;
-    // the caller checks actual relaxed energy/gradient and disables this
-    // branch near stationarity. Certified solves still perform the check below.
+    // TrialReady never claims physical KKT convergence. A ready candidate
+    // first samples its own structure response, not the responses of all
+    // retained orbital directions; real energy/gradient keyframes follow.
     const double coordinate_gradient = problem_.orbital_gradient().stableNorm();
     const double coordinate_target = options.absolute_residual_tolerance +
         coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient);
     const double coordinate_residual = std::hypot(
         result.kkt_residual.orbital.stableNorm(), structure_residual_norm);
-    if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
+    const bool coordinate_trial_ready =
+        allow_early_trial && !need_curvature_certificate && shifted_positive &&
         descent > 0.0 && basis_size > trial_basis_size_ &&
-        coordinate_residual <= coordinate_target) {
-      trial_basis_size_ = basis_size;
-      result.stop_reason = NeoStopReason::TrialReady;
-      diagnostics::neo_trace("historical_trial", "coordinate_residual=%.17g,coordinate_target=%.17g,physical_residual=%.17g,target=%.17g",
-          coordinate_residual, coordinate_target, result.residual_norm, kkt_residual_target);
-      return result;
+        coordinate_residual <= coordinate_target;
+    double augmented_residual = std::numeric_limits<double>::infinity();
+    if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
+        result.boundary && result.shift > 0.0 && descent > 0.0 &&
+        qo.cols() >= 3 && basis_size > trial_basis_size_) {
+      const double augmented_scale = std::sqrt(result.shift / descent);
+      augmented_residual = result.residual_norm * augmented_scale /
+          std::hypot(1.0, augmented_scale * result.step_norm);
     }
-    // A certified solve must resolve the relaxed model, not first converge
-    // its frozen-structure restriction. Seed the response of the actual
-    // candidate once, reusing B p rather than solving for every B Q column.
-    // Approximate nonlinear trials keep their deferred response policy.
-    if (!allow_early_trial && !stationary && !response_seeded_ &&
-        structure_basis_.cols() == 0 && basis_size < maximum_dimension &&
+    const bool augmented_trial_ready = augmented_residual < 2.5;
+    // A certified solve seeds its first response immediately. An approximate
+    // solve samples the actual candidate only when ready; after p changes,
+    // its remaining response must be checked again, not assumed resolved by
+    // an earlier sample. No per-column B Q response solves are required.
+    const bool seed_certified_response = !allow_early_trial && !stationary &&
+        !response_seeded_ && structure_basis_.cols() == 0;
+    if ((seed_certified_response || coordinate_trial_ready ||
+         augmented_trial_ready) &&
+        structure_basis_.cols() < problem_.structure_size() &&
+        basis_size < maximum_dimension &&
         problem_.has_structure_residual_solver() &&
         !result.kkt_residual.structure.isZero(0.0)) {
       response_seeded_ = true;
@@ -861,8 +868,22 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
         const auto image = problem_.apply_structure_coupling(response);
         ++result.coupled_actions;
         ++result.structure_actions;
-        if (retain_structure_image(response, image)) continue;
+        // Omitting this response perturbs the orbital residual by B^T dq.
+        // Enrich an approximate model only when that perturbation exceeds
+        // its existing physical KKT budget. Certified solves always retain it.
+        const double response_error = problem_.orbital_dual_norm(image.orbital);
+        const bool retain = !allow_early_trial || response_error > kkt_residual_target;
+        diagnostics::neo_trace("candidate_response", "error=%.17g,target=%.17g,retained=%d",
+            response_error, kkt_residual_target, static_cast<int>(retain));
+        if (retain && retain_structure_image(response, image)) continue;
       }
+    }
+    if (coordinate_trial_ready) {
+      trial_basis_size_ = basis_size;
+      result.stop_reason = NeoStopReason::TrialReady;
+      diagnostics::neo_trace("historical_trial", "coordinate_residual=%.17g,coordinate_target=%.17g,physical_residual=%.17g,target=%.17g",
+          coordinate_residual, coordinate_target, result.residual_norm, kkt_residual_target);
+      return result;
     }
     if (stationary && required_curvature_converged && shifted_positive) {
       // A small raw structure residual can still produce a large orbital
@@ -927,19 +948,12 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
     // coordinates have no trust penalty. This candidate is NOT certified.
     // Three directions and the 2.5 start threshold follow PySCF mc1step;
     // exact energy/gradient keyframes decide whether it is usable.
-    if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
-        result.boundary && result.shift > 0.0 && descent > 0.0 &&
-        qo.cols() >= 3 && basis_size > trial_basis_size_) {
-      const double augmented_scale = std::sqrt(result.shift / descent);
-      const double augmented_residual = result.residual_norm * augmented_scale /
-          std::hypot(1.0, augmented_scale * result.step_norm);
-      if (augmented_residual < 2.5) {
-        trial_basis_size_ = basis_size;
-        result.stop_reason = NeoStopReason::TrialReady;
-        diagnostics::neo_trace("early_trial", "residual=%.17g,augmented_residual=%.17g,target=%.17g",
-            result.residual_norm, augmented_residual, kkt_residual_target);
-        return result;
-      }
+    if (augmented_trial_ready) {
+      trial_basis_size_ = basis_size;
+      result.stop_reason = NeoStopReason::TrialReady;
+      diagnostics::neo_trace("early_trial", "residual=%.17g,augmented_residual=%.17g,target=%.17g",
+          result.residual_norm, augmented_residual, kkt_residual_target);
+      return result;
     }
 
     if (basis_size >= maximum_dimension) {

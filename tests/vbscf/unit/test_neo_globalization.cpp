@@ -112,6 +112,34 @@ void check_invalid_input_is_rejected() {
   require(threw, "nonfinite trial energy was accepted");
 }
 
+void check_trial_phase_is_coordinate_invariant() {
+  constexpr double tolerance = 1.0e-3;
+  const double raw_gradient = 1.0e-4;
+  const double raw_metric = 1.0e-8;
+  const double scale = 1.0e4;
+  const double transformed_gradient = scale * raw_gradient;
+  const double transformed_metric = scale * scale * raw_metric;
+  const double raw_norm = std::sqrt(raw_gradient * raw_gradient / raw_metric);
+  const double transformed_norm = std::sqrt(
+      transformed_gradient * transformed_gradient / transformed_metric);
+  require(raw_gradient < tolerance && transformed_gradient > tolerance,
+          "fixture does not expose coordinate-component phase misclassification");
+  require_close(raw_norm, transformed_norm, "physical gradient norm changed under chart scaling");
+  require(xmvb::vb::neo_trial_allowed(raw_norm, tolerance) &&
+              xmvb::vb::neo_trial_allowed(transformed_norm, tolerance),
+          "equivalent charts do not select the same nonlinear trial phase");
+  require(!xmvb::vb::neo_trial_allowed(3.0 * tolerance, tolerance) &&
+              !xmvb::vb::neo_trial_allowed(0.0, tolerance),
+          "near-stationary solve unexpectedly enabled approximate trials");
+  bool rejected = false;
+  try {
+    xmvb::vb::neo_trial_allowed(raw_norm, 0.0);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected, "trial phase accepted a nonpositive gradient tolerance");
+}
+
 }  // namespace
 
 int main() {
@@ -123,5 +151,6 @@ int main() {
   check_nonpositive_prediction_is_rejected();
   check_minimum_radius_is_respected();
   check_invalid_input_is_rejected();
+  check_trial_phase_is_coordinate_invariant();
   return 0;
 }

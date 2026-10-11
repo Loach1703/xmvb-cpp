@@ -418,10 +418,14 @@ bool build_accepted_neo_keyframe(
 
   diagnostics::neo_trace_context.keyframe = record->accepted_iteration_index;
   diagnostics::neo_trace_context.attempt = 0;
-  // Cheap coordinate candidates do not resolve physical stationarity in an
-  // ill-conditioned chart. Keep their historical role away from convergence.
-  bool allow_early_trial = physical_gradient_norm > 3.0 * options.gradient_tolerance &&
-      gradient_infinity_norm(reduced_gradient) >= options.gradient_tolerance;
+  // Coordinate-small need not mean physically stationary in an ill-conditioned
+  // chart. Route the solve using the same dual norm as the final certificate.
+  // TrialReady remains approximate and must pass real energy/gradient checks.
+  bool allow_early_trial = neo_trial_allowed(
+      physical_gradient_norm, options.gradient_tolerance);
+  diagnostics::neo_trace("phase", "physical_gradient=%.17g,coordinate_inf=%.17g,tolerance=%.17g,early_trial=%d",
+      physical_gradient_norm, gradient_infinity_norm(reduced_gradient),
+      options.gradient_tolerance, static_cast<int>(allow_early_trial));
   while (true) {
     ++diagnostics::neo_trace_context.attempt;
     const double trial_radius = *trust_radius;

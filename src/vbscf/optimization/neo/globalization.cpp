@@ -24,6 +24,14 @@ void require_finite(double value, const char* name) {
 
 }  // namespace
 
+bool neo_trial_allowed(double physical_gradient_norm, double gradient_tolerance) {
+  require_finite(physical_gradient_norm, "physical gradient norm");
+  require_finite(gradient_tolerance, "gradient tolerance");
+  if (physical_gradient_norm < 0.0 || !(gradient_tolerance > 0.0))
+    throw std::invalid_argument("NEO trial phase requires a nonnegative norm and positive tolerance");
+  return physical_gradient_norm > 3.0 * gradient_tolerance;
+}
+
 NeoGlobalizationResult globalize_neo_trial(
     double current_energy,
     double trial_energy,
