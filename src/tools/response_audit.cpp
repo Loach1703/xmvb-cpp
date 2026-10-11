@@ -17,7 +17,7 @@
 #include "core/eigen_response.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/assembly/action.hpp"
-#include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
+#include "vbscf/structures/orthogonal_ci/metric.hpp"
 
 namespace xmvb::tools {
 
@@ -29,7 +29,8 @@ void audit_structure_response(
     const xmvb::vb::StructureAction& action,
     const xmvb::vb::AcceptedPointContext& context,
     bool complete_space,
-    int limit) {
+    int limit,
+    const Eigen::MatrixXd& orbital_forcing) {
   const int n = action.n_structures();
   if (n < 2 || n > limit)
     throw std::invalid_argument("structure spectrum exceeds explicit diagnostic size limit");
@@ -96,60 +97,18 @@ void audit_structure_response(
             << "\noccupation_max_block = " << max_block
             << "\noccupation_block_cells = " << block_cells << '\n';
   if (complete_space && action.storage().orthogonal_direct_ci) {
-    struct SpinBlock {
-      std::vector<int> indices;
-      Eigen::MatrixXd lower;
-    };
-    std::vector<SpinBlock> blocks;
-    for (const auto& group : occupation_groups) {
-      const auto& indices = group.second;
-      Eigen::MatrixXd block(indices.size(), indices.size());
-      for (int column = 0; column < block.cols(); ++column)
-        for (int row = 0; row < block.rows(); ++row)
-          block(row, column) = spin_metric(indices[row], indices[column]);
-      const Eigen::LLT<Eigen::MatrixXd> factor(block);
-      if (factor.info() != Eigen::Success)
-        throw std::runtime_error("spin-recoupling block factorization failed");
-      blocks.push_back({indices, Eigen::MatrixXd(factor.matrixL())});
-    }
-    const auto solve_spin = [&](const Eigen::MatrixXd& rhs) {
-      Eigen::MatrixXd result(n, rhs.cols());
-      for (const auto& block : blocks) {
-        Eigen::MatrixXd local(block.indices.size(), rhs.cols());
-        for (int row = 0; row < local.rows(); ++row)
-          local.row(row) = rhs.row(block.indices[row]);
-        block.lower.triangularView<Eigen::Lower>().solveInPlace(local);
-        block.lower.transpose().triangularView<Eigen::Upper>().solveInPlace(local);
-        for (int row = 0; row < local.rows(); ++row)
-          result.row(block.indices[row]) = local.row(row);
-      }
-      return result;
-    };
-    const auto& overlap = context.prepared_active_space.orbital_result.active_orbital_overlap_matrix;
-    const int n_active = context.n_active_orbitals;
-    if (overlap.size() != static_cast<std::size_t>(n_active) * n_active)
-      throw std::runtime_error("metric inverse active-overlap dimensions disagree");
-    const Eigen::Map<const Eigen::MatrixXd> active_metric(overlap.data(), n_active, n_active);
-    const Eigen::LLT<Eigen::MatrixXd> active_factor(active_metric);
-    if (active_factor.info() != Eigen::Success)
-      throw std::runtime_error("metric inverse orbital factorization failed");
-    const Eigen::MatrixXd r = active_factor.matrixU();
-    const xmvb::vb::ExteriorOrbitalTransform alpha(
-        context.same_spin_pair_cache.alpha_reuse_table.unique_determinants, r);
-    const xmvb::vb::ExteriorOrbitalTransform beta(
-        context.same_spin_pair_cache.beta_reuse_table.unique_determinants, r);
+    const std::size_t column_bytes =
+        (static_cast<std::size_t>(first_grid.size()) + 4 * n) * sizeof(double);
+    const xmvb::vb::StructureMetricInverse metric_inverse(
+        action, context.same_spin_pair_cache.alpha_reuse_table.unique_determinants,
+        context.same_spin_pair_cache.beta_reuse_table.unique_determinants,
+        complete_space, 64 * 1024 * 1024, column_bytes);
     const auto inverse_metric = [&](const Eigen::MatrixXd& rhs) {
-      Eigen::MatrixXd carrier = expansion * solve_spin(rhs);
-      for (int column = 0; column < carrier.cols(); ++column) {
-        Eigen::MatrixXd grid = Eigen::Map<const Eigen::MatrixXd>(carrier.col(column).data(), n_alpha, n_beta);
-        alpha.apply_inverse_adjoint_left(&grid);
-        beta.apply_inverse_adjoint_right_block(grid);
-        alpha.apply_inverse_left(&grid);
-        beta.apply_inverse_right_block(grid);
-        carrier.col(column) = Eigen::Map<const Eigen::VectorXd>(grid.data(), grid.size());
-      }
-      return solve_spin(Eigen::MatrixXd(expansion.transpose() * carrier));
+      return metric_inverse.apply(rhs);
     };
+    std::cout << "sparse_metric_factor_bytes = " << metric_inverse.factor_bytes()
+              << "\nsparse_metric_block_count = " << metric_inverse.block_count()
+              << "\nsparse_metric_max_block = " << metric_inverse.max_block_size() << '\n';
     Eigen::MatrixXd rhs(n, 3);
     for (int column = 0; column < rhs.cols(); ++column)
       for (int row = 0; row < n; ++row)
@@ -170,10 +129,16 @@ void audit_structure_response(
         symmetry_error > 1.0e-10 || pairings.diagonal().minCoeff() <= 0.0)
       throw std::runtime_error("factorized structure metric inverse failed its certificate");
 
-    // Ground-root control only. These three synthetic RHS columns test the
-    // same bordered equation and relative tolerance with both preconditioners.
+    // Ground-root control only. The actual orbital coupling tests the same
+    // horizontal equation and relative tolerance with both preconditioners.
     // No dense response inverse enters either operator application.
     if (context.selected_state_indices.size() == 1 && context.selected_state_indices[0] == 0) {
+      if (orbital_forcing.rows() != n || orbital_forcing.cols() != 1 ||
+          !orbital_forcing.allFinite() || !(orbital_forcing.norm() > 0.0))
+        throw std::invalid_argument("ground response control needs a finite nonzero orbital forcing");
+      const Eigen::MatrixXd& rhs = orbital_forcing;
+      std::cout << "response_control_rhs_kind = orbital_coupling"
+                << "\nresponse_control_rhs_norm = " << rhs.norm() << '\n';
       const Eigen::VectorXd c = context.selected_state_eigenvectors.col(0);
       const Eigen::VectorXd mc = m * c;
       const Eigen::VectorXd normal = mc.normalized();

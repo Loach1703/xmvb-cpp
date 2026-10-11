@@ -1069,6 +1069,28 @@ Eigen::MatrixXd StructureAction::orthogonalize_structure_block(
   return orthogonal;
 }
 
+void StructureAction::inverse_orbital_transform(Eigen::MatrixXd* spin_products) const {
+  if (!direct_ci_ || spin_products == nullptr ||
+      spin_products->rows() != n_unique_alpha_ ||
+      spin_products->cols() <= 0 || spin_products->cols() % n_unique_beta_ != 0)
+    throw std::invalid_argument("inverse orbital transform needs a complete packed spin carrier");
+  direct_ci_->alpha_transform.apply_inverse_left(spin_products);
+  for (int first = 0; first < spin_products->cols(); first += n_unique_beta_)
+    direct_ci_->beta_transform().apply_inverse_right_block(
+        spin_products->middleCols(first, n_unique_beta_));
+}
+
+void StructureAction::inverse_adjoint_orbital_transform(Eigen::MatrixXd* spin_products) const {
+  if (!direct_ci_ || spin_products == nullptr ||
+      spin_products->rows() != n_unique_alpha_ ||
+      spin_products->cols() <= 0 || spin_products->cols() % n_unique_beta_ != 0)
+    throw std::invalid_argument("inverse orbital adjoint needs a complete packed spin carrier");
+  direct_ci_->alpha_transform.apply_inverse_adjoint_left(spin_products);
+  for (int first = 0; first < spin_products->cols(); first += n_unique_beta_)
+    direct_ci_->beta_transform().apply_inverse_adjoint_right_block(
+        spin_products->middleCols(first, n_unique_beta_));
+}
+
 StructureActionResult StructureAction::apply(
     const Eigen::Ref<const Eigen::MatrixXd>& vectors) const {
   if (vectors.rows() != n_structures_ || vectors.cols() <= 0) {

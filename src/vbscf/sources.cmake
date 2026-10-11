@@ -28,6 +28,7 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/evaluation/evaluator.cpp
   vbscf/structures/expansion/expander.cpp
   vbscf/structures/orthogonal_ci/exterior_transform.cpp
+  vbscf/structures/orthogonal_ci/metric.cpp
   vbscf/structures/orthogonal_ci/integrals.cpp
   vbscf/structures/orthogonal_ci/planner.cpp
   vbscf/structures/orthogonal_ci/sigma.cpp

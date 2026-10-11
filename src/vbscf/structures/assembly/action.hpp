@@ -13,6 +13,8 @@
 
 namespace xmvb::vb {
 
+class StructureMetricInverse;
+
 /**
  * @brief Result of applying the structure Hamiltonian and overlap to a vector block.
  *
@@ -209,6 +211,11 @@ public:
   Eigen::MatrixXd orthogonalize_structure_block(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
 
+  /** @brief Applies inverse exterior transforms to packed spin products in place. */
+  void inverse_orbital_transform(Eigen::MatrixXd* spin_products) const;
+  /** @brief Applies inverse-adjoint exterior transforms to spin products in place. */
+  void inverse_adjoint_orbital_transform(Eigen::MatrixXd* spin_products) const;
+
   /**
    * @brief Contracts packed unique-string-product images into structures.
    *
@@ -242,6 +249,7 @@ public:
   StructureActionStorage storage() const noexcept;
 
 private:
+  friend class StructureMetricInverse;
   struct OrthogonalDirectCiData;
   struct TiledPairData;
   struct StructureTerm {

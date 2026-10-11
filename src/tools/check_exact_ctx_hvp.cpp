@@ -439,10 +439,17 @@ int main(int argc, char** argv) {
         layout,
         &chart);
     if (options.response_spectrum_limit > 0) {
+      Eigen::MatrixXd forcing;
+      if (input.complete_active_space && selected_states.size() == 1 &&
+          accepted.second_order_context->n_structures >= 2 &&
+          accepted.second_order_context->n_structures <= options.response_spectrum_limit) {
+        forcing = -exact_hvp.apply_orbital_coupling(direction).scaled_structure_forcing;
+      }
       xmvb::tools::audit_structure_response(exact_hvp.structure_action(),
                               *accepted.second_order_context,
                               input.complete_active_space,
-                              options.response_spectrum_limit);
+                              options.response_spectrum_limit,
+                              forcing);
       return 0;
     }
     if (options.curvature_steps > 0) {

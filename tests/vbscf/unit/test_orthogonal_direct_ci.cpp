@@ -2,6 +2,7 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -16,6 +17,7 @@
 
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
+#include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "vbscf/structures/orthogonal_ci/planner.hpp"
 #include "vbscf/structures/orthogonal_ci/sigma.hpp"
 #include "vbscf/determinants/pairs/evaluator.hpp"
@@ -1325,6 +1327,70 @@ void check_sigma_action() {
   require(
       topology_action.storage().orthogonal_direct_ci,
       "complete fixed-spin carrier did not select direct CI");
+  bool selected_metric_rejected = false;
+  try {
+    const xmvb::vb::StructureMetricInverse invalid(
+        topology_action, topology.alpha_reuse_table.unique_determinants,
+        topology.beta_reuse_table.unique_determinants, false, 65536, 65536);
+  } catch (const std::invalid_argument&) {
+    selected_metric_rejected = true;
+  }
+  require(selected_metric_rejected,
+          "complete carrier incorrectly admitted a selected structure metric inverse");
+
+  // Complete spin-product basis with nonorthogonal recoupling inside each
+  // spatial occupation pattern. This tests nontrivial Gram blocks and chunks.
+  std::vector<std::vector<xmvb::vb::StructureExpansionTerm>> full_terms(product_dimension);
+  Eigen::MatrixXd full_expansion = Eigen::MatrixXd::Identity(product_dimension, product_dimension);
+  std::map<std::vector<int>, int> first_product;
+  for (int product = 0; product < product_dimension; ++product) {
+    full_terms[product].push_back({product, 1.0});
+    std::vector<int> occupation(n_orbitals, 0);
+    for (int orbital : product_alpha[product]) ++occupation[orbital];
+    for (int orbital : product_beta[product]) ++occupation[orbital];
+    const auto [entry, inserted] = first_product.emplace(occupation, product);
+    if (!inserted) {
+      full_terms[entry->second].push_back({product, 0.25});
+      full_expansion(entry->second, product) = 0.25;
+    }
+  }
+  const Eigen::MatrixXd full_overlap = full_expansion.transpose() * dense_overlap * full_expansion;
+  xmvb::vb::StructureDiagonal full_diagonal;
+  full_diagonal.overlap = full_overlap.diagonal();
+  full_diagonal.hamiltonian =
+      (full_expansion.transpose() * dense_hamiltonian * full_expansion).diagonal();
+  const xmvb::vb::StructureAction full_action(
+      full_terms, product_dimension, topology, packed_overlap,
+      one_electron, two_electron, n_orbitals, &full_diagonal);
+  const std::size_t one_column_bytes = 5 * product_dimension * sizeof(double);
+  const xmvb::vb::StructureMetricInverse full_metric(
+      full_action, topology.alpha_reuse_table.unique_determinants,
+      topology.beta_reuse_table.unique_determinants, true, 65536, one_column_bytes);
+  Eigen::MatrixXd metric_rhs(product_dimension, 7);
+  for (int column = 0; column < metric_rhs.cols(); ++column)
+    for (int row = 0; row < metric_rhs.rows(); ++row)
+      metric_rhs(row, column) = std::sin(0.19 * (row + 1) * (column + 2));
+  const Eigen::MatrixXd metric_solution = full_metric.apply(metric_rhs);
+  const Eigen::MatrixXd reference_metric_solution = full_overlap.partialPivLu().solve(metric_rhs);
+  require((metric_solution - reference_metric_solution).cwiseAbs().maxCoeff() < 3.0e-11 &&
+              (full_action.apply(metric_solution).overlap - metric_rhs).cwiseAbs().maxCoeff() < 3.0e-11,
+          "sparse complete-space metric inverse differs from its dense reference");
+  require(full_metric.factor_bytes() < static_cast<std::size_t>(product_dimension) * product_dimension * sizeof(double) &&
+              full_metric.max_block_size() == 6 && full_metric.block_count() == 19,
+          "spin metric lost its occupation-block representation");
+  for (bool factor_limit : {true, false}) {
+    bool rejected = false;
+    try {
+      const xmvb::vb::StructureMetricInverse invalid(
+          full_action, topology.alpha_reuse_table.unique_determinants,
+          topology.beta_reuse_table.unique_determinants, true,
+          factor_limit ? 0 : 65536,
+          factor_limit ? one_column_bytes : one_column_bytes - 1);
+    } catch (const std::length_error&) {
+      rejected = true;
+    }
+    require(rejected, "structure metric ignored its factor or workspace byte limit");
+  }
   const auto topology_images = topology_action.apply(structure_vectors);
   require(
       (topology_images.hamiltonian -
