@@ -687,6 +687,9 @@ void check_occupation_curvature() {
         build_transported_reduced_lbfgs_preconditioner(
             space, empty_history, 1, LbfgsInitialInverse::OrbitalBlock);
     const Eigen::Vector2d probe(0.3, -0.7);
+    const Eigen::VectorXd pairings = space.orbital_pairings(probe, action * probe);
+    require(std::abs(pairings.sum() - probe.dot(action * probe)) < 1.0e-12,
+            "orbital diagnostic does not conserve the vector-covector pairing");
     require((standard_lbfgs.apply(probe) - probe).norm() < 1.0e-14,
             "standard L-BFGS did not start from the identity inverse");
     require((block_preconditioner.apply(probe) - inverse * probe).norm() <

@@ -218,6 +218,28 @@ bool build_accepted_neo_keyframe(
           physical_gradient_norm, actual_gradient, predicted_gradient, seconds);
     };
   }
+  if (diagnostics::neo_trace_enabled()) {
+    const int n_inactive =
+        (accepted_orbitals.n_total_electrons - accepted_orbitals.n_active_electrons) / 2;
+    observe_candidate = [&, n_inactive, audit = std::move(observe_candidate)](
+                            const ResponseNeoResult& candidate) {
+      if (audit) audit(candidate);
+      const int count = candidate.orbital_actions;
+      if (count <= 0 || ((count & (count - 1)) != 0 &&
+                        candidate.residual_norm > candidate.residual_target)) return;
+      const Eigen::VectorXd& residual = candidate.kkt_residual.orbital;
+      const Eigen::VectorXd inverse_residual =
+          chart.apply_inverse_reduced_block_preconditioner(residual);
+      const Eigen::VectorXd weights = chart.orbital_pairings(inverse_residual, residual);
+      const double total = weights.sum();
+      for (Eigen::Index orbital = 0; orbital < weights.size(); ++orbital) {
+        diagnostics::neo_trace("orbital_residual",
+            "hvp=%d,orbital=%ld,inactive=%d,block_pairing=%.17g,fraction=%.17g,total=%.17g",
+            count, static_cast<long>(orbital + 1), static_cast<int>(orbital < n_inactive),
+            weights[orbital], total > 0.0 ? weights[orbital] / total : 0.0, total);
+      }
+    };
+  }
   std::function<ResponseNeoResult(const NeoOptions&, bool)> solve_step;
   if (use_structure_response) {
     ResponseNeoModelObserver observe_model;
@@ -237,7 +259,7 @@ bool build_accepted_neo_keyframe(
         const Eigen::MatrixXd projected = basis.transpose() * images;
         const Eigen::MatrixXd symmetric = 0.5 * (projected + projected.transpose());
         Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(
-            model, symmetric, Eigen::EigenvaluesOnly);
+            model, symmetric);
         Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> core_spectrum(
             core, symmetric, Eigen::EigenvaluesOnly);
         if (spectrum.info() != Eigen::Success || core_spectrum.info() != Eigen::Success)
@@ -247,6 +269,14 @@ bool build_accepted_neo_keyframe(
             static_cast<long>(dimension), spectrum.eigenvalues()[0],
             spectrum.eigenvalues()[dimension - 1], core_spectrum.eigenvalues()[0],
             core_spectrum.eigenvalues()[dimension - 1]);
+        const Eigen::VectorXd soft = basis * spectrum.eigenvectors().col(0);
+        const Eigen::VectorXd soft_image = images * spectrum.eigenvectors().col(0);
+        const Eigen::VectorXd weights = chart.orbital_pairings(soft, soft_image);
+        for (Eigen::Index orbital = 0; orbital < weights.size(); ++orbital)
+          diagnostics::neo_trace("soft_orbital",
+              "dimension=%ld,orbital=%ld,block_pairing=%.17g,total=%.17g",
+              static_cast<long>(dimension), static_cast<long>(orbital + 1),
+              weights[orbital], weights.sum());
       };
     }
     auto problem = std::make_shared<ResponseNeoProblem>(

@@ -1007,6 +1007,27 @@ OrbitalChart::project_vector(
   return project_impl(packed_vector, true, true);
 }
 
+Eigen::VectorXd OrbitalChart::orbital_pairings(
+    const Eigen::VectorXd& vector,
+    const Eigen::VectorXd& covector) const {
+  require_finite_vector_size(vector, reduced_size_, "orbital pairing vector");
+  require_finite_vector_size(covector, reduced_size_, "orbital pairing covector");
+  int count = 0;
+  for (const auto& block : block_bases_)
+    for (const auto& orbital : block.orbitals)
+      count = std::max(count, orbital.orbital_index + 1);
+  Eigen::VectorXd result = Eigen::VectorXd::Zero(count);
+  for (const auto& block : block_bases_) {
+    for (const auto& orbital : block.orbitals) {
+      result[orbital.orbital_index] +=
+          vector.segment(orbital.local_reduced_offset, orbital.local_reduced_size)
+              .dot(covector.segment(orbital.local_reduced_offset,
+                                    orbital.local_reduced_size));
+    }
+  }
+  return result;
+}
+
 Eigen::VectorXd OrbitalChart::apply_inverse_reduced_curvature(
     const Eigen::VectorXd& reduced_vector) const {
   require_finite_vector_size(

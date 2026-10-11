@@ -107,6 +107,16 @@ public:
   Eigen::VectorXd apply_reduced_curvature(
       const Eigen::VectorXd& reduced_vector) const;
 
+  /**
+   * @brief Partitions a reduced vector-covector pairing by orbital index.
+   *
+   * Entries sum to the full pairing. This is a coordinate-block diagnostic,
+   * not a decomposition of the coupled physical dual norm.
+   */
+  Eigen::VectorXd orbital_pairings(
+      const Eigen::VectorXd& vector,
+      const Eigen::VectorXd& covector) const;
+
   Eigen::VectorXd apply_inverse_reduced_block_preconditioner(
       const Eigen::VectorXd& reduced_vector) const;
 
