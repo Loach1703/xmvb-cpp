@@ -1,4 +1,5 @@
 #include "vbscf/integrals/active/two_electron/response/internal.hpp"
+#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -124,3 +125,46 @@ Eigen::MatrixXd contract_exchange_direction(
 }
 
 }  // namespace xmvb::vb::detail
+
+namespace xmvb::vb {
+
+std::vector<double> backpropagate_exact_active_h1e_gradient(
+    const std::vector<double>& active_gradient,
+    const ExactPackedActiveTwoElectronAdjointCache& cache) {
+  const int n_bf = cache.n_basis_functions;
+  const int n = cache.n_active_orbitals;
+  if (n_bf <= 0 || n <= 0 ||
+      active_gradient.size() != static_cast<std::size_t>(n) * n ||
+      cache.accepted_pair_products == nullptr ||
+      cache.exchange_integrals.rows() != static_cast<Eigen::Index>(n_bf) * n_bf ||
+      cache.exchange_integrals.cols() != static_cast<Eigen::Index>(n) * n)
+    throw std::invalid_argument("active H1e adjoint integral dimensions mismatch");
+  const Eigen::Map<const Eigen::MatrixXd> gradient(active_gradient.data(), n, n);
+  const ExactCtxPairMatrix density = gradient + gradient.transpose();
+  const Eigen::Index pairs = cache.active_pair_first_indices.size();
+  Eigen::VectorXd packed(pairs);
+  for (Eigen::Index p = 0; p < pairs; ++p) {
+    const int a = cache.active_pair_first_indices[p];
+    const int b = cache.active_pair_second_indices[p];
+    packed[p] = density(a, b) * (a == b ? 1.0 : 2.0);
+  }
+  const Eigen::Map<const Eigen::VectorXd> full(density.data(), n * n);
+  std::vector<double> result(static_cast<std::size_t>(n_bf) * n_bf);
+  const int threads = coarse_openmp_thread_count(
+      effective_openmp_thread_count(), result.size());
+  // For D=C*(G+G^T)*C^T, the physical AO adjoint is 2*J(D)-K(D).
+  // Half of this symmetric matrix has exactly the original pairing with all
+  // admissible dD; the orbital pullback consumes R+R^T, not an AO gauge.
+#pragma omp parallel for num_threads(threads) schedule(static)
+  for (Eigen::Index row = 0; row < static_cast<Eigen::Index>(result.size()); ++row) {
+    const int mu = row / n_bf;
+    const int nu = row % n_bf;
+    const double coulomb = cache.accepted_pair_products->row(
+        detail::ao_pair_index(mu, nu)).dot(packed);
+    const double exchange = cache.exchange_integrals.row(row).dot(full);
+    result[static_cast<std::size_t>(nu) * n_bf + mu] = coulomb - 0.5 * exchange;
+  }
+  return result;
+}
+
+}  // namespace xmvb::vb

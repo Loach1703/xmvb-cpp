@@ -14,6 +14,7 @@
 #include "vbscf/integrals/active/two_electron/response/backpropagator.hpp"
 #include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 #include "vbscf/integrals/active/two_electron/response/directional.hpp"
+#include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
 
 namespace {
 
@@ -200,6 +201,27 @@ int main(int argc, char** argv) {
               << "\nexchange_hvp_reference_error = " << exchange_error << '\n';
     if (exchange_error > 1.0e-11 * std::max(1.0, max_abs_value(pair_hvp)))
       throw std::runtime_error("exchange HVP disagrees with AO-pair reference");
+    if (accepted_cache.exchange_integrals.size() != 0) {
+      Eigen::MatrixXd active(n_active_orbitals, n_active_orbitals);
+      for (int a = 0; a < n_active_orbitals; ++a)
+        for (int b = 0; b < n_active_orbitals; ++b)
+          active(a, b) = std::sin(0.17 * (a + 1) + 0.31 * (b + 1));
+      const auto& coefficients = *accepted_cache.accepted_active_coefficients;
+      const Eigen::MatrixXd ao_gradient = coefficients * active.transpose() * coefficients.transpose();
+      const auto reference = xmvb::vb::AoEffectiveOneElectronBackpropagator().backpropagate(
+          ao_gradient, input.ao_integral_input).inactive_density_gradient;
+      const auto contracted = xmvb::vb::backpropagate_exact_active_h1e_gradient(
+          xmvb::vb::flatten_matrix_column_major(active), accepted_cache);
+      const int n_bf = accepted_cache.n_basis_functions;
+      const Eigen::Map<const Eigen::MatrixXd> r(reference.data(), n_bf, n_bf);
+      const Eigen::Map<const Eigen::MatrixXd> c(contracted.data(), n_bf, n_bf);
+      const Eigen::MatrixXd physical_reference = r + r.transpose();
+      const Eigen::MatrixXd physical_contracted = c + c.transpose();
+      const double error = max_abs_difference(physical_reference, physical_contracted);
+      std::cout << "active_h1e_adjoint_reference_error = " << error << '\n';
+      if (error > 1.0e-11 * std::max(1.0, max_abs_value(physical_reference)))
+        throw std::runtime_error("active H1e adjoint disagrees with AO-ERI transpose");
+    }
     const auto measure_hvp = [&](const char* label) {
       xmvb::vb::ExactPackedActiveTwoElectronApplyWorkspace workspace;
       Eigen::MatrixXd result;

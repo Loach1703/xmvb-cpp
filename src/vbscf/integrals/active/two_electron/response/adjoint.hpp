@@ -11,6 +11,19 @@
 namespace xmvb::vb {
 
 /**
+ * @brief Pulls an active H1e adjoint back to the symmetric inactive density.
+ *
+ * Reuses accepted Coulomb and exchange integral images. The returned AO
+ * covector is the symmetric representative of the unique-ERI transpose:
+ * its sum with its transpose is identical to that operator's result. Only
+ * symmetric density variations are admissible in orbital preparation.
+ * Requires resident pair products and the bounded exchange image.
+ */
+std::vector<double> backpropagate_exact_active_h1e_gradient(
+    const std::vector<double>& active_gradient,
+    const ExactPackedActiveTwoElectronAdjointCache& cache);
+
+/**
  * @brief Backpropagates a changing packed active-2e adjoint at a fixed point.
  *
  * When `K B(C)` is resident, an outer-response adjoint is pulled back without

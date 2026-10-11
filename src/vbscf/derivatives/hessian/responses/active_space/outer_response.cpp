@@ -459,20 +459,25 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
   }
 
   AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator;
-  const auto ao_effective_one_electron_backpropagation_result =
-      ri_factorization != nullptr
-      ? ao_effective_one_electron_backpropagator.backpropagate(
+  std::vector<double> total_inactive_density_gradient;
+  if (exact_two_electron_cache != nullptr &&
+      exact_two_electron_cache->exchange_integrals.size() != 0) {
+    total_inactive_density_gradient = backpropagate_exact_active_h1e_gradient(
+        symmetric_active_one_electron_gradient, *exact_two_electron_cache);
+  } else if (ri_factorization != nullptr) {
+    total_inactive_density_gradient =
+        ao_effective_one_electron_backpropagator.backpropagate(
             active_space_matrix_backpropagation_result
                 .ao_effective_one_electron_gradient,
             *ri_factorization,
-            input.orbital_preparation_input.n_basis_functions)
-      : ao_effective_one_electron_backpropagator.backpropagate(
+            input.orbital_preparation_input.n_basis_functions).inactive_density_gradient;
+  } else {
+    total_inactive_density_gradient =
+        ao_effective_one_electron_backpropagator.backpropagate(
             active_space_matrix_backpropagation_result
                 .ao_effective_one_electron_gradient,
-            input.ao_integral_input);
-
-  std::vector<double> total_inactive_density_gradient =
-      ao_effective_one_electron_backpropagation_result.inactive_density_gradient;
+            input.ao_integral_input).inactive_density_gradient;
+  }
   Eigen::MatrixXd total_active_auxiliary_gradient =
       active_space_matrix_backpropagation_result.active_auxiliary_orbital_gradient;
   total_active_auxiliary_gradient.noalias() +=
