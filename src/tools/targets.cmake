@@ -125,7 +125,8 @@ target_link_libraries(check_exact_two_electron_hvp
     xmvb_output)
 
 add_executable(check_exact_ctx_hvp
-  tools/check_exact_ctx_hvp.cpp)
+  tools/check_exact_ctx_hvp.cpp
+  tools/response_audit.cpp)
 target_link_libraries(check_exact_ctx_hvp
   PRIVATE
     xmvb_vbscf
