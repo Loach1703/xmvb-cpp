@@ -150,8 +150,10 @@ void check_coordinate_trial_budget_cannot_hide_stagnation() {
   require_close(target, 5.0e-5,
                 "absolute coordinate floor hid an unresolved gradient");
   require_close(neo_trial_residual_target(
-      10.0 * coordinate_gradient, physical_gradient, 1.0e-3, physical_target),
-      10.0 * target, "relative trial budget changed under uniform coordinate scaling");
+      2.0 * coordinate_gradient, physical_gradient, 1.0e-3, physical_target),
+      2.0 * target, "absolute-floor correction did not track compressed coordinates");
+  require_close(neo_trial_residual_target(0.0045, 0.0078, 0.00102, 0.001),
+                0.00102, "useful historical candidate budget was unnecessarily tightened");
   require_close(neo_trial_residual_target(1.0, 1.0, 0.1, 0.1), 0.1,
                 "trial safeguard loosened an existing tighter budget");
   require_close(neo_trial_residual_target(0.01, 1.0, 0.0001, 0.0), 0.0001,

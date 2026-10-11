@@ -255,8 +255,9 @@ NeoResult solve_neo(
             spectrum.eigenvalues(),
             spectrum.eigenvectors().transpose() * whitened_gradient,
             options.trust_radius);
-    const Eigen::VectorXd coefficients =
-        whitening * spectrum.eigenvectors() * projected_step.step;
+    const Eigen::VectorXd white_step =
+        spectrum.eigenvectors() * projected_step.step;
+    const Eigen::VectorXd coefficients = whitening * white_step;
 
     result.step.noalias() = q * coefficients;
     result.hessian_step.noalias() = hq * coefficients;

@@ -11,8 +11,8 @@ bool neo_trial_allowed(double physical_gradient_norm, double gradient_tolerance)
 
 /** @brief Expresses the absolute early-trial floor in relative gradient units.
  * This is a candidate-generation safeguard, not a physical KKT certificate.
- * A fixed absolute coordinate floor must not admit an essentially unchanged
- * residual merely because the chart compresses the gradient.
+ * Budgets already below the coordinate gradient are preserved. A fixed
+ * absolute floor must not make even the zero step eligible for a trial.
  */
 double neo_trial_residual_target(double coordinate_gradient,
                                  double physical_gradient,

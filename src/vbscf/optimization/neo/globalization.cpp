@@ -44,6 +44,9 @@ double neo_trial_residual_target(double coordinate_gradient,
   if (coordinate_target < absolute_target)
     throw std::invalid_argument("NEO coordinate target is below its absolute component");
   if (physical_gradient == 0.0) return 0.0;
+  // Preserve a historical candidate budget that already requires progress.
+  // Correct only the regime where even p=0 could pass the coordinate test.
+  if (coordinate_target < coordinate_gradient) return coordinate_target;
   return coordinate_target - absolute_target + absolute_target *
       std::min(1.0, coordinate_gradient / physical_gradient);
 }

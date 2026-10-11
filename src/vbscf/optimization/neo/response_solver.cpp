@@ -725,8 +725,10 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
     const SpectralTrustRegionSolution projected = solve_spectral_trust_region(
         spectrum_values_, spectral_gradient_,
         options.trust_radius);
-    const Eigen::VectorXd p_coefficients = whitening *
-        spectrum_vectors_ * projected.step;
+    // Associate the lift as two matrix-vector products. Forming W * V
+    // first would spend O(k^3) and allocate a dense matrix for one vector.
+    const Eigen::VectorXd white_step = spectrum_vectors_ * projected.step;
+    const Eigen::VectorXd p_coefficients = whitening * white_step;
     const Eigen::VectorXd q_coefficients =
         response_coefficients * p_coefficients;
 
