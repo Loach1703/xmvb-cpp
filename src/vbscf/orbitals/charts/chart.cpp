@@ -14,6 +14,7 @@
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
 #include <Eigen/SVD>
+#include <lapacke.h>
 #include "vbscf/orbitals/charts/partition.hpp"
 #include "vbscf/orbitals/charts/physical_metric.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
@@ -133,19 +134,21 @@ PositiveCurvatureBlock build_positive_curvature_block(
         "orbital-chart curvature block must be finite and square");
   }
 
-  const Eigen::MatrixXd sym_block =
+  Eigen::MatrixXd eigenvectors =
       0.5 * (curvature_block + curvature_block.transpose());
+  Eigen::VectorXd eigenvalues(curvature_block.rows());
   diagnostics::ScopedPhase eigen_phase(diagnostics::Phase::BlockEigen);
-  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(sym_block);
+  const lapack_int dimension = static_cast<lapack_int>(eigenvalues.size());
+  const lapack_int info = LAPACKE_dsyevd(
+      LAPACK_COL_MAJOR, 'V', 'L', dimension,
+      eigenvectors.data(), dimension, eigenvalues.data());
   eigen_phase.stop();
-  if (solver.info() != Eigen::Success ||
-      !solver.eigenvalues().allFinite() ||
-      !solver.eigenvectors().allFinite()) {
+  if (info != 0 || !eigenvalues.allFinite() || !eigenvectors.allFinite()) {
     throw std::runtime_error(
         "failed to diagonalize orbital-chart curvature block");
   }
 
-  Eigen::VectorXd safe_eigenvalues = solver.eigenvalues().cwiseAbs();
+  Eigen::VectorXd safe_eigenvalues = eigenvalues.cwiseAbs();
   const double spectral_scale = safe_eigenvalues.maxCoeff();
   if (!(spectral_scale > 0.0) || !std::isfinite(spectral_scale)) {
     throw std::runtime_error(
@@ -157,11 +160,11 @@ PositiveCurvatureBlock build_positive_curvature_block(
     safe_eigenvalues[i] = std::max(safe_eigenvalues[i], spectral_floor);
   }
   PositiveCurvatureBlock result;
-  result.matrix = solver.eigenvectors() *
-      safe_eigenvalues.asDiagonal() * solver.eigenvectors().transpose();
-  result.inverse = solver.eigenvectors() *
+  result.matrix = eigenvectors *
+      safe_eigenvalues.asDiagonal() * eigenvectors.transpose();
+  result.inverse = eigenvectors *
       safe_eigenvalues.cwiseInverse().asDiagonal() *
-      solver.eigenvectors().transpose();
+      eigenvectors.transpose();
   return result;
 }
 

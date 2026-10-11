@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <Eigen/Cholesky>
+#include <Eigen/Eigenvalues>
 #include <Eigen/Geometry>
 #include <Eigen/LU>
 #include <Eigen/SVD>
@@ -643,6 +644,43 @@ void check_complete_oeo_active_subspace_gauge() {
   std::cout << "complete-CAS metric gauge, adjoint, projector and dual invariance: passed\n";
 }
 
+void check_curvature_spectral_regularization() {
+  Eigen::MatrixXd c = Eigen::MatrixXd::Zero(3, 1);
+  c(0, 0) = 1.0;
+  auto input = make_input(c, {{0, 1, 2}}, 0);
+  input.ao_overlap_matrix.setIdentity();
+  const SparseParameterLayout view(input);
+  Eigen::Matrix2d rotation;
+  rotation << std::cos(0.37), -std::sin(0.37),
+              std::sin(0.37), std::cos(0.37);
+  for (const Eigen::Vector2d spectrum :
+       {Eigen::Vector2d(0.3, 2.0), Eigen::Vector2d(-1.0, 3.0),
+        Eigen::Vector2d(1.0e-14, 2.0), Eigen::Vector2d(2.0, 2.0)}) {
+    Eigen::MatrixXd f = -2.0 * Eigen::Matrix3d::Identity();
+    f.bottomRightCorner<2, 2>().noalias() +=
+        0.5 * rotation * spectrum.asDiagonal() * rotation.transpose();
+    const OrbitalChart space(input, view, c, c, &f);
+    Eigen::MatrixXd u(3, 2);
+    for (int column = 0; column < 2; ++column)
+      u.col(column) = space.expand_step(Eigen::Vector2d::Unit(column));
+    const Eigen::Matrix2d signed_block =
+        2.0 * u.transpose() * (f - f(0, 0) * Eigen::Matrix3d::Identity()) * u;
+    const Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> reference(signed_block);
+    Eigen::Vector2d safe = reference.eigenvalues().cwiseAbs();
+    safe = safe.cwiseMax(std::sqrt(std::numeric_limits<double>::epsilon()) * safe.maxCoeff());
+    const Eigen::Matrix2d positive = reference.eigenvectors() *
+        safe.asDiagonal() * reference.eigenvectors().transpose();
+    const Eigen::Matrix2d inverse = reference.eigenvectors() *
+        safe.cwiseInverse().asDiagonal() * reference.eigenvectors().transpose();
+    const Eigen::Vector2d probe(0.3, -0.7);
+    require((space.apply_reduced_curvature(probe) - positive * probe).norm() < 1.0e-12,
+            "curvature spectrum regularization differs from the independent reference");
+    require((space.apply_inverse_reduced_block_preconditioner(probe) - inverse * probe).norm() <
+                2.0e-8 * std::max(1.0, (inverse * probe).norm()),
+            "regularized curvature inverse differs from the independent reference");
+  }
+}
+
 void check_occupation_curvature() {
   Eigen::MatrixXd c = Eigen::MatrixXd::Zero(3, 1);
   c(0, 0) = 1.0;
@@ -1232,6 +1270,7 @@ int main() {
   try {
     check_response_spectrum_summary();
     check_accuracy_aware_forcing();
+    check_curvature_spectral_regularization();
     check_occupation_curvature();
     check_pullback_secant_transport();
     Eigen::MatrixXd c(6, 4);
