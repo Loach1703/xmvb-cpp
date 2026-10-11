@@ -51,8 +51,12 @@ not merely to the final stopping criterion.
 
 ## Conclusion and limits
 
-For NEGPIA, omitting structure coupling to reduce estimated action cost
-caused a substantial convergence regression. Model admission must account
+For NEGPIA, switching from coupled to core-only to reduce estimated action
+cost caused a substantial convergence regression. This switch changes both
+the local-active orbital Hessian contribution and the orbital/structure
+coupling: `apply_orbital_coupling` enables `local_active_response`, whereas
+the core-only branch disables it. This experiment therefore does not isolate
+structure coupling as the cause. Model admission must account
 for model quality and total nonlinear cost, not only per-action dimensions.
 This does not establish that complete coupling is economical for every
 large active space. Production admission has not been changed: other

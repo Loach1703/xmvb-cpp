@@ -19,6 +19,7 @@ module load anaconda3/25.06
 set -u
 source_dir="$1"
 snapshots="$2"
+candidate="${3:-coupled}"
 dependencies=/home/guqqgroup/taoxia/software/conda-envs/xmvb-cpp-89c74a6
 export LD_LIBRARY_PATH="$dependencies/lib:${LD_LIBRARY_PATH:-}"
 export OMP_NUM_THREADS=32 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
@@ -37,7 +38,7 @@ for variable in OMP_NUM_THREADS OMP_PLACES OMP_PROC_BIND OMP_MAX_ACTIVE_LEVELS \
     printf '%s=%s\n' "$variable" "${!variable}" >> "$root/threads.txt"
 done
 # Independent systems run in parallel; each matched pair shares one node.
-for variant in current coupled; do
+for variant in current "$candidate"; do
     mkdir -p "$root/$variant"
     cd "$root/$variant"
     cp "$historical/input.xmi" input.xmi

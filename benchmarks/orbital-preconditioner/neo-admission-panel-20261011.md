@@ -57,8 +57,10 @@ are not comparisons at exactly identical final energy accuracy.
 
 ## Interpretation
 
-Coupling removal is a genuine model-quality regression for NEGPIA, but
-complete coupling is not a universal performance solution. Most other
+The coupled-to-core-only switch is a genuine model-quality regression for
+NEGPIA, but the switch changes both local-active orbital curvature and
+structure coupling. Their individual effects require a separate ablation.
+Complete coupling is not a universal performance solution. Most other
 core-only cases already need only 12 to 25 orbital HVPs; adding hundreds of
 structure actions can offset their reduced nonlinear iteration count.
 

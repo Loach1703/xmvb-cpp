@@ -1,0 +1,12 @@
+diff --git a/src/vbscf/optimization/backends/neo.cpp b/src/vbscf/optimization/backends/neo.cpp
+--- a/src/vbscf/optimization/backends/neo.cpp
++++ b/src/vbscf/optimization/backends/neo.cpp
+@@ -291,7 +291,7 @@
+     };
+   } else {
+     HvpComponents core_components;
+-    core_components.local_active_response = false;
++    core_components.local_active_response = true;
+     core_components.structure_response = false;
+     auto problem = std::make_shared<NeoProblem>(
+         reduced_gradient,
