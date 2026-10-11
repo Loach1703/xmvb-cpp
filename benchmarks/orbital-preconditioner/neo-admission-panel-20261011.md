@@ -59,7 +59,9 @@ are not comparisons at exactly identical final energy accuracy.
 
 The coupled-to-core-only switch is a genuine model-quality regression for
 NEGPIA, but the switch changes both local-active orbital curvature and
-structure coupling. Their individual effects require a separate ablation.
+structure coupling, including the overlap-normalization gauge contribution.
+Their individual effects require a separate ablation. The subsequent
+same-point check is recorded in `neo-component-audit-20261011.md`.
 Complete coupling is not a universal performance solution. Most other
 core-only cases already need only 12 to 25 orbital HVPs; adding hundreds of
 structure actions can offset their reduced nonlinear iteration count.

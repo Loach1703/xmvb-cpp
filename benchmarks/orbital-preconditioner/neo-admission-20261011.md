@@ -56,7 +56,10 @@ cost caused a substantial convergence regression. This switch changes both
 the local-active orbital Hessian contribution and the orbital/structure
 coupling: `apply_orbital_coupling` enables `local_active_response`, whereas
 the core-only branch disables it. This experiment therefore does not isolate
-structure coupling as the cause. Model admission must account
+structure coupling as the cause. A subsequent same-point check also identifies
+the overlap-normalization gauge response present in the coupled action but
+absent from local-active-only action (`neo-component-audit-20261011.md`).
+Model admission must account
 for model quality and total nonlinear cost, not only per-action dimensions.
 This does not establish that complete coupling is economical for every
 large active space. Production admission has not been changed: other

@@ -13,22 +13,28 @@ corrected to state this explicitly.
 
 ## Operator decomposition
 
+**Correction from the subsequent same-point audit:** local-active alone is
+not the fixed-structure orbital Hessian. Coupled orbital action additionally
+includes the selected-state overlap-normalization gauge response. The earlier
+formula omitted this contribution; the corrected decomposition follows.
+
 Let $A_0$ denote direct-core and fixed-upstream pullback curvature, $L$ the
-additional local-active orbital curvature, $B$ the orbital/structure coupling,
-and $C$ the structure tangent operator. At a stationary structure solution,
+computational local-active contribution, $G$ the overlap-normalization gauge
+contribution, $B$ the horizontal orbital/structure coupling, and $C$ the
+structure tangent operator. At a stationary structure solution,
 with the inverse restricted to the appropriate tangent space, the formal
 relaxed orbital operator is
 
 $$
-H_{\mathrm{rel}}=A_0+L-B^T C^\dagger B.
+\bar A=A_0+L+G,\qquad H_{\mathrm{rel}}=\bar A-B^T C^\dagger B.
 $$
 
 The production core-only approximation is $A_0$, not the complete
-fixed-structure orbital operator $A_0+L$. The omitted response is therefore
+fixed-structure orbital operator $\bar A$. The omitted response is therefore
 the combination
 
 $$
-\Delta H=L-B^T C^\dagger B,
+\Delta H=L+G-B^T C^\dagger B,
 $$
 
 not solely the structure Schur term. If a core-only shifted solve supplies
@@ -93,9 +99,10 @@ converged or failed, and no new optimizer iteration cap was imposed.
 ## What the evidence supports
 
 Adding local-active curvature alone is not a viable improvement on these
-cases. Together with the admission experiments, this makes cancellation
-between local-active and structure-relaxation curvature an important
-hypothesis. It is not proven by trajectories taken at different orbital points.
+cases. The same-point follow-up distinguishes the overlap-normalization
+gauge term from horizontal structure relaxation. The apparent large
+cancellation in the computational local/structure split must not be attributed
+solely to the physical Schur term. See `neo-component-audit-20261011.md`.
 
 Before implementing a model-error-driven admission policy, measure the two
 contributions on exactly the same accepted point and actual candidate direction:
