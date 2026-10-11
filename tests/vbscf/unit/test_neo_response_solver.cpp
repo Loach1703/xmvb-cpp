@@ -961,6 +961,46 @@ void check_physical_mismatch_seeds_response(double scale) {
                 "direction-local seeding changed the coupled Newton solution");
 }
 
+/** @brief An exact core inverse resolves a rank-r response in at most r+1 orbital actions. */
+void check_exact_core_inverse_response_span() {
+  constexpr Eigen::Index n = 12, rank = 3;
+  const Eigen::MatrixXd a = Eigen::VectorXd::LinSpaced(n, 2.0, 8.0).asDiagonal();
+  const Eigen::MatrixXd c = Eigen::Vector3d(1.5, 2.0, 3.0).asDiagonal();
+  Eigen::MatrixXd b(rank, n);
+  for (Eigen::Index i = 0; i < rank; ++i)
+    for (Eigen::Index j = 0; j < n; ++j)
+      b(i, j) = 0.1 * std::sin(static_cast<double>((i + 1) * (j + 2)));
+  const Eigen::VectorXd gradient = Eigen::VectorXd::LinSpaced(n, 0.2, 1.3);
+  const ResponseNeoProblem problem(
+      gradient, rank,
+      [a, b](const Eigen::VectorXd& p) {
+        return ResponseNeoDirection{a * p, b * p};
+      },
+      [b, c](const Eigen::VectorXd& q) {
+        return ResponseNeoDirection{b.transpose() * q, c * q};
+      },
+      [](const Eigen::VectorXd& p) { return p; },
+      [](const Eigen::VectorXd& g) { return g.stableNorm(); },
+      [a](const Eigen::VectorXd& r, double shift, double) {
+        return (r.array() / (a.diagonal().array() + shift)).matrix().eval();
+      });
+  NeoOptions options;
+  options.trust_radius = 10.0;
+  options.relative_residual_tolerance = 1e-12;
+  options.require_curvature_certificate = false;
+  const auto result = xmvb::vb::solve_response_neo(problem, options);
+  const Eigen::MatrixXd relaxed = a - b.transpose() * c.ldlt().solve(b);
+  require(result.converged(),
+          "coupled solve did not converge with the exact core inverse");
+  require(result.orbital_actions <= rank + 1,
+          "exact core inverse failed to retain the rank-plus-one Woodbury span: " +
+              std::to_string(result.orbital_actions) + " actions");
+  require_close(result.step.orbital, -relaxed.ldlt().solve(gradient), 1e-10,
+                "exact core inverse changed the coupled Newton solution");
+  verify_coupled_residual(a, b, c, Eigen::MatrixXd::Identity(n, n),
+                          gradient, options.trust_radius, result);
+}
+
 void check_positive_interior_defers_spectrum() {
   const Eigen::Index n = 8;
   const Eigen::MatrixXd a = Eigen::VectorXd::LinSpaced(n, 1.0, 8.0).asDiagonal();
@@ -1080,6 +1120,7 @@ int main() {
     check_trial_response_within_physical_budget();
     check_changed_trial_refreshes_structure_response();
     check_positive_interior_defers_spectrum();
+    check_exact_core_inverse_response_span();
     check_spd_structure_and_explicit_schur();
     check_anisotropic_coupled_dual_residual();
     check_negative_relaxed_curvature();
