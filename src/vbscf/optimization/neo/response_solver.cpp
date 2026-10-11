@@ -90,6 +90,35 @@ struct StructureInverse {
   Eigen::MatrixXd null_vectors;
 };
 
+/** @brief Extends a congruence under an upper-triangular whitening transform.
+ *
+ * The previous leading blocks of A and W are immutable. Only the new border
+ * and corner of W^T A W require products; one added column costs O(k^2).
+ */
+void extend_whitened_block(
+    const Eigen::MatrixXd& a,
+    const Eigen::MatrixXd& whitening,
+    Eigen::MatrixXd* white) {
+  const Eigen::Index previous = white->rows();
+  const Eigen::Index added = a.rows() - previous;
+  if (added == 0) return;
+  const auto v = whitening.topRightCorner(previous, added);
+  const auto d = whitening.bottomRightCorner(added, added);
+  const Eigen::MatrixXd top_image =
+      a.topLeftCorner(previous, previous) * v +
+      a.topRightCorner(previous, added) * d;
+  const Eigen::MatrixXd border =
+      whitening.topLeftCorner(previous, previous).transpose() * top_image;
+  const Eigen::MatrixXd corner = v.transpose() * top_image +
+      d.transpose() * (a.bottomLeftCorner(added, previous) * v +
+                       a.bottomRightCorner(added, added) * d);
+  white->conservativeResize(a.rows(), a.cols());
+  white->topRightCorner(previous, added) = border;
+  white->bottomLeftCorner(added, previous) = border.transpose();
+  white->bottomRightCorner(added, added) =
+      0.5 * (corner + corner.transpose());
+}
+
 StructureInverse symmetric_pseudoinverse(const Eigen::MatrixXd& matrix) {
   if (matrix.rows() == 0) {
     return {matrix, Eigen::MatrixXd(matrix.rows(), 0)};
@@ -657,10 +686,17 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
       }
 
       response_coefficients_.noalias() = -structure_inverse_ * b;
-      const Eigen::MatrixXd relaxed = a + b.transpose() * response_coefficients_;
-      if (observe_model) observe_model(qo, a, relaxed);
-      spectrum_vectors_ =
-          whitening_.transpose() * relaxed * whitening_;
+      if (observe_model) {
+        const Eigen::MatrixXd relaxed = a + b.transpose() * response_coefficients_;
+        observe_model(qo, a, relaxed);
+      }
+      extend_whitened_block(a, whitening_, &whitened_orbital_);
+      spectrum_vectors_ = whitened_orbital_;
+      if (qs.cols() != 0) {
+        const Eigen::MatrixXd white_coupling = b * whitening_;
+        spectrum_vectors_.noalias() -= white_coupling.transpose() *
+            (structure_inverse_ * white_coupling);
+      }
       diagnostics::ScopedPhase spectrum_phase(diagnostics::Phase::NeoSpectrum);
       diagnostics::record_matrix_shape(diagnostics::Phase::NeoSpectrum,
                                       qo.cols(), qo.cols());

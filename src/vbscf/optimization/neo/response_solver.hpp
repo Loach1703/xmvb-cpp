@@ -230,6 +230,8 @@ private:
   Eigen::MatrixXd projected_structure_;
   /** @brief Small projected factors; basis dimensions are their revision keys. */
   Eigen::MatrixXd whitening_;
+  /** @brief Immutable leading blocks of W^T A W, extended with new orbitals. */
+  Eigen::MatrixXd whitened_orbital_;
   /** @brief Upper Cholesky factor extended with each new metric column. */
   Eigen::MatrixXd metric_factor_;
   Eigen::MatrixXd structure_inverse_;

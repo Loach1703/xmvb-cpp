@@ -338,6 +338,41 @@ void check_workspace_reuses_actions_after_radius_change() {
                 "reused NEO response differs from a fresh solve");
 }
 
+void check_bordered_whitening_with_coupled_response() {
+  constexpr int no = 12;
+  constexpr int ns = 4;
+  Eigen::MatrixXd a = Eigen::MatrixXd::Zero(no, no);
+  Eigen::MatrixXd metric = Eigen::MatrixXd::Zero(no, no);
+  Eigen::MatrixXd b(ns, no);
+  Eigen::MatrixXd c = Eigen::MatrixXd::Zero(ns, ns);
+  Eigen::VectorXd gradient(no);
+  for (int i = 0; i < no; ++i) {
+    gradient[i] = std::cos(0.7 * (i + 1));
+    for (int j = 0; j < no; ++j) {
+      a(i, j) = 0.1 * std::cos(0.3 * (i - j));
+      metric(i, j) = 0.2 * std::cos(0.5 * (i - j));
+    }
+    a(i, i) += 1.0 + i;
+    metric(i, i) += 0.4 + 0.2 * i;
+    for (int j = 0; j < ns; ++j)
+      b(j, i) = 0.08 * std::sin((j + 1.0) * (i + 1.0));
+  }
+  c.diagonal().setLinSpaced(1.0, 3.0);
+  const auto problem = dense_problem(a, b, c, metric, gradient);
+  ResponseNeoWorkspace workspace(problem);
+  NeoOptions options;
+  options.relative_residual_tolerance = 1.0e-12;
+  const Eigen::MatrixXd relaxed = a - b.transpose() * c.ldlt().solve(b);
+  for (const double radius : {0.1, 0.5, 2.0}) {
+    options.trust_radius = radius;
+    const auto result = workspace.solve(options);
+    verify_coupled_residual(a, b, c, metric, gradient, radius, result);
+    require_close(result.step.orbital,
+                  explicit_orbital_step(relaxed, metric, gradient, radius),
+                  2.0e-9, "bordered whitening changed the coupled step");
+  }
+}
+
 void check_recycled_orbital_guess_starts_subspace() {
   Eigen::VectorXd first_direction;
   const Eigen::Vector2d guess(0.0, 2.0);
@@ -1007,6 +1042,7 @@ int main() {
     check_budget_reports_subspace_limit();
     check_structure_contracts();
     check_workspace_reuses_actions_after_radius_change();
+    check_bordered_whitening_with_coupled_response();
     check_recycled_orbital_guess_starts_subspace();
     check_boundary_residual_uses_shifted_preconditioner();
     check_preconditioner_receives_relative_physical_budget();
