@@ -138,6 +138,35 @@ Eigen::MatrixXd dense(const OrbitalPreparationInput& input) {
   return c;
 }
 
+/** @brief Curvature surrogates must not change quotient maps or stationarity. */
+void check_preconditioner_geometry(
+    const OrbitalPreparationInput& input, bool complete_active_space = false) {
+  const SparseParameterLayout layout(input);
+  const Eigen::MatrixXd orbitals = dense(input);
+  const Eigen::MatrixXd f = Eigen::VectorXd::LinSpaced(
+      input.n_basis_functions, -2., 3.).asDiagonal();
+  const OrbitalChart geometry(input, layout, orbitals, orbitals,
+                              nullptr, false, complete_active_space);
+  const OrbitalChart preconditioned(input, layout, orbitals, orbitals,
+                                    &f, false, complete_active_space);
+  require(geometry.reduced_size() == preconditioned.reduced_size() &&
+              geometry.rank_signature() == preconditioned.rank_signature(),
+          "one-electron preconditioner changed quotient dimensions");
+  const Eigen::VectorXd gradient = Eigen::VectorXd::LinSpaced(
+      layout.pack(input).size(), -.4, .7);
+  require((geometry.project_reduced_gradient(gradient) -
+           preconditioned.project_reduced_gradient(gradient)).norm() < 1.e-12,
+          "one-electron preconditioner changed gradient coordinates");
+  const Eigen::VectorXd step = Eigen::VectorXd::LinSpaced(
+      geometry.reduced_size(), -.2, .3);
+  require((geometry.expand_step(step) - preconditioned.expand_step(step)).norm() < 1.e-12,
+          "one-electron preconditioner changed the physical orbital lift");
+  const NonredundantRetractionMetric metric(geometry, layout, input);
+  const NonredundantRetractionMetric preconditioned_metric(preconditioned, layout, input);
+  require((metric.apply(step) - preconditioned_metric.apply(step)).norm() < 1.e-12,
+          "one-electron preconditioner changed the trust-region metric");
+}
+
 // Finite physical map, independent of both analytic gauge constructions.
 // Ray projectors remove scale/sign without differentiating a normalization.
 Eigen::VectorXd physical_map(const OrbitalPreparationInput& input) {
@@ -1188,6 +1217,9 @@ int main() {
     check_metric_inverse_certificates(full);
     auto oeo = full;
     oeo.orbital_type = kOrbitalTypeOeo;
+    check_preconditioner_geometry(partial);
+    check_preconditioner_geometry(full);
+    check_preconditioner_geometry(oeo, true);
     check_metric_inverse_certificates(oeo, true);
     check_metric_blocks(partial, false);
     check_metric_blocks(frozen, false);

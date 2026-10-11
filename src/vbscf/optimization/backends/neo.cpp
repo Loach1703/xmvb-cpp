@@ -507,15 +507,11 @@ BackendRunResult run_neo_backend(
   const OrbitalPreconditioner preconditioner =
       resolve_neo_preconditioner(*objective, options.orbital_preconditioner);
   OrbitalChart chart = build_orbital_chart(
-      *objective, parameter_view, OrbitalPreconditioner::Identity);
+      *objective, parameter_view, preconditioner);
   auto projected = chart.project_gradient(gradient);
   double final_gradient_inf =
       gradient_infinity_norm(projected.reduced_gradient);
   double final_gradient_l2 = projected.reduced_gradient.norm();
-  if (final_gradient_inf >= options.gradient_tolerance) {
-    chart = build_orbital_chart(
-        *objective, parameter_view, preconditioner);
-  }
   Eigen::VectorXd orbital_guess_packed;
   double recycle_gradient_target =
       neo_forcing_term(final_gradient_l2, chart.reduced_size()) *
@@ -571,8 +567,10 @@ BackendRunResult run_neo_backend(
     // Every accepted point has a new exact gradient and a new local model.
     // It is therefore an outer iteration, including for iteration limits and
     // progress output; grouping such points obscures the actual work.
+    // Preconditioning changes only curvature surrogates, not the quotient
+    // maps. Use one chart for stationarity, reporting, and the next solve.
     OrbitalChart next_geometry = build_orbital_chart(
-        *objective, parameter_view, OrbitalPreconditioner::Identity);
+        *objective, parameter_view, preconditioner);
     auto next_projected = next_geometry.project_gradient(gradient);
     final_gradient_inf =
         gradient_infinity_norm(next_projected.reduced_gradient);
@@ -602,19 +600,7 @@ BackendRunResult run_neo_backend(
       result->converged = true;
       result->termination_reason = "neo_projected_gradient_tolerance";
     }
-    if (!result->converged &&
-        run_result.n_iterations + 1 < options.max_iterations) {
-      OrbitalChart next_chart = build_orbital_chart(
-          *objective, parameter_view, preconditioner);
-      if (next_chart.reduced_size() != next_geometry.reduced_size() ||
-          next_chart.rank_signature() != next_geometry.rank_signature()) {
-        throw std::runtime_error(
-            "preconditioner changed the nonredundant orbital geometry");
-      }
-      chart = std::move(next_chart);
-    } else {
-      chart = std::move(next_geometry);
-    }
+    chart = std::move(next_geometry);
     projected = std::move(next_projected);
 
     ++run_result.n_iterations;
