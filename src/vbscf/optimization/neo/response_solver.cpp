@@ -838,6 +838,24 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
       return result;
     }
 
+    const double descent = -problem_.orbital_gradient().dot(result.step.orbital);
+    // Historical NEO used coordinate residuals to end this solve. Retain
+    // that inexpensive candidate policy only as a nonlinear trial: it is
+    // not a physical KKT certificate and never returns Converged.
+    const double coordinate_gradient = problem_.orbital_gradient().stableNorm();
+    const double coordinate_target = options.absolute_residual_tolerance +
+        coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient);
+    const double coordinate_residual = std::hypot(
+        result.kkt_residual.orbital.stableNorm(), structure_residual_norm);
+    if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
+        descent > 0.0 && basis_size > trial_basis_size_ &&
+        coordinate_residual <= coordinate_target) {
+      trial_basis_size_ = basis_size;
+      result.stop_reason = NeoStopReason::TrialReady;
+      diagnostics::neo_trace("historical_trial", "coordinate_residual=%.17g,coordinate_target=%.17g,physical_residual=%.17g,target=%.17g",
+          coordinate_residual, coordinate_target, result.residual_norm, kkt_residual_target);
+      return result;
+    }
     // CIAH's early-start test applies to the normalized augmented vector,
     // not the unscaled Newton residual. For [1, alpha*p, alpha*q], the top
     // AH equation gives alpha^2 = lambda / (-g^T p). The orbital trust
@@ -845,7 +863,6 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
     // coordinates have no trust penalty. This candidate is NOT certified.
     // Three directions and the 2.5 start threshold follow PySCF mc1step;
     // exact energy/gradient keyframes decide whether it is usable.
-    const double descent = -problem_.orbital_gradient().dot(result.step.orbital);
     if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
         result.boundary && result.shift > 0.0 && descent > 0.0 &&
         qo.cols() >= 3 && basis_size > trial_basis_size_) {

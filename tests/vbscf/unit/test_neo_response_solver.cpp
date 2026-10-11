@@ -705,11 +705,11 @@ void check_early_trial_is_not_certified_and_resumes() {
   a.diagonal() << 1.0, 2.0, 4.0, 8.0, 16.0, 32.0;
   const Eigen::MatrixXd b(0, 6), c(0, 0);
   const auto metric = Eigen::Matrix<double, 6, 6>::Identity().eval();
-  const Eigen::VectorXd gradient = Eigen::VectorXd::Ones(6);
+  const Eigen::VectorXd gradient = 0.01 * Eigen::VectorXd::Ones(6);
   const auto problem = dense_problem(a, b, c, metric, gradient);
   ResponseNeoWorkspace workspace(problem);
   NeoOptions options;
-  options.trust_radius = 0.1;
+  options.trust_radius = 0.001;
   options.relative_residual_tolerance = 1.0e-12;
   options.require_curvature_certificate = false;
   const auto early = workspace.solve(options, true);
@@ -718,7 +718,7 @@ void check_early_trial_is_not_certified_and_resumes() {
   require(early.residual_norm > early.residual_target,
           "early-trial fixture already satisfies the strict certificate");
   require(workspace.orbital_basis_size() == 3,
-          "early trial did not start after three orbital directions");
+          "CIAH trial did not start after three orbital directions");
   int retained = static_cast<int>(workspace.orbital_basis_size());
   options.trust_radius *= 0.5;
   const auto retry = workspace.solve(options, true);
@@ -734,6 +734,31 @@ void check_early_trial_is_not_certified_and_resumes() {
   require_close(resumed.step.orbital,
       explicit_orbital_step(a, metric, gradient, options.trust_radius),
       2.0e-9, "resumed early trial changed the strict trust-region solution");
+}
+
+void check_historical_interior_trial_preserves_physical_certificate() {
+  const Eigen::MatrixXd a = Eigen::Vector4d(1.0, 2.0, 4.0, 8.0).asDiagonal();
+  const Eigen::MatrixXd b(0, 4), c(0, 0);
+  const Eigen::MatrixXd metric = 1.0e-4 * Eigen::MatrixXd::Identity(4, 4);
+  const Eigen::VectorXd gradient = Eigen::VectorXd::Ones(4);
+  const auto problem = dense_problem(a, b, c, metric, gradient);
+  ResponseNeoWorkspace workspace(problem);
+  NeoOptions options;
+  options.trust_radius = 10.0;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.require_curvature_certificate = false;
+  const auto trial = workspace.solve(options, true);
+  require(trial.trial_ready() && !trial.converged() && !trial.boundary,
+          "historical interior candidate was not classified as an uncertified trial");
+  require(trial.residual_norm > trial.residual_target,
+          "historical trial fixture already satisfies the physical certificate");
+  const int retained = static_cast<int>(workspace.orbital_basis_size());
+  const auto final = workspace.solve(options);
+  verify_coupled_residual(a, b, c, metric, gradient, options.trust_radius, final);
+  require(final.orbital_actions == workspace.orbital_basis_size() - retained,
+          "strict continuation recomputed historical trial HVPs");
+  require_close(final.step.orbital, -a.ldlt().solve(gradient), 1.0e-10,
+                "historical trial changed the certified Newton solution");
 }
 
 void check_candidate_observation_preserves_solve() {
@@ -771,6 +796,7 @@ int main() {
   try {
     check_candidate_observation_preserves_solve();
     check_early_trial_is_not_certified_and_resumes();
+    check_historical_interior_trial_preserves_physical_certificate();
     check_spd_structure_and_explicit_schur();
     check_anisotropic_coupled_dual_residual();
     check_negative_relaxed_curvature();

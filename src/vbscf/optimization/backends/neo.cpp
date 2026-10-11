@@ -339,7 +339,11 @@ bool build_accepted_neo_keyframe(
 
   diagnostics::neo_trace_context.keyframe = record->accepted_iteration_index;
   diagnostics::neo_trace_context.attempt = 0;
-  bool allow_early_trial = physical_gradient_norm > 3.0 * options.gradient_tolerance;
+  // Historical coordinate-based candidates are useful away from stationarity,
+  // but cannot settle an unresolved physical gradient in an ill-conditioned
+  // chart once the coordinate gradient already passes the outer threshold.
+  bool allow_early_trial = physical_gradient_norm > 3.0 * options.gradient_tolerance &&
+      gradient_infinity_norm(reduced_gradient) >= options.gradient_tolerance;
   while (true) {
     ++diagnostics::neo_trace_context.attempt;
     const double trial_radius = *trust_radius;
