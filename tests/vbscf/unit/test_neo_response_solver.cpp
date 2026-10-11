@@ -736,10 +736,40 @@ void check_early_trial_is_not_certified_and_resumes() {
       2.0e-9, "resumed early trial changed the strict trust-region solution");
 }
 
+void check_candidate_observation_preserves_solve() {
+  const Eigen::MatrixXd a = Eigen::Vector4d(1.0, 2.0, 4.0, 8.0).asDiagonal();
+  const Eigen::MatrixXd b(0, 4), c(0, 0);
+  const Eigen::MatrixXd metric = Eigen::MatrixXd::Identity(4, 4);
+  const Eigen::VectorXd gradient = Eigen::VectorXd::Ones(4);
+  const auto problem = dense_problem(a, b, c, metric, gradient);
+  NeoOptions options;
+  options.trust_radius = 10.0;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.absolute_residual_tolerance = 1.0e-12;
+  options.require_curvature_certificate = false;
+  ResponseNeoWorkspace reference_workspace(problem), observed_workspace(problem);
+  const auto reference = reference_workspace.solve(options);
+  int observations = 0;
+  const auto observed = observed_workspace.solve(options, false,
+      [&](const ResponseNeoResult& candidate) {
+        ++observations;
+        require(candidate.step.orbital.allFinite(), "observed step is not finite");
+        require(candidate.predicted_reduction > 0.0, "observed model has no descent");
+        require(!candidate.converged(), "pre-certificate observation claimed convergence");
+      });
+  require(observations == observed.iterations, "not every projection was observed");
+  require(observed.orbital_actions == reference.orbital_actions,
+          "observation added HVP actions");
+  require_close(observed.step.orbital, reference.step.orbital, 1.0e-13,
+                "observation changed the final step");
+  verify_coupled_residual(a, b, c, metric, gradient, options.trust_radius, observed);
+}
+
 }  // namespace
 
 int main() {
   try {
+    check_candidate_observation_preserves_solve();
     check_early_trial_is_not_certified_and_resumes();
     check_spd_structure_and_explicit_schur();
     check_anisotropic_coupled_dual_residual();

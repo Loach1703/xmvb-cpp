@@ -175,8 +175,13 @@ public:
   /**
    * @brief Solves using cached images, or yields an approximate boundary trial.
    * @param allow_early_trial Enables CIAH early start; TrialReady is not Converged.
+   * @param observe_candidate Borrows each uncertified projection for diagnostics;
+   *        must not mutate the model or retain the borrowed result.
    */
-  ResponseNeoResult solve(const NeoOptions& options, bool allow_early_trial = false);
+  ResponseNeoResult solve(
+      const NeoOptions& options,
+      bool allow_early_trial = false,
+      const std::function<void(const ResponseNeoResult&)>& observe_candidate = {});
 
   Eigen::Index orbital_basis_size() const noexcept {
     return orbital_basis_.cols();

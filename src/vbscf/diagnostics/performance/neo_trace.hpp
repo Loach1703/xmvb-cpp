@@ -14,6 +14,15 @@ inline bool neo_trace_enabled() {
   return enabled;
 }
 
+/** @brief Expensive nonlinear candidate audit; never a production policy. */
+inline bool neo_candidate_audit_enabled() {
+  static const bool enabled = [] {
+    const char* value = std::getenv("XMVB_NEO_CANDIDATE_AUDIT");
+    return neo_trace_enabled() && value && value[0] == '1' && value[1] == '\0';
+  }();
+  return enabled;
+}
+
 /** @brief Identifies an accepted-point solve and its radius retry. */
 struct NeoTraceContext {
   int keyframe = 0;

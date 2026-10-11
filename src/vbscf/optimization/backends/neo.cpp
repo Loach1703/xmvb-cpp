@@ -2,6 +2,7 @@
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -85,6 +86,23 @@ struct AcceptedNeoKeyframe {
   Eigen::VectorXd next_orbital_guess_packed;
 };
 
+/** @brief Measures a completed trial gradient in its own physical chart. */
+double trial_physical_gradient_norm(
+    const VbScfObjective::TrialEvaluation& trial,
+    const SparseParameterLayout& parameter_view,
+    bool complete_active_space) {
+  const auto& orbitals = trial.orbital_preparation_input;
+  const auto& preparation = trial.gradient_result.orbital_preparation_result;
+  const int n_inactive = (orbitals.n_total_electrons - orbitals.n_active_electrons) / 2;
+  const OrbitalChart chart(
+      orbitals, parameter_view,
+      preparation.auxiliary_orbital_matrix.leftCols(n_inactive + orbitals.n_active_orbitals),
+      preparation.physical_orbital_frame.normalized_orbital_matrix,
+      nullptr, false, complete_active_space);
+  const NonredundantRetractionMetric metric(chart, parameter_view, orbitals);
+  return metric.dual_norm(chart.project_gradient(trial.gradient).reduced_gradient);
+}
+
 bool build_accepted_neo_keyframe(
     VbScfObjective* objective,
     const SparseParameterLayout& parameter_view,
@@ -140,6 +158,48 @@ bool build_accepted_neo_keyframe(
       objective->second_order_context()
           ->structure_solve_accuracy
           .response_backward_error_tolerance(selected_energy_scale);
+  // Evaluate one candidate at a time, retaining no direction or trial cache.
+  // Counters are per radius attempt, matching ResponseNeoResult's HVP count.
+  std::function<void(const ResponseNeoResult&)> observe_candidate;
+  if (diagnostics::neo_candidate_audit_enabled()) {
+    observe_candidate = [&, last_attempt = -1, last_hvp = -1](
+                            const ResponseNeoResult& candidate) mutable {
+      const int attempt = diagnostics::neo_trace_context.attempt;
+      if (attempt != last_attempt) {
+        last_attempt = attempt;
+        last_hvp = -1;
+      }
+      const int hvp = candidate.orbital_actions;
+      if (hvp == last_hvp ||
+          (hvp != 3 && hvp != 5 && hvp != 10 && hvp != 20 &&
+           hvp != 50 && hvp != 100)) return;
+      last_hvp = hvp;
+      const auto start = std::chrono::steady_clock::now();
+      const auto parameters = build_nonredundant_lifted_trial_parameters(
+          accepted_orbitals, chart, parameter_view, candidate.step.orbital);
+      // Trial evaluation restores the accepted input and is never committed.
+      auto trial = objective->evaluate_trial(parameters, true);
+      const double actual_gradient = trial_physical_gradient_norm(
+          trial, parameter_view, objective->input().complete_active_space);
+      const double predicted_gradient = orbital_metric.dual_norm(
+          reduced_gradient + candidate.hessian_step.orbital);
+      const double gradient_dot_step = reduced_gradient.dot(candidate.step.orbital);
+      const double curvature = candidate.step.orbital.dot(candidate.hessian_step.orbital) +
+          candidate.step.structure.dot(candidate.hessian_step.structure);
+      const auto globalization = globalize_neo_trial(
+          energy, trial.energy, gradient_dot_step, curvature,
+          candidate.boundary, *trust_radius, options.minimum_step_size);
+      const double seconds = std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - start).count();
+      diagnostics::neo_trace("quality",
+          "hvp=%d,micro=%d,radius=%.17g,boundary=%d,shift=%.17g,residual=%.17g,target=%.17g,predicted=%.17g,actual=%.17g,rho=%.17g,energy_acceptable=%d,source_gradient=%.17g,actual_gradient=%.17g,predicted_gradient=%.17g,audit_seconds=%.17g",
+          hvp, candidate.iterations, *trust_radius, static_cast<int>(candidate.boundary),
+          candidate.shift, candidate.residual_norm, candidate.residual_target,
+          globalization.predicted_reduction, globalization.actual_reduction,
+          globalization.rho, static_cast<int>(globalization.accepted),
+          physical_gradient_norm, actual_gradient, predicted_gradient, seconds);
+    };
+  }
   std::function<ResponseNeoResult(const NeoOptions&, bool)> solve_step;
   if (use_structure_response) {
     auto problem = std::make_shared<ResponseNeoProblem>(
@@ -223,11 +283,11 @@ bool build_accepted_neo_keyframe(
         });
     auto workspace = std::make_shared<ResponseNeoWorkspace>(*problem);
     solve_step = [problem = std::move(problem),
-                  workspace = std::move(workspace)](
+                  workspace = std::move(workspace), &observe_candidate](
                      const NeoOptions& neo_options, bool allow_early_trial) {
       // The workspace stores a reference; retain its immutable problem here.
       static_cast<void>(problem);
-      return workspace->solve(neo_options, allow_early_trial);
+      return workspace->solve(neo_options, allow_early_trial, observe_candidate);
     };
   } else {
     HvpComponents core_components;
@@ -351,19 +411,8 @@ bool build_accepted_neo_keyframe(
       // coupled step. Compare invariant physical norms at their own points:
       // reduced coordinate vectors at different charts are not comparable.
       objective->complete_trial(&trial);
-      const auto& preparation = trial.gradient_result.orbital_preparation_result;
-      const int n_inactive = (accepted_orbitals.n_total_electrons -
-                              accepted_orbitals.n_active_electrons) / 2;
-      const OrbitalChart trial_chart(
-          trial.orbital_preparation_input, parameter_view,
-          preparation.auxiliary_orbital_matrix.leftCols(
-              n_inactive + accepted_orbitals.n_active_orbitals),
-          preparation.physical_orbital_frame.normalized_orbital_matrix,
-          nullptr, false, objective->input().complete_active_space);
-      const auto trial_gradient = trial_chart.project_gradient(trial.gradient);
-      const NonredundantRetractionMetric trial_metric(
-          trial_chart, parameter_view, trial.orbital_preparation_input);
-      const double trial_norm = trial_metric.dual_norm(trial_gradient.reduced_gradient);
+      const double trial_norm = trial_physical_gradient_norm(
+          trial, parameter_view, objective->input().complete_active_space);
       const double predicted_norm = orbital_metric.dual_norm(
           reduced_gradient + step.hessian_step.orbital);
       // PySCF's factor-three gradient trust guard, applied to physical norms.

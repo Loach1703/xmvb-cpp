@@ -469,7 +469,8 @@ bool ResponseNeoWorkspace::append_structure_block(
 }
 
 ResponseNeoResult ResponseNeoWorkspace::solve(
-    const NeoOptions& options, bool allow_early_trial) {
+    const NeoOptions& options, bool allow_early_trial,
+    const std::function<void(const ResponseNeoResult&)>& observe_candidate) {
   diagnostics::ScopedPhase phase(diagnostics::Phase::NeoSolve);
   if (!(options.trust_radius > 0.0) ||
       !std::isfinite(options.trust_radius) ||
@@ -711,6 +712,9 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
         -problem_.orbital_gradient().dot(result.step.orbital) -
         0.5 * (result.step.orbital.dot(result.hessian_step.orbital) +
                result.step.structure.dot(result.hessian_step.structure));
+    // Observation cannot accept a step or change solver tolerances. The
+    // candidate is borrowed only for this call and is not yet certified.
+    if (observe_candidate) observe_candidate(result);
 
     const bool stationary = result.residual_norm <= kkt_residual_target;
     const bool need_curvature_certificate =
