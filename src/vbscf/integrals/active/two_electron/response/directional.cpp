@@ -9,6 +9,7 @@
 
 #include "core/openmp.hpp"
 #include "vbscf/integrals/active/two_electron/response/internal.hpp"
+#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
 #include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
 
@@ -138,17 +139,24 @@ void compute_exact_packed_active_two_electron_integral_directional_derivative(
           "cached accepted pair buffers size mismatch in delta GGO");
     }
 
-    build_mixed_ao_pair_to_active_pair_coefficients_from_cache(
-        *accepted_cache.accepted_active_coefficients,
-        dense_active_direction,
-        accepted_cache,
-        &workspace->directional_pair_coefficients);
-    apply_exact_ao_pair_kernel(
-        ao_integral_input,
-        workspace->directional_pair_coefficients,
-        n_bf,
-        n_active_pairs,
-        &workspace->directional_pair_products);
+    if (accepted_cache.exchange_integrals.size() == 0 ||
+        accepted_cache.orbital_pair_products.size() == 0) {
+      build_mixed_ao_pair_to_active_pair_coefficients_from_cache(
+          *accepted_cache.accepted_active_coefficients,
+          dense_active_direction,
+          accepted_cache,
+          &workspace->directional_pair_coefficients);
+    }
+    if (accepted_cache.exchange_integrals.size() != 0) {
+      workspace->directional_pair_products.resize(0, 0);
+    } else {
+      apply_exact_ao_pair_kernel(
+          ao_integral_input,
+          workspace->directional_pair_coefficients,
+          n_bf,
+          n_active_pairs,
+          &workspace->directional_pair_products);
+    }
 
     workspace->active_pair_contraction.resize(
         static_cast<Eigen::Index>(n_active_pairs),
@@ -262,6 +270,24 @@ compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
   };
   constexpr Eigen::Index workspace_bytes = 64 * 1024 * 1024;
   constexpr Eigen::Index value_bytes = sizeof(double);
+
+  if (fixed_adjoint_directions != nullptr &&
+      accepted_cache.exchange_integrals.size() != 0 &&
+      accepted_cache.orbital_pair_products.size() != 0) {
+    Eigen::MatrixXd contraction;
+    ExactPackedActiveTwoElectronApplyWorkspace workspace;
+    for (Eigen::Index direction = 0; direction < n_directions; ++direction) {
+      detail::contract_orbital_pair_direction(
+          accepted_cache, dense_active_directions[direction], &contraction);
+      pack(contraction, direction);
+      apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+          accepted_cache, dense_active_directions[direction], ao_integral_input,
+          &workspace, &(*fixed_adjoint_directions)[direction]);
+      if (directional_pair_products != nullptr)
+        (*directional_pair_products)[direction].resize(0, 0);
+    }
+    return packed_directions;
+  }
 
   if (accepted_cache.accepted_pair_products == nullptr) {
     if (directional_pair_products == nullptr && fixed_adjoint_directions == nullptr) {

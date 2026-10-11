@@ -67,6 +67,7 @@ set(XMVB_VBSCF_ACTIVE_INTEGRAL_SOURCES
   vbscf/integrals/active/two_electron/construction/builder.cpp
   vbscf/integrals/active/two_electron/construction/kernel.cpp
   vbscf/integrals/active/two_electron/response/adjoint.cpp
+  vbscf/integrals/active/two_electron/response/exchange.cpp
   vbscf/integrals/active/two_electron/response/directional.cpp
   vbscf/integrals/active/two_electron/response/ri.cpp
   vbscf/integrals/active/two_electron/transformation/pair_transforms.cpp

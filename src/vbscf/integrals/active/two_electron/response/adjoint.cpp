@@ -219,6 +219,7 @@ build_exact_packed_active_two_electron_adjoint_cache(
         &accepted_active_space_two_electron_result.dense_ao_pair_products;
   }
   build_orbital_pair_products(&cache);
+  detail::build_exchange_integrals(&cache);
 
   return cache;
 }
@@ -338,6 +339,13 @@ void apply_exact_packed_active_two_electron_adjoint_hessian_vector(
       workspace->dense_active_direction,
       accepted_cache,
       &workspace->dense_active_gradient_direction);
+  if (accepted_cache.exchange_integrals.size() != 0) {
+    workspace->dense_active_gradient_direction +=
+        detail::contract_exchange_direction(accepted_cache, dense_active_direction);
+    if (dense_active_gradient_direction != nullptr)
+      *dense_active_gradient_direction = workspace->dense_active_gradient_direction;
+    return;
+  }
   build_mixed_ao_pair_to_active_pair_coefficients_from_cache(
       *accepted_cache.accepted_active_coefficients,
       workspace->dense_active_direction,

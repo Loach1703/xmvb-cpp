@@ -40,6 +40,14 @@ struct ExactPackedActiveTwoElectronAdjointCache {
    * integral intermediate, independent of the active density, not a Hessian.
    */
   ExactCtxPairMatrix orbital_pair_products;
+  /**
+   * @brief Density-independent (AO active|AO active) integral image.
+   *
+   * Rows are (mu, kappa), columns (b, d). Shared storage plus the primary
+   * construction/action workspaces is admitted under a 64 MiB bound.
+   * This is a partial integral transform, not an orbital Hessian.
+   */
+  ExactCtxPairMatrix exchange_integrals;
 };
 
 /**

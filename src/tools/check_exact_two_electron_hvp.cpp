@@ -189,6 +189,58 @@ int main(int argc, char** argv) {
             input.ao_integral_input,
             n_active_orbitals,
             gradient_result.active_space_two_electron_result);
+    auto exchange_image = std::move(accepted_cache.exchange_integrals);
+    const auto pair_hvp = xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+        accepted_cache, dense_active_direction, input.ao_integral_input);
+    accepted_cache.exchange_integrals = std::move(exchange_image);
+    const auto exchange_hvp = xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+        accepted_cache, dense_active_direction, input.ao_integral_input);
+    const double exchange_error = max_abs_difference(exchange_hvp, pair_hvp);
+    std::cout << "exchange_integral_bytes = " << accepted_cache.exchange_integrals.size() * sizeof(double)
+              << "\nexchange_hvp_reference_error = " << exchange_error << '\n';
+    if (exchange_error > 1.0e-11 * std::max(1.0, max_abs_value(pair_hvp)))
+      throw std::runtime_error("exchange HVP disagrees with AO-pair reference");
+    const auto measure_hvp = [&](const char* label) {
+      xmvb::vb::ExactPackedActiveTwoElectronApplyWorkspace workspace;
+      Eigen::MatrixXd result;
+      constexpr int repeats = 10;
+      double checksum = 0.0;
+      const auto start = std::chrono::steady_clock::now();
+      for (int repeat = 0; repeat < repeats; ++repeat) {
+        xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+            accepted_cache, dense_active_direction, input.ao_integral_input,
+            &workspace, &result);
+        checksum += result.squaredNorm();
+      }
+      std::cout << label << "_seconds_per_call = "
+                << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() / repeats
+                << "\n" << label << "_checksum = " << checksum << '\n';
+    };
+    measure_hvp("exchange_hvp");
+    exchange_image = std::move(accepted_cache.exchange_integrals);
+    measure_hvp("ao_pair_hvp");
+    accepted_cache.exchange_integrals = std::move(exchange_image);
+    auto physical_adjoint = std::move(accepted_cache.active_pair_gradient_matrix);
+    const Eigen::Index pairs = physical_adjoint.rows();
+    accepted_cache.active_pair_gradient_matrix.resize(pairs, pairs);
+    for (Eigen::Index p = 0; p < pairs; ++p) {
+      for (Eigen::Index q = 0; q <= p; ++q) {
+        const double value = std::sin(0.17 * (p + 1) + 0.23 * (q + 1));
+        accepted_cache.active_pair_gradient_matrix(p, q) = value;
+        accepted_cache.active_pair_gradient_matrix(q, p) = value;
+      }
+    }
+    const auto arbitrary_exchange = xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+        accepted_cache, dense_active_direction, input.ao_integral_input);
+    exchange_image = std::move(accepted_cache.exchange_integrals);
+    const auto arbitrary_pair = xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+        accepted_cache, dense_active_direction, input.ao_integral_input);
+    accepted_cache.exchange_integrals = std::move(exchange_image);
+    accepted_cache.active_pair_gradient_matrix = std::move(physical_adjoint);
+    const double arbitrary_error = max_abs_difference(arbitrary_exchange, arbitrary_pair);
+    std::cout << "arbitrary_exchange_hvp_error = " << arbitrary_error << '\n';
+    if (arbitrary_error > 1.0e-11 * std::max(1.0, max_abs_value(arbitrary_pair)))
+      throw std::runtime_error("exchange HVP failed arbitrary-adjoint reference");
     auto streamed_active_space_result =
         gradient_result.active_space_two_electron_result;
     streamed_active_space_result.dense_ao_pair_products.resize(0, 0);
