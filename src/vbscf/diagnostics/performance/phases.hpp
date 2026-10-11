@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <limits>
 
 namespace xmvb::vb::diagnostics {
 
@@ -19,7 +20,8 @@ enum class Phase {
   MetricAction, MetricSolve, MetricBlock, AoPairAction, AoH1eFused, AoH1eTranspose, AoH1eForward,
   CiConnections, CiSigma, CiGenerator, CiIntegralDirection,
   NeoProjectionFactor, NeoProjectionResidual, TrustSecular,
-  NeoMetricFactor, NeoStructureFactor, NeoSpectrum, Count
+  NeoMetricFactor, NeoStructureFactor, NeoSpectrum,
+  ChartConstraintSvd, ChartGaugeSvd, Count
 };
 
 /** @brief Opt-in wall/process-CPU totals. Nested scopes are not additive.
@@ -31,6 +33,8 @@ class PhaseTotals {
   PhaseTotals() {
     const char* value = std::getenv("XMVB_PHASE_TIMING");
     enabled = value != nullptr && value[0] == '1';
+    for (auto& value : matrix_min_rows) value.store(std::numeric_limits<unsigned long long>::max());
+    for (auto& value : matrix_min_cols) value.store(std::numeric_limits<unsigned long long>::max());
   }
 
   ~PhaseTotals() {
@@ -46,7 +50,8 @@ class PhaseTotals {
         "ao_h1e_fused", "ao_h1e_transpose", "ao_h1e_forward",
         "ci_connections", "ci_sigma", "ci_generator", "ci_integral_direction",
         "neo_projection_factor", "neo_projection_residual", "trust_secular",
-        "neo_metric_factor", "neo_structure_factor", "neo_spectrum"};
+        "neo_metric_factor", "neo_structure_factor", "neo_spectrum",
+        "chart_constraint_svd", "chart_gauge_svd"};
     static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Phase::Count));
     std::fprintf(stderr, "XMVB_PHASE,stage,calls,wall_seconds\n");
     for (std::size_t i = 0; i < calls.size(); ++i)
@@ -60,6 +65,16 @@ class PhaseTotals {
                        static_cast<double>(CLOCKS_PER_SEC));
     std::fprintf(stderr, "XMVB_WORKSPACE,projector_peak_payload_bytes,%llu\n",
                  projector_bytes.load(std::memory_order_relaxed));
+    std::fprintf(stderr, "XMVB_MATRIX,stage,calls,min_rows,max_rows,min_cols,max_cols\n");
+    for (std::size_t i = 0; i < calls.size(); ++i) {
+      if (matrix_calls[i].load(std::memory_order_relaxed) == 0) continue;
+      std::fprintf(stderr, "XMVB_MATRIX,%s,%llu,%llu,%llu,%llu,%llu\n", names[i],
+          matrix_calls[i].load(std::memory_order_relaxed),
+          matrix_min_rows[i].load(std::memory_order_relaxed),
+          matrix_max_rows[i].load(std::memory_order_relaxed),
+          matrix_min_cols[i].load(std::memory_order_relaxed),
+          matrix_max_cols[i].load(std::memory_order_relaxed));
+    }
     std::fprintf(stderr, "XMVB_BALANCE,stage,calls,min_loop_seconds,max_loop_seconds,sum_loop_seconds,capacity_seconds,start_skew_seconds,critical_seconds\n");
     for (std::size_t i = 0; i < calls.size(); ++i) {
       if (worker_calls[i].load(std::memory_order_relaxed) == 0) continue;
@@ -79,6 +94,11 @@ class PhaseTotals {
   std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> calls{};
   std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> nanoseconds{};
   std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> cpu_ticks{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> matrix_calls{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> matrix_min_rows{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> matrix_max_rows{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> matrix_min_cols{};
+  std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> matrix_max_cols{};
   std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_calls{};
   std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_min{};
   std::array<std::atomic<unsigned long long>, static_cast<std::size_t>(Phase::Count)> worker_max{};
@@ -98,6 +118,25 @@ inline void count_phase(Phase phase) {
   auto& totals = phase_totals();
   if (totals.enabled)
     totals.calls[static_cast<std::size_t>(phase)].fetch_add(1, std::memory_order_relaxed);
+}
+
+/** @brief Opt-in matrix-shape ranges; stores scalars only, never matrix contents. */
+inline void record_matrix_shape(Phase phase, unsigned long long rows,
+                                unsigned long long cols) {
+  auto& totals = phase_totals();
+  if (!totals.enabled) return;
+  const auto i = static_cast<std::size_t>(phase);
+  const auto update = [](std::atomic<unsigned long long>& slot,
+                         unsigned long long value, bool minimum) {
+    auto previous = slot.load(std::memory_order_relaxed);
+    while ((minimum ? value < previous : value > previous) &&
+           !slot.compare_exchange_weak(previous, value, std::memory_order_relaxed)) {}
+  };
+  totals.matrix_calls[i].fetch_add(1, std::memory_order_relaxed);
+  update(totals.matrix_min_rows[i], rows, true);
+  update(totals.matrix_max_rows[i], rows, false);
+  update(totals.matrix_min_cols[i], cols, true);
+  update(totals.matrix_max_cols[i], cols, false);
 }
 
 /** @brief Largest projector-owned matrix payload, excluding referenced inputs. */

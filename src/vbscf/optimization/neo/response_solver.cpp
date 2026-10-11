@@ -540,6 +540,8 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
           projected_orbital_, "response NEO orbital block is not symmetric",
           problem_.operator_relative_accuracy());
       if (metric_size_ != qo.cols()) {
+        diagnostics::record_matrix_shape(diagnostics::Phase::NeoMetricFactor,
+                                        qo.cols(), qo.cols());
         diagnostics::ScopedPhase metric_phase(diagnostics::Phase::NeoMetricFactor);
         const Eigen::MatrixXd metric = symmetric_part(
             projected_metric_, "response NEO orbital metric is not symmetric");
@@ -554,6 +556,8 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
 
       Eigen::MatrixXd b(qs.cols(), qo.cols());
       if (inverse_size_ != qs.cols()) {
+        diagnostics::record_matrix_shape(diagnostics::Phase::NeoStructureFactor,
+                                        qs.cols(), qs.cols());
         diagnostics::ScopedPhase structure_phase(diagnostics::Phase::NeoStructureFactor);
         const Eigen::MatrixXd c = symmetric_part(
             projected_structure_,
@@ -620,6 +624,8 @@ ResponseNeoResult ResponseNeoWorkspace::solve(const NeoOptions& options) {
       spectrum_vectors_ =
           whitening_.transpose() * relaxed * whitening_;
       diagnostics::ScopedPhase spectrum_phase(diagnostics::Phase::NeoSpectrum);
+      diagnostics::record_matrix_shape(diagnostics::Phase::NeoSpectrum,
+                                      qo.cols(), qo.cols());
       const lapack_int dimension = static_cast<lapack_int>(qo.cols());
       spectrum_values_.resize(dimension);
       // The projected model needs its complete spectrum. Divide-and-conquer

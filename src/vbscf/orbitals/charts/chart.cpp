@@ -251,6 +251,8 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
     admissible_source_parameters =
         Eigen::MatrixXd::Identity(source_count, source_count);
   } else {
+    diagnostics::record_matrix_shape(diagnostics::Phase::ChartConstraintSvd,
+                                    forbidden_sources.rows(), forbidden_sources.cols());
     Eigen::JacobiSVD<Eigen::MatrixXd> constraint_svd(
         forbidden_sources, Eigen::ComputeFullV);
     if (constraint_svd.info() != Eigen::Success) {
@@ -295,6 +297,8 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
   // complements here would select a different physical horizontal lift.
   const Eigen::MatrixXd horizontal_constraints =
       local_gauge_generators.transpose();
+  diagnostics::record_matrix_shape(diagnostics::Phase::ChartGaugeSvd,
+                                  horizontal_constraints.rows(), horizontal_constraints.cols());
   Eigen::JacobiSVD<Eigen::MatrixXd> gauge_svd(
       horizontal_constraints, Eigen::ComputeFullV);
   if (gauge_svd.info() != Eigen::Success) {
