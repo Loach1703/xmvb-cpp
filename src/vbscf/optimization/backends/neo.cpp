@@ -258,6 +258,10 @@ bool build_accepted_neo_keyframe(
           images.col(column) = chart.apply_reduced_curvature(basis.col(column));
         const Eigen::MatrixXd projected = basis.transpose() * images;
         const Eigen::MatrixXd symmetric = 0.5 * (projected + projected.transpose());
+        diagnostics::neo_trace("model_difference",
+            "dimension=%ld,block=%.17g,fixed=%.17g,response=%.17g,fixed_defect=%.17g",
+            static_cast<long>(dimension), symmetric.stableNorm(), core.stableNorm(),
+            (model - core).stableNorm(), (core - symmetric).stableNorm());
         Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(
             model, symmetric);
         Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> core_spectrum(

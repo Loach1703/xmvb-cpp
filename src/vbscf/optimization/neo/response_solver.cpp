@@ -703,6 +703,25 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
     result.residual_norm = std::hypot(
         orbital_residual_norm, structure_residual_norm);
     result.residual_target = kkt_residual_target;
+    if (diagnostics::neo_trace_enabled() &&
+        ((result.orbital_actions & (result.orbital_actions - 1)) == 0 ||
+         result.residual_norm <= kkt_residual_target)) {
+      // Reuse retained action images. These coordinate norms diagnose model
+      // cancellation; they never replace the physical KKT certificate.
+      const Eigen::VectorXd fixed_residual = problem_.orbital_gradient() +
+          orbital_a + result.shift * result.orbital_metric_step;
+      const double fixed_norm = fixed_residual.stableNorm();
+      const double response_norm = orbital_bt.stableNorm();
+      const double product = fixed_norm * response_norm;
+      diagnostics::neo_trace("residual_terms",
+          "hvp=%d,no=%ld,ns=%ld,gradient=%.17g,fixed=%.17g,response=%.17g,cosine=%.17g,combined=%.17g,forcing=%.17g,structure_image=%.17g",
+          result.orbital_actions, static_cast<long>(qo.cols()),
+          static_cast<long>(qs.cols()), problem_.orbital_gradient().stableNorm(),
+          fixed_norm, response_norm,
+          product > 0.0 ? fixed_residual.dot(orbital_bt) / product : 0.0,
+          result.kkt_residual.orbital.stableNorm(),
+          structure_b.stableNorm(), structure_c.stableNorm());
+    }
     diagnostics::neo_trace("candidate",
         "micro=%d,no=%ld,ns=%ld,hvp=%d,structure=%d,ro=%.17g,rs=%.17g,target=%.17g,shift=%.17g,radius=%.17g,step=%.17g,boundary=%d",
         result.iterations, static_cast<long>(qo.cols()),
