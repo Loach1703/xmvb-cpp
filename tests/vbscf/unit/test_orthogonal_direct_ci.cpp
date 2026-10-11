@@ -168,6 +168,46 @@ void check_exterior_transform() {
               .maxCoeff() < 2.0e-13,
       "left exterior adjoint differs from explicit compound matrix");
   require(transform.shear_pair_count() > 0, "test transform has no shears");
+
+  transform.apply_inverse_left(&left);
+  require((left - coefficients).cwiseAbs().maxCoeff() < 3.0e-13,
+          "inverse exterior left action fails a forward round trip");
+  transform.apply_inverse_adjoint_left(&adjoint);
+  require((adjoint - coefficients).cwiseAbs().maxCoeff() < 3.0e-13,
+          "inverse exterior adjoint fails a forward round trip");
+  Eigen::MatrixXd inverse = coefficients;
+  transform.apply_inverse_left(&inverse);
+  require((exterior * inverse - coefficients).cwiseAbs().maxCoeff() < 3.0e-13,
+          "inverse exterior differs from an independent compound-matrix solve");
+  Eigen::MatrixXd inverse_adjoint = coefficients;
+  transform.apply_inverse_adjoint_left(&inverse_adjoint);
+  require((exterior.transpose() * inverse_adjoint - coefficients).cwiseAbs().maxCoeff() < 3.0e-13,
+          "inverse exterior transpose differs from an independent compound solve");
+  Eigen::MatrixXd inverse_right = original_right;
+  transform.apply_right(&inverse_right);
+  transform.apply_inverse_right_block(inverse_right);
+  require((inverse_right - original_right).cwiseAbs().maxCoeff() < 3.0e-13,
+          "inverse exterior right action fails a forward round trip");
+  transform.apply_adjoint_right(&inverse_right);
+  transform.apply_inverse_adjoint_right_block(inverse_right);
+  require((inverse_right - original_right).cwiseAbs().maxCoeff() < 3.0e-13,
+          "inverse exterior right adjoint fails a forward round trip");
+  block_storage.middleCols(2, original_right.cols()) = original_right;
+  transform.apply_inverse_right_block(right_block);
+  const Eigen::MatrixXd right_inverse_reference =
+      exterior.partialPivLu().solve(original_right.transpose()).transpose();
+  require((right_block - right_inverse_reference).cwiseAbs().maxCoeff() < 3.0e-13 &&
+              block_storage.leftCols(2).isZero(0.0) &&
+              block_storage.rightCols(2).isZero(0.0),
+          "inverse exterior block differs from a compound solve or modifies neighbors");
+  block_storage.middleCols(2, original_right.cols()) = original_right;
+  transform.apply_inverse_adjoint_right_block(right_block);
+  const Eigen::MatrixXd right_inverse_adjoint_reference =
+      exterior.transpose().partialPivLu().solve(original_right.transpose()).transpose();
+  require((right_block - right_inverse_adjoint_reference).cwiseAbs().maxCoeff() < 3.0e-13 &&
+              block_storage.leftCols(2).isZero(0.0) &&
+              block_storage.rightCols(2).isZero(0.0),
+          "inverse exterior block adjoint differs from a compound solve or modifies neighbors");
 }
 
 void check_planner() {

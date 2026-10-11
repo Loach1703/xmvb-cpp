@@ -251,6 +251,72 @@ void ExteriorOrbitalTransform::apply_adjoint_right_block(
   coefficients.array().rowwise() *= determinant_scales_.transpose().array();
 }
 
+void ExteriorOrbitalTransform::validate_inverse() const {
+  if (!determinant_scales_.allFinite() ||
+      (determinant_scales_.array() == 0.0).any()) {
+    throw std::runtime_error("exterior transform has noninvertible numerical scales");
+  }
+}
+
+void ExteriorOrbitalTransform::apply_inverse_left(
+    Eigen::MatrixXd* coefficients) const {
+  if (coefficients == nullptr)
+    throw std::invalid_argument("inverse exterior transform output is null");
+  validate_left(*coefficients);
+  validate_inverse();
+  // Reverse the shear product before undoing its diagonal factor.
+  for (auto shear = shears_.rbegin(); shear != shears_.rend(); ++shear) {
+    for (const DeterminantPair& pair : shear->pairs) {
+      coefficients->row(pair.target) -=
+          (shear->coefficient * pair.sign) * coefficients->row(pair.source);
+    }
+  }
+  coefficients->array().colwise() /= determinant_scales_.array();
+}
+
+void ExteriorOrbitalTransform::apply_inverse_adjoint_left(
+    Eigen::MatrixXd* coefficients) const {
+  if (coefficients == nullptr)
+    throw std::invalid_argument("inverse exterior adjoint output is null");
+  validate_left(*coefficients);
+  validate_inverse();
+  coefficients->array().colwise() /= determinant_scales_.array();
+  for (const Shear& shear : shears_) {
+    for (const DeterminantPair& pair : shear.pairs) {
+      coefficients->row(pair.source) -=
+          (shear.coefficient * pair.sign) * coefficients->row(pair.target);
+    }
+  }
+}
+
+void ExteriorOrbitalTransform::apply_inverse_right_block(
+    Eigen::Ref<Eigen::MatrixXd> coefficients) const {
+  if (coefficients.cols() != dimension())
+    throw std::invalid_argument("inverse exterior column dimension mismatch");
+  validate_inverse();
+  for (auto shear = shears_.rbegin(); shear != shears_.rend(); ++shear) {
+    for (const DeterminantPair& pair : shear->pairs) {
+      coefficients.col(pair.target) -=
+          (shear->coefficient * pair.sign) * coefficients.col(pair.source);
+    }
+  }
+  coefficients.array().rowwise() /= determinant_scales_.transpose().array();
+}
+
+void ExteriorOrbitalTransform::apply_inverse_adjoint_right_block(
+    Eigen::Ref<Eigen::MatrixXd> coefficients) const {
+  if (coefficients.cols() != dimension())
+    throw std::invalid_argument("inverse exterior adjoint column dimension mismatch");
+  validate_inverse();
+  coefficients.array().rowwise() /= determinant_scales_.transpose().array();
+  for (const Shear& shear : shears_) {
+    for (const DeterminantPair& pair : shear.pairs) {
+      coefficients.col(pair.source) -=
+          (shear.coefficient * pair.sign) * coefficients.col(pair.target);
+    }
+  }
+}
+
 ExteriorTransformDirection ExteriorOrbitalTransform::direction(
     const Eigen::Ref<const Eigen::MatrixXd>& delta_orbital_transform) const {
   if (delta_orbital_transform.rows() != n_orbitals_ ||

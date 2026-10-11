@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <random>
@@ -13,6 +14,8 @@
 
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
+#include <Eigen/Cholesky>
+#include <Eigen/QR>
 
 #include "input/loading/loader.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
@@ -42,6 +45,7 @@ struct Options {
   int diagonal_samples = 0;
   bool coupled_finite_difference = false;
   int curvature_steps = 0;
+  int response_spectrum_limit = 0;
 };
 
 void print_usage() {
@@ -56,7 +60,8 @@ void print_usage() {
       << " [--direction gradient|preconditioned_gradient]"
       << " [--stream-pair-products 0|1]"
       << " [--diagonal-samples count]"
-      << " [--curvature-steps count]\n";
+      << " [--curvature-steps count]"
+      << " [--response-spectrum-limit count]\n";
 }
 
 Options parse_arguments(int argc, char** argv) {
@@ -114,6 +119,8 @@ Options parse_arguments(int argc, char** argv) {
       options.diagonal_samples = std::stoi(value);
     } else if (name == "--curvature-steps") {
       options.curvature_steps = std::stoi(value);
+    } else if (name == "--response-spectrum-limit") {
+      options.response_spectrum_limit = std::stoi(value);
     } else if (name == "--coupled-finite-difference") {
       if (value != "0" && value != "1") {
         throw std::invalid_argument(
@@ -130,6 +137,7 @@ Options parse_arguments(int argc, char** argv) {
   }
   if (!(options.step > 0.0) || !(options.max_relative_error >= 0.0) ||
       options.diagonal_samples < 0 || options.curvature_steps < 0 ||
+      options.response_spectrum_limit < 0 ||
       !(options.response_tolerance > 0.0)) {
     throw std::invalid_argument("finite-difference tolerances must be non-negative");
   }
@@ -162,6 +170,121 @@ struct CoupledReferenceAudit {
   int structure_coordinate_dimension = 0;
   int structure_response_rank = 0;
 };
+
+/** @brief Bounded dense reference for coordinate versus physical response spectra.
+ * Diagnostic only: the explicit size limit is checked before square allocations.
+ * This mode exits without evaluating an orbital HVP or changing production solves.
+ */
+void audit_response_spectrum(
+    const xmvb::vb::StructureAction& action,
+    const xmvb::vb::AcceptedPointContext& context,
+    int limit) {
+  const int n = action.n_structures();
+  if (n < 2 || n > limit)
+    throw std::invalid_argument("structure spectrum exceeds explicit diagnostic size limit");
+  const auto matrices = action.apply(Eigen::MatrixXd::Identity(n, n));
+  const auto symmetric = [](const Eigen::MatrixXd& matrix) -> Eigen::MatrixXd {
+    return 0.5 * (matrix + matrix.transpose());
+  };
+  const Eigen::MatrixXd h = symmetric(matrices.hamiltonian);
+  const Eigen::MatrixXd m = symmetric(matrices.overlap);
+  const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> metric_spectrum(m);
+  if (metric_spectrum.info() != Eigen::Success ||
+      !(metric_spectrum.eigenvalues()[0] > 0.0))
+    throw std::runtime_error("diagnostic structure overlap is not positive definite");
+  std::cout << "structure_overlap_min = " << metric_spectrum.eigenvalues()[0]
+            << "\nstructure_overlap_max = " << metric_spectrum.eigenvalues()[n - 1]
+            << "\nstructure_overlap_condition = "
+            << metric_spectrum.eigenvalues()[n - 1] / metric_spectrum.eigenvalues()[0]
+            << '\n';
+  // Separate spin recoupling from the exterior orbital transform. Distinct
+  // spatial occupation patterns are orthogonal before that transform.
+  Eigen::VectorXd first = Eigen::VectorXd::Zero(n);
+  first[0] = 1.0;
+  const Eigen::MatrixXd first_grid = action.expand_structure_block(first);
+  if (first_grid.size() > limit)
+    throw std::invalid_argument("spin-product spectrum exceeds explicit diagnostic size limit");
+  const Eigen::MatrixXd packed = action.expand_structure_block(Eigen::MatrixXd::Identity(n, n));
+  const int n_alpha = static_cast<int>(first_grid.rows());
+  const int n_beta = static_cast<int>(first_grid.cols());
+  Eigen::MatrixXd expansion(first_grid.size(), n);
+  std::map<std::vector<int>, std::vector<int>> occupation_groups;
+  for (int column = 0; column < n; ++column) {
+    const Eigen::MatrixXd grid = packed.middleCols(column * n_beta, n_beta);
+    expansion.col(column) = Eigen::Map<const Eigen::VectorXd>(grid.data(), grid.size());
+    std::optional<std::vector<int>> occupation;
+    for (int beta = 0; beta < n_beta; ++beta) {
+      for (int alpha = 0; alpha < n_alpha; ++alpha) {
+        if (grid(alpha, beta) == 0.0) continue;
+        std::vector<int> pattern(context.n_active_orbitals, 0);
+        for (int orbital : context.same_spin_pair_cache.alpha_reuse_table.unique_determinants[alpha])
+          ++pattern.at(orbital);
+        for (int orbital : context.same_spin_pair_cache.beta_reuse_table.unique_determinants[beta])
+          ++pattern.at(orbital);
+        if (occupation && *occupation != pattern)
+          throw std::runtime_error("one structure spans multiple spatial occupation patterns");
+        occupation = std::move(pattern);
+      }
+    }
+    if (!occupation) throw std::runtime_error("diagnostic structure expansion is empty");
+    occupation_groups[*occupation].push_back(column);
+  }
+  const Eigen::MatrixXd spin_metric = expansion.transpose() * expansion;
+  const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spin_spectrum(spin_metric);
+  if (spin_spectrum.info() != Eigen::Success || !(spin_spectrum.eigenvalues()[0] > 0.0))
+    throw std::runtime_error("diagnostic spin-recoupling metric is not positive definite");
+  std::size_t block_cells = 0;
+  std::size_t max_block = 0;
+  for (const auto& [pattern, columns] : occupation_groups) {
+    block_cells += columns.size() * columns.size();
+    max_block = std::max(max_block, columns.size());
+  }
+  std::cout << "spin_recoupling_condition = "
+            << spin_spectrum.eigenvalues()[n - 1] / spin_spectrum.eigenvalues()[0]
+            << "\noccupation_block_count = " << occupation_groups.size()
+            << "\noccupation_max_block = " << max_block
+            << "\noccupation_block_cells = " << block_cells << '\n';
+  const auto report = [](const char* name, const Eigen::VectorXd& values) {
+    const double smallest = values[0];
+    const double largest = values[values.size() - 1];
+    std::cout << "RESPONSE_SPECTRUM,kind=" << name << ",min=" << smallest
+              << ",max=" << largest << ",positive_condition="
+              << (smallest > 0.0 ? largest / smallest
+                                : std::numeric_limits<double>::infinity()) << '\n';
+  };
+  for (Eigen::Index state = 0; state < context.selected_state_eigenvectors.cols(); ++state) {
+    const Eigen::VectorXd c = context.selected_state_eigenvectors.col(state);
+    const Eigen::VectorXd normal = (m * c).normalized();
+    const Eigen::HouseholderQR<Eigen::MatrixXd> qr(normal);
+    const Eigen::MatrixXd complement =
+        (qr.householderQ() * Eigen::MatrixXd::Identity(n, n)).rightCols(n - 1);
+    const Eigen::MatrixXd shifted = h - context.selected_state_energies[state] * m;
+    const Eigen::MatrixXd projected = symmetric(complement.transpose() * shifted * complement);
+    const Eigen::MatrixXd projected_metric = symmetric(complement.transpose() * m * complement);
+    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> raw(projected);
+    const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> physical(projected, projected_metric);
+    const Eigen::VectorXd diagonal = shifted.diagonal().cwiseAbs();
+    const double sigma = diagonal.maxCoeff();
+    const double floor = std::numeric_limits<double>::epsilon() * std::max(1.0, sigma);
+    const Eigen::VectorXd inverse =
+        (diagonal.array() + sigma * normal.array().square()).max(floor).inverse();
+    const Eigen::MatrixXd projected_inverse = symmetric(
+        complement.transpose() * inverse.asDiagonal() * complement);
+    const Eigen::LLT<Eigen::MatrixXd> factor(projected_inverse);
+    if (raw.info() != Eigen::Success || physical.info() != Eigen::Success ||
+        factor.info() != Eigen::Success)
+      throw std::runtime_error("diagnostic response spectral factorization failed");
+    const Eigen::MatrixXd l = factor.matrixL();
+    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> jacobi(
+        symmetric(l.transpose() * projected * l));
+    if (jacobi.info() != Eigen::Success)
+      throw std::runtime_error("diagnostic preconditioned response spectrum failed");
+    std::cout << "response_spectrum_state = " << state << '\n';
+    report("coefficient", raw.eigenvalues());
+    report("jacobi", jacobi.eigenvalues());
+    report("overlap_metric", physical.eigenvalues());
+  }
+}
 
 Eigen::VectorXd flatten_structure_tangent(
     const xmvb::vb::StructureTangent& tangent) {
@@ -431,6 +554,12 @@ int main(int argc, char** argv) {
         &input,
         layout,
         &chart);
+    if (options.response_spectrum_limit > 0) {
+      audit_response_spectrum(exact_hvp.structure_action(),
+                              *accepted.second_order_context,
+                              options.response_spectrum_limit);
+      return 0;
+    }
     if (options.curvature_steps > 0) {
       // Diagnostic only: seek a negative Rayleigh witness without forming H.
       // A nonnegative Ritz value in this incomplete space proves no stability.

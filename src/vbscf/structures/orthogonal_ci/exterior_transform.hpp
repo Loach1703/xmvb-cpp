@@ -40,6 +40,15 @@ public:
   void apply_adjoint_right_block(
       Eigen::Ref<Eigen::MatrixXd> coefficients) const;
 
+  /** @brief Applies the inverse exterior transform to rows in place. */
+  void apply_inverse_left(Eigen::MatrixXd* coefficients) const;
+  /** @brief Applies the inverse transpose to rows in place. */
+  void apply_inverse_adjoint_left(Eigen::MatrixXd* coefficients) const;
+  /** @brief Applies the inverse exterior transform to a column block in place. */
+  void apply_inverse_right_block(Eigen::Ref<Eigen::MatrixXd> coefficients) const;
+  /** @brief Applies the inverse transpose to a column block in place. */
+  void apply_inverse_adjoint_right_block(Eigen::Ref<Eigen::MatrixXd> coefficients) const;
+
   /** @brief Linearizes the exterior transform for an upper-triangular `delta R`. */
   ExteriorTransformDirection direction(
       const Eigen::Ref<const Eigen::MatrixXd>& delta_orbital_transform) const;
@@ -85,6 +94,7 @@ private:
 
   void validate_left(const Eigen::MatrixXd& coefficients) const;
   void validate_right(const Eigen::MatrixXd& coefficients) const;
+  void validate_inverse() const;
 
   int n_orbitals_ = 0;
   int n_electrons_ = 0;
