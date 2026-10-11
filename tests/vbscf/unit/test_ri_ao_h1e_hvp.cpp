@@ -280,14 +280,23 @@ void check_large_work_count_thread_bound() {
 }
 
 /** @brief Checks exact scalar/fused/block actions against a dense stencil. */
-void check_exact_parallel_actions() {
+void check_exact_parallel_actions(int n_bf = 2) {
   xmvb::vb::AoIntegralInput ao;
-  ao.n_basis_functions = 2;
-  const std::vector<int> left{0, 0, 0, 1, 1, 2};
-  const std::vector<int> right{0, 1, 2, 1, 2, 2};
-  const std::vector<double> values{0.7, -0.2, 0.1, 0.5, 0.3, 0.9};
-  ao.pair_graph = xmvb::vb::build_ao_pair_graph(left, right, values, 2);
-  Matrix stencil = Matrix::Zero(4, 4);
+  ao.n_basis_functions = n_bf;
+  std::vector<int> left, right;
+  std::vector<double> values;
+  const int n_pairs = n_bf * (n_bf + 1) / 2;
+  for (int a = 0; a < n_pairs; ++a) {
+    for (int b = a; b < n_pairs; ++b) {
+      // Mixed pair orientations also exercise unordered compact streams.
+      left.push_back((a + b) % 2 ? b : a);
+      right.push_back((a + b) % 2 ? a : b);
+      values.push_back(std::sin(0.7 * (a + 1) * (b + 2)));
+    }
+  }
+  ao.pair_graph = xmvb::vb::build_ao_pair_graph(left, right, values, n_bf);
+  const int size = n_bf * n_bf;
+  Matrix stencil = Matrix::Zero(size, size);
   for (std::size_t edge = 0; edge < values.size(); ++edge) {
     const int i = ao.pair_graph.pair_first[left[edge]];
     const int j = ao.pair_graph.pair_second[left[edge]];
@@ -297,16 +306,17 @@ void check_exact_parallel_actions() {
     if (i == j) v *= 0.5;
     if (k == l) v *= 0.5;
     if (i == k && j == l) v *= 0.5;
-    stencil(j * 2 + i, l * 2 + k) += 4.0 * v;
-    stencil(l * 2 + k, j * 2 + i) += 4.0 * v;
-    stencil(k * 2 + i, j * 2 + l) -= v;
-    stencil(l * 2 + j, i * 2 + k) -= v;
-    stencil(l * 2 + i, j * 2 + k) -= v;
-    stencil(k * 2 + j, i * 2 + l) -= v;
+    stencil(j * n_bf + i, l * n_bf + k) += 4.0 * v;
+    stencil(l * n_bf + k, j * n_bf + i) += 4.0 * v;
+    stencil(k * n_bf + i, j * n_bf + l) -= v;
+    stencil(l * n_bf + j, i * n_bf + k) -= v;
+    stencil(l * n_bf + i, j * n_bf + k) -= v;
+    stencil(k * n_bf + j, i * n_bf + l) -= v;
   }
-  Matrix sources(4, 3), adjoints(4, 3);
-  sources << 0.2, 0.4, -0.1, 0.3, -0.6, 0.8,
-             -0.5, 0.7, 0.9, 0.1, -0.2, 0.6;
+  Matrix sources(size, 3), adjoints(size, 3);
+  for (int row = 0; row < size; ++row)
+    for (int column = 0; column < 3; ++column)
+      sources(row, column) = std::sin(0.3 * (row + 1) * (column + 2));
   adjoints = 0.3 * sources.array().cos().matrix();
   const Matrix expected_forward = stencil * sources;
   const Matrix expected_transpose = stencil.transpose() * adjoints;
@@ -318,20 +328,20 @@ void check_exact_parallel_actions() {
             sources.col(column).data(), ao, threads);
         const auto transpose = xmvb::vb::apply_ao_h1e_transpose(
             adjoints.col(column).data(), ao, threads);
-        require_close(Eigen::Map<const Matrix>(forward.data(), 4, 1),
+        require_close(Eigen::Map<const Matrix>(forward.data(), size, 1),
                       expected_forward.col(column), 2.0e-13,
                       "parallel exact forward mismatch");
-        require_close(Eigen::Map<const Matrix>(transpose.data(), 4, 1),
+        require_close(Eigen::Map<const Matrix>(transpose.data(), size, 1),
                       expected_transpose.col(column), 2.0e-13,
                       "parallel exact transpose mismatch");
         std::vector<double> fused_forward, fused_transpose;
         xmvb::vb::apply_ao_h1e_fused(
             sources.col(column).data(), adjoints.col(column).data(),
             ao, threads, &workspace, &fused_forward, &fused_transpose);
-        require_close(Eigen::Map<const Matrix>(fused_forward.data(), 4, 1),
+        require_close(Eigen::Map<const Matrix>(fused_forward.data(), size, 1),
                       expected_forward.col(column), 2.0e-13,
                       "parallel exact fused forward mismatch");
-        require_close(Eigen::Map<const Matrix>(fused_transpose.data(), 4, 1),
+        require_close(Eigen::Map<const Matrix>(fused_transpose.data(), size, 1),
                       expected_transpose.col(column), 2.0e-13,
                       "parallel exact fused transpose mismatch");
       }
@@ -350,6 +360,7 @@ void check_exact_parallel_actions() {
   ao.pair_graph.columns.clear();
   ao.pair_graph.values.clear();
   ao.pair_graph.integral_edges.clear();
+  ao.pair_graph.integral_rows = left;
   ao.pair_graph.integral_columns = right;
   ao.pair_graph.integral_values = values;
   check();
@@ -367,13 +378,13 @@ void check_exact_parallel_actions() {
   ao.pair_graph.integral_rows.clear();
   ao.pair_graph.integral_columns.clear();
   ao.pair_graph.integral_values.clear();
-  ao.pair_graph.row_offsets.assign(4, 0);
+  ao.pair_graph.row_offsets.assign(n_pairs + 1, 0);
   std::vector<double> forward, transpose;
   xmvb::vb::apply_ao_h1e_fused(
       sources.col(0).data(), adjoints.col(0).data(), ao, 32,
       &workspace, &forward, &transpose);
-  require(Eigen::Map<const Matrix>(forward.data(), 4, 1).isZero(0.0) &&
-              Eigen::Map<const Matrix>(transpose.data(), 4, 1).isZero(0.0),
+  require(Eigen::Map<const Matrix>(forward.data(), size, 1).isZero(0.0) &&
+              Eigen::Map<const Matrix>(transpose.data(), size, 1).isZero(0.0),
           "empty exact action retained stale workspace values");
 }
 
@@ -387,6 +398,7 @@ int main() {
     check_exact_builder_triangular_regression();
     check_large_work_count_thread_bound();
     check_exact_parallel_actions();
+    check_exact_parallel_actions(5);
     std::cout << "RI AO-H1E fused HVP primitives: passed\n";
     return 0;
   } catch (const std::exception& error) {

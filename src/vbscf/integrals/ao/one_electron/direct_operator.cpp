@@ -98,30 +98,73 @@ int matrix_index(int row, int column, int n_bf) {
   };
 }
 
-inline void accumulate_forward(
-    const H1eTerms& t,
-    const double* source,
-    double* target) {
-  const double coulomb = 4.0 * t.value;
-  target[t.ij] += coulomb * source[t.kl];
-  target[t.kl] += coulomb * source[t.ij];
-  target[t.ik] -= t.value * source[t.lj];
-  target[t.jl] -= t.value * source[t.ki];
-  target[t.il] -= t.value * source[t.kj];
-  target[t.jk] -= t.value * source[t.li];
-}
-
-inline void accumulate_transpose(
-    const H1eTerms& t,
-    const double* adjoint,
-    double* target) {
-  const double coulomb = 4.0 * t.value;
-  target[t.kl] += coulomb * adjoint[t.ij];
-  target[t.ij] += coulomb * adjoint[t.kl];
-  target[t.lj] -= t.value * adjoint[t.ik];
-  target[t.ki] -= t.value * adjoint[t.jl];
-  target[t.kj] -= t.value * adjoint[t.il];
-  target[t.li] -= t.value * adjoint[t.jk];
+/**
+ * @brief Contracts contiguous unique-integral groups with a common left pair.
+ *
+ * CSR references are storage-ordered, so each group reuses its left AO indices
+ * and Coulomb source. Compact streams need not be ordered: singleton groups
+ * obey the same contraction. Only two scalar Coulomb sums are retained; ERIs
+ * and density matrices stay shared, with no decoded-stencil cache.
+ */
+template <bool Forward, bool Transpose>
+void contract_integrals(
+    const AoIntegralInput& ao, std::size_t begin, std::size_t end,
+    const double* source, const double* adjoint,
+    double* forward, double* transpose) {
+  const AoPairGraph& graph = ao.pair_graph;
+  const int n_bf = ao.n_basis_functions;
+  const bool compact = graph.has_compact_integral_stream();
+  while (begin < end) {
+    const int left = graph.integral_rows[begin];
+    const int i = graph.pair_first[left];
+    const int j = graph.pair_second[left];
+    const int i_column = i * n_bf;
+    const int j_column = j * n_bf;
+    const int ij = j_column + i;
+    const double left_scale = i == j ? 0.5 : 1.0;
+    double source_ij = 0.0, adjoint_ij = 0.0;
+    if constexpr (Forward) source_ij = source[ij];
+    if constexpr (Transpose) adjoint_ij = adjoint[ij];
+    double forward_coulomb = 0.0, transpose_coulomb = 0.0;
+    do {
+      const std::size_t edge = compact ? begin : graph.integral_edges[begin];
+      const int right = compact ? graph.integral_columns[edge] : graph.columns[edge];
+      const int k = graph.pair_first[right];
+      const int l = graph.pair_second[right];
+      double value = (compact ? graph.integral_values[edge] : graph.values[edge]) * left_scale;
+      if (k == l) value *= 0.5;
+      if (left == right) value *= 0.5;
+      const int k_column = k * n_bf;
+      const int l_column = l * n_bf;
+      const int kl = l_column + k;
+      const int ik = k_column + i, jl = l_column + j;
+      const int il = l_column + i, jk = k_column + j;
+      const int lj = j_column + l, ki = i_column + k;
+      const int kj = j_column + k, li = i_column + l;
+      const double coulomb = 4.0 * value;
+      if constexpr (Forward) {
+        forward_coulomb += coulomb * source[kl];
+        forward[kl] += coulomb * source_ij;
+        forward[ik] -= value * source[lj];
+        forward[jl] -= value * source[ki];
+        forward[il] -= value * source[kj];
+        forward[jk] -= value * source[li];
+      }
+      if constexpr (Transpose) {
+        transpose_coulomb += coulomb * adjoint[kl];
+        transpose[kl] += coulomb * adjoint_ij;
+        transpose[lj] -= value * adjoint[ik];
+        transpose[ki] -= value * adjoint[jl];
+        transpose[kj] -= value * adjoint[il];
+        transpose[li] -= value * adjoint[jk];
+      }
+      ++begin;
+    } while (begin < end && graph.integral_rows[begin] == left);
+    // Exchange terms can also touch ij. Keeping the Coulomb sum separate is
+    // algebraically exact even for coincident indices; only sum order changes.
+    if constexpr (Forward) forward[ij] += forward_coulomb;
+    if constexpr (Transpose) transpose[ij] += transpose_coulomb;
+  }
 }
 
 /** @brief Thread-ordered reduction; output elements are owned by distinct workers. */
@@ -163,11 +206,11 @@ std::vector<double> apply_ao_h1e(
     auto& local = partial[thread];
     local.assign(size, 0.0);
     work.start(thread);
-#pragma omp for schedule(dynamic, chunk) nowait
-    for (std::ptrdiff_t offset = 0;
-         offset < static_cast<std::ptrdiff_t>(n_integrals);
-         ++offset) {
-      accumulate_forward(make_terms(ao, offset), source, local.data());
+#pragma omp for schedule(dynamic, 1) nowait
+    for (std::size_t begin = 0; begin < n_integrals; begin += chunk) {
+      contract_integrals<true, false>(
+          ao, begin, std::min(begin + chunk, n_integrals),
+          source, nullptr, local.data(), nullptr);
     }
     work.stop(thread);
 #pragma omp barrier
@@ -205,11 +248,11 @@ std::vector<double> apply_ao_h1e_transpose(
     auto& local = partial[thread];
     local.assign(size, 0.0);
     work.start(thread);
-#pragma omp for schedule(dynamic, chunk) nowait
-    for (std::ptrdiff_t offset = 0;
-         offset < static_cast<std::ptrdiff_t>(n_integrals);
-         ++offset) {
-      accumulate_transpose(make_terms(ao, offset), adjoint, local.data());
+#pragma omp for schedule(dynamic, 1) nowait
+    for (std::size_t begin = 0; begin < n_integrals; begin += chunk) {
+      contract_integrals<false, true>(
+          ao, begin, std::min(begin + chunk, n_integrals),
+          nullptr, adjoint, nullptr, local.data());
     }
     work.stop(thread);
 #pragma omp barrier
@@ -256,13 +299,11 @@ void apply_ao_h1e_fused(
     local_forward.assign(size, 0.0);
     local_transpose.assign(size, 0.0);
     work.start(thread);
-#pragma omp for schedule(dynamic, chunk) nowait
-    for (std::ptrdiff_t offset = 0;
-         offset < static_cast<std::ptrdiff_t>(n_integrals);
-         ++offset) {
-      const H1eTerms terms = make_terms(ao, offset);
-      accumulate_forward(terms, source, local_forward.data());
-      accumulate_transpose(terms, adjoint, local_transpose.data());
+#pragma omp for schedule(dynamic, 1) nowait
+    for (std::size_t begin = 0; begin < n_integrals; begin += chunk) {
+      contract_integrals<true, true>(
+          ao, begin, std::min(begin + chunk, n_integrals),
+          source, adjoint, local_forward.data(), local_transpose.data());
     }
     work.stop(thread);
 #pragma omp barrier
