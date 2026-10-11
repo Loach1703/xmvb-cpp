@@ -1288,6 +1288,13 @@ int main() {
     auto full = make_input(c, {{0,1,2,3,4,5}, {0,1,2,3,4,5},
                                {0,1,2,3,4,5}, {0,1,2,3,4,5}}, 2);
     check("full support", full, 14);
+    auto reordered = make_input(c,
+        {{5,4,3,2,1,0}, {0,1,2,3,4,5},
+         {5,4,3,2,1,0}, {0,1,2,3,4,5}}, 2);
+    check("mixed full-support AO ordering", reordered, 14);
+    reordered.orbital_type = kOrbitalTypeOeo;
+    check_preconditioner_geometry(reordered, true);
+    check_metric_inverse_certificates(reordered, true);
     check_finite_step_gradient_pullback(partial);
     check_finite_step_gradient_pullback(full);
     check_metric_inverse_certificates(partial);

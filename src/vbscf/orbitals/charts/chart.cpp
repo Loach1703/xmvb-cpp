@@ -203,11 +203,9 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
           inactive_span_basis *
           (inactive_span_basis.transpose() * ao_overlap * active_residuals);
     }
-    const Eigen::MatrixXd active_metric =
-        0.5 * (active_residuals.transpose() * ao_overlap * active_residuals +
-               active_residuals.transpose() * ao_overlap.transpose() *
-                   active_residuals)
-                  .eval();
+    Eigen::MatrixXd active_metric =
+        active_residuals.transpose() * ao_overlap * active_residuals;
+    active_metric = (0.5 * (active_metric + active_metric.transpose())).eval();
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> active_solver(active_metric);
     const double active_scale = active_solver.info() == Eigen::Success
         ? active_solver.eigenvalues().maxCoeff()
@@ -388,17 +386,16 @@ Eigen::MatrixXd whiten_normalized_orbital_quotient_basis(
   const double norm = std::sqrt(squared_norm);
   const Eigen::VectorXd normalized = raw_coefficients / norm;
   const Eigen::VectorXd overlap_times_normalized = overlap * normalized;
-  const Eigen::MatrixXd normalization_jacobian =
-      (Eigen::MatrixXd::Identity(raw_coefficients.size(), raw_coefficients.size()) -
-       normalized * overlap_times_normalized.transpose()) /
-      norm;
-  const Eigen::MatrixXd physical_tangents =
-      normalization_jacobian * quotient_basis;
-  const Eigen::MatrixXd metric =
-      0.5 *
-      (physical_tangents.transpose() * overlap * physical_tangents +
-       physical_tangents.transpose() * overlap.transpose() * physical_tangents)
-          .eval();
+  // Apply the normalization derivative as a rank-one correction. Its full
+  // AO matrix is unnecessary: J U = (U - c (c^T S U)) / ||x||_S.
+  const Eigen::RowVectorXd radial_components =
+      overlap_times_normalized.transpose() * quotient_basis;
+  Eigen::MatrixXd physical_tangents = quotient_basis;
+  physical_tangents.noalias() -= normalized * radial_components;
+  physical_tangents /= norm;
+  Eigen::MatrixXd metric =
+      physical_tangents.transpose() * overlap * physical_tangents;
+  metric = (0.5 * (metric + metric.transpose())).eval();
   Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigensolver(metric);
   if (eigensolver.info() != Eigen::Success ||
       !eigensolver.eigenvalues().allFinite() ||
@@ -528,6 +525,12 @@ OrbitalChart::OrbitalChart(
       complete_active_space && input.orbital_type == kOrbitalTypeOeo;
   active_subspace_gauge_ = use_active_subspace_gauge;
   const auto blocks = detect_orbital_blocks(input);
+  // Full-AO inactive orbitals share one gauge. Complete-space OEO active
+  // orbitals share a second gauge. Reuse their exact complements only within
+  // this accepted point; restricted supports and individual active rays do
+  // not share these complements.
+  std::optional<Eigen::MatrixXd> full_inactive_quotient;
+  std::optional<Eigen::MatrixXd> full_active_quotient;
 
   int block_index = 0;
   for (const auto& block : blocks) {
@@ -607,13 +610,31 @@ OrbitalChart::OrbitalChart(
       for (Eigen::Index row = 0; row < local_size; ++row) {
         local_basis_indices[row] = bf_indices[proj.block_rows[row]];
       }
-      Eigen::MatrixXd U_p = build_exact_local_sparse_quotient_basis(
-          input, m.orbital_index, n_inactive,
-          stable_inactive_span_basis,
-          phys_orbital_matrix,
-          ao_overlap,
-          local_basis_indices,
-          use_active_subspace_gauge);
+      bool full_support = local_size == input.n_basis_functions;
+      for (Eigen::Index row = 0; row < local_size && full_support; ++row)
+        full_support = local_basis_indices[row] == row;
+      const bool shared_gauge = full_support &&
+          (m.orbital_index < n_inactive || use_active_subspace_gauge);
+      Eigen::MatrixXd local_quotient;
+      const Eigen::MatrixXd* quotient;
+      if (shared_gauge) {
+        auto& shared = m.orbital_index < n_inactive
+            ? full_inactive_quotient : full_active_quotient;
+        if (!shared) {
+          shared.emplace(build_exact_local_sparse_quotient_basis(
+              input, m.orbital_index, n_inactive,
+              stable_inactive_span_basis, phys_orbital_matrix, ao_overlap,
+              local_basis_indices, use_active_subspace_gauge));
+        }
+        quotient = &*shared;
+      } else {
+        local_quotient = build_exact_local_sparse_quotient_basis(
+            input, m.orbital_index, n_inactive,
+            stable_inactive_span_basis, phys_orbital_matrix, ao_overlap,
+            local_basis_indices, use_active_subspace_gauge);
+        quotient = &local_quotient;
+      }
+      const Eigen::MatrixXd& U_p = *quotient;
       proj.local_gauge_rank = static_cast<int>(local_size - U_p.cols());
       proj.local_combined_rank = static_cast<int>(local_size);
       proj.expected_quotient_dimension = static_cast<int>(U_p.cols());
