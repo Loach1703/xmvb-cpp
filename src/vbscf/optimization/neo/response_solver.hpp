@@ -230,6 +230,8 @@ private:
   Eigen::MatrixXd projected_structure_;
   /** @brief Small projected factors; basis dimensions are their revision keys. */
   Eigen::MatrixXd whitening_;
+  /** @brief Upper Cholesky factor extended with each new metric column. */
+  Eigen::MatrixXd metric_factor_;
   Eigen::MatrixXd structure_inverse_;
   Eigen::MatrixXd structure_null_vectors_;
   Eigen::MatrixXd response_coefficients_;

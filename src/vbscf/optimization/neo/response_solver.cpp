@@ -560,12 +560,27 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
         diagnostics::ScopedPhase metric_phase(diagnostics::Phase::NeoMetricFactor);
         const Eigen::MatrixXd metric = symmetric_part(
             projected_metric_, "response NEO orbital metric is not symmetric");
-        Eigen::LLT<Eigen::MatrixXd> metric_factor(metric);
-        if (metric_factor.info() != Eigen::Success) {
-          throw std::runtime_error("response NEO orbital metric is not positive definite");
+        // The retained metric block is immutable. Extend R in M=R^T R and
+        // its inverse instead of refactoring every leading principal block.
+        const Eigen::Index previous = std::max<Eigen::Index>(0, metric_size_);
+        metric_factor_.conservativeResize(metric.rows(), metric.cols());
+        whitening_.conservativeResize(metric.rows(), metric.cols());
+        metric_factor_.bottomRows(metric.rows() - previous).setZero();
+        whitening_.bottomRows(metric.rows() - previous).setZero();
+        for (Eigen::Index column = previous; column < metric.cols(); ++column) {
+          const Eigen::VectorXd border = metric_factor_.topLeftCorner(column, column)
+              .transpose().triangularView<Eigen::Lower>()
+              .solve(metric.col(column).head(column));
+          const double pivot = metric(column, column) - border.squaredNorm();
+          if (!(pivot > 0.0) || !std::isfinite(pivot))
+            throw std::runtime_error("response NEO orbital metric is not positive definite");
+          const double diagonal = std::sqrt(pivot);
+          metric_factor_.col(column).head(column) = border;
+          metric_factor_(column, column) = diagonal;
+          whitening_.col(column).head(column).noalias() =
+              -whitening_.topLeftCorner(column, column) * border / diagonal;
+          whitening_(column, column) = 1.0 / diagonal;
         }
-        whitening_ = metric_factor.matrixU().solve(
-            Eigen::MatrixXd::Identity(metric.rows(), metric.cols()));
         metric_size_ = qo.cols();
       }
 
