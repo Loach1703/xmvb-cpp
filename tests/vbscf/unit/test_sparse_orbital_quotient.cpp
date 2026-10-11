@@ -653,6 +653,10 @@ void check_occupation_curvature() {
     input.ao_overlap_matrix.setIdentity();
     const SparseParameterLayout view(input);
     const OrbitalChart space(input, view, c, c, &f);
+    const OrbitalChart geometry(input, view, c, c);
+    require(geometry.rank_signature() == space.rank_signature() &&
+                geometry.reduced_size() == space.reduced_size(),
+            "geometry-only chart changed the orbital quotient");
     Eigen::MatrixXd u(3, space.reduced_size()), action(2, 2), inverse(2, 2);
     Eigen::MatrixXd shifted_inverse(2, 2);
     const auto cached_shifted_inverse = space.shifted_block_inverse(0.4);
@@ -660,6 +664,11 @@ void check_occupation_curvature() {
     for (int j = 0; j < 2; ++j) {
       const Eigen::VectorXd unit = Eigen::VectorXd::Unit(2, j);
       u.col(j) = space.expand_step(unit);
+      require((geometry.expand_step(unit) - u.col(j)).norm() < 1.0e-14,
+              "geometry-only chart changed the tangent lift");
+      require((geometry.project_reduced_gradient(u.col(j)) -
+               space.project_reduced_gradient(u.col(j))).norm() < 1.0e-14,
+              "geometry-only chart changed the gradient pullback");
       action.col(j) = space.apply_reduced_curvature(unit);
       inverse.col(j) = space.apply_inverse_reduced_block_preconditioner(unit);
       shifted_inverse.col(j) =

@@ -257,8 +257,9 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
   result.final_gradient_inf_norm = result.gradient_inf_norm_history.back();
   result.final_gradient_l2_norm = final_gradient_l2_norm;
   {
+    // Reporting uses only geometry and the physical metric, not curvature.
     const OrbitalChart final_space =
-        build_orbital_chart(objective, parameter_view);
+        build_orbital_chart(objective, parameter_view, OrbitalPreconditioner::Identity);
     const Eigen::VectorXd final_packed_gradient =
         parameter_view.gather_from_full(
             objective.gradient_result().sparse_orbital_energy_gradient);

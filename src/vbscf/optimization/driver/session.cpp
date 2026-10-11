@@ -123,7 +123,10 @@ void record_accepted_iteration_snapshot(
   if (reduced_gradient == nullptr) {
     const SparseParameterLayout parameter_view(
         objective->input().orbital_preparation_input);
-    const OrbitalChart chart = build_orbital_chart(*objective, parameter_view);
+    // A gradient snapshot requires the quotient pullback only. Do not build
+    // one-electron curvature blocks that no snapshot consumer uses.
+    const OrbitalChart chart = build_orbital_chart(
+        *objective, parameter_view, OrbitalPreconditioner::Identity);
     const Eigen::VectorXd packed_gradient = parameter_view.gather_from_full(
         gradient_result.sparse_orbital_energy_gradient);
     computed_reduced_gradient =
