@@ -115,7 +115,9 @@ void set_augmented_certificate(
 
 }  // namespace
 
-NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
+NeoResult solve_neo(
+    const NeoProblem& problem, const NeoOptions& options,
+    bool allow_early_trial) {
   if (!(options.trust_radius > 0.0) ||
       !std::isfinite(options.trust_radius) ||
       !(options.relative_residual_tolerance > 0.0) ||
@@ -345,6 +347,20 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
         (result.global_curvature_certified ||
          !problem.hessian_lower_bound())) {
       result.stop_reason = NeoStopReason::Converged;
+      set_augmented_certificate(problem, minimum_ritz_vector, &result);
+      return result;
+    }
+
+    // Match coupled NEO's historical candidate policy, not its physical
+    // stationarity certificate. The caller must validate a real nonlinear
+    // energy/gradient keyframe and disable early trials near convergence.
+    const double coordinate_gradient = problem.gradient().stableNorm();
+    const double coordinate_target = options.absolute_residual_tolerance +
+        coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient);
+    if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
+        -problem.gradient().dot(result.step) > 0.0 &&
+        result.kkt_residual.stableNorm() <= coordinate_target) {
+      result.stop_reason = NeoStopReason::TrialReady;
       set_augmented_certificate(problem, minimum_ritz_vector, &result);
       return result;
     }

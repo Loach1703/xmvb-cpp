@@ -1,5 +1,7 @@
 #include <array>
+#include <algorithm>
 #include <cmath>
+#include <tuple>
 #include <stdexcept>
 #include <string>
 
@@ -18,6 +20,34 @@ void require(bool condition, const char* message) {
   if (!condition) {
     throw std::runtime_error(message);
   }
+}
+
+/** @brief Linear reference ordering preserves values, duplicates and orientation. */
+void check_unique_integral_order() {
+  using namespace xmvb::vb;
+  const std::vector<int> left{5, 0, 3, 2, 5, 0, 3};
+  const std::vector<int> right{0, 5, 3, 1, 0, 0, 2};
+  const std::vector<double> values{0.7, -0.2, 0.4, 0.3, 0.8, 0.9, -0.1};
+  const auto graph = build_ao_pair_graph(left, right, values, 3);
+  std::vector<std::tuple<int, int, double>> expected, actual;
+  for (std::size_t i = 0; i < left.size(); ++i)
+    expected.emplace_back(left[i], right[i], values[i]);
+  require(std::is_sorted(graph.integral_edges.begin(), graph.integral_edges.end()),
+          "linear ordering differs from sorted CSR references");
+  for (std::size_t i = 0; i < graph.integral_count(); ++i) {
+    const auto eri = graph.integral(i);
+    actual.emplace_back(eri.left_pair, eri.right_pair, eri.value);
+    const int edge = graph.integral_edges[i];
+    require(edge >= graph.row_offsets[eri.left_pair] &&
+                edge < graph.row_offsets[eri.left_pair + 1],
+            "linear ordering assigned the wrong CSR row");
+  }
+  std::sort(expected.begin(), expected.end());
+  std::sort(actual.begin(), actual.end());
+  require(actual == expected, "linear ordering changed a unique integral");
+  require(std::all_of(graph.columns.begin(), graph.columns.end(),
+                      [](int column) { return column >= 0; }),
+          "temporary primary-edge marks leaked into the published graph");
 }
 
 /** @brief Exercises long CSR rows, empty rows, edge remainders and SIMD tails. */
@@ -121,6 +151,7 @@ void check_direction_block(const xmvb::vb::AoIntegralInput& integrals) {
 }  // namespace
 
 int main() {
+  check_unique_integral_order();
   check_csr_edge_groups();
   constexpr int n_active = 11;
 

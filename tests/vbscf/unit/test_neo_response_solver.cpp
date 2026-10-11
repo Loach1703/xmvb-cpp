@@ -761,6 +761,39 @@ void check_historical_interior_trial_preserves_physical_certificate() {
                 "historical trial changed the certified Newton solution");
 }
 
+void check_trial_defers_structure_certificate() {
+  int response_calls = 0;
+  const ResponseNeoProblem problem(
+      Eigen::VectorXd::Ones(1), 1,
+      [](const Eigen::VectorXd& p) {
+        return ResponseNeoDirection{2 * p, 0.1 * p};
+      },
+      [](const Eigen::VectorXd& q) {
+        return ResponseNeoDirection{0.1 * q, q};
+      },
+      [](const Eigen::VectorXd& p) { return p; },
+      [](const Eigen::VectorXd& r) { return r.norm(); },
+      {}, {}, 0.0, {},
+      [&response_calls](const Eigen::VectorXd& r) {
+        ++response_calls;
+        return Eigen::VectorXd(-r);
+      });
+  NeoOptions options;
+  options.relative_residual_tolerance = 0.1;
+  options.require_curvature_certificate = false;
+  ResponseNeoWorkspace workspace(problem);
+  const auto trial = workspace.solve(options, true);
+  require(trial.trial_ready() && !trial.converged() && response_calls == 0,
+          "nonlinear trial paid for or claimed exact structure certification");
+  const auto certified = workspace.solve(options);
+  require(certified.converged() && response_calls == 1 &&
+              certified.residual_norm <= certified.residual_target,
+          "strict continuation bypassed the structure response certificate");
+  require_close(certified.kkt_residual.structure,
+                0.1 * certified.step.orbital + certified.step.structure, 1e-12,
+                "deferred certificate returned an inconsistent structure residual");
+}
+
 void check_candidate_observation_preserves_solve() {
   const Eigen::MatrixXd a = Eigen::Vector4d(1.0, 2.0, 4.0, 8.0).asDiagonal();
   const Eigen::MatrixXd b(0, 4), c(0, 0);
@@ -797,6 +830,7 @@ int main() {
     check_candidate_observation_preserves_solve();
     check_early_trial_is_not_certified_and_resumes();
     check_historical_interior_trial_preserves_physical_certificate();
+    check_trial_defers_structure_certificate();
     check_spd_structure_and_explicit_schur();
     check_anisotropic_coupled_dual_residual();
     check_negative_relaxed_curvature();

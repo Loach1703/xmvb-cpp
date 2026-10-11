@@ -309,8 +309,8 @@ bool build_accepted_neo_keyframe(
           return chart.apply_inverse_reduced_block_preconditioner(residual);
         });
     solve_step = [problem = std::move(problem)](
-                     const NeoOptions& neo_options, bool) {
-      const NeoResult core = solve_neo(*problem, neo_options);
+                     const NeoOptions& neo_options, bool allow_early_trial) {
+      const NeoResult core = solve_neo(*problem, neo_options, allow_early_trial);
       ResponseNeoResult result;
       result.step = {core.step, Eigen::VectorXd{}};
       result.hessian_step = {core.hessian_step, Eigen::VectorXd{}};

@@ -600,6 +600,32 @@ void check_projection_roundoff() {
           "roundoff bound hides a materially nonsymmetric action");
 }
 
+void check_core_early_trial_preserves_certificate() {
+  const Eigen::MatrixXd hessian = Eigen::Vector4d(1, 2, 4, 8).asDiagonal();
+  const Eigen::MatrixXd metric = 1e-4 * Eigen::MatrixXd::Identity(4, 4);
+  const Eigen::VectorXd gradient = Eigen::VectorXd::Ones(4);
+  const auto problem = dense_problem(hessian, metric, gradient);
+  NeoOptions options;
+  options.trust_radius = 10;
+  options.relative_residual_tolerance = 1e-12;
+  options.require_curvature_certificate = false;
+  const auto early = solve_neo(problem, options, true);
+  require(early.stop_reason == xmvb::vb::NeoStopReason::TrialReady && !early.converged(),
+          "core candidate falsely claims physical convergence");
+  require(early.residual_norm > early.residual_target,
+          "core early-trial fixture already satisfies the physical certificate");
+  const auto final = solve_neo(problem, options);
+  require(final.converged() && final.residual_norm <= final.residual_target,
+          "disabling early core trials lost physical KKT certification");
+  require(early.hessian_actions < final.hessian_actions,
+          "core candidate did not avoid strict-solve HVPs");
+  require_close(final.step, -hessian.ldlt().solve(gradient), 1e-10,
+                "core candidate policy changed the certified Newton solution");
+  options.require_curvature_certificate = true;
+  require(solve_neo(problem, options, true).converged(),
+          "core trial bypassed an explicitly requested curvature certificate");
+}
+
 void check_nonsymmetric_hessian_rejected() {
   Eigen::Matrix2d hessian;
   hessian << 2.0, 1.0,
@@ -642,6 +668,7 @@ int main() {
     check_boundary_requires_curvature_certificate();
     check_projection_roundoff();
     check_nonsymmetric_hessian_rejected();
+    check_core_early_trial_preserves_certificate();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

@@ -115,7 +115,12 @@ struct NeoResult {
  * return a verified negative Rayleigh direction before KKT convergence.
  * A nonnegative Ritz value from an incomplete subspace is not a global
  * positive-semidefiniteness certificate.
+ * With `allow_early_trial`, a coordinate-residual heuristic may return
+ * TrialReady, never Converged. The caller must validate an actual nonlinear
+ * keyframe and disable this heuristic near final stationarity.
  */
-NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options);
+NeoResult solve_neo(
+    const NeoProblem& problem, const NeoOptions& options,
+    bool allow_early_trial = false);
 
 }  // namespace xmvb::vb

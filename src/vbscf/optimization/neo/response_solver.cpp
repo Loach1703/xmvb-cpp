@@ -782,6 +782,25 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
     // different: its step itself depends on the minimum-curvature direction.
     const bool required_curvature_converged =
         !need_curvature_certificate || curvature_converged;
+    const double descent = -problem_.orbital_gradient().dot(result.step.orbital);
+    // Decide whether a nonlinear trial is ready before paying for an exact
+    // residual response. TrialReady never claims physical KKT convergence;
+    // the caller checks actual relaxed energy/gradient and disables this
+    // branch near stationarity. Certified solves still perform the check below.
+    const double coordinate_gradient = problem_.orbital_gradient().stableNorm();
+    const double coordinate_target = options.absolute_residual_tolerance +
+        coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient);
+    const double coordinate_residual = std::hypot(
+        result.kkt_residual.orbital.stableNorm(), structure_residual_norm);
+    if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
+        descent > 0.0 && basis_size > trial_basis_size_ &&
+        coordinate_residual <= coordinate_target) {
+      trial_basis_size_ = basis_size;
+      result.stop_reason = NeoStopReason::TrialReady;
+      diagnostics::neo_trace("historical_trial", "coordinate_residual=%.17g,coordinate_target=%.17g,physical_residual=%.17g,target=%.17g",
+          coordinate_residual, coordinate_target, result.residual_norm, kkt_residual_target);
+      return result;
+    }
     if (stationary && required_curvature_converged && shifted_positive) {
       // A small raw structure residual can still produce a large orbital
       // response when C is ill-conditioned. Check the actual response before
@@ -838,24 +857,6 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
       return result;
     }
 
-    const double descent = -problem_.orbital_gradient().dot(result.step.orbital);
-    // Historical NEO used coordinate residuals to end this solve. Retain
-    // that inexpensive candidate policy only as a nonlinear trial: it is
-    // not a physical KKT certificate and never returns Converged.
-    const double coordinate_gradient = problem_.orbital_gradient().stableNorm();
-    const double coordinate_target = options.absolute_residual_tolerance +
-        coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient);
-    const double coordinate_residual = std::hypot(
-        result.kkt_residual.orbital.stableNorm(), structure_residual_norm);
-    if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
-        descent > 0.0 && basis_size > trial_basis_size_ &&
-        coordinate_residual <= coordinate_target) {
-      trial_basis_size_ = basis_size;
-      result.stop_reason = NeoStopReason::TrialReady;
-      diagnostics::neo_trace("historical_trial", "coordinate_residual=%.17g,coordinate_target=%.17g,physical_residual=%.17g,target=%.17g",
-          coordinate_residual, coordinate_target, result.residual_norm, kkt_residual_target);
-      return result;
-    }
     // CIAH's early-start test applies to the normalized augmented vector,
     // not the unscaled Newton residual. For [1, alpha*p, alpha*q], the top
     // AH equation gives alpha^2 = lambda / (-g^T p). The orbital trust

@@ -173,8 +173,25 @@ def main():
     parser.add_argument('--baseline', type=Path, default=Path('results/history/paired_runs.csv'))
     parser.add_argument('--csv', type=Path, required=True)
     parser.add_argument('--markdown', type=Path)
+    parser.add_argument('--reference', type=Path,
+                        help='Previous current-version comparison CSV for matched input checks')
     args = parser.parse_args()
     rows = summarize(args.root, args.baseline)
+    if args.reference:
+        with args.reference.open() as stream:
+            reference = {r['case']: r for r in csv.DictReader(stream)}
+        for row in rows:
+            if row['status'] != 'converged':
+                continue
+            previous = reference[row['case']]
+            if previous['current_input_sha256'] != row['current_input_sha256']:
+                raise ValueError(f"reference input differs for {row['case']}")
+            for key in ('accepted_points', 'hvp', 'structure_actions', 'wall_s',
+                        'rss_mib', 'energy', 'physical_gradient', 'executable_sha256'):
+                row['reference_' + key] = previous['current_' + key]
+            row['reference_wall_speedup'] = float(previous['current_wall_s']) / row['current_wall_s']
+            row['energy_difference_from_reference_Eh'] = (
+                row['current_energy'] - float(previous['current_energy']))
     columns = list(dict.fromkeys(key for row in rows for key in row))
     with args.csv.open('w', newline='') as stream:
         writer = csv.DictWriter(stream, fieldnames=columns, lineterminator='\n')
