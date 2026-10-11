@@ -30,6 +30,11 @@ mkdir -p "$root"
 hostname > "$root/node.txt"
 lscpu > "$root/cpu.txt"
 scontrol show job "$SLURM_JOB_ID" > "$root/allocation.txt"
+sha256sum "$source_dir/src/core/openmp.hpp" \
+    "$source_dir/src/vbscf/optimization/neo/response_solver.cpp" \
+    "$source_dir/src/vbscf/optimization/neo/response_solver.hpp" \
+    "$source_dir/src/vbscf/structures/orthogonal_ci/sigma.cpp" \
+    > "$root/source-hashes.txt"
 cmake -S "$source_dir" -B "$source_dir/build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -g1 -fno-omit-frame-pointer' \
     -DBUILD_TESTING=ON -DXMVB_BUILD_DEV_TARGETS=ON \
@@ -39,9 +44,11 @@ cmake -S "$source_dir" -B "$source_dir/build" -G Ninja \
     -DCMAKE_Fortran_COMPILER="$dependencies/bin/gfortran" \
     -DXMVB_ENABLE_EIGEN_BLAS_BACKEND=ON > "$root/build.log" 2>&1
 cmake --build "$source_dir/build" --target xmvb test_active_two_electron_sparse \
-    test_ri_ao_h1e_hvp test_orthogonal_direct_ci -j16 >> "$root/build.log" 2>&1
+    test_ri_ao_h1e_hvp test_orthogonal_direct_ci test_neo_response_solver \
+    test_neo test_neo_globalization -j16 >> "$root/build.log" 2>&1
 for threads in 1 8 32; do
-    for test in test_active_two_electron_sparse test_ri_ao_h1e_hvp test_orthogonal_direct_ci; do
+    for test in test_active_two_electron_sparse test_ri_ao_h1e_hvp test_orthogonal_direct_ci \
+        test_neo_response_solver test_neo test_neo_globalization; do
         srun --exact --cpus-per-task="$threads" --cpu-bind=cores \
             env OMP_NUM_THREADS="$threads" "$source_dir/build/src/$test" \
             > "$root/$test-$threads.out" 2>&1

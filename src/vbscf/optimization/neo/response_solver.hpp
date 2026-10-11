@@ -212,6 +212,20 @@ private:
   Eigen::MatrixXd projected_coupling_;
   Eigen::MatrixXd projected_coupling_adjoint_;
   Eigen::MatrixXd projected_structure_;
+  /** @brief Small projected factors; basis dimensions are their revision keys. */
+  Eigen::MatrixXd whitening_;
+  Eigen::MatrixXd structure_inverse_;
+  Eigen::MatrixXd structure_null_vectors_;
+  Eigen::MatrixXd response_coefficients_;
+  Eigen::MatrixXd spectrum_vectors_;
+  Eigen::VectorXd spectrum_values_;
+  Eigen::VectorXd spectral_gradient_;
+  Eigen::Index metric_size_ = -1;
+  Eigen::Index inverse_size_ = -1;
+  Eigen::Index model_orbital_size_ = -1;
+  Eigen::Index model_structure_size_ = -1;
+  /** @brief Fixed accepted-point gradient norm, independent of the radius. */
+  double gradient_norm_ = -1.0;
   Eigen::Index orbital_canonical_ = 0;
   Eigen::Index structure_canonical_ = 0;
 };

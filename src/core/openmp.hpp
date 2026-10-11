@@ -54,6 +54,22 @@ inline int bounded_openmp_thread_count(
 }
 
 /**
+ * @brief Keeps short loops serial unless each worker has a team-width of work.
+ *
+ * Unlike heavy AO rows, CI links and carrier entries are fine-grained work.
+ * Requiring workers squared items avoids a team for only a few items per
+ * worker. Use either the existing full team or serial execution: repeatedly
+ * changing team sizes between CI and AO kernels incurs worker-pool churn.
+ * This is a granularity policy, not a claim of optimal throughput; no work
+ * or precision is discarded.
+ */
+inline int coarse_openmp_thread_count(int requested, std::size_t work_items) {
+  const auto workers = static_cast<std::size_t>(
+      bounded_openmp_thread_count(requested, work_items));
+  return workers <= work_items / workers ? static_cast<int>(workers) : 1;
+}
+
+/**
  * @brief Number of shared work pieces for dynamic loop balancing.
  *
  * Up to workers squared pieces give each worker workers average pieces, so

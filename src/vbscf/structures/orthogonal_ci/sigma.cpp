@@ -164,11 +164,10 @@ DirectCiSigmaAction::build_spin_connections(
   SpinConnections result;
   result.singles.resize(dimension);
   result.occupied = determinants;
-  const int n_threads = std::max(
-      1,
-      std::min(effective_openmp_thread_count(), dimension));
+  const int n_threads = coarse_openmp_thread_count(
+      effective_openmp_thread_count(), static_cast<std::size_t>(dimension));
 
-#pragma omp parallel for schedule(dynamic, 1) if(n_threads > 1) num_threads(n_threads)
+#pragma omp parallel for schedule(static) if(n_threads > 1) num_threads(n_threads)
   for (int target = 0; target < dimension; ++target) {
     auto& singles = result.singles[target];
     const auto& target_occupied = determinants[target];
@@ -517,7 +516,7 @@ void DirectCiSigmaAction::apply_one_body_generators(
   }
   const SpinConnections& beta_graph = beta_connections();
   const Eigen::Index work_items = columns * static_cast<Eigen::Index>(n_alpha_);
-  const int n_threads = bounded_openmp_thread_count(
+  const int n_threads = coarse_openmp_thread_count(
       effective_openmp_thread_count(), static_cast<std::size_t>(work_items));
 
 #pragma omp parallel for schedule(static) if(n_threads > 1) num_threads(n_threads)
@@ -701,9 +700,8 @@ Eigen::MatrixXd DirectCiSigmaAction::one_body_generator_adjoint(
   const int block_width = static_cast<int>(left.cols()) / n_beta_;
   const SpinConnections& beta_graph = beta_connections();
   const int work_items = block_width * n_alpha_ * n_beta_;
-  const int n_threads = std::max(
-      1,
-      std::min(effective_openmp_thread_count(), work_items));
+  const int n_threads = coarse_openmp_thread_count(
+      effective_openmp_thread_count(), static_cast<std::size_t>(work_items));
   std::vector<Eigen::MatrixXd> partials(
       n_threads,
       Eigen::MatrixXd::Zero(n_orbitals_, n_orbitals_));

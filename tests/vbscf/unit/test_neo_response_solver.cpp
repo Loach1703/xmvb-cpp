@@ -296,8 +296,20 @@ void check_workspace_reuses_actions_after_radius_change() {
        0.2, 1.1;
   const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
   const Eigen::Vector3d gradient(0.7, -0.8, 0.5);
-  const ResponseNeoProblem problem =
-      dense_problem(a, b, c, metric, gradient);
+  int gradient_norm_calls = 0;
+  const ResponseNeoProblem problem(
+      gradient, c.rows(),
+      [a, b](const Eigen::VectorXd& p) {
+        return ResponseNeoDirection{a * p, b * p};
+      },
+      [b, c](const Eigen::VectorXd& q) {
+        return ResponseNeoDirection{b.transpose() * q, c * q};
+      },
+      [metric](const Eigen::VectorXd& p) { return metric * p; },
+      [&](const Eigen::VectorXd& covector) {
+        if ((covector - gradient).isZero(0.0)) ++gradient_norm_calls;
+        return physical_dual_norm(metric, covector);
+      });
   ResponseNeoWorkspace workspace(problem);
 
   NeoOptions options;
@@ -310,6 +322,8 @@ void check_workspace_reuses_actions_after_radius_change() {
 
   options.trust_radius = 0.2;
   const ResponseNeoResult reused = workspace.solve(options);
+  require(gradient_norm_calls == 1,
+          "radius retry recomputed the accepted-point gradient dual norm");
   const ResponseNeoResult fresh = xmvb::vb::solve_response_neo(
       problem, options);
   require(reused.converged(), "reused NEO solve did not converge");
@@ -512,6 +526,10 @@ void check_keyframe_response_uses_forcing_accuracy() {
       problem, keyframe_options);
   require(keyframe.converged(),
           "inexact keyframe response solve did not converge");
+  require(keyframe.minimum_curvature_orbital.norm() > 0.0 &&
+              std::isfinite(keyframe.curvature_residual_norm) &&
+              keyframe.curvature_residual_target > 0.0,
+          "deferred curvature diagnostic was not evaluated at convergence");
   require(problem.orbital_dual_norm(keyframe.kkt_residual.orbital) <=
               keyframe.residual_target,
           "inexact keyframe orbital residual exceeds its certificate");

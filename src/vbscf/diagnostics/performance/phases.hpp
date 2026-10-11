@@ -18,7 +18,8 @@ enum class Phase {
   NeoProjectedSolve, NeoPreconditioner, NeoBasis, NeoMetric,
   MetricAction, MetricSolve, MetricBlock, AoPairAction, AoH1eFused, AoH1eTranspose, AoH1eForward,
   CiConnections, CiSigma, CiGenerator, CiIntegralDirection,
-  NeoProjectionFactor, NeoProjectionResidual, TrustSecular, Count
+  NeoProjectionFactor, NeoProjectionResidual, TrustSecular,
+  NeoMetricFactor, NeoStructureFactor, NeoSpectrum, Count
 };
 
 /** @brief Opt-in wall/process-CPU totals. Nested scopes are not additive.
@@ -44,7 +45,8 @@ class PhaseTotals {
         "metric_action", "metric_solve", "metric_block", "ao_pair_action",
         "ao_h1e_fused", "ao_h1e_transpose", "ao_h1e_forward",
         "ci_connections", "ci_sigma", "ci_generator", "ci_integral_direction",
-        "neo_projection_factor", "neo_projection_residual", "trust_secular"};
+        "neo_projection_factor", "neo_projection_residual", "trust_secular",
+        "neo_metric_factor", "neo_structure_factor", "neo_spectrum"};
     static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Phase::Count));
     std::fprintf(stderr, "XMVB_PHASE,stage,calls,wall_seconds\n");
     for (std::size_t i = 0; i < calls.size(); ++i)
