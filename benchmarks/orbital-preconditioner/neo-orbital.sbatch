@@ -35,7 +35,8 @@ cmake --build "$source_dir/build" --target xmvb check_exact_ctx_hvp \
     > "$root/build.log" 2>&1
 cp "$source_dir/build/src/xmvb-cpp.exe" "$root/orbital_gauge.exe"
 # Compare the same complete orbital model, not the formerly incomplete core model.
-cp "$SLURM_SUBMIT_DIR/neo-admission-281651/orbital_gauge.exe" "$root/current.exe"
+reference="${2:-$SLURM_SUBMIT_DIR/neo-admission-281651/orbital_gauge.exe}"
+cp "$reference" "$root/current.exe"
 for test in test_eigen_response test_neo test_neo_response_solver test_neo_globalization \
     test_sparse_orbital_quotient test_active_two_electron_sparse \
     test_ri_ao_h1e_hvp test_shifted_metric_preconditioner; do

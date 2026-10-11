@@ -54,6 +54,7 @@ double neo_forcing_term(
 bool admit_structure_response(
     const VbScfObjective& objective,
     const StructureTangentOperator& structure_hessian,
+    const StructureAction& structure_action,
     Eigen::Index orbital_dimension) {
   if (structure_hessian.tangent_size() == 0) return false;
 
@@ -64,10 +65,24 @@ bool admit_structure_response(
   const long double n_ao_pairs = n_ao * (n_ao + 1.0L) / 2.0L;
   const long double n_active_pairs =
       n_active * (n_active + 1.0L) / 2.0L;
-  const long double core_pair_work = n_ao_pairs * n_active_pairs;
+  const auto& graph = objective.input().ao_integral_input.pair_graph;
+  // Exact HVP applies the AO-pair operator to active-pair columns. Its work
+  // scales with graph edges, not just the number of AO-pair rows.
+  const long double ao_pair_actions = graph.empty()
+      ? n_ao_pairs
+      : graph.has_row_graph()
+          ? static_cast<long double>(graph.values.size())
+          : 2.0L * static_cast<long double>(graph.integral_count());
+  const long double core_pair_work = ao_pair_actions * n_active_pairs;
+  // The orthogonal direct-CI branch uses pair-channel GEMM on spin products,
+  // not the U_alpha^2 U_beta + U_alpha U_beta^2 cofactor sandwiches.
+  const auto& selected = context.selected_state_matrices;
   const long double response_work =
-      estimate_selected_state_contraction_work(
-          context.selected_state_matrices);
+      structure_action.supports_integral_direction()
+          ? static_cast<long double>(selected.n_unique_alpha) *
+              selected.n_unique_beta * n_active_pairs * n_active_pairs *
+              selected.states.size()
+          : estimate_selected_state_contraction_work(selected);
 
   // A coupled orbital basis vector evaluates Bp in addition to the core HVP.
   // Retain the complete coupled model when either its horizontal response
@@ -136,7 +151,8 @@ bool build_accepted_neo_keyframe(
       objective->second_order_context(), orbital_hessian.structure_action());
   const bool use_structure_response =
       admit_structure_response(
-          *objective, structure_hessian, chart.reduced_size());
+          *objective, structure_hessian, orbital_hessian.structure_action(),
+          chart.reduced_size());
   record->model_dimension = std::max(
       record->model_dimension,
       static_cast<int>(
@@ -336,9 +352,8 @@ bool build_accepted_neo_keyframe(
 
   diagnostics::neo_trace_context.keyframe = record->accepted_iteration_index;
   diagnostics::neo_trace_context.attempt = 0;
-  // Historical coordinate-based candidates are useful away from stationarity,
-  // but cannot settle an unresolved physical gradient in an ill-conditioned
-  // chart once the coordinate gradient already passes the outer threshold.
+  // Cheap coordinate candidates do not resolve physical stationarity in an
+  // ill-conditioned chart. Keep their historical role away from convergence.
   bool allow_early_trial = physical_gradient_norm > 3.0 * options.gradient_tolerance &&
       gradient_infinity_norm(reduced_gradient) >= options.gradient_tolerance;
   while (true) {
@@ -346,8 +361,21 @@ bool build_accepted_neo_keyframe(
     const double trial_radius = *trust_radius;
     NeoOptions neo_options;
     neo_options.trust_radius = trial_radius;
+    // A larger physical norm must not loosen the historical absolute forcing
+    // budget for nonlinear trial candidates. Both norms have energy units;
+    // the physical norm still defines the certificate. Near stationarity only
+    // its invariant budget applies. No acceptance or accuracy threshold changes.
     neo_options.relative_residual_tolerance = neo_forcing_term(
         physical_gradient_norm, chart.reduced_size());
+    if (allow_early_trial) {
+      const double coordinate_gradient = reduced_gradient.stableNorm();
+      const double coordinate_budget =
+          neo_forcing_term(coordinate_gradient, chart.reduced_size()) *
+          coordinate_gradient;
+      neo_options.relative_residual_tolerance = std::min(
+          neo_options.relative_residual_tolerance,
+          coordinate_budget / physical_gradient_norm);
+    }
     // Match the outer physical stationarity budget. The solver measures
     // orbital covectors in the dual of this same retraction metric; a small
     // coordinate residual cannot certify an unresolved physical gradient.

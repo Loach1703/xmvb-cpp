@@ -42,3 +42,12 @@ uv run --no-project --with matplotlib python tools/plot_optimizer_comparison.py 
 The source scripts are retained so the CSV and figure can be regenerated and
 audited. The raw Slurm outputs remain on Hanhai25; they are not copied into
 this repository.
+
+The source-regression study on 2026-10-11 is recorded in
+[`neo_regression_20261011.csv`](neo_regression_20261011.csv) and
+[its analysis](../../benchmarks/orbital-preconditioner/neo-regression-20261011.md).
+Its native pairs compare `ac9630f2` with restored coupled-action planning and
+the historical trial forcing budget. 67970 and QOCGUM recover their historical
+five accepted points and 11/13 HVPs. FeCl2 remains at 287 HVPs; its historical
+72-HVP endpoint is not an equal-physical-accuracy reference. The study also
+records the slower, deleted experiments and the NEGPIA runtime tradeoff.
