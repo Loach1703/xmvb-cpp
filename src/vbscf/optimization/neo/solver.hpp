@@ -40,7 +40,8 @@ struct NeoOptions {
   bool require_curvature_certificate = true;
   /**
    * Stop with a negative-curvature witness for an exactly zero gradient,
-   * after refining its Ritz residual to the negative curvature scale.
+   * once its directly evaluated Rayleigh quotient clears the numerical error
+   * margin. No extremal-eigenvector or nonlinear-step convergence is implied.
    */
   bool stop_on_negative_curvature = false;
 };

@@ -306,6 +306,34 @@ void run_audit(int argc, char** argv) {
         packed_mode /= norm;
         write_doubles(prefix + "independent_mode_f64.bin", packed_mode.data(),
                       packed_mode.size());
+        // A sign witness is not a usable nonlinear step certificate. Test
+        // both signs at the existing default physical trust radius, without
+        // committing either trial or changing the optimization algorithm.
+        const Eigen::VectorXd orbital_mode =
+            probe.minimum_curvature_direction.head(chart.reduced_size()) / norm;
+        const double radius = NeoOptions{}.trust_radius;
+        double best_energy = accepted_energy;
+        Eigen::VectorXd best_orbitals;
+        for (double signed_radius : {-radius, radius}) {
+          const auto trial_orbitals = chart.retract_step(
+              orbital_input, orbital_mode, signed_radius);
+          const auto trial = objective.evaluate_trial_energy(
+              layout.pack(trial_orbitals), false);
+          std::cout << "independent_trial_step = " << signed_radius << '\n'
+                    << "independent_trial_energy = " << trial.energy << '\n'
+                    << "independent_trial_reduction = "
+                    << accepted_energy - trial.energy << '\n';
+          if (trial.energy < best_energy) {
+            best_energy = trial.energy;
+            best_orbitals = Eigen::Map<const Eigen::VectorXd>(
+                trial_orbitals.orbital_value_table.data(),
+                trial_orbitals.orbital_value_table.size());
+          }
+        }
+        std::cout << "independent_escape_found = " << (best_orbitals.size() > 0) << '\n';
+        if (best_orbitals.size() > 0)
+          write_doubles(prefix + "escape_orbitals_f64.bin", best_orbitals.data(),
+                        best_orbitals.size());
       }
     }
     std::cout.flush();

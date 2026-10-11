@@ -315,9 +315,9 @@ NeoResult solve_neo(
         complete_basis || lower_bound_certifies;
     // A directly negative Rayleigh quotient witnesses indefiniteness even
     // before its Ritz residual has converged to final accuracy. The margin
-    // follows local operator accuracy and roundoff. Residual refinement to the
-    // curvature scale prevents a first negative projection dominated by stiff
-    // components from becoming an ineffective nonlinear trial direction.
+    // follows local operator accuracy and roundoff. This is only an inertia
+    // witness: its Ritz residual need not converge, and no nonlinear trial or
+    // shifted Newton KKT certificate is implied by the return.
     if (options.stop_on_negative_curvature) {
       const double local_action_scale = minimum_ritz_vector.norm() *
           minimum_hessian_image.norm() / metric_length_squared;
@@ -325,9 +325,7 @@ NeoResult solve_neo(
           options.relative_residual_tolerance * local_action_scale,
           symmetry_factor * projected_hessian.norm());
       if (std::isfinite(result.minimum_curvature_value) &&
-          result.minimum_curvature_value < -negative_curvature_margin &&
-          result.curvature_residual_norm <=
-              -result.minimum_curvature_value * minimum_metric_image.norm()) {
+          result.minimum_curvature_value < -negative_curvature_margin) {
         result.stop_reason = NeoStopReason::NegativeCurvature;
         set_augmented_certificate(problem, minimum_ritz_vector, &result);
         return result;

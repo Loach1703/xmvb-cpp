@@ -393,6 +393,31 @@ void check_positive_zero_gradient_curvature_probe() {
                 2.0e-10, "positive probe returned an inconsistent Ritz value");
 }
 
+/** @brief A negative quadratic form does not require an eigenvector residual. */
+void check_negative_witness_without_spectral_refinement() {
+  Eigen::Matrix3d hessian = Eigen::Matrix3d::Zero();
+  hessian.diagonal() << -30.0, 100.0, 200.0;
+  const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
+  NeoOptions options;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.stop_on_negative_curvature = true;
+  const NeoResult result = solve_neo(
+      dense_problem(hessian, metric, Eigen::Vector3d::Zero()), options);
+  require(result.stop_reason == NeoStopReason::NegativeCurvature,
+          "negative quadratic form was not recognized");
+  require(result.hessian_actions == 1,
+          "negative witness unnecessarily refined an extremal eigenvector");
+  require(result.curvature_residual_norm > std::abs(result.minimum_curvature_value),
+          "fixture no longer distinguishes a witness from an eigenvector");
+  require(!result.global_curvature_certified && !result.converged(),
+          "partial negative witness claimed a complete Newton or spectral certificate");
+  const auto& v = result.minimum_curvature_direction;
+  require(v.dot(hessian * v) < 0.0,
+          "reported witness does not have independently negative curvature");
+  require_close(result.minimum_curvature_hessian_image, hessian * v, 1.0e-12,
+                "negative witness has an inconsistent Hessian image");
+}
+
 void check_certified_lower_bounds() {
   const Eigen::Matrix3d hessian = hidden_curvature_hessian();
   const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
@@ -659,6 +684,7 @@ int main() {
     check_hard_case();
     check_hidden_negative_curvature();
     check_zero_gradient_curvature_probe();
+    check_negative_witness_without_spectral_refinement();
     check_positive_zero_gradient_curvature_probe();
     check_certified_lower_bounds();
     check_scalable_lowest_root_convergence();
