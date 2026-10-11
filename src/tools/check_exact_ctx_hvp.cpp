@@ -6,6 +6,7 @@
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -21,6 +22,7 @@
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
+#include "vbscf/orbitals/charts/physical_metric.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
 
 namespace {
@@ -39,6 +41,7 @@ struct Options {
   bool stream_pair_products = false;
   int diagonal_samples = 0;
   bool coupled_finite_difference = false;
+  int curvature_steps = 0;
 };
 
 void print_usage() {
@@ -52,7 +55,8 @@ void print_usage() {
       << " [--standard-two-electron-mode exact|ri]"
       << " [--direction gradient|preconditioned_gradient]"
       << " [--stream-pair-products 0|1]"
-      << " [--diagonal-samples count]\n";
+      << " [--diagonal-samples count]"
+      << " [--curvature-steps count]\n";
 }
 
 Options parse_arguments(int argc, char** argv) {
@@ -108,6 +112,8 @@ Options parse_arguments(int argc, char** argv) {
       options.stream_pair_products = value == "1";
     } else if (name == "--diagonal-samples") {
       options.diagonal_samples = std::stoi(value);
+    } else if (name == "--curvature-steps") {
+      options.curvature_steps = std::stoi(value);
     } else if (name == "--coupled-finite-difference") {
       if (value != "0" && value != "1") {
         throw std::invalid_argument(
@@ -123,7 +129,7 @@ Options parse_arguments(int argc, char** argv) {
     }
   }
   if (!(options.step > 0.0) || !(options.max_relative_error >= 0.0) ||
-      options.diagonal_samples < 0 ||
+      options.diagonal_samples < 0 || options.curvature_steps < 0 ||
       !(options.response_tolerance > 0.0)) {
     throw std::invalid_argument("finite-difference tolerances must be non-negative");
   }
@@ -359,6 +365,9 @@ int main(int argc, char** argv) {
     if (accepted.second_order_context == nullptr) {
       throw std::runtime_error("accepted-point second-order context is unavailable");
     }
+    std::cout << std::setprecision(16)
+              << "accepted_total_energy = " << accepted.scf_result.total_energy
+              << std::setprecision(12) << std::endl;
 
     xmvb::vb::SparseParameterLayout layout(input.orbital_preparation_input);
     const int n_inactive =
@@ -422,7 +431,70 @@ int main(int argc, char** argv) {
         &input,
         layout,
         &chart);
+    if (options.curvature_steps > 0) {
+      // Diagnostic only: seek a negative Rayleigh witness without forming H.
+      // A nonnegative Ritz value in this incomplete space proves no stability.
+      const int width = std::min<int>(options.curvature_steps, direction.size());
+      Eigen::MatrixXd basis(direction.size(), width);
+      Eigen::MatrixXd images(direction.size(), width);
+      Eigen::MatrixXd block_images(direction.size(), width);
+      std::mt19937_64 generator(42);
+      std::normal_distribution<double> gaussian;
+      Eigen::VectorXd next(direction.size());
+      for (Eigen::Index row = 0; row < next.size(); ++row) next[row] = gaussian(generator);
+      if (options.preconditioned_direction)
+        next = chart.apply_inverse_reduced_block_preconditioner(next);
+      for (int column = 0; column < width; ++column) {
+        for (int pass = 0; pass < 2; ++pass) {
+          const Eigen::VectorXd weights = basis.leftCols(column).transpose() * next;
+          next.noalias() -= basis.leftCols(column) * weights;
+        }
+        const double norm = next.stableNorm();
+        if (!(norm > 0.0) || !std::isfinite(norm)) break;
+        basis.col(column) = next / norm;
+        images.col(column) = exact_hvp.apply_reduced(basis.col(column));
+        block_images.col(column) = options.preconditioned_direction
+            ? chart.apply_reduced_curvature(basis.col(column))
+            : Eigen::VectorXd(basis.col(column));
+        Eigen::MatrixXd projected = basis.leftCols(column + 1).transpose() *
+            images.leftCols(column + 1);
+        const double defect = (projected - projected.transpose()).stableNorm();
+        projected = (0.5 * (projected + projected.transpose())).eval();
+        Eigen::MatrixXd metric = basis.leftCols(column + 1).transpose() *
+            block_images.leftCols(column + 1);
+        metric = (0.5 * (metric + metric.transpose())).eval();
+        Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(projected, metric);
+        if (spectrum.info() != Eigen::Success)
+          throw std::runtime_error("curvature probe eigensolve failed");
+        direction = basis.leftCols(column + 1) * spectrum.eigenvectors().col(0);
+        const Eigen::VectorXd image = images.leftCols(column + 1) *
+            spectrum.eigenvectors().col(0);
+        const Eigen::VectorXd block_image = block_images.leftCols(column + 1) *
+            spectrum.eigenvectors().col(0);
+        next = image - spectrum.eigenvalues()[0] * block_image;
+        std::cout << std::setprecision(16)
+                  << "CURVATURE_PROBE,actions=" << column + 1
+                  << ",rayleigh=" << direction.dot(image)
+                  << ",residual=" << next.stableNorm()
+                  << ",symmetry_defect=" << defect << '\n';
+        // Sign detection is a witness, not extremal-eigenvector convergence.
+        const double scale = std::max(1.0, spectrum.eigenvalues().cwiseAbs().maxCoeff());
+        if (direction.dot(image) < -std::sqrt(std::numeric_limits<double>::epsilon()) * scale)
+          break;
+        if (options.preconditioned_direction)
+          next = chart.apply_inverse_reduced_block_preconditioner(next);
+      }
+      // Reevaluate its full HVP and existing gradient/energy finite differences.
+      direction.normalize();
+    }
     const Eigen::VectorXd analytic = exact_hvp.apply_reduced(direction);
+    const xmvb::vb::OrbitalPhysicalMetric physical_metric(
+        input.orbital_preparation_input, chart.uses_active_subspace_gauge());
+    const double physical_direction_squared_norm = physical_metric.squared_norm(
+        layout, chart.expand_step(direction));
+    if (!(physical_direction_squared_norm > 0.0) ||
+        !std::isfinite(physical_direction_squared_norm))
+      throw std::runtime_error("HVP diagnostic direction has invalid physical norm");
 
     double coupled_orbital_fd_relative_error = 0.0;
     double coupled_structure_fd_relative_error = 0.0;
@@ -782,7 +854,7 @@ int main(int argc, char** argv) {
               << xmvb::vb::structure_eigensolver_name(options.eigensolver)
               << '\n'
               << "direction = "
-              << (options.preconditioned_direction
+              << (options.curvature_steps > 0 ? "curvature_probe" : options.preconditioned_direction
                       ? "preconditioned_gradient"
                       : "gradient") << '\n'
               << "reduced_dimension = " << direction.size() << '\n'
@@ -847,6 +919,14 @@ int main(int argc, char** argv) {
               << "max_rel_diff = " << relative_error << '\n'
               << "analytic_directional_curvature = "
               << analytic_directional_curvature << '\n'
+              << "physical_direction_squared_norm = "
+              << physical_direction_squared_norm << '\n'
+              << "physical_rayleigh_curvature = "
+              << analytic_directional_curvature / physical_direction_squared_norm << '\n'
+              << "accepted_coordinate_gradient_norm = "
+              << accepted_reduced_gradient.norm() << '\n'
+              << "accepted_gradient_dot_direction = "
+              << accepted_reduced_gradient.dot(direction) << '\n'
               << "gradient_fd_directional_curvature = "
               << gradient_fd_directional_curvature << '\n'
               << "energy_fd_directional_curvature = "

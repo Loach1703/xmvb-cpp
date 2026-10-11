@@ -880,10 +880,39 @@ void check_candidate_observation_preserves_solve() {
   verify_coupled_residual(a, b, c, metric, gradient, options.trust_radius, observed);
 }
 
+/** @brief Small KKT residuals do not exclude weak, gradient-orthogonal curvature. */
+void check_stationarity_is_not_curvature_certificate() {
+  const Eigen::Matrix2d a = Eigen::Vector2d(2.0, -2.0e-5).asDiagonal();
+  const Eigen::MatrixXd b(0, 2), c(0, 0);
+  const Eigen::Vector2d gradient(1.0e-4, 0.0);
+  const auto problem = dense_problem(a, b, c, Eigen::Matrix2d::Identity(), gradient);
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.relative_residual_tolerance = 1.0e-3;
+  options.absolute_residual_tolerance = 1.0e-3;
+  options.require_curvature_certificate = false;
+  const auto stationary = xmvb::vb::solve_response_neo(problem, options);
+  require(stationary.converged() && !stationary.global_curvature_certified,
+          "KKT-only solve incorrectly certified global curvature");
+  options.require_curvature_certificate = true;
+  const auto stable = xmvb::vb::solve_response_neo(problem, options);
+  const double curvature = stable.minimum_curvature_orbital.dot(
+      a * stable.minimum_curvature_orbital);
+  require(stable.converged() && curvature < 0.0 &&
+              stable.global_curvature_certified,
+          "complete spectral solve missed gradient-orthogonal negative curvature");
+  const auto energy = [&](const Eigen::VectorXd& p) {
+    return gradient.dot(p) + 0.5 * p.dot(a * p);
+  };
+  require(energy(stable.step.orbital) < energy(stationary.step.orbital) - 5.0e-6,
+          "negative-curvature escape did not improve the quadratic model");
+}
+
 }  // namespace
 
 int main() {
   try {
+    check_stationarity_is_not_curvature_certificate();
     check_physical_mismatch_seeds_response(1.0);
     check_physical_mismatch_seeds_response(100.0);
     check_candidate_observation_preserves_solve();
