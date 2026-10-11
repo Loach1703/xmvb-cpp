@@ -831,13 +831,12 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
           coordinate_residual, coordinate_target, result.residual_norm, kkt_residual_target);
       return result;
     }
-    // A coordinate-ready candidate can still miss physical stationarity.
-    // Seed its missing Schur response once, before accumulating frozen-only
-    // orbital directions. Reuse the already computed B p, not every B Q.
-    // Other strict solves retain the existing deferred certificate policy.
+    // A certified solve must resolve the relaxed model, not first converge
+    // its frozen-structure restriction. Seed the response of the actual
+    // candidate once, reusing B p rather than solving for every B Q column.
+    // Approximate nonlinear trials keep their deferred response policy.
     if (!allow_early_trial && !stationary && !response_seeded_ &&
         structure_basis_.cols() == 0 && basis_size < maximum_dimension &&
-        coordinate_residual <= coordinate_target &&
         problem_.has_structure_residual_solver() &&
         !result.kkt_residual.structure.isZero(0.0)) {
       response_seeded_ = true;

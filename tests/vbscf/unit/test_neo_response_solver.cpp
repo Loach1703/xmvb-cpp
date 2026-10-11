@@ -794,14 +794,16 @@ void check_trial_defers_structure_certificate() {
                 "deferred certificate returned an inconsistent structure residual");
 }
 
-void check_physical_mismatch_seeds_response() {
+void check_physical_mismatch_seeds_response(double scale) {
   Eigen::Matrix2d a;
   a << 2.0, 0.6, 0.6, 3.0;
   const Eigen::RowVector2d b(0.2, 0.1);
   const Eigen::Matrix<double, 1, 1> c =
       1.7 * Eigen::Matrix<double, 1, 1>::Identity();
   const Eigen::Matrix2d metric = 1.0e-4 * Eigen::Matrix2d::Identity();
-  const Eigen::Vector2d gradient(0.0005, 0.001);
+  // Cover both a coordinate-ready candidate and one whose frozen residual
+  // is not ready. Certified solves must seed the actual response in either.
+  const Eigen::Vector2d gradient = scale * Eigen::Vector2d(0.0005, 0.001);
   int orbital_actions = 0, responses = 0;
   const ResponseNeoProblem problem(
       gradient, 1,
@@ -882,7 +884,8 @@ void check_candidate_observation_preserves_solve() {
 
 int main() {
   try {
-    check_physical_mismatch_seeds_response();
+    check_physical_mismatch_seeds_response(1.0);
+    check_physical_mismatch_seeds_response(100.0);
     check_candidate_observation_preserves_solve();
     check_early_trial_is_not_certified_and_resumes();
     check_historical_interior_trial_preserves_physical_certificate();
