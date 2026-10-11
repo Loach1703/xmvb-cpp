@@ -9,6 +9,16 @@ namespace xmvb::vb {
  */
 bool neo_trial_allowed(double physical_gradient_norm, double gradient_tolerance);
 
+/** @brief Expresses the absolute early-trial floor in relative gradient units.
+ * This is a candidate-generation safeguard, not a physical KKT certificate.
+ * A fixed absolute coordinate floor must not admit an essentially unchanged
+ * residual merely because the chart compresses the gradient.
+ */
+double neo_trial_residual_target(double coordinate_gradient,
+                                 double physical_gradient,
+                                 double coordinate_target,
+                                 double absolute_target);
+
 /** @brief Outcome of comparing a NEO trial step with its quadratic model. */
 struct NeoGlobalizationResult {
   /** Quadratic-model decrease, `-g^T p - 0.5 p^T H p`. */

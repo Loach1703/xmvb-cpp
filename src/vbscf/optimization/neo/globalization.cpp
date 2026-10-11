@@ -32,6 +32,22 @@ bool neo_trial_allowed(double physical_gradient_norm, double gradient_tolerance)
   return physical_gradient_norm > 3.0 * gradient_tolerance;
 }
 
+double neo_trial_residual_target(double coordinate_gradient,
+                                 double physical_gradient,
+                                 double coordinate_target,
+                                 double absolute_target) {
+  for (const double value : {coordinate_gradient, physical_gradient,
+                             coordinate_target, absolute_target}) {
+    if (!std::isfinite(value) || value < 0.0)
+      throw std::invalid_argument("NEO trial residual budgets must be finite and nonnegative");
+  }
+  if (coordinate_target < absolute_target)
+    throw std::invalid_argument("NEO coordinate target is below its absolute component");
+  if (physical_gradient == 0.0) return 0.0;
+  return coordinate_target - absolute_target + absolute_target *
+      std::min(1.0, coordinate_gradient / physical_gradient);
+}
+
 NeoGlobalizationResult globalize_neo_trial(
     double current_energy,
     double trial_energy,

@@ -651,6 +651,24 @@ void check_core_early_trial_preserves_certificate() {
           "core trial bypassed an explicitly requested curvature certificate");
 }
 
+void check_core_early_trial_rejects_absolute_floor() {
+  const Eigen::MatrixXd hessian = Eigen::Vector4d(1, 2, 4, 8).asDiagonal();
+  const Eigen::MatrixXd metric = 1e-4 * Eigen::MatrixXd::Identity(4, 4);
+  const Eigen::VectorXd gradient = 2e-4 * Eigen::VectorXd::Ones(4);
+  NeoOptions options;
+  options.trust_radius = 10.0;
+  options.relative_residual_tolerance = 0.1;
+  options.absolute_residual_tolerance = 1e-3;
+  options.require_curvature_certificate = false;
+  const auto step = solve_neo(dense_problem(hessian, metric, gradient), options, true);
+  require(step.converged() || step.stop_reason == NeoStopReason::TrialReady,
+          "compressed-gradient candidate failed");
+  require(step.hessian_actions > 1,
+          "absolute coordinate floor admitted an unresolved first direction");
+  require(step.residual_norm < physical_dual_norm(metric, gradient),
+          "candidate did not reduce its physical residual");
+}
+
 void check_nonsymmetric_hessian_rejected() {
   Eigen::Matrix2d hessian;
   hessian << 2.0, 1.0,
@@ -695,6 +713,7 @@ int main() {
     check_projection_roundoff();
     check_nonsymmetric_hessian_rejected();
     check_core_early_trial_preserves_certificate();
+    check_core_early_trial_rejects_absolute_floor();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

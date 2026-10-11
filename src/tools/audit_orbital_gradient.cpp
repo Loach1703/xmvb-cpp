@@ -23,6 +23,7 @@
 #include "vbscf/optimization/trust_region/retraction.hpp"
 #include "vbscf/optimization/neo/curvature.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
+#include "vbscf/orbitals/gauge/support_preserving.hpp"
 
 namespace {
 
@@ -130,9 +131,10 @@ void run_audit(int argc, char** argv) {
     throw std::invalid_argument(
         "usage: audit_orbital_gradient INPUT [dense|davidson] "
         "[energy-tol] [gradient-tol] [packed-direction-f64.bin|gradient|random] "
-        "[full-hvp|probe-curvature|vector-hvp] [orbital-table-f64.bin]");
+        "[full-hvp|probe-curvature|vector-hvp|balance-gauge] [orbital-table-f64.bin]");
   }
-  const bool audit_hvp = argc >= 7;
+  const bool balance_gauge = argc >= 7 && std::string(argv[6]) == "balance-gauge";
+  const bool audit_hvp = argc >= 7 && !balance_gauge;
   const bool vector_hvp = audit_hvp && std::string(argv[6]) == "vector-hvp";
   const bool probe_curvature = audit_hvp && std::string(argv[6]) == "probe-curvature";
   if (audit_hvp && !probe_curvature && !vector_hvp &&
@@ -146,6 +148,7 @@ void run_audit(int argc, char** argv) {
     const Eigen::VectorXd values = read_packed_direction(argv[7], table.size());
     std::copy(values.data(), values.data() + values.size(), table.begin());
   }
+  if (balance_gauge) balance_active_gauge(&loaded.input.orbital_preparation_input);
   StructureEigensolver solver = loaded.structure_eigensolver;
   if (argc >= 3) {
     const std::string name = argv[2];

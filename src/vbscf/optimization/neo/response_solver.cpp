@@ -17,6 +17,7 @@
 #include <lapacke.h>
 
 #include "vbscf/optimization/trust_region/spectral.hpp"
+#include "vbscf/optimization/neo/globalization.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -875,8 +876,11 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
     // first samples its own structure response, not the responses of all
     // retained orbital directions; real energy/gradient keyframes follow.
     const double coordinate_gradient = problem_.orbital_gradient().stableNorm();
-    const double coordinate_target = options.absolute_residual_tolerance +
-        coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient);
+    const double coordinate_target = neo_trial_residual_target(
+        coordinate_gradient, gradient_norm,
+        options.absolute_residual_tolerance +
+            coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient),
+        options.absolute_residual_tolerance);
     const double coordinate_residual = std::hypot(
         result.kkt_residual.orbital.stableNorm(), structure_residual_norm);
     const bool coordinate_trial_ready =

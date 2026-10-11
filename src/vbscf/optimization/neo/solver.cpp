@@ -14,6 +14,7 @@
 
 #include "vbscf/optimization/trust_region/spectral.hpp"
 #include "vbscf/optimization/neo/symmetry.hpp"
+#include "vbscf/optimization/neo/globalization.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -353,8 +354,11 @@ NeoResult solve_neo(
     // stationarity certificate. The caller must validate a real nonlinear
     // energy/gradient keyframe and disable early trials near convergence.
     const double coordinate_gradient = problem.gradient().stableNorm();
-    const double coordinate_target = options.absolute_residual_tolerance +
-        coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient);
+    const double coordinate_target = neo_trial_residual_target(
+        coordinate_gradient, gradient_norm,
+        options.absolute_residual_tolerance +
+            coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient),
+        options.absolute_residual_tolerance);
     if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
         -problem.gradient().dot(result.step) > 0.0 &&
         result.kkt_residual.stableNorm() <= coordinate_target) {
