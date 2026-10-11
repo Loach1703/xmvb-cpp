@@ -708,6 +708,15 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
         result.structure_actions, orbital_residual_norm, structure_residual_norm,
         kkt_residual_target, result.shift, options.trust_radius, result.step_norm,
         static_cast<int>(result.boundary));
+    // Report already available Ritz data only. These are projected-model
+    // eigenvalues, not a global spectral certificate or a new stopping test.
+    if (diagnostics::neo_trace_enabled()) {
+      diagnostics::neo_trace("spectrum",
+          "micro=%d,hvp=%d,min=%.17g,max=%.17g,coordinate_residual=%.17g,physical_residual=%.17g",
+          result.iterations, result.orbital_actions, spectrum_values_[0],
+          spectrum_values_[spectrum_values_.size() - 1],
+          result.kkt_residual.orbital.stableNorm(), orbital_residual_norm);
+    }
     result.predicted_reduction =
         -problem_.orbital_gradient().dot(result.step.orbital) -
         0.5 * (result.step.orbital.dot(result.hessian_step.orbital) +
