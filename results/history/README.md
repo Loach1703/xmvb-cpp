@@ -51,3 +51,15 @@ the historical trial forcing budget. 67970 and QOCGUM recover their historical
 five accepted points and 11/13 HVPs. FeCl2 remains at 287 HVPs; its historical
 72-HVP endpoint is not an equal-physical-accuracy reference. The study also
 records the slower, deleted experiments and the NEGPIA runtime tradeoff.
+
+The follow-up orbital-direction study is recorded in
+[`neo_directions_20261011.csv`](neo_directions_20261011.csv) and
+[its analysis](../../benchmarks/orbital-preconditioner/neo-directions-20261011.md).
+It retains a candidate-local Schur seed for coordinate/physical residual
+disagreement: FeCl2 drops from 287 to 246 HVPs, while the other five systems'
+point/HVP counts are unchanged. NEGPIA's regression is not solved. FeCl2's
+endpoint energy increases by 1.11e-6 Eh although the unchanged stopping tests
+pass; these are not identical-energy benchmarks. The CSV also includes the
+deleted expansions, failed analytic-diagonal runs, and compact-diagonal
+controls, with raw paths and input/executable hashes. Failed runs must not be
+included as converged speed comparisons.

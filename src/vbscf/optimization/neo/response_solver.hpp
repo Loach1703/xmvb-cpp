@@ -237,6 +237,8 @@ private:
   Eigen::Index model_structure_size_ = -1;
   /** @brief Fixed accepted-point gradient norm, independent of the radius. */
   double gradient_norm_ = -1.0;
+  /** @brief One candidate-local Schur seed for a physical/coordinate mismatch. */
+  bool response_seeded_ = false;
   /** @brief A rejected early candidate must gain a direction before yielding again. */
   Eigen::Index trial_basis_size_ = -1;
   Eigen::Index orbital_canonical_ = 0;

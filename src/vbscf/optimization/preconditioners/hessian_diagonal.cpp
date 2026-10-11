@@ -24,16 +24,8 @@ std::size_t tensor4_index(
           dimension + s);
 }
 
-std::size_t ppaa_index(
-    int p, int q, int a, int b, int n_mo, int n_active) noexcept {
-  return (((static_cast<std::size_t>(p) * n_mo + q) * n_active + a) *
-          n_active + b);
-}
-
-std::size_t papa_index(
-    int p, int a, int q, int b, int n_mo, int n_active) noexcept {
-  return (((static_cast<std::size_t>(p) * n_active + a) * n_mo + q) *
-          n_active + b);
+std::size_t slice_index(int p, int a, int b, int n_active) noexcept {
+  return ((static_cast<std::size_t>(p) * n_active + a) * n_active + b);
 }
 
 std::size_t packed_eri_count(int n_active) noexcept {
@@ -53,19 +45,23 @@ void validate(
       x.j_pc.cols() != x.n_core || x.k_pc.rows() != n_mo ||
       x.k_pc.cols() != x.n_core || dm1.rows() != x.n_active ||
       dm1.cols() != x.n_active ||
-      x.ppaa.size() != static_cast<std::size_t>(n_mo) * n_mo *
+      x.j_active.size() != static_cast<std::size_t>(n_mo) *
                              x.n_active * x.n_active ||
-      x.papa.size() != static_cast<std::size_t>(n_mo) * x.n_active *
-                             n_mo * x.n_active ||
+      x.k_active.size() != x.j_active.size() ||
+      x.active_eri.size() != static_cast<std::size_t>(x.n_active) *
+                             x.n_active * x.n_active * x.n_active ||
       packed_gradient.size() != packed_eri_count(x.n_active) ||
       !x.h_core.allFinite() || !x.v_core.allFinite() ||
       !x.j_pc.allFinite() || !x.k_pc.allFinite() || !dm1.allFinite()) {
     throw std::invalid_argument("invalid VBSCF analytic Hessian-diagonal input");
   }
-  if (!std::all_of(x.ppaa.begin(), x.ppaa.end(), [](double value) {
+  if (!std::all_of(x.j_active.begin(), x.j_active.end(), [](double value) {
         return std::isfinite(value);
       }) ||
-      !std::all_of(x.papa.begin(), x.papa.end(), [](double value) {
+      !std::all_of(x.k_active.begin(), x.k_active.end(), [](double value) {
+        return std::isfinite(value);
+      }) ||
+      !std::all_of(x.active_eri.begin(), x.active_eri.end(), [](double value) {
         return std::isfinite(value);
       }) ||
       !std::all_of(packed_gradient.begin(), packed_gradient.end(), [](double value) {
@@ -251,56 +247,47 @@ Eigen::MatrixXd build_analytic_rotation_hessian_diagonal(
   dm1.diagonal().head(n_core).setConstant(2.0);
   dm1.block(n_core, n_core, n_active, n_active) = dm1_active;
 
-  Eigen::MatrixXd v_active = Eigen::MatrixXd::Zero(n_mo, n_mo);
+  Eigen::VectorXd v_total_diagonal = x.v_core.diagonal();
   for (int p = 0; p < n_mo; ++p) {
-    for (int q = 0; q < n_mo; ++q) {
-      double value = 0.0;
-      for (int a = 0; a < n_active; ++a) {
-        for (int b = 0; b < n_active; ++b) {
-          value +=
-              x.ppaa[ppaa_index(p, q, a, b, n_mo, n_active)] *
-                  dm1_active(a, b) -
-              0.5 * x.papa[papa_index(p, a, q, b, n_mo, n_active)] *
-                  dm1_active(a, b);
-        }
+    double value = 0.0;
+    for (int a = 0; a < n_active; ++a) {
+      for (int b = 0; b < n_active; ++b) {
+        value +=
+            x.j_active[slice_index(p, a, b, n_active)] * dm1_active(a, b) -
+            0.5 * x.k_active[slice_index(p, a, b, n_active)] * dm1_active(a, b);
       }
-      v_active(p, q) = value;
+    }
+    v_total_diagonal[p] += value;
+  }
+  Eigen::VectorXd gradient_diagonal = Eigen::VectorXd::Zero(n_mo);
+  gradient_diagonal.head(n_core) = 2.0 *
+      (x.h_core.diagonal().head(n_core) + v_total_diagonal.head(n_core));
+  for (int a = 0; a < n_active; ++a) {
+    for (int u = 0; u < n_active; ++u) {
+      gradient_diagonal[n_core + a] +=
+          (x.h_core(n_core + a, n_core + u) +
+           x.v_core(n_core + a, n_core + u)) * dm1_active(u, a);
+      for (int w = 0; w < n_active; ++w)
+        for (int z = 0; z < n_active; ++z)
+          gradient_diagonal[n_core + a] +=
+              x.active_eri[tensor4_index(a, u, w, z, n_active)] *
+              dm2[tensor4_index(w, z, u, a, n_active)];
     }
   }
-  const Eigen::MatrixXd v_total = x.v_core + v_active;
-
-  Eigen::MatrixXd gpq = Eigen::MatrixXd::Zero(n_mo, n_mo);
-  gpq.leftCols(n_core) =
-      2.0 * (x.h_core.leftCols(n_core) + v_total.leftCols(n_core));
-  gpq.middleCols(n_core, n_active).noalias() =
-      (x.h_core.middleCols(n_core, n_active) +
-       x.v_core.middleCols(n_core, n_active)) * dm1_active;
 
   Eigen::MatrixXd jkcaa = Eigen::MatrixXd::Zero(n_occ, n_active);
   Eigen::MatrixXd v_dm2 = Eigen::MatrixXd::Zero(n_mo, n_active);
   for (int p = 0; p < n_mo; ++p) {
     for (int a = 0; a < n_active; ++a) {
-      double gradient_dm2 = 0.0;
       double diagonal_dm2 = 0.0;
-      for (int u = 0; u < n_active; ++u) {
-        for (int w = 0; w < n_active; ++w) {
-          for (int z = 0; z < n_active; ++z) {
-            gradient_dm2 +=
-                x.ppaa[ppaa_index(
-                    p, n_core + u, w, z, n_mo, n_active)] *
-                dm2[tensor4_index(w, z, u, a, n_active)];
-          }
-        }
-      }
-      gpq(p, n_core + a) += gradient_dm2;
 
       for (int w = 0; w < n_active; ++w) {
         for (int z = 0; z < n_active; ++z) {
           diagonal_dm2 +=
-              x.ppaa[ppaa_index(p, p, w, z, n_mo, n_active)] *
+              x.j_active[slice_index(p, w, z, n_active)] *
               dm2[tensor4_index(w, z, a, a, n_active)];
           diagonal_dm2 +=
-              x.papa[papa_index(p, w, p, z, n_mo, n_active)] *
+              x.k_active[slice_index(p, w, z, n_active)] *
               (dm2[tensor4_index(a, w, z, a, n_active)] +
                dm2[tensor4_index(w, a, z, a, n_active)]);
         }
@@ -310,8 +297,8 @@ Eigen::MatrixXd build_analytic_rotation_hessian_diagonal(
         double value = 0.0;
         for (int v = 0; v < n_active; ++v) {
           value +=
-              (6.0 * x.papa[papa_index(p, a, p, v, n_mo, n_active)] -
-               2.0 * x.ppaa[ppaa_index(p, p, a, v, n_mo, n_active)]) *
+              (6.0 * x.k_active[slice_index(p, a, v, n_active)] -
+               2.0 * x.j_active[slice_index(p, a, v, n_active)]) *
               dm1_active(a, v);
         }
         jkcaa(p, a) = value;
@@ -325,12 +312,11 @@ Eigen::MatrixXd build_analytic_rotation_hessian_diagonal(
       diagonal(p, q) =
           x.h_core(p, p) * dm1(q, q) - x.h_core(p, q) * dm1(p, q) +
           x.h_core(q, q) * dm1(p, p) - x.h_core(q, p) * dm1(q, p) -
-          gpq(p, p) - gpq(q, q);
+          gradient_diagonal[p] - gradient_diagonal[q];
     }
-    diagonal(p, p) += 2.0 * gpq(p, p);
+    diagonal(p, p) += 2.0 * gradient_diagonal[p];
   }
 
-  const Eigen::VectorXd v_total_diagonal = v_total.diagonal();
   for (int p = 0; p < n_mo; ++p) {
     for (int c = 0; c < n_core; ++c) {
       diagonal(p, c) += 2.0 * v_total_diagonal(p);
@@ -474,41 +460,40 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
         mo.middleCols(n_core, n_active), &active_pair_map);
     active_pair_products = apply_ao_pair_operator(input, active_pair_map);
   }
-  const int n_mo_pairs = n_bf * (n_bf + 1) / 2;
   const int n_active_pairs = n_active * (n_active + 1) / 2;
-  Eigen::MatrixXd ppaa_pairs = Eigen::MatrixXd::Zero(
-      n_mo_pairs, n_active_pairs);
+  x.j_active.resize(static_cast<std::size_t>(n_bf) * n_active * n_active);
+  x.k_active.resize(x.j_active.size());
+  // Only the diagonal MO pair (pp|ab) enters the analytic diagonal.
+  // Accumulate directly: each worker owns O(n_active^2), not an AO-pair map.
 #pragma omp parallel for schedule(static)
   for (int p = 0; p < n_bf; ++p) {
-    for (int q = 0; q <= p; ++q) {
-      const int pq = TwoElectronIndexer::packed_pair_index(p, q);
-      Eigen::VectorXd pair_coefficients(active_pair_products.rows());
-      Eigen::Index ao_pair = 0;
-      for (int mu = 0; mu < n_bf; ++mu) {
-        for (int nu = 0; nu <= mu; ++nu, ++ao_pair) {
-          double coefficient = mo(mu, p) * mo(nu, q);
-          if (mu != nu) coefficient += mo(nu, p) * mo(mu, q);
-          pair_coefficients[ao_pair] = coefficient;
-        }
+    Eigen::RowVectorXd contraction = Eigen::RowVectorXd::Zero(n_active_pairs);
+    Eigen::Index pair = 0;
+    for (int mu = 0; mu < n_bf; ++mu)
+      for (int nu = 0; nu <= mu; ++nu, ++pair) {
+        const double coefficient =
+            mo(mu, p) * mo(nu, p) * (mu == nu ? 1.0 : 2.0);
+        contraction.noalias() += coefficient * active_pair_products.row(pair);
       }
-      ppaa_pairs.row(pq).noalias() =
-          pair_coefficients.transpose() * active_pair_products;
-    }
+    for (int a = 0; a < n_active; ++a)
+      for (int b = 0; b < n_active; ++b)
+        x.j_active[slice_index(p, a, b, n_active)] =
+            contraction[TwoElectronIndexer::packed_pair_index(a, b)];
   }
-  x.ppaa.resize(
-      static_cast<std::size_t>(n_bf) * n_bf * n_active * n_active);
-  for (int p = 0; p < n_bf; ++p)
-    for (int q = 0; q < n_bf; ++q) {
-      const int pq = TwoElectronIndexer::packed_pair_index(p, q);
-      for (int a = 0; a < n_active; ++a)
-        for (int b = 0; b < n_active; ++b) {
-          const int ab = TwoElectronIndexer::packed_pair_index(a, b);
-          x.ppaa[ppaa_index(p, q, a, b, n_bf, n_active)] =
-              ppaa_pairs(pq, ab);
-        }
-    }
-  x.papa.resize(
-      static_cast<std::size_t>(n_bf) * n_active * n_bf * n_active);
+  ExactCtxPairMatrix active_pair_map;
+  build_packed_orbital_pair_map(
+      mo.middleCols(n_core, n_active), &active_pair_map);
+  const Eigen::MatrixXd active_pairs =
+      active_pair_map.transpose() * active_pair_products;
+  x.active_eri.resize(static_cast<std::size_t>(n_active) *
+                      n_active * n_active * n_active);
+  for (int a = 0; a < n_active; ++a)
+    for (int b = 0; b < n_active; ++b)
+      for (int c = 0; c < n_active; ++c)
+        for (int d = 0; d < n_active; ++d)
+          x.active_eri[tensor4_index(a, b, c, d, n_active)] = active_pairs(
+              TwoElectronIndexer::packed_pair_index(a, b),
+              TwoElectronIndexer::packed_pair_index(c, d));
   const int transform_block_width = std::max(1, 2 * n_active);
   for (int p_begin = 0; p_begin < n_bf; p_begin += transform_block_width) {
     const int p_count = std::min(transform_block_width, n_bf - p_begin);
@@ -517,30 +502,21 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
         mo.middleCols(n_core, n_active));
     const ExactCtxPairMatrix block_products =
         apply_ao_pair_operator(input, block_map);
-    for (int q = 0; q < n_bf; ++q) {
-      Eigen::MatrixXd contractions = Eigen::MatrixXd::Zero(
-          n_active, p_count * n_active);
-      Eigen::Index pair = 0;
-      for (int mu = 0; mu < n_bf; ++mu) {
-        for (int nu = 0; nu <= mu; ++nu, ++pair) {
-          for (int b = 0; b < n_active; ++b) {
-            double coefficient = mo(mu, q) * mo(nu, n_core + b);
-            if (mu != nu) {
-              coefficient += mo(nu, q) * mo(mu, n_core + b);
-            }
-            contractions.row(b).noalias() +=
-                coefficient * block_products.row(pair);
-          }
-        }
-      }
-      for (int local_p = 0; local_p < p_count; ++local_p)
-        for (int a = 0; a < n_active; ++a)
-          for (int b = 0; b < n_active; ++b)
-            x.papa[papa_index(
-                p_begin + local_p, a, q, b, n_bf, n_active)] =
-                contractions(b, local_p * n_active + a);
+    // (pa|pb), not the unused full (pa|qb) tensor. Read-only pair blocks
+    // are shared; each worker contracts just one n_active-square slice.
+#pragma omp parallel for schedule(static)
+    for (int local_p = 0; local_p < p_count; ++local_p) {
+      const Eigen::MatrixXd contraction =
+          block_map.middleCols(local_p * n_active, n_active).transpose() *
+          block_products.middleCols(local_p * n_active, n_active);
+      for (int a = 0; a < n_active; ++a)
+        for (int b = 0; b < n_active; ++b)
+          x.k_active[slice_index(p_begin + local_p, a, b, n_active)] =
+              contraction(a, b);
     }
   }
+  x.j_pc = Eigen::MatrixXd::Zero(n_bf, n_core);
+  x.k_pc = Eigen::MatrixXd::Zero(n_bf, n_core);
   ExactCtxPairMatrix core_diagonal_map(
       static_cast<Eigen::Index>(n_bf) * (n_bf + 1) / 2, n_core);
   Eigen::Index ao_pair = 0;
@@ -551,7 +527,6 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
             mo(mu, c) * mo(nu, c) * (mu == nu ? 1.0 : 2.0);
   const ExactCtxPairMatrix core_diagonal_products =
       apply_ao_pair_operator(input, core_diagonal_map);
-  x.j_pc = Eigen::MatrixXd::Zero(n_bf, n_core);
   for (int p = 0; p < n_bf; ++p) {
     Eigen::VectorXd diagonal_pair(core_diagonal_map.rows());
     ao_pair = 0;
@@ -562,7 +537,6 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
     x.j_pc.row(p) = diagonal_pair.transpose() * core_diagonal_products;
   }
 
-  x.k_pc = Eigen::MatrixXd::Zero(n_bf, n_core);
   for (int p_begin = 0; p_begin < n_bf; p_begin += transform_block_width) {
     const int p_count = std::min(transform_block_width, n_bf - p_begin);
     const ExactCtxPairMatrix block_map = build_mixed_pair_map(

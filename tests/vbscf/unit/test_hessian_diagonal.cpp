@@ -108,22 +108,29 @@ xmvb::vb::AnalyticDiagonalIntermediates make_intermediates(
   x.v_core = Eigen::MatrixXd::Zero(n,n);
   x.j_pc = Eigen::MatrixXd::Zero(n,n_core);
   x.k_pc = Eigen::MatrixXd::Zero(n,n_core);
-  x.ppaa.resize(static_cast<std::size_t>(n)*n*na*na);
-  x.papa.resize(static_cast<std::size_t>(n)*na*n*na);
+  x.j_active.resize(static_cast<std::size_t>(n)*na*na);
+  x.k_active.resize(x.j_active.size());
+  x.active_eri.resize(static_cast<std::size_t>(na)*na*na*na);
+  for (int a = 0; a < na; ++a)
+    for (int b = 0; b < na; ++b)
+      for (int c = 0; c < na; ++c)
+        for (int d = 0; d < na; ++d)
+          x.active_eri[eri_index(a,b,c,d,na)] =
+              eri(g,n_core+a,n_core+b,n_core+c,n_core+d,n);
   for (int p = 0; p < n; ++p) {
     for (int q = 0; q < n; ++q) {
       for (int c = 0; c < n_core; ++c) {
         x.v_core(p,q) +=
             2.0 * eri(g,p,q,c,c,n) - eri(g,p,c,c,q,n);
       }
-      for (int a = 0; a < na; ++a)
-        for (int b = 0; b < na; ++b) {
-          x.ppaa[((p*n+q)*na+a)*na+b] =
-              eri(g,p,q,n_core+a,n_core+b,n);
-          x.papa[((p*na+a)*n+q)*na+b] =
-              eri(g,p,n_core+a,q,n_core+b,n);
-        }
     }
+    for (int a = 0; a < na; ++a)
+      for (int b = 0; b < na; ++b) {
+        x.j_active[(p*na+a)*na+b] =
+            eri(g,p,p,n_core+a,n_core+b,n);
+        x.k_active[(p*na+a)*na+b] =
+            eri(g,p,n_core+a,p,n_core+b,n);
+      }
     for (int c = 0; c < n_core; ++c) {
       x.j_pc(p,c) = eri(g,p,p,c,c,n);
       x.k_pc(p,c) = eri(g,p,c,p,c,n);

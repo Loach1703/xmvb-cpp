@@ -801,6 +801,25 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
           coordinate_residual, coordinate_target, result.residual_norm, kkt_residual_target);
       return result;
     }
+    // A coordinate-ready candidate can still miss physical stationarity.
+    // Seed its missing Schur response once, before accumulating frozen-only
+    // orbital directions. Reuse the already computed B p, not every B Q.
+    // Other strict solves retain the existing deferred certificate policy.
+    if (!allow_early_trial && !stationary && !response_seeded_ &&
+        structure_basis_.cols() == 0 && basis_size < maximum_dimension &&
+        coordinate_residual <= coordinate_target &&
+        problem_.has_structure_residual_solver() &&
+        !result.kkt_residual.structure.isZero(0.0)) {
+      response_seeded_ = true;
+      const Eigen::VectorXd response = problem_.solve_structure_residual(
+          result.kkt_residual.structure);
+      if (!response.isZero(0.0)) {
+        const auto image = problem_.apply_structure_coupling(response);
+        ++result.coupled_actions;
+        ++result.structure_actions;
+        if (retain_structure_image(response, image)) continue;
+      }
+    }
     if (stationary && required_curvature_converged && shifted_positive) {
       // A small raw structure residual can still produce a large orbital
       // response when C is ill-conditioned. Check the actual response before

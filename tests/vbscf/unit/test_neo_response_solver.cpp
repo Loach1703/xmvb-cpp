@@ -794,6 +794,48 @@ void check_trial_defers_structure_certificate() {
                 "deferred certificate returned an inconsistent structure residual");
 }
 
+void check_physical_mismatch_seeds_response() {
+  Eigen::Matrix2d a;
+  a << 2.0, 0.6, 0.6, 3.0;
+  const Eigen::RowVector2d b(0.2, 0.1);
+  const Eigen::Matrix<double, 1, 1> c =
+      1.7 * Eigen::Matrix<double, 1, 1>::Identity();
+  const Eigen::Matrix2d metric = 1.0e-4 * Eigen::Matrix2d::Identity();
+  const Eigen::Vector2d gradient(0.0005, 0.001);
+  int orbital_actions = 0, responses = 0;
+  const ResponseNeoProblem problem(
+      gradient, 1,
+      [&](const Eigen::VectorXd& p) {
+        ++orbital_actions;
+        return ResponseNeoDirection{a * p, b * p};
+      },
+      [b, c](const Eigen::VectorXd& q) {
+        return ResponseNeoDirection{b.transpose() * q, c * q};
+      },
+      [metric](const Eigen::VectorXd& p) { return metric * p; },
+      [](const Eigen::VectorXd& r) { return 100.0 * r.norm(); },
+      {}, {}, 0.0, {},
+      [&](const Eigen::VectorXd& r) {
+        if (responses == 0)
+          require(orbital_actions == 1,
+                  "physical mismatch accumulated frozen orbital directions");
+        ++responses;
+        return Eigen::VectorXd(-r / c(0, 0));
+      });
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.absolute_residual_tolerance = 1.0e-3;
+  options.require_curvature_certificate = false;
+  ResponseNeoWorkspace workspace(problem);
+  const auto result = workspace.solve(options);
+  require(responses > 0, "physical mismatch omitted its structure seed");
+  verify_coupled_residual(a, b, c, metric, gradient, options.trust_radius, result);
+  const Eigen::Matrix2d relaxed = a - b.transpose() * c.ldlt().solve(b);
+  require_close(result.step.orbital, -relaxed.ldlt().solve(gradient), 1.0e-10,
+                "direction-local seeding changed the coupled Newton solution");
+}
+
 void check_candidate_observation_preserves_solve() {
   const Eigen::MatrixXd a = Eigen::Vector4d(1.0, 2.0, 4.0, 8.0).asDiagonal();
   const Eigen::MatrixXd b(0, 4), c(0, 0);
@@ -827,6 +869,7 @@ void check_candidate_observation_preserves_solve() {
 
 int main() {
   try {
+    check_physical_mismatch_seeds_response();
     check_candidate_observation_preserves_solve();
     check_early_trial_is_not_certified_and_resumes();
     check_historical_interior_trial_preserves_physical_certificate();

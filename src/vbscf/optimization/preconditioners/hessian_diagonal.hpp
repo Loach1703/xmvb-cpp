@@ -19,9 +19,9 @@ struct AnalyticOrbitalDiagonal {
 /**
  * @brief MO-basis intermediates for the analytic fixed-structure rotation diagonal.
  *
- * The four-index arrays use row-major logical indexing. `ppaa(p,q,a,b)` is
- * `(pq|ab)` and `papa(p,a,q,b)` is `(pa|qb)`. Only the partial transforms
- * required by the diagonal are stored; a full MO ERI tensor is never formed.
+ * `j_active(p,a,b)=(pp|ab)` and `k_active(p,a,b)=(pa|pb)` are
+ * three-index slices, with row-major logical indexing. `active_eri(a,b,c,d)`
+ * holds only the active-space tensor. No off-diagonal external pair is stored.
  */
 struct AnalyticDiagonalIntermediates {
   int n_core = 0;
@@ -30,8 +30,9 @@ struct AnalyticDiagonalIntermediates {
   Eigen::MatrixXd v_core;
   Eigen::MatrixXd j_pc;
   Eigen::MatrixXd k_pc;
-  std::vector<double> ppaa;
-  std::vector<double> papa;
+  std::vector<double> j_active;
+  std::vector<double> k_active;
+  std::vector<double> active_eri;
 };
 
 /**

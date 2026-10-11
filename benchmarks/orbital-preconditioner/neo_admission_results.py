@@ -27,6 +27,8 @@ def summarize(case, directory):
     else:
         rows = []
     status = read(directory / "status.txt").strip()
+    if not status:
+        status = extract(read(directory / "run.err"), r"Exited with exit code (\d+)")
     converged = status == "0" and "VBSCF converged" in output
     hashes = read(directory / "hashes.txt").splitlines()
     rss = extract(resources, r"Maximum resident set size \(kbytes\): (\d+)")
@@ -66,9 +68,9 @@ def main():
             (directory.name, directory) for directory in sorted(root.iterdir()) if directory.is_dir()
         ]
         for case, directory in cases:
-            for variant in ("current", "coupled", "local", "orbital_gauge"):
-                if (directory / variant).is_dir():
-                    results.append(summarize(case, directory / variant))
+            for variant in sorted(directory.iterdir()):
+                if variant.is_dir() and (variant / "input.xmi").exists():
+                    results.append(summarize(case, variant))
     if not results:
         parser.error("no run directories found")
     writer = csv.DictWriter(sys.stdout, fieldnames=list(results[0]), lineterminator="\n")
