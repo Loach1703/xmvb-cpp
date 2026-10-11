@@ -86,6 +86,90 @@ bool test_preconditioned_minres_residual_scale() {
   return true;
 }
 
+/** @brief A conservative bound must not postpone a valid true certificate. */
+bool test_conservative_preconditioner_bound() {
+  const Eigen::Matrix4d overlap = Eigen::Matrix4d::Identity();
+  Eigen::Matrix4d hamiltonian = Eigen::Matrix4d::Zero();
+  hamiltonian.diagonal() << 0.0, 1.0, 1.02, 1.04;
+  Eigen::VectorXd energies = Eigen::VectorXd::Zero(1);
+  Eigen::MatrixXd roots = Eigen::MatrixXd::Zero(4, 1);
+  roots(0, 0) = 1.0;
+  Eigen::MatrixXd forcing(4, 1);
+  forcing.col(0) << 0.0, 1.0, 0.4, -0.3;
+  const xmvb::core::GeneralizedEigenAction action =
+      [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
+        return xmvb::core::GeneralizedEigenActionResult{
+            hamiltonian * vectors, overlap * vectors};
+      };
+  const xmvb::core::EigenResponsePreconditioner preconditioner{
+      [](const Eigen::Ref<const Eigen::VectorXd>& rhs, Eigen::Index) -> Eigen::VectorXd {
+        return rhs;
+      }, 1.0e-30};
+  const xmvb::core::EigenResponseOptions options{1, 0.05};
+  const auto result = xmvb::core::solve_generalized_eigen_response(
+      action, hamiltonian.diagonal(), overlap.diagonal(), energies,
+      roots, roots, forcing, Eigen::MatrixXd::Zero(4, 1), options,
+      {}, nullptr, &preconditioner);
+  const Eigen::Vector4d residual =
+      hamiltonian * result.eigenvector_response.col(0) + forcing.col(0);
+  const xmvb::core::EigenResponsePreconditioner anisotropic{
+      [](const Eigen::Ref<const Eigen::VectorXd>& rhs, Eigen::Index) -> Eigen::VectorXd {
+        Eigen::VectorXd image = rhs;
+        image[1] *= 1.0e12;
+        return image;
+      }, 1.0};
+  bool rejected_false_estimate = false;
+  try {
+    (void)xmvb::core::solve_generalized_eigen_response(
+        action, hamiltonian.diagonal(), overlap.diagonal(), energies,
+        roots, roots, forcing, Eigen::MatrixXd::Zero(4, 1), options,
+        {}, nullptr, &anisotropic);
+  } catch (const std::runtime_error& error) {
+    // Its small relative preconditioned estimate schedules an early check,
+    // but the unchanged true bordered residual must reject this candidate.
+    rejected_false_estimate = std::string_view(error.what()).find(
+        "candidate_checks=1") != std::string_view::npos;
+  }
+  return rejected_false_estimate && result.iterations[0] == 1 &&
+      residual.norm() <= options.relative_residual_tolerance * forcing.norm() &&
+      result.relative_residual_norms[0] <= options.relative_residual_tolerance;
+}
+
+/** @brief Certifies an affine metric gauge with large cancelling products. */
+bool test_cancelling_metric_gauge() {
+  Eigen::Matrix4d basis;
+  basis << 1, 1, 1, 1,
+           1, -1, 1, -1,
+           1, 1, -1, -1,
+           1, -1, -1, 1;
+  basis *= 0.5;
+  const Eigen::Vector4d metric_values(1.0e8, 1.0, 2.0, 3.0);
+  const Eigen::Vector4d curvatures(0.0, 1.0e-9, 6.0e-9, 12.0e-9);
+  const Eigen::Matrix4d overlap = basis * metric_values.asDiagonal() * basis.transpose();
+  const Eigen::Matrix4d hamiltonian = basis * curvatures.asDiagonal() * basis.transpose();
+  const Eigen::Vector4d reference =
+      31.0 * basis.col(1) + 7.0 * basis.col(2) + 2.0 * basis.col(3);
+  const Eigen::MatrixXd roots = basis.leftCols(1) / 1.0e4;
+  const Eigen::MatrixXd forcing = -hamiltonian * reference;
+  const xmvb::core::GeneralizedEigenAction action =
+      [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
+        return xmvb::core::GeneralizedEigenActionResult{
+            hamiltonian * vectors, overlap * vectors};
+      };
+  const xmvb::core::EigenResponseOptions options{8, 1.0e-5};
+  const auto result = xmvb::core::solve_generalized_eigen_response(
+      action, hamiltonian.diagonal(), overlap.diagonal(),
+      Eigen::VectorXd::Zero(1), roots, overlap * roots,
+      forcing, Eigen::MatrixXd::Zero(4, 1), options);
+  const Eigen::Vector4d normal = overlap * roots.col(0);
+  long double gauge = 0.0L;
+  for (int i = 0; i < 4; ++i)
+    gauge += static_cast<long double>(normal[i]) * result.eigenvector_response(i, 0);
+  return (result.eigenvector_response.col(0) - reference).norm() <= 1.0e-5 &&
+      std::abs(gauge) <= options.relative_residual_tolerance * forcing.norm() &&
+      result.relative_residual_norms[0] <= options.relative_residual_tolerance;
+}
+
 /** @brief Reproduces the unresolved noncommuting, soft-spectrum response. */
 bool test_ill_conditioned_selected_roots() {
   constexpr int n = 96;
@@ -1376,6 +1460,8 @@ int main(int argc, char** argv) {
             << (passed && spectral_passed && recycling_passed
                     ? " PASS\n" : " FAIL\n");
   const bool minres_scale_passed = test_preconditioned_minres_residual_scale();
+  const bool conservative_bound_passed = test_conservative_preconditioner_bound();
+  const bool cancelling_gauge_passed = test_cancelling_metric_gauge();
   const bool orbital_gauge_passed = test_orbital_gauge_projection();
   const bool solvable_ill_passed = test_solvable_ill_conditioned_overlap();
   const bool inexact_ritz_passed = test_inexact_ritz_root();
@@ -1395,6 +1481,8 @@ int main(int argc, char** argv) {
             << " spectral=" << spectral_passed
             << " recycling=" << recycling_passed
             << " minres_scale=" << minres_scale_passed
+            << " conservative_bound=" << conservative_bound_passed
+            << " cancelling_gauge=" << cancelling_gauge_passed
             << " ill_overlap=" << solvable_ill_passed
             << " inexact_ritz=" << inexact_ritz_passed
             << " repeated_root=" << repeated_root_passed
@@ -1408,6 +1496,8 @@ int main(int argc, char** argv) {
   return passed && spectral_passed && recycling_passed && orbital_gauge_passed &&
       solvable_ill_passed &&
       minres_scale_passed &&
+      conservative_bound_passed &&
+      cancelling_gauge_passed &&
       inexact_ritz_passed && repeated_root_passed &&
       equal_weight_subspace_passed && galerkin_application_passed &&
       frozen_isolated_passed && frozen_equal_weight_passed &&

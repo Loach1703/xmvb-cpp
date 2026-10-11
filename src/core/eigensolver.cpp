@@ -567,16 +567,31 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
     // direction. Returning an inaccurate root here would violate the outer
     // derivative contract, so report the finite-precision limit explicitly.
     if (active_dimension == dimension) {
+      // A failed algebraic Ritz gate must not hide the physical root error
+      // behind ||r||/||c|| in an ill-conditioned structure representation.
+      if (options.physical_residual_norm) {
+        for (int root = 0; root < options.n_roots; ++root) {
+          const double physical = options.physical_residual_norm(
+              root_vectors.col(root), projected_eigenvalues[root]);
+          if (!std::isfinite(physical) || physical < 0.0)
+            throw std::runtime_error("Davidson physical residual norm is invalid");
+          result.stationarity_residual_norms[root] = physical;
+        }
+      }
       std::ostringstream message;
       message << "complete Davidson basis cannot meet the requested Ritz residual: "
               << *std::max_element(
                      result.relative_residual_norms.begin(),
                      result.relative_residual_norms.end())
-              << "; CI stationarity residual = "
+              << (options.physical_residual_norm
+                      ? "; physical CI stationarity residual = "
+                      : "; CI stationarity residual = ")
               << *std::max_element(
                      result.stationarity_residual_norms.begin(),
                      result.stationarity_residual_norms.end())
-              << " (requested " << options.stationarity_tolerance << ')';
+              << " (requested " << options.stationarity_tolerance << ')'
+              << "; coefficient norm = " << root_vectors.colwise().norm().maxCoeff()
+              << "; overlap-image norm = " << overlap_root_vectors.colwise().norm().maxCoeff();
       throw std::runtime_error(message.str());
     }
 

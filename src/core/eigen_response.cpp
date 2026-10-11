@@ -95,6 +95,28 @@ GeneralizedEigenActionResult apply_checked(
   return images;
 }
 
+/** @brief Accurate scalar constraint evaluation under coefficient cancellation. */
+double constraint_dot(
+    const Eigen::Ref<const Eigen::VectorXd>& normal,
+    const Eigen::Ref<const Eigen::VectorXd>& vector) {
+  long double sum = 0.0L;
+  for (Eigen::Index i = 0; i < normal.size(); ++i)
+    sum += static_cast<long double>(normal[i]) * vector[i];
+  return static_cast<double>(sum);
+}
+
+/** @brief Restores the affine gauge before testing the original equation. */
+void restore_response_gauge(
+    Eigen::VectorXd* response,
+    const Eigen::Ref<const Eigen::VectorXd>& normal,
+    double target) {
+  const double norm = normal.stableNorm();
+  const Eigen::VectorXd unit = normal / norm;
+  for (int pass = 0; pass < 2; ++pass)
+    response->noalias() += unit *
+        ((target - constraint_dot(normal, *response)) / norm);
+}
+
 Eigen::MatrixXd apply_bordered_operators(
     const GeneralizedEigenAction& action,
     const Eigen::Ref<const Eigen::VectorXd>& selected_eigenvalues,
@@ -111,7 +133,7 @@ Eigen::MatrixXd apply_bordered_operators(
         images.hamiltonian.col(state) -
         selected_eigenvalues[state] * images.overlap.col(state) +
         vectors(n, state) * overlap_selected.col(state);
-    result(n, state) = overlap_selected.col(state).dot(
+    result(n, state) = constraint_dot(overlap_selected.col(state),
         vectors.col(state).head(n));
   }
   return result;
@@ -771,6 +793,7 @@ EigenResponseResult solve_generalized_eigen_response(
   Eigen::VectorXd bordered_absolute_targets(n_selected);
   Eigen::VectorXd correctable_absolute_targets(n_selected);
   Eigen::VectorXd preconditioned_absolute_targets(n_selected);
+  Eigen::VectorXd candidate_absolute_targets(n_selected);
   Eigen::VectorXd residual_norms(n_selected);
   Eigen::VectorXd beta_new(n_selected);
   Eigen::VectorXd beta_first(n_selected);
@@ -913,6 +936,10 @@ EigenResponseResult solve_generalized_eigen_response(
     // The Lanczos/Givens residual is measured in the inverse-preconditioner
     // metric; an Euclidean RHS norm gives an invalid trigger scale.
     residual_norms[state] = beta_first[state];
+    // A relative preconditioned estimate schedules a true bordered check;
+    // it is not itself a certificate in the original equation's norm.
+    candidate_absolute_targets[state] =
+        options.relative_residual_tolerance * beta_first[state];
   }
 
   for (int iteration = 0;
@@ -1009,7 +1036,9 @@ EigenResponseResult solve_generalized_eigen_response(
       residual_norms[state] *= std::abs(sine[state]);
       result.iterations[static_cast<std::size_t>(state)] = iteration + 1;
       const bool estimated_converged =
-          residual_norms[state] <= preconditioned_absolute_targets[state];
+          residual_norms[state] <= std::max(
+              preconditioned_absolute_targets[state],
+              candidate_absolute_targets[state]);
       converged[static_cast<std::size_t>(state)] = estimated_converged;
       if (estimated_converged) {
         estimated_converged_states.push_back(state);
@@ -1032,8 +1061,11 @@ EigenResponseResult solve_generalized_eigen_response(
         const Eigen::VectorXd forcing =
             delta_hamiltonian_selected.col(state) -
             selected_eigenvalues[state] * delta_overlap_selected.col(state);
-        const Eigen::VectorXd response =
+        Eigen::VectorXd response =
             solution.col(state) + particular_solution.col(state);
+        restore_response_gauge(&response, overlap_selected.col(state),
+                               full_rhs(n, state));
+        solution.col(state) = response - particular_solution.col(state);
         result.eigenvalue_response[state] =
             (selected_eigenvectors.col(state).dot(forcing) +
              ritz_residuals.col(state).dot(response)) /
@@ -1118,6 +1150,10 @@ EigenResponseResult solve_generalized_eigen_response(
         beta_new[state] = std::sqrt(beta_squared);
         beta_first[state] = beta_new[state];
         residual_norms[state] = beta_first[state];
+        // Calibrate the next inspection against the measured bordered error.
+        // Only the unchanged true-residual test above can accept the response.
+        candidate_absolute_targets[state] = beta_first[state] *
+            (bordered_absolute_targets[state] / true_residual.norm());
         cosine[state] = 1.0;
         old_cosine[state] = 1.0;
         sine[state] = 0.0;
@@ -1140,6 +1176,9 @@ EigenResponseResult solve_generalized_eigen_response(
         selected_eigenvalues[state] * delta_overlap_selected.col(state);
     result.eigenvector_response.col(state) =
         solution.col(state) + particular_solution.col(state);
+    Eigen::VectorXd response = result.eigenvector_response.col(state);
+    restore_response_gauge(&response, overlap_selected.col(state), full_rhs(n, state));
+    result.eigenvector_response.col(state) = response;
     result.eigenvalue_response[state] =
         (selected_eigenvectors.col(state).dot(forcing) +
          ritz_residuals.col(state).dot(
