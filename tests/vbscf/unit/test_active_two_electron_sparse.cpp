@@ -20,6 +20,36 @@ void require(bool condition, const char* message) {
   }
 }
 
+/** @brief Exercises long CSR rows, empty rows, edge remainders and SIMD tails. */
+void check_csr_edge_groups() {
+  using namespace xmvb::vb;
+  constexpr int n_bf = 5;
+  constexpr int n_pairs = n_bf * (n_bf + 1) / 2;
+  std::vector<int> left, right;
+  std::vector<double> values;
+  Eigen::MatrixXd reference = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
+  for (int a = 0; a < n_pairs - 1; ++a) {
+    for (int b = a; b < n_pairs - 1; ++b) {
+      const double value = std::sin(0.217 * (a + 1) * (b + 3));
+      left.push_back(a);
+      right.push_back(b);
+      values.push_back(value);
+      reference(a, b) = reference(b, a) = value;
+    }
+  }
+  const auto graph = build_ao_pair_graph(left, right, values, n_bf);
+  for (const int width : {0, 1, 7, 8, 9, 36, 65}) {
+    ExactCtxPairMatrix input(n_pairs, width);
+    for (int row = 0; row < n_pairs; ++row)
+      for (int column = 0; column < width; ++column)
+        input(row, column) = std::cos(0.31 * (row + 2) * (column + 1));
+    ExactCtxPairMatrix output = ExactCtxPairMatrix::Constant(n_pairs, width, 1e20);
+    detail::apply_exact_ao_pair_graph(graph, input, n_bf, width, &output);
+    require(output.isApprox(reference * input, 2e-13),
+            "CSR edge grouping changed a long, empty or remainder row");
+  }
+}
+
 void check_direction_block(const xmvb::vb::AoIntegralInput& integrals) {
   using namespace xmvb::vb;
   Eigen::MatrixXd orbitals(2, 2);
@@ -91,6 +121,7 @@ void check_direction_block(const xmvb::vb::AoIntegralInput& integrals) {
 }  // namespace
 
 int main() {
+  check_csr_edge_groups();
   constexpr int n_active = 11;
 
   const xmvb::vb::AoPairGraph ordered_graph =

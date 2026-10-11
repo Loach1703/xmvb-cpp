@@ -35,15 +35,25 @@ void contract_rows(const int* offsets, const int* columns, const double* values,
     std::fill_n(output, width, 0.0);
     int edge = offsets[row];
     const int end = offsets[row + 1];
-    for (; edge + 3 < end; edge += 4) {
+    // Consume eight consecutive edges before writing the output row again.
+    // CSR metadata is still read once and additions retain their edge order.
+    for (; end - edge >= 8; edge += 8) {
       const double* input0 = source + static_cast<std::size_t>(columns[edge]) * width;
       const double* input1 = source + static_cast<std::size_t>(columns[edge + 1]) * width;
       const double* input2 = source + static_cast<std::size_t>(columns[edge + 2]) * width;
       const double* input3 = source + static_cast<std::size_t>(columns[edge + 3]) * width;
+      const double* input4 = source + static_cast<std::size_t>(columns[edge + 4]) * width;
+      const double* input5 = source + static_cast<std::size_t>(columns[edge + 5]) * width;
+      const double* input6 = source + static_cast<std::size_t>(columns[edge + 6]) * width;
+      const double* input7 = source + static_cast<std::size_t>(columns[edge + 7]) * width;
       const double value0 = values[edge];
       const double value1 = values[edge + 1];
       const double value2 = values[edge + 2];
       const double value3 = values[edge + 3];
+      const double value4 = values[edge + 4];
+      const double value5 = values[edge + 5];
+      const double value6 = values[edge + 6];
+      const double value7 = values[edge + 7];
 #pragma omp simd
       for (std::size_t pair = 0; pair < width; ++pair) {
         double sum = output[pair];
@@ -51,6 +61,10 @@ void contract_rows(const int* offsets, const int* columns, const double* values,
         sum += value1 * input1[pair];
         sum += value2 * input2[pair];
         sum += value3 * input3[pair];
+        sum += value4 * input4[pair];
+        sum += value5 * input5[pair];
+        sum += value6 * input6[pair];
+        sum += value7 * input7[pair];
         output[pair] = sum;
       }
     }
