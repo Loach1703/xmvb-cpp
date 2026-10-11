@@ -1648,29 +1648,15 @@ StructureAction::active_integral_response_adjoint(
   Eigen::MatrixXd generator_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);
 
-  std::vector<Eigen::MatrixXd> orthogonal_responses;
-  orthogonal_responses.reserve(n_states);
   for (std::size_t state_index = 0;
        state_index < n_states;
        ++state_index) {
-    const auto& directional_state =
-        directional_selected_states.states[state_index];
-    if (directional_state.coefficient_matrix.rows() != n_unique_alpha_ ||
-        directional_state.coefficient_matrix.cols() != n_unique_beta_ ||
-        !directional_state.coefficient_matrix.allFinite()) {
-      throw std::invalid_argument(
-          "invalid selected-subspace coefficient response");
+    const auto& coefficients =
+        directional_selected_states.states[state_index].coefficient_matrix;
+    if (coefficients.rows() != n_unique_alpha_ ||
+        coefficients.cols() != n_unique_beta_ || !coefficients.allFinite()) {
+      throw std::invalid_argument("invalid selected-subspace coefficient response");
     }
-    Eigen::MatrixXd orthogonal_response =
-        directional_state.coefficient_matrix;
-    direct_ci_->alpha_transform.apply_left(&orthogonal_response);
-    direct_ci_->beta_transform().apply_right(&orthogonal_response);
-    orthogonal_responses.push_back(std::move(orthogonal_response));
-  }
-
-  for (std::size_t state_index = 0;
-       state_index < n_states;
-       ++state_index) {
     const double state_weight = state.weights[state_index];
     if (!std::isfinite(state_weight) || state_weight < 0.0 ||
         !std::isfinite(state.energies[state_index])) {
@@ -1680,7 +1666,6 @@ StructureAction::active_integral_response_adjoint(
       continue;
     }
     const auto& accepted = state.orthogonal_coefficients[state_index];
-    const auto& response = orthogonal_responses[state_index];
     if (accepted.rows() != n_unique_alpha_ ||
         accepted.cols() != n_unique_beta_ ||
         state.residuals[state_index].rows() != n_unique_alpha_ ||
@@ -1688,16 +1673,26 @@ StructureAction::active_integral_response_adjoint(
       throw std::invalid_argument("invalid selected-subspace adjoint state");
     }
 
-    const DirectCiIntegralAdjoint integral_gradient =
-        direct_ci_->sigma.integral_adjoint(response, accepted);
-    one_gradient.noalias() +=
-        2.0 * state_weight * integral_gradient.one_electron;
-    pair_gradient.noalias() +=
-        2.0 * state_weight * integral_gradient.pair_kernel;
-
+    // A pure overlap multiplier has exactly zero coefficient response.
+    // Linearity eliminates its exterior transform, sigma and integral adjoint;
+    // this is an algebraic zero, not a tolerance-based approximation.
+    const bool has_response = !coefficients.isZero(0.0);
+    Eigen::MatrixXd response;
     Eigen::MatrixXd response_residual =
-        direct_ci_->sigma.apply(response) -
-        state.energies[state_index] * response;
+        Eigen::MatrixXd::Zero(n_unique_alpha_, n_unique_beta_);
+    if (has_response) {
+      response = coefficients;
+      direct_ci_->alpha_transform.apply_left(&response);
+      direct_ci_->beta_transform().apply_right(&response);
+      const DirectCiIntegralAdjoint integral_gradient =
+          direct_ci_->sigma.integral_adjoint(response, accepted);
+      one_gradient.noalias() +=
+          2.0 * state_weight * integral_gradient.one_electron;
+      pair_gradient.noalias() +=
+          2.0 * state_weight * integral_gradient.pair_kernel;
+      response_residual = direct_ci_->sigma.apply(response) -
+          state.energies[state_index] * response;
+    }
     // Orbital overlap directions are symmetric, so only
     // sym(M W), W=diag(state weights), belongs to B^T.  Dividing its current
     // column by w_i lets the existing 2 w_i generator adjoint consume the
@@ -1718,12 +1713,12 @@ StructureAction::active_integral_response_adjoint(
       }
     }
     generator_gradient.noalias() += 2.0 * state_weight *
-        (direct_ci_->sigma.one_body_generator_adjoint(
-             response_residual,
-             accepted) +
-         direct_ci_->sigma.one_body_generator_adjoint(
-             state.residuals[state_index],
-             response));
+        direct_ci_->sigma.one_body_generator_adjoint(response_residual, accepted);
+    if (has_response) {
+      generator_gradient.noalias() += 2.0 * state_weight *
+          direct_ci_->sigma.one_body_generator_adjoint(
+              state.residuals[state_index], response);
+    }
   }
 
   NonorthogonalActiveIntegralAdjoint result =

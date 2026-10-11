@@ -26,6 +26,7 @@ export OMP_NUM_THREADS=32 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THRE
 export OMP_PLACES=cores OMP_PROC_BIND=close OMP_MAX_ACTIVE_LEVELS=1 LC_ALL=C
 unset OMP_WAIT_POLICY GOMP_SPINCOUNT XMVB_NEO_TRACE
 cases=(240_vb 67970_vb csd_CONYAH_vb csd_QOCGUM_vb csd_YEPKAF_vb)
+if (( $# > 3 )); then cases=("${@:4}"); fi
 case_name="${cases[SLURM_ARRAY_TASK_ID]}"
 historical="/home/guqqgroup/taoxia/xmvb-runs/all-optimizers-c2776c4/neo/$case_name"
 root="$SLURM_SUBMIT_DIR/neo-admission-panel-$SLURM_ARRAY_JOB_ID/$case_name"

@@ -553,16 +553,26 @@ int main(int argc, char** argv) {
     const xmvb::vb::OrbitalCouplingBlockAction block_coupling =
         exact_hvp.apply_orbital_coupling_batch(coupling_directions);
     Eigen::MatrixXd scalar_orbital_coupling(direction.size(), 2);
+    Eigen::MatrixXd orbital_only_action(direction.size(), 2);
     std::vector<Eigen::MatrixXd> scalar_structure_forcing(2);
     for (Eigen::Index column = 0; column < 2; ++column) {
       xmvb::vb::OrbitalCouplingAction scalar_coupling =
           exact_hvp.apply_orbital_coupling(coupling_directions.col(column));
       scalar_orbital_coupling.col(column) = scalar_coupling.orbital_hessian;
+      orbital_only_action.col(column) =
+          exact_hvp.apply_orbital(coupling_directions.col(column));
       scalar_structure_forcing[static_cast<std::size_t>(column)] =
           std::move(scalar_coupling.scaled_structure_forcing);
     }
     const double coupling_batch_orbital_error = relative_matrix_error(
         block_coupling.orbital_hessian, scalar_orbital_coupling);
+    const double orbital_only_error = relative_matrix_error(
+        orbital_only_action, scalar_orbital_coupling);
+    if (orbital_only_error > 1.0e-10) {
+      throw std::runtime_error(
+          "orbital-only gauge disagrees with the coupled orbital action: " +
+          std::to_string(orbital_only_error));
+    }
     double coupling_batch_structure_error = 0.0;
     for (Eigen::Index column = 0; column < 2; ++column) {
       coupling_batch_structure_error = std::max(
@@ -798,6 +808,8 @@ int main(int argc, char** argv) {
               << state_hvp_average_error << '\n'
               << "component_decomposition_error = "
               << component_decomposition_error << '\n'
+              << "orbital_only_error = "
+              << orbital_only_error << '\n'
               << "coupling_batch_orbital_error = "
               << coupling_batch_orbital_error << '\n'
               << "coupling_batch_structure_error = "

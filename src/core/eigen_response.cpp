@@ -1522,7 +1522,8 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
     const Eigen::Ref<const Eigen::MatrixXd>& overlap_selected,
     const Eigen::Ref<const Eigen::MatrixXd>& selected_residuals,
     const Eigen::Ref<const Eigen::MatrixXd>& delta_hamiltonian_selected,
-    const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected) {
+    const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected,
+    bool horizontal_forcing) {
   validate_response_columns(
       selected_eigenvalues, selected_eigenvectors, overlap_selected,
       delta_hamiltonian_selected, delta_overlap_selected);
@@ -1548,8 +1549,6 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
     throw std::invalid_argument(message.str());
   }
 
-  data.forcing = delta_hamiltonian_selected -
-      delta_overlap_selected * selected_eigenvalues.asDiagonal();
   Eigen::MatrixXd metric_derivative =
       selected_eigenvectors.transpose() * delta_overlap_selected;
   const double antisymmetric_error =
@@ -1576,6 +1575,22 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
   const Eigen::MatrixXd energy_commutator =
       selected_eigenvalues.asDiagonal() * internal_coefficients -
       internal_coefficients * selected_eigenvalues.asDiagonal();
+  if (!horizontal_forcing) {
+    // Only selected-space projections are needed by the normalization gauge.
+    // Keep the accepted Ritz residual; do not form or project a full RHS.
+    data.gauge_selected_matrix_response = data.metric.partialPivLu().solve(
+        selected_eigenvectors.transpose() * delta_hamiltonian_selected -
+        metric_derivative * selected_eigenvalues.asDiagonal() +
+        data.metric * energy_commutator +
+        (selected_eigenvectors.transpose() * selected_residuals) *
+            internal_coefficients);
+    if (!data.gauge_selected_matrix_response.allFinite()) {
+      throw std::runtime_error("equal-weight coupling gauge multiplier is not finite");
+    }
+    return data;
+  }
+  data.forcing = delta_hamiltonian_selected -
+      delta_overlap_selected * selected_eigenvalues.asDiagonal();
   const Eigen::MatrixXd gauge_shifted_image =
       overlap_selected * energy_commutator +
       selected_residuals * internal_coefficients;

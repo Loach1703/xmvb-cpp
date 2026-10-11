@@ -47,9 +47,13 @@ ScaledStructureCoupling scale_equal_weight_structure_coupling(
   validate_weights(normalized_state_weights);
   const Eigen::Index n_states =
       static_cast<Eigen::Index>(normalized_state_weights.size());
-  const Eigen::Index n_structures = coupling.horizontal_forcing.rows();
-  if (n_structures <= 0 || coupling.horizontal_forcing.cols() != n_states ||
-      coupling.gauge_coefficient_response.rows() != n_structures ||
+  const Eigen::Index n_structures = coupling.gauge_coefficient_response.rows();
+  const bool has_forcing = coupling.horizontal_forcing.size() != 0;
+  if (n_structures <= 0 ||
+      (!has_forcing && (coupling.horizontal_forcing.rows() != 0 ||
+                        coupling.horizontal_forcing.cols() != 0)) ||
+      (has_forcing && (coupling.horizontal_forcing.rows() != n_structures ||
+                       coupling.horizontal_forcing.cols() != n_states)) ||
       coupling.gauge_coefficient_response.cols() != n_states ||
       coupling.gauge_selected_matrix_response.rows() != n_states ||
       coupling.gauge_selected_matrix_response.cols() != n_states ||
@@ -63,7 +67,7 @@ ScaledStructureCoupling scale_equal_weight_structure_coupling(
   ScaledStructureCoupling result;
   result.horizontal_forcing.scaled_coefficients =
       coupling.horizontal_forcing;
-  for (Eigen::Index state = 0; state < n_states; ++state) {
+  for (Eigen::Index state = 0; has_forcing && state < n_states; ++state) {
     result.horizontal_forcing.scaled_coefficients.col(state) *=
         std::sqrt(2.0 * normalized_state_weights[static_cast<std::size_t>(state)]);
   }

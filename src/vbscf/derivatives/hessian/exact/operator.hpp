@@ -17,9 +17,10 @@ struct VbScfInput;
 /**
  * @brief Selects which HVP sub-components to include.
  *
- * The orbital Hessian-vector product decomposes into three additive
- * contributions (direct core, fixed-upstream pullback, outer response) that
- * can be independently toggled.
+ * These switches select computational contributions, not physical Hessian
+ * blocks. In particular, disabling structure_response also removes the
+ * selected-state normalization gauge; use apply_orbital() for the complete
+ * orbital operator without horizontal structure relaxation.
  */
 struct HvpComponents {
   bool direct_core_response = true;
@@ -200,6 +201,15 @@ public:
    * The accepted-point forward/integral direction is evaluated only once.
    */
   OrbitalCouplingAction apply_orbital_coupling(
+      const Eigen::VectorXd& reduced_direction) const;
+
+  /**
+   * @brief Applies the complete orbital operator without horizontal response.
+   *
+   * Includes selected-state normalization gauge in the fused local backward.
+   * No horizontal structure forcing or response solve is constructed.
+   */
+  Eigen::VectorXd apply_orbital(
       const Eigen::VectorXd& reduced_direction) const;
 
   /**

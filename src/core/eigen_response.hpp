@@ -166,6 +166,8 @@ struct EqualWeightEigenCoupling {
  * This function performs no generalized-eigen response iteration and mutates no
  * recycle space. `selected_residuals` is the accepted Ritz residual
  * @f$HC-SCE@f$ and may be zero for an exact accepted eigensystem.
+ * If horizontal_forcing is false, only the normalization gauge is prepared;
+ * forcing and horizontal_forcing in the result remain empty.
  */
 EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
     const Eigen::Ref<const Eigen::VectorXd>& selected_eigenvalues,
@@ -173,7 +175,8 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
     const Eigen::Ref<const Eigen::MatrixXd>& overlap_selected,
     const Eigen::Ref<const Eigen::MatrixXd>& selected_residuals,
     const Eigen::Ref<const Eigen::MatrixXd>& delta_hamiltonian_selected,
-    const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected);
+    const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected,
+    bool horizontal_forcing = true);
 
 /**
  * @brief Solves selected generalized-eigenpair response without a full spectrum.

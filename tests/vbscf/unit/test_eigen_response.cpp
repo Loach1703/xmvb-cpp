@@ -1130,6 +1130,35 @@ bool test_finite_ritz_frozen_equal_weight_response() {
                                                std::abs(vu)});
 }
 
+/** @brief Gauge-only projections retain finite Ritz residuals exactly. */
+bool test_orbital_gauge_projection() {
+  constexpr int n = 7;
+  const Eigen::MatrixXd h = symmetric_test_matrix(n, 2.0);
+  const Eigen::MatrixXd m = symmetric_test_matrix(n, 4.0);
+  const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> solver(h, m);
+  Eigen::MatrixXd states = solver.eigenvectors().leftCols(2);
+  states.col(0) = std::cos(0.02) * solver.eigenvectors().col(0) +
+      std::sin(0.02) * solver.eigenvectors().col(3);
+  const Eigen::VectorXd energies = solver.eigenvalues().head(2);
+  const Eigen::MatrixXd overlap = m * states;
+  const Eigen::MatrixXd residual = h * states - overlap * energies.asDiagonal();
+  const Eigen::MatrixXd dh = directional_test_matrix(n) * states;
+  const Eigen::MatrixXd dm = symmetric_test_matrix(n, 0.0) * states;
+  const auto full = xmvb::core::prepare_equal_weight_generalized_eigen_coupling(
+      energies, states, overlap, residual, dh, dm);
+  const auto orbital = xmvb::core::prepare_equal_weight_generalized_eigen_coupling(
+      energies, states, overlap, residual, dh, dm, false);
+  const double error =
+      (full.gauge_coefficient_response - orbital.gauge_coefficient_response).norm() +
+      (full.gauge_selected_matrix_response - orbital.gauge_selected_matrix_response).norm();
+  const bool passed = error < 1.0e-12 && residual.norm() > 1.0e-4 &&
+      orbital.forcing.size() == 0 && orbital.horizontal_forcing.size() == 0;
+  std::cout << "orbital_gauge_projection error=" << error
+            << " ritz_residual=" << residual.norm()
+            << (passed ? " PASS\n" : " FAIL\n");
+  return passed;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1294,6 +1323,7 @@ int main(int argc, char** argv) {
             << (passed && spectral_passed && recycling_passed
                     ? " PASS\n" : " FAIL\n");
   const bool minres_scale_passed = test_preconditioned_minres_residual_scale();
+  const bool orbital_gauge_passed = test_orbital_gauge_projection();
   const bool solvable_ill_passed = test_solvable_ill_conditioned_overlap();
   const bool inexact_ritz_passed = test_inexact_ritz_root();
   const bool repeated_root_passed = test_repeated_root_bordered_candidate();
@@ -1322,7 +1352,7 @@ int main(int argc, char** argv) {
             << " finite_ritz_isolated=" << finite_ritz_isolated_passed
             << " finite_ritz_equal_weight="
             << finite_ritz_equal_weight_passed << '\n';
-  return passed && spectral_passed && recycling_passed &&
+  return passed && spectral_passed && recycling_passed && orbital_gauge_passed &&
       solvable_ill_passed &&
       minres_scale_passed &&
       inexact_ritz_passed && repeated_root_passed &&

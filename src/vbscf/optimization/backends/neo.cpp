@@ -290,14 +290,11 @@ bool build_accepted_neo_keyframe(
       return workspace->solve(neo_options, allow_early_trial, observe_candidate);
     };
   } else {
-    HvpComponents core_components;
-    core_components.local_active_response = false;
-    core_components.structure_response = false;
     auto problem = std::make_shared<NeoProblem>(
         reduced_gradient,
-        [&orbital_hessian, core_components](
+        [&orbital_hessian](
             const Eigen::VectorXd& vector) {
-          return orbital_hessian.apply_reduced(vector, core_components);
+          return orbital_hessian.apply_orbital(vector);
         },
         [&orbital_metric](const Eigen::VectorXd& vector) {
           return orbital_metric.apply(vector);
@@ -310,29 +307,29 @@ bool build_accepted_neo_keyframe(
         });
     solve_step = [problem = std::move(problem)](
                      const NeoOptions& neo_options, bool allow_early_trial) {
-      const NeoResult core = solve_neo(*problem, neo_options, allow_early_trial);
+      const NeoResult orbital = solve_neo(*problem, neo_options, allow_early_trial);
       ResponseNeoResult result;
-      result.step = {core.step, Eigen::VectorXd{}};
-      result.hessian_step = {core.hessian_step, Eigen::VectorXd{}};
-      result.orbital_metric_step = core.metric_step;
-      result.kkt_residual = {core.kkt_residual, Eigen::VectorXd{}};
+      result.step = {orbital.step, Eigen::VectorXd{}};
+      result.hessian_step = {orbital.hessian_step, Eigen::VectorXd{}};
+      result.orbital_metric_step = orbital.metric_step;
+      result.kkt_residual = {orbital.kkt_residual, Eigen::VectorXd{}};
       result.minimum_curvature_orbital =
           Eigen::VectorXd::Zero(problem->size());
-      result.shift = core.shift;
-      result.predicted_reduction = core.predicted_reduction;
-      result.step_norm = core.step_norm;
-      result.residual_norm = core.residual_norm;
-      result.residual_target = core.residual_target;
-      result.curvature_residual_norm = core.curvature_residual_norm;
-      result.curvature_residual_target = core.curvature_residual_target;
-      result.iterations = core.iterations;
-      result.coupled_actions = core.hessian_actions;
-      result.orbital_actions = core.hessian_actions;
-      result.boundary = core.boundary;
-      result.hard_case = core.hard_case;
+      result.shift = orbital.shift;
+      result.predicted_reduction = orbital.predicted_reduction;
+      result.step_norm = orbital.step_norm;
+      result.residual_norm = orbital.residual_norm;
+      result.residual_target = orbital.residual_target;
+      result.curvature_residual_norm = orbital.curvature_residual_norm;
+      result.curvature_residual_target = orbital.curvature_residual_target;
+      result.iterations = orbital.iterations;
+      result.coupled_actions = orbital.hessian_actions;
+      result.orbital_actions = orbital.hessian_actions;
+      result.boundary = orbital.boundary;
+      result.hard_case = orbital.hard_case;
       result.global_curvature_certified =
-          core.global_curvature_certified;
-      result.stop_reason = core.stop_reason;
+          orbital.global_curvature_certified;
+      result.stop_reason = orbital.stop_reason;
       return result;
     };
   }

@@ -145,6 +145,24 @@ OrbitalCouplingAction ExactHvpOperator::apply_orbital_coupling(
   return state_->apply_orbital_coupling(reduced_direction);
 }
 
+Eigen::VectorXd ExactHvpOperator::apply_orbital(
+    const Eigen::VectorXd& direction) const {
+  return state_->apply_orbital(direction);
+}
+
+Eigen::VectorXd ExactHvpOperator::State::apply_orbital(
+    const Eigen::VectorXd& direction) const {
+  OrbitalCouplingAction gauge;
+  return apply_reduced_impl(
+      direction,
+      {.direct_core_response = true,
+       .fixed_upstream_pullback = true,
+       .local_active_response = true,
+       .structure_response = false},
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      &gauge, false);
+}
+
 OrbitalCouplingAction ExactHvpOperator::State::apply_orbital_coupling(
     const Eigen::VectorXd& reduced_direction) const {
   OrbitalCouplingAction result;
@@ -293,7 +311,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     const ExactCtxPairMatrix* precomputed_directional_pair_products,
     const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
     const PrecomputedDirection* precomputed_direction,
-    OrbitalCouplingAction* coupling_output) const {
+    OrbitalCouplingAction* coupling_output,
+    bool horizontal_forcing) const {
   diagnostics::ScopedPhase apply_phase(diagnostics::Phase::HvpApply);
   const auto apply_start_time = std::chrono::steady_clock::now();
   auto record_apply_wall_time = [&]() {
@@ -319,7 +338,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     throw std::invalid_argument(
         "coupled orbital action cannot solve the structure response");
   }
-  if (coupling_output != nullptr) {
+  if (coupling_output != nullptr && horizontal_forcing) {
     coupling_output->scaled_structure_forcing = Eigen::MatrixXd::Zero(
         accepted_point_context_->n_structures,
         static_cast<int>(accepted_point_context_->selected_state_indices.size()));
@@ -640,7 +659,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
                   eigen.overlap_selected,
                   eigen.selected_residuals,
                   images.delta_hamiltonian_selected,
-                  images.delta_overlap_selected);
+                  images.delta_overlap_selected,
+                  horizontal_forcing);
           local_gauge_coupling = scale_equal_weight_structure_coupling(
               coupling, accepted_point_context_->normalized_state_weights);
           gauge_coupling = &*local_gauge_coupling;
