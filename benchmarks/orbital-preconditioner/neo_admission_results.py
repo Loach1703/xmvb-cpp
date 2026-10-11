@@ -66,7 +66,7 @@ def main():
             (directory.name, directory) for directory in sorted(root.iterdir()) if directory.is_dir()
         ]
         for case, directory in cases:
-            for variant in ("current", "coupled", "local"):
+            for variant in ("current", "coupled", "local", "orbital_gauge"):
                 if (directory / variant).is_dir():
                     results.append(summarize(case, directory / variant))
     if not results:
