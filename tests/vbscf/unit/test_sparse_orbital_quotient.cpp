@@ -163,6 +163,39 @@ Eigen::VectorXd physical_map(const OrbitalPreparationInput& input) {
   return result;
 }
 
+void check_finite_step_gradient_pullback(const OrbitalPreparationInput& input) {
+  const SparseParameterLayout view(input);
+  const Eigen::MatrixXd orbitals = dense(input);
+  const OrbitalChart source(input, view, orbitals, orbitals);
+  require(source.reduced_size() > 0, "keyframe pullback fixture has no tangent space");
+  const Eigen::VectorXd step = 0.15 * Eigen::VectorXd::LinSpaced(
+      source.reduced_size(), -0.4, 0.7);
+  const auto trial = source.retract_step(input, step);
+  const auto energy = [](const OrbitalPreparationInput& point) {
+    const Eigen::VectorXd features = physical_map(point);
+    return features.dot(Eigen::VectorXd::LinSpaced(features.size(), -0.4, 0.8));
+  };
+  // Independently differentiate the finite normalized/projected physical map
+  // in raw trial coordinates; its gradient already includes these pullbacks.
+  constexpr double h = 1e-6;
+  const Eigen::VectorXd parameters = view.pack(trial);
+  Eigen::VectorXd raw_gradient(parameters.size());
+  for (Eigen::Index i = 0; i < parameters.size(); ++i) {
+    auto plus = trial, minus = trial;
+    const Eigen::VectorXd delta = h * Eigen::VectorXd::Unit(parameters.size(), i);
+    view.unpack(parameters + delta, &plus);
+    view.unpack(parameters - delta, &minus);
+    raw_gradient[i] = (energy(plus) - energy(minus)) / (2 * h);
+  }
+  const Eigen::VectorXd pulled = source.project_reduced_gradient(raw_gradient);
+  const Eigen::VectorXd direction = Eigen::VectorXd::LinSpaced(
+      source.reduced_size(), 0.3, -0.8).normalized();
+  const double finite = (energy(source.retract_step(input, step + h * direction)) -
+                         energy(source.retract_step(input, step - h * direction))) / (2 * h);
+  require(std::abs(pulled.dot(direction) - finite) < 1e-7 * std::max(1.0, std::abs(finite)),
+          "source-chart keyframe gradient differs from finite retraction derivative");
+}
+
 double finite_physical_metric_squared_norm(
     const OrbitalPreparationInput& input,
     const SparseParameterLayout& view,
@@ -1149,6 +1182,8 @@ int main() {
     auto full = make_input(c, {{0,1,2,3,4,5}, {0,1,2,3,4,5},
                                {0,1,2,3,4,5}, {0,1,2,3,4,5}}, 2);
     check("full support", full, 14);
+    check_finite_step_gradient_pullback(partial);
+    check_finite_step_gradient_pullback(full);
     check_metric_inverse_certificates(partial);
     check_metric_inverse_certificates(full);
     auto oeo = full;

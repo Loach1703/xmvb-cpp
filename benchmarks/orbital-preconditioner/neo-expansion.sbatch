@@ -29,9 +29,11 @@ mkdir -p "$root"
 hostname > "$root/node.txt"
 lscpu > "$root/cpu.txt"
 cmake --build "$source_dir/build" --target xmvb test_neo \
-    test_neo_response_solver test_shifted_metric_preconditioner -j16 \
+    test_neo_response_solver test_neo_globalization test_sparse_orbital_quotient \
+    test_shifted_metric_preconditioner -j16 \
     > "$root/build.log" 2>&1
-for test in test_neo test_neo_response_solver test_shifted_metric_preconditioner; do
+for test in test_neo test_neo_response_solver test_neo_globalization \
+    test_sparse_orbital_quotient test_shifted_metric_preconditioner; do
     srun --exact --cpus-per-task=32 --cpu-bind=cores \
         "$source_dir/build/src/$test" > "$root/$test.out" 2> "$root/$test.err"
 done
