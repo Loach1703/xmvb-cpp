@@ -1143,6 +1143,14 @@ EigenResponseResult solve_generalized_eigen_response(
               << " original_rhs_norm=" << original_rhs_norms[state]
               << " projected_absolute_target=" <<
                      correctable_absolute_targets[state]
+              << " estimated_preconditioned_residual=" <<
+                     residual_norms[state]
+              << " preconditioned_target=" <<
+                     preconditioned_absolute_targets[state]
+              << " inverse_preconditioner_min=" <<
+                     inverse_preconditioner.col(state).minCoeff()
+              << " inverse_preconditioner_max=" <<
+                     inverse_preconditioner.col(state).maxCoeff()
               << " candidate_checks=" <<
                      candidate_checks[static_cast<std::size_t>(state)]
               << " reliable_restarts=" <<
