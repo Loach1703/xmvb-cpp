@@ -850,14 +850,27 @@ void check_candidate_observation_preserves_solve() {
   ResponseNeoWorkspace reference_workspace(problem), observed_workspace(problem);
   const auto reference = reference_workspace.solve(options);
   int observations = 0;
+  int model_observations = 0;
   const auto observed = observed_workspace.solve(options, false,
       [&](const ResponseNeoResult& candidate) {
         ++observations;
         require(candidate.step.orbital.allFinite(), "observed step is not finite");
         require(candidate.predicted_reduction > 0.0, "observed model has no descent");
         require(!candidate.converged(), "pre-certificate observation claimed convergence");
+      },
+      [&](const Eigen::MatrixXd& basis, const Eigen::MatrixXd& core,
+          const Eigen::MatrixXd& model) {
+        ++model_observations;
+        require_close(basis.transpose() * basis,
+                      Eigen::MatrixXd::Identity(basis.cols(), basis.cols()),
+                      1.0e-13, "observed model basis is not orthonormal");
+        require_close(model, basis.transpose() * a * basis, 1.0e-13,
+                      "observed projected model disagrees with the dense action");
+        require_close(core, model, 1.0e-13,
+                      "zero structure space changed the observed relaxed model");
       });
   require(observations == observed.iterations, "not every projection was observed");
+  require(model_observations == observations, "not every new model was observed");
   require(observed.orbital_actions == reference.orbital_actions,
           "observation added HVP actions");
   require_close(observed.step.orbital, reference.step.orbital, 1.0e-13,

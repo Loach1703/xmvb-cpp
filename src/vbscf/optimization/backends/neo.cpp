@@ -9,6 +9,8 @@
 #include <memory>
 #include <utility>
 
+#include <Eigen/Eigenvalues>
+
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
@@ -218,6 +220,35 @@ bool build_accepted_neo_keyframe(
   }
   std::function<ResponseNeoResult(const NeoOptions&, bool)> solve_step;
   if (use_structure_response) {
+    ResponseNeoModelObserver observe_model;
+    if (diagnostics::neo_trace_enabled()) {
+      observe_model = [&chart, last_dimension = Eigen::Index{0}](
+                          const Eigen::MatrixXd& basis,
+                          const Eigen::MatrixXd& core,
+                          const Eigen::MatrixXd& model) mutable {
+        const Eigen::Index dimension = basis.cols();
+        // Sample doubling dimensions only; structure enrichments at the same
+        // dimension must not trigger repeated diagnostic matrix products.
+        if (dimension == last_dimension || (dimension & (dimension - 1)) != 0) return;
+        last_dimension = dimension;
+        Eigen::MatrixXd images(basis.rows(), dimension);
+        for (Eigen::Index column = 0; column < dimension; ++column)
+          images.col(column) = chart.apply_reduced_curvature(basis.col(column));
+        const Eigen::MatrixXd projected = basis.transpose() * images;
+        const Eigen::MatrixXd symmetric = 0.5 * (projected + projected.transpose());
+        Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(
+            model, symmetric, Eigen::EigenvaluesOnly);
+        Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> core_spectrum(
+            core, symmetric, Eigen::EigenvaluesOnly);
+        if (spectrum.info() != Eigen::Success || core_spectrum.info() != Eigen::Success)
+          throw std::runtime_error("failed to audit NEO block-preconditioned spectrum");
+        diagnostics::neo_trace("preconditioned_spectrum",
+            "dimension=%ld,min=%.17g,max=%.17g,core_min=%.17g,core_max=%.17g",
+            static_cast<long>(dimension), spectrum.eigenvalues()[0],
+            spectrum.eigenvalues()[dimension - 1], core_spectrum.eigenvalues()[0],
+            core_spectrum.eigenvalues()[dimension - 1]);
+      };
+    }
     auto problem = std::make_shared<ResponseNeoProblem>(
         reduced_gradient,
         structure_hessian.tangent_size(),
@@ -299,11 +330,12 @@ bool build_accepted_neo_keyframe(
         });
     auto workspace = std::make_shared<ResponseNeoWorkspace>(*problem);
     solve_step = [problem = std::move(problem),
-                  workspace = std::move(workspace), &observe_candidate](
+                  workspace = std::move(workspace), &observe_candidate,
+                  observe_model = std::move(observe_model)](
                      const NeoOptions& neo_options, bool allow_early_trial) {
       // The workspace stores a reference; retain its immutable problem here.
       static_cast<void>(problem);
-      return workspace->solve(neo_options, allow_early_trial, observe_candidate);
+      return workspace->solve(neo_options, allow_early_trial, observe_candidate, observe_model);
     };
   } else {
     auto problem = std::make_shared<NeoProblem>(

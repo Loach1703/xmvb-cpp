@@ -32,6 +32,10 @@ using ResponseNeoPreconditioner =
 using ResponseNeoStructureResidualSolver =
     std::function<Eigen::VectorXd(const Eigen::VectorXd&)>;
 
+/** @brief Borrows the orbital basis, fixed-structure and relaxed projections for diagnostics. */
+using ResponseNeoModelObserver = std::function<void(
+    const Eigen::MatrixXd&, const Eigen::MatrixXd&, const Eigen::MatrixXd&)>;
+
 /**
  * @brief Quadratic model for orbital-trust NEO with projected response.
  *
@@ -181,7 +185,8 @@ public:
   ResponseNeoResult solve(
       const NeoOptions& options,
       bool allow_early_trial = false,
-      const std::function<void(const ResponseNeoResult&)>& observe_candidate = {});
+      const std::function<void(const ResponseNeoResult&)>& observe_candidate = {},
+      const ResponseNeoModelObserver& observe_model = {});
 
   Eigen::Index orbital_basis_size() const noexcept {
     return orbital_basis_.cols();

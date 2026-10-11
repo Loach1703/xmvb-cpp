@@ -470,7 +470,8 @@ bool ResponseNeoWorkspace::append_structure_block(
 
 ResponseNeoResult ResponseNeoWorkspace::solve(
     const NeoOptions& options, bool allow_early_trial,
-    const std::function<void(const ResponseNeoResult&)>& observe_candidate) {
+    const std::function<void(const ResponseNeoResult&)>& observe_candidate,
+    const ResponseNeoModelObserver& observe_model) {
   diagnostics::ScopedPhase phase(diagnostics::Phase::NeoSolve);
   if (!(options.trust_radius > 0.0) ||
       !std::isfinite(options.trust_radius) ||
@@ -635,6 +636,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
 
       response_coefficients_.noalias() = -structure_inverse_ * b;
       const Eigen::MatrixXd relaxed = a + b.transpose() * response_coefficients_;
+      if (observe_model) observe_model(qo, a, relaxed);
       spectrum_vectors_ =
           whitening_.transpose() * relaxed * whitening_;
       diagnostics::ScopedPhase spectrum_phase(diagnostics::Phase::NeoSpectrum);
