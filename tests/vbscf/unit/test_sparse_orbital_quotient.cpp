@@ -692,6 +692,32 @@ void check_occupation_curvature() {
     require((block_preconditioner.apply(probe) - inverse * probe).norm() <
                 1.0e-14,
             "TNHVP L-BFGS did not use the orbital-block inverse");
+    // An independent dense inverse-BFGS reference checks cross-orbital
+    // secants. The production recursion must not alter the chart curvature.
+    auto secant_inverse = block_preconditioner;
+    Eigen::Matrix2d reference_inverse = inverse;
+    Eigen::Matrix2d coupled_curvature;
+    coupled_curvature << 3.0, 0.7, 0.7, 2.0;
+    for (const Eigen::Vector2d step :
+         {Eigen::Vector2d(0.2, 0.3), Eigen::Vector2d(-0.4, 0.1)}) {
+      const Eigen::Vector2d change = coupled_curvature * step;
+      require(secant_inverse.try_add_pair(step, change),
+              "positive cross-orbital secant was rejected");
+      const double rho = 1.0 / step.dot(change);
+      const Eigen::Matrix2d update =
+          Eigen::Matrix2d::Identity() - rho * step * change.transpose();
+      reference_inverse =
+          (update * reference_inverse * update.transpose() +
+           rho * step * step.transpose()).eval();
+      require((secant_inverse.apply(probe) - reference_inverse * probe).norm() <
+                  1.0e-12,
+              "block two-loop recursion differs from inverse BFGS");
+      require((secant_inverse.apply(change) - step).norm() < 1.0e-12,
+              "block inverse lost its latest secant equation");
+    }
+    require((space.apply_reduced_curvature(probe) - action * probe).norm() <
+                1.0e-14,
+            "secant preconditioning modified the physical chart model");
   }
   std::cout << "Inactive occupation and active unit-model production blocks: passed\n";
 }
