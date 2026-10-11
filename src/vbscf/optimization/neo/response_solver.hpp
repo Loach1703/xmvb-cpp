@@ -196,6 +196,10 @@ public:
   }
 
 private:
+  /** @brief Extends the positive projected factor when its leading block is fixed. */
+  void update_newton_factor(bool leading_unchanged);
+  /** @brief Computes the projected spectrum only for boundary or Ritz diagnostics. */
+  bool ensure_model_spectrum();
   bool append_orbital(
       Eigen::VectorXd direction,
       int* actions,
@@ -237,6 +241,12 @@ private:
   Eigen::MatrixXd structure_inverse_;
   Eigen::MatrixXd structure_null_vectors_;
   Eigen::MatrixXd response_coefficients_;
+  /** @brief Positive projected factor; no AO-sized or per-thread copies. */
+  Eigen::MatrixXd newton_factor_;
+  Eigen::VectorXd white_gradient_;
+  bool model_positive_ = false;
+  bool spectrum_ready_ = false;
+  /** @brief Projected model until spectral decomposition, then its eigenvectors. */
   Eigen::MatrixXd spectrum_vectors_;
   Eigen::VectorXd spectrum_values_;
   Eigen::VectorXd spectral_gradient_;

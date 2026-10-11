@@ -498,6 +498,46 @@ bool ResponseNeoWorkspace::append_structure_block(
   return true;
 }
 
+void ResponseNeoWorkspace::update_newton_factor(bool leading_unchanged) {
+  if (!leading_unchanged) {
+    Eigen::LLT<Eigen::MatrixXd> factor(spectrum_vectors_);
+    model_positive_ = factor.info() == Eigen::Success;
+    if (model_positive_) newton_factor_ = factor.matrixU();
+    return;
+  }
+  // A nonpositive leading principal block cannot become positive by bordering.
+  if (!model_positive_) return;
+  const Eigen::Index previous = newton_factor_.rows();
+  const Eigen::Index size = spectrum_vectors_.rows();
+  newton_factor_.conservativeResize(size, size);
+  newton_factor_.bottomRows(size - previous).setZero();
+  for (Eigen::Index column = previous; column < size; ++column) {
+    const Eigen::VectorXd border = newton_factor_.topLeftCorner(column, column)
+        .transpose().triangularView<Eigen::Lower>()
+        .solve(spectrum_vectors_.row(column).head(column).transpose());
+    const double pivot = spectrum_vectors_(column, column) - border.squaredNorm();
+    if (!(pivot > 0.0) || !std::isfinite(pivot)) {
+      model_positive_ = false;
+      return;
+    }
+    newton_factor_.col(column).head(column) = border;
+    newton_factor_(column, column) = std::sqrt(pivot);
+  }
+}
+
+bool ResponseNeoWorkspace::ensure_model_spectrum() {
+  if (spectrum_ready_) return true;
+  diagnostics::ScopedPhase phase(diagnostics::Phase::NeoSpectrum);
+  const lapack_int size = static_cast<lapack_int>(spectrum_vectors_.rows());
+  diagnostics::record_matrix_shape(diagnostics::Phase::NeoSpectrum, size, size);
+  spectrum_values_.resize(size);
+  if (LAPACKE_dsyevd(LAPACK_COL_MAJOR, 'V', 'L', size,
+      spectrum_vectors_.data(), size, spectrum_values_.data()) != 0) return false;
+  spectral_gradient_.noalias() = spectrum_vectors_.transpose() * white_gradient_;
+  spectrum_ready_ = true;
+  return true;
+}
+
 ResponseNeoResult ResponseNeoWorkspace::solve(
     const NeoOptions& options, bool allow_early_trial,
     const std::function<void(const ResponseNeoResult&)>& observe_candidate,
@@ -698,36 +738,39 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
         spectrum_vectors_.noalias() -= white_coupling.transpose() *
             (structure_inverse_ * white_coupling);
       }
-      diagnostics::ScopedPhase spectrum_phase(diagnostics::Phase::NeoSpectrum);
-      diagnostics::record_matrix_shape(diagnostics::Phase::NeoSpectrum,
-                                      qo.cols(), qo.cols());
-      const lapack_int dimension = static_cast<lapack_int>(qo.cols());
-      spectrum_values_.resize(dimension);
-      // The projected model needs its complete spectrum. Divide-and-conquer
-      // computes that spectrum in the owned small matrix, avoiding Eigen's
-      // QR eigensolve followed by a second eigenvector-matrix copy.
-      const lapack_int info = LAPACKE_dsyevd(
-          LAPACK_COL_MAJOR, 'V', 'L', dimension,
-          spectrum_vectors_.data(), dimension, spectrum_values_.data());
-      if (info != 0) {
-        result.stop_reason = NeoStopReason::NumericalFailure;
-        return result;
-      }
       const Eigen::VectorXd gradient =
           qo.transpose() * problem_.orbital_gradient();
-      const Eigen::VectorXd white_gradient = whitening_.transpose() * gradient;
-      spectral_gradient_.noalias() = spectrum_vectors_.transpose() * white_gradient;
+      white_gradient_.noalias() = whitening_.transpose() * gradient;
+      update_newton_factor(model_structure_size_ == qs.cols() && model_orbital_size_ >= 0);
+      spectrum_ready_ = false;
       model_orbital_size_ = qo.cols();
       model_structure_size_ = qs.cols();
     }
     const Eigen::MatrixXd& whitening = whitening_;
     const Eigen::MatrixXd& response_coefficients = response_coefficients_;
-    const SpectralTrustRegionSolution projected = solve_spectral_trust_region(
-        spectrum_values_, spectral_gradient_,
-        options.trust_radius);
-    // Associate the lift as two matrix-vector products. Forming W * V
-    // first would spend O(k^3) and allocate a dense matrix for one vector.
-    const Eigen::VectorXd white_step = spectrum_vectors_ * projected.step;
+    SpectralTrustRegionSolution projected;
+    Eigen::VectorXd white_step;
+    bool interior_newton = false;
+    if (model_positive_ && !options.require_curvature_certificate) {
+      const Eigen::VectorXd rhs = newton_factor_.transpose()
+          .triangularView<Eigen::Lower>().solve(-white_gradient_);
+      white_step = newton_factor_.triangularView<Eigen::Upper>().solve(rhs);
+      const double length = white_step.stableNorm();
+      interior_newton = white_step.allFinite() && length <= options.trust_radius;
+      if (interior_newton) {
+        const double roundoff = std::numeric_limits<double>::epsilon() * qo.cols();
+        projected.boundary = length >= options.trust_radius * (1.0 - roundoff);
+      }
+    }
+    if (!interior_newton) {
+      if (!ensure_model_spectrum()) {
+        result.stop_reason = NeoStopReason::NumericalFailure;
+        return result;
+      }
+      projected = solve_spectral_trust_region(
+          spectrum_values_, spectral_gradient_, options.trust_radius);
+      white_step.noalias() = spectrum_vectors_ * projected.step;
+    }
     const Eigen::VectorXd p_coefficients = whitening * white_step;
     const Eigen::VectorXd q_coefficients =
         response_coefficients * p_coefficients;
@@ -790,9 +833,14 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
         result.structure_actions, orbital_residual_norm, structure_residual_norm,
         kkt_residual_target, result.shift, options.trust_radius, result.step_norm,
         static_cast<int>(result.boundary));
-    // Report already available Ritz data only. These are projected-model
-    // eigenvalues, not a global spectral certificate or a new stopping test.
+    // Spectral tracing explicitly requests Ritz diagnostics, including when
+    // the native interior solve needs no spectrum. This diagnostic work must
+    // not be included in native performance comparisons.
     if (diagnostics::neo_trace_enabled()) {
+      if (!ensure_model_spectrum()) {
+        result.stop_reason = NeoStopReason::NumericalFailure;
+        return result;
+      }
       diagnostics::neo_trace("spectrum",
           "micro=%d,hvp=%d,min=%.17g,max=%.17g,coordinate_residual=%.17g,physical_residual=%.17g",
           result.iterations, result.orbital_actions, spectrum_values_[0],
@@ -819,6 +867,7 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
     // their five full-space image contractions, but evaluate them for every
     // final candidate and whenever the solver requires a curvature certificate.
     const auto measure_curvature = [&] {
+      if (!ensure_model_spectrum()) return false;
       const Eigen::VectorXd minimum_coefficients = whitening *
           spectrum_vectors_.col(0);
       result.minimum_curvature_orbital.noalias() =
@@ -855,18 +904,22 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
           orbital_basis_.cols() == problem_.orbital_size() &&
           structure_basis_.cols() == problem_.structure_size() &&
           curvature_converged;
+      return true;
     };
     const int basis_size = static_cast<int>(
         orbital_basis_.cols() + structure_basis_.cols());
     if (need_curvature_certificate || stationary ||
         basis_size >= maximum_dimension) {
-      measure_curvature();
+      if (!measure_curvature()) {
+        result.stop_reason = NeoStopReason::NumericalFailure;
+        return result;
+      }
     }
     const double positivity_tolerance =
         curvature_relative_tolerance * std::max({
-            1.0, result.shift, std::abs(spectrum_values_[0])});
+            1.0, result.shift, spectrum_ready_ ? std::abs(spectrum_values_[0]) : 0.0});
     const bool shifted_positive =
-        spectrum_values_[0] + result.shift >= -positivity_tolerance;
+        interior_newton || spectrum_values_[0] + result.shift >= -positivity_tolerance;
     // A nonlinear keyframe certifies a regular boundary candidate by its
     // actual/predicted decrease.  Resolving an unrelated lowest Ritz vector
     // is therefore unnecessary unless explicitly requested.  A hard case is
@@ -1091,7 +1144,10 @@ ResponseNeoResult ResponseNeoWorkspace::solve(
         static_cast<long>(orbital_basis_.cols()),
         static_cast<long>(structure_basis_.cols()));
     if (!expanded) {
-      if (!need_curvature_certificate && !stationary) measure_curvature();
+      if (!need_curvature_certificate && !stationary && !measure_curvature()) {
+        result.stop_reason = NeoStopReason::NumericalFailure;
+        return result;
+      }
       result.stop_reason = NeoStopReason::NumericalFailure;
       return result;
     }
