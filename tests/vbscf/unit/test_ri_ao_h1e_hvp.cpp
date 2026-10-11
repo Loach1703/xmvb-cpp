@@ -325,7 +325,7 @@ void check_exact_parallel_actions(int n_bf = 2) {
   adjoints = 0.3 * sources.array().cos().matrix();
   const Matrix expected_forward = stencil * sources;
   const Matrix expected_transpose = stencil.transpose() * adjoints;
-  xmvb::vb::AoH1eFusedWorkspace workspace;
+  xmvb::vb::AoH1eSymmetricWorkspace symmetric_workspace;
   const auto check = [&]() {
     for (int threads : {1, 2, 4, 32}) {
       for (Eigen::Index column = 0; column < sources.cols(); ++column) {
@@ -340,15 +340,27 @@ void check_exact_parallel_actions(int n_bf = 2) {
                       expected_transpose.col(column), 2.0e-13,
                       "parallel exact transpose mismatch");
         std::vector<double> fused_forward, fused_transpose;
-        xmvb::vb::apply_ao_h1e_fused(
-            sources.col(column).data(), adjoints.col(column).data(),
-            ao, threads, &workspace, &fused_forward, &fused_transpose);
-        require_close(Eigen::Map<const Matrix>(fused_forward.data(), size, 1),
-                      expected_forward.col(column), 2.0e-13,
-                      "parallel exact fused forward mismatch");
-        require_close(Eigen::Map<const Matrix>(fused_transpose.data(), size, 1),
-                      expected_transpose.col(column), 2.0e-13,
-                      "parallel exact fused transpose mismatch");
+        const Eigen::Map<const Matrix> source_matrix(sources.col(column).data(), n_bf, n_bf);
+        const Eigen::Map<const Matrix> adjoint_matrix(adjoints.col(column).data(), n_bf, n_bf);
+        const Matrix symmetric_source = source_matrix + source_matrix.transpose();
+        const Matrix symmetric_adjoint = adjoint_matrix + adjoint_matrix.transpose();
+        const Eigen::Map<const Eigen::VectorXd> source_vector(symmetric_source.data(), size);
+        const Eigen::Map<const Eigen::VectorXd> adjoint_vector(symmetric_adjoint.data(), size);
+        const Eigen::VectorXd raw_forward = stencil * source_vector;
+        const Eigen::VectorXd raw_transpose = stencil.transpose() * adjoint_vector;
+        const Eigen::Map<const Matrix> reference_forward(raw_forward.data(), n_bf, n_bf);
+        const Eigen::Map<const Matrix> reference_transpose(raw_transpose.data(), n_bf, n_bf);
+        xmvb::vb::apply_symmetric_ao_h1e_fused(
+            symmetric_source.data(), symmetric_adjoint.data(), ao, threads,
+            &symmetric_workspace, &fused_forward, &fused_transpose);
+        const Eigen::Map<const Matrix> symmetric_forward(fused_forward.data(), n_bf, n_bf);
+        const Eigen::Map<const Matrix> symmetric_transpose(fused_transpose.data(), n_bf, n_bf);
+        require_close(symmetric_forward,
+                      reference_forward + reference_forward.transpose(), 2.0e-13,
+                      "two-channel physical forward mismatch");
+        require_close(symmetric_transpose + symmetric_transpose.transpose(),
+                      reference_transpose + reference_transpose.transpose(), 2.0e-13,
+                      "two-channel physical transpose mismatch");
       }
       Matrix forward, transpose;
       xmvb::vb::apply_ao_h1e_fused_batch(
@@ -385,9 +397,9 @@ void check_exact_parallel_actions(int n_bf = 2) {
   ao.pair_graph.integral_values.clear();
   ao.pair_graph.row_offsets.assign(n_pairs + 1, 0);
   std::vector<double> forward, transpose;
-  xmvb::vb::apply_ao_h1e_fused(
+  xmvb::vb::apply_symmetric_ao_h1e_fused(
       sources.col(0).data(), adjoints.col(0).data(), ao, 32,
-      &workspace, &forward, &transpose);
+      &symmetric_workspace, &forward, &transpose);
   require(Eigen::Map<const Matrix>(forward.data(), size, 1).isZero(0.0) &&
               Eigen::Map<const Matrix>(transpose.data(), size, 1).isZero(0.0),
           "empty exact action retained stale workspace values");

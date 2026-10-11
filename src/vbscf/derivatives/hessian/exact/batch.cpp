@@ -14,6 +14,7 @@
 #include <Eigen/Core>
 
 #include "core/eigen_response.hpp"
+#include "core/openmp.hpp"
 #include "vbscf/derivatives/hessian/coupled/coupling.hpp"
 #include "vbscf/derivatives/hessian/responses/active_space/local_tile_accumulator_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/orbital/preparation.hpp"
@@ -242,8 +243,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
         inactive_density_columns,
         symmetrized_pullback_columns,
         current_input_->ao_integral_input,
-        detail::choose_exact_ao_h1e_thread_count(
-            current_input_->orbital_preparation_input),
+        effective_openmp_thread_count(),
         &delta_h1e_columns,
         &inactive_density_gradient_columns);
     for (Eigen::Index column = 0; column < n_directions; ++column) {

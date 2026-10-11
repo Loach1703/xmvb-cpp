@@ -8,11 +8,25 @@
 
 namespace xmvb::vb {
 
-/** @brief Thread-local buffers reused by repeated fused AO-H1E actions. */
-struct AoH1eFusedWorkspace {
-  std::vector<std::vector<double>> forward;
-  std::vector<std::vector<double>> transpose;
+/** @brief Shared inputs and reused worker outputs for two symmetric channels. */
+struct AoH1eSymmetricWorkspace {
+  using Channels = Eigen::Matrix<double, Eigen::Dynamic, 2, Eigen::RowMajor>;
+  Channels sources;
+  std::vector<Channels> partial;
 };
+
+/**
+ * @brief Applies two symmetric AO sources with a common two-lane stencil.
+ *
+ * Both inputs must be symmetric. The first output is the complete physical
+ * AO forward matrix; the second is half the physical adjoint matrix, so its
+ * sum with its transpose equals that of the raw unique-ERI transpose.
+ * Input channels are shared; workers retain only AO-sized output buffers.
+ */
+void apply_symmetric_ao_h1e_fused(
+    const double* source, const double* adjoint, const AoIntegralInput& ao,
+    int n_threads, AoH1eSymmetricWorkspace* workspace,
+    std::vector<double>* forward, std::vector<double>* transpose);
 
 /** @brief Applies the exact AO-H1E operator directly from unique AO ERIs. */
 std::vector<double> apply_ao_h1e(
@@ -25,21 +39,6 @@ std::vector<double> apply_ao_h1e_transpose(
     const double* adjoint,
     const AoIntegralInput& ao,
     int n_threads);
-
-/**
- * @brief Applies the exact AO-H1E operator and its transpose.
- *
- * The unique ERI stream is read once. Caller-owned buffers allow repeated
- * Hessian-vector products to reuse their AO-sized storage.
- */
-void apply_ao_h1e_fused(
-    const double* source,
-    const double* adjoint,
-    const AoIntegralInput& ao,
-    int n_threads,
-    AoH1eFusedWorkspace* workspace,
-    std::vector<double>* forward,
-    std::vector<double>* transpose);
 
 /** @brief Applies the fused operator to several independent directions. */
 void apply_ao_h1e_fused_batch(

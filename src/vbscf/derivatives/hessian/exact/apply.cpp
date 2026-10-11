@@ -454,7 +454,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           orbital_preparation_directional_result.delta_inactive_density,
           total_ao_effective_one_electron_direction,
           current_input_->ao_integral_input,
-          current_input_->orbital_preparation_input,
           &ao_h1e_fused_workspace_,
           &ao_h1e_symmetrized_gradient_workspace_,
           &ao_h1e_delta_h1e_workspace_,

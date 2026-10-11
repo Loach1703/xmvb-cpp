@@ -154,7 +154,7 @@ private:
   Eigen::MatrixXd accepted_hho_gradient_symmetric_;
   Eigen::MatrixXd accepted_active_auxiliary_orbitals_times_hho_gradient_symmetric_;
   mutable Eigen::MatrixXd ao_h1e_symmetrized_gradient_workspace_;
-  mutable AoH1eFusedWorkspace ao_h1e_fused_workspace_;
+  mutable AoH1eSymmetricWorkspace ao_h1e_fused_workspace_;
   mutable AoEffectiveOneElectronRiFusedWorkspace ri_ao_h1e_fused_workspace_;
   mutable Eigen::MatrixXd ri_ao_h1e_forward_workspace_;
   mutable Eigen::MatrixXd ri_ao_h1e_adjoint_workspace_;
