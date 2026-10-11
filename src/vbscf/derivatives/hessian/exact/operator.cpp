@@ -274,7 +274,8 @@ ExactHvpOperator::State::diagnostics() const {
   if (!accepted_ri_two_electron_cache_.has_value() &&
       accepted_exact_two_electron_cache_.accepted_pair_products != nullptr) {
     info.resident_exact_pair_elements = static_cast<std::size_t>(
-        accepted_exact_two_electron_cache_.accepted_pair_products->size());
+        accepted_exact_two_electron_cache_.accepted_pair_products->size() +
+        accepted_exact_two_electron_cache_.orbital_pair_products.size());
   }
   info.exact_pair_tile_rows = accepted_ri_two_electron_cache_.has_value()
       ? 0

@@ -33,6 +33,13 @@ struct ExactPackedActiveTwoElectronAdjointCache {
   const ExactCtxPairMatrix* accepted_pair_products = nullptr;
   const ExactCtxDenseMatrix* accepted_active_coefficients = nullptr;
   ExactCtxPairMatrix active_pair_gradient_matrix;
+  /**
+   * @brief Accepted one-orbital contraction, rows (AO, active), columns pairs.
+   *
+   * Uses O(n_bf*n_active^3) shared storage, capped at 64 MiB. This is an
+   * integral intermediate, independent of the active density, not a Hessian.
+   */
+  ExactCtxPairMatrix orbital_pair_products;
 };
 
 /**

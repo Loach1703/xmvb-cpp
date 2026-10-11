@@ -153,9 +153,14 @@ void compute_exact_packed_active_two_electron_integral_directional_derivative(
     workspace->active_pair_contraction.resize(
         static_cast<Eigen::Index>(n_active_pairs),
         static_cast<Eigen::Index>(n_active_pairs));
-    workspace->active_pair_contraction.noalias() =
-        workspace->directional_pair_coefficients.transpose() *
-        *accepted_cache.accepted_pair_products;
+    if (accepted_cache.orbital_pair_products.size() != 0) {
+      detail::contract_orbital_pair_direction(
+          accepted_cache, dense_active_direction, &workspace->active_pair_contraction);
+    } else {
+      workspace->active_pair_contraction.noalias() =
+          workspace->directional_pair_coefficients.transpose() *
+          *accepted_cache.accepted_pair_products;
+    }
   }
 
   const std::size_t packed_size =
@@ -316,10 +321,17 @@ compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
       block.resize(n_bf_pairs, width * n_active_pairs);
     for (Eigen::Index offset = 0; offset < width; ++offset) {
       const Eigen::Index direction = begin + offset;
-      build_mixed_ao_pair_to_active_pair_coefficients_from_cache(
-          *accepted_cache.accepted_active_coefficients,
-          dense_active_directions[direction], accepted_cache, &mixed);
-      contraction.noalias() = mixed.transpose() * *accepted_cache.accepted_pair_products;
+      if (directional_pair_products != nullptr || accepted_cache.orbital_pair_products.size() == 0) {
+        build_mixed_ao_pair_to_active_pair_coefficients_from_cache(
+            *accepted_cache.accepted_active_coefficients,
+            dense_active_directions[direction], accepted_cache, &mixed);
+      }
+      if (accepted_cache.orbital_pair_products.size() != 0) {
+        detail::contract_orbital_pair_direction(
+            accepted_cache, dense_active_directions[direction], &contraction);
+      } else {
+        contraction.noalias() = mixed.transpose() * *accepted_cache.accepted_pair_products;
+      }
       pack(contraction, direction);
       if (directional_pair_products != nullptr && width > 1)
         block.middleCols(offset * n_active_pairs, n_active_pairs) = mixed;

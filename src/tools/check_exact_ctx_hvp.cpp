@@ -634,6 +634,8 @@ int main(int argc, char** argv) {
         std::max(1.0, infinity_norm(analytic));
     if (!options.coupled_finite_difference &&
         component_decomposition_error > 1.0e-10) {
+      std::cerr << "component_decomposition_error = "
+                << component_decomposition_error << '\n';
       throw std::runtime_error(
           "exact HVP component decomposition is inconsistent");
     }
@@ -690,6 +692,9 @@ int main(int argc, char** argv) {
       if (state_energy_average_error > 1.0e-10 ||
           state_gradient_average_error > 1.0e-9 ||
           state_hvp_average_error > 1.0e-8) {
+        std::cerr << "state_energy_average_error = " << state_energy_average_error
+                  << "\nstate_gradient_average_error = " << state_gradient_average_error
+                  << "\nstate_hvp_average_error = " << state_hvp_average_error << '\n';
         throw std::runtime_error(
             "equal-weight state-average linearity check failed");
       }

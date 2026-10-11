@@ -98,4 +98,10 @@ void accumulate_pair_product_adjoint(
     const ExactPackedActiveTwoElectronAdjointCache& cache,
     Eigen::MatrixXd* dense_active_gradients);
 
+/** @brief Contracts a direction with the accepted one-orbital integral image. */
+void contract_orbital_pair_direction(
+    const ExactPackedActiveTwoElectronAdjointCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& direction,
+    Eigen::MatrixXd* contraction);
+
 }  // namespace xmvb::vb::detail

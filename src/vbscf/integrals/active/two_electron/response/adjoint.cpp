@@ -23,6 +23,56 @@ using detail::build_ao_pair_component_tables;
 using detail::build_mixed_ao_pair_to_active_pair_coefficients_from_cache;
 using detail::multiply_pair_coefficients_by_gradient_matrix;
 
+/** @brief Density adjoint of the accepted one-orbital integral contraction. */
+Eigen::MatrixXd backpropagate_orbital_pair_products(
+    const ExactPackedActiveTwoElectronAdjointCache& cache,
+    const ExactCtxPairMatrix& pair_gradient) {
+  const Eigen::Index n = cache.n_active_orbitals;
+  const Eigen::Index pairs = cache.active_pair_first_indices.size();
+  Eigen::MatrixXd weights = Eigen::MatrixXd::Zero(n * pairs, n);
+  for (Eigen::Index p = 0; p < pairs; ++p) {
+    const int a = cache.active_pair_first_indices[p];
+    const int b = cache.active_pair_second_indices[p];
+    for (Eigen::Index q = 0; q < pairs; ++q) {
+      weights(b * pairs + q, a) += pair_gradient(q, p);
+      weights(a * pairs + q, b) += pair_gradient(q, p);
+    }
+  }
+  const Eigen::Map<const ExactCtxPairMatrix> image(
+      cache.orbital_pair_products.data(), cache.n_basis_functions, n * pairs);
+  return image * weights;
+}
+
+/** @brief Builds shared three-active/one-AO integrals without thread replicas. */
+void build_orbital_pair_products(ExactPackedActiveTwoElectronAdjointCache* cache) {
+  const Eigen::Index n_bf = cache->n_basis_functions;
+  const Eigen::Index n = cache->n_active_orbitals;
+  const Eigen::Index pairs = cache->active_pair_first_indices.size();
+  constexpr std::size_t budget = 64 * 1024 * 1024;
+  const std::size_t columns = static_cast<std::size_t>(n) * pairs;
+  if (cache->accepted_pair_products == nullptr ||
+      columns > budget / sizeof(double) / static_cast<std::size_t>(n_bf)) {
+    return;
+  }
+  cache->orbital_pair_products.setZero(n_bf * n, pairs);
+  const auto& c = *cache->accepted_active_coefficients;
+  const auto& products = *cache->accepted_pair_products;
+#pragma omp parallel for schedule(static)
+  for (Eigen::Index mu = 0; mu < n_bf; ++mu) {
+    for (Eigen::Index nu = 0; nu < n_bf; ++nu) {
+      const double* source = products.row(detail::ao_pair_index(mu, nu)).data();
+      for (Eigen::Index a = 0; a < n; ++a) {
+        const double coefficient = c(nu, a);
+        double* target = cache->orbital_pair_products.row(mu * n + a).data();
+#pragma omp simd
+        for (Eigen::Index p = 0; p < pairs; ++p) {
+          target[p] += coefficient * source[p];
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
 
 Eigen::MatrixXd backpropagate_exact_packed_active_two_electron_gradient(
@@ -54,6 +104,9 @@ Eigen::MatrixXd backpropagate_exact_packed_active_two_electron_gradient(
       build_active_pair_gradient_matrix(
           packed_active_two_electron_gradient,
           active_pairs);
+  if (accepted_cache.orbital_pair_products.size() != 0) {
+    return backpropagate_orbital_pair_products(accepted_cache, active_pair_gradient_matrix);
+  }
   Eigen::MatrixXd dense_active_gradient = Eigen::MatrixXd::Zero(
       n_bf,
       n_ao);
@@ -165,6 +218,7 @@ build_exact_packed_active_two_electron_adjoint_cache(
     cache.accepted_pair_products =
         &accepted_active_space_two_electron_result.dense_ao_pair_products;
   }
+  build_orbital_pair_products(&cache);
 
   return cache;
 }

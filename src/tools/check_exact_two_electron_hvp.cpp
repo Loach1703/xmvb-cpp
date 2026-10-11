@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "input/loading/loader.hpp"
@@ -11,6 +13,7 @@
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
 #include "vbscf/integrals/active/two_electron/response/backpropagator.hpp"
 #include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
+#include "vbscf/integrals/active/two_electron/response/directional.hpp"
 
 namespace {
 
@@ -136,6 +139,47 @@ int main(int argc, char** argv) {
         build_dense_active_direction(
             n_basis_functions,
             n_active_orbitals);
+    auto accepted_cache = xmvb::vb::build_exact_packed_active_two_electron_adjoint_cache(
+        gradient_result.packed_active_two_electron_gradient,
+        gradient_result.active_space_two_electron_result.dense_active_coefficients,
+        input.ao_integral_input, n_active_orbitals,
+        gradient_result.active_space_two_electron_result);
+    const auto contracted_gradient = xmvb::vb::backpropagate_exact_packed_active_two_electron_gradient(
+        gradient_result.packed_active_two_electron_gradient, accepted_cache);
+    const auto contracted_direction =
+        xmvb::vb::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+            accepted_cache, {dense_active_direction}, input.ao_integral_input);
+    const auto measure = [&](const char* name) {
+      constexpr int repeats = 20;
+      const auto start = std::chrono::steady_clock::now();
+      double checksum = 0.0;
+      for (int repeat = 0; repeat < repeats; ++repeat) {
+        const auto gradient = xmvb::vb::backpropagate_exact_packed_active_two_electron_gradient(
+            gradient_result.packed_active_two_electron_gradient, accepted_cache);
+        const auto integrals =
+            xmvb::vb::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+                accepted_cache, {dense_active_direction}, input.ao_integral_input);
+        checksum += gradient.squaredNorm() + integrals.squaredNorm();
+      }
+      std::cout << name << "_seconds_per_call = "
+                << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() / repeats
+                << "\n" << name << "_checksum = " << checksum << '\n';
+    };
+    measure("contracted_kernel");
+    // Independent AO-pair contraction reference; move, never duplicate, the image.
+    auto orbital_products = std::move(accepted_cache.orbital_pair_products);
+    measure("ao_pair_kernel");
+    const auto pair_gradient = xmvb::vb::backpropagate_exact_packed_active_two_electron_gradient(
+        gradient_result.packed_active_two_electron_gradient, accepted_cache);
+    const auto pair_direction =
+        xmvb::vb::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+            accepted_cache, {dense_active_direction}, input.ao_integral_input);
+    const double contracted_gradient_error = max_abs_difference(contracted_gradient, pair_gradient);
+    const double contracted_direction_error = max_abs_difference(contracted_direction, pair_direction);
+    if (contracted_gradient_error > 1.e-11 * std::max(1., max_abs_value(pair_gradient)) ||
+        contracted_direction_error > 1.e-11 * std::max(1., max_abs_value(pair_direction))) {
+      throw std::runtime_error("one-orbital integral contractions disagree with AO-pair reference");
+    }
     const auto analytic_dense_active_gradient_direction =
         xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
             gradient_result.packed_active_two_electron_gradient,
@@ -232,6 +276,9 @@ int main(int argc, char** argv) {
     std::cout << "max_rel_diff = "
               << max_abs_diff / std::max(1.0, max_abs_fd) << '\n';
     std::cout << "streamed_max_abs_diff = " << streamed_max_abs_diff << '\n';
+    std::cout << "contracted_gradient_max_abs_diff = " << contracted_gradient_error << '\n';
+    std::cout << "contracted_direction_max_abs_diff = " << contracted_direction_error << '\n';
+    std::cout << "orbital_pair_products_bytes = " << orbital_products.size() * sizeof(double) << '\n';
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
