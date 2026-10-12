@@ -53,6 +53,12 @@ public:
   Eigen::MatrixXd apply(
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const;
 
+  /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
+   * Uses occupation lists and the retained two-electron kernel, not sigma
+   * probes. The one-electron integrals must belong to this immutable action.
+   */
+  Eigen::MatrixXd diagonal(const Eigen::Ref<const Eigen::MatrixXd>& one_electron) const;
+
   /**
    * @brief Applies a general one-body orbital generator.
    *

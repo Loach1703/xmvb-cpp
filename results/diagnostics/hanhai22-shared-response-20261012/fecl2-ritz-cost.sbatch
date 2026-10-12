@@ -31,6 +31,8 @@ for test_name in test_ciah test_coupled_structure test_orthogonal_direct_ci test
 done
 cp "$source_dir/build/src/xmvb-cpp.exe" "$artifact/"
 grep -E 'CMAKE_BUILD_TYPE:|CMAKE_CXX_FLAGS(_RELEASE)?:' "$source_dir/build/CMakeCache.txt" > "$artifact/flags.txt"
+# Reuse the frozen build/unit-test artifact for independent regression arrays.
+[[ ${XMVB_AUDIT_BUILD_ONLY:-0} == 1 ]] && exit 0
 for variant in native profile; do
  cp "$root/fecl2-metric-convergence-1248707/input.xmi" "$artifact/$variant/"
  cp "$root/fecl2-metric-convergence-1248707/def2-tzvp.gbs" "$artifact/$variant/"

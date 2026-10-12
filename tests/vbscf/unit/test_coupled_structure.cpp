@@ -9,6 +9,7 @@
 #include <Eigen/Core>
 #include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
+#include <Eigen/LU>
 
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
@@ -421,6 +422,47 @@ void check_metric_factorization(const StructureFixture& fixture) {
       "complete spin carrier incorrectly admitted a noncomplete VB space");
 }
 
+/** @brief Carrier inverse needs both horizontal Riesz maps in a nonorthogonal basis. */
+void check_carrier_diagonal(const StructureFixture& fixture) {
+  const auto expanded=fixture.action.orthogonalize_structure_block(Eigen::Matrix4d::Identity());
+  Eigen::Matrix4d f;
+  for (int j=0;j<4;++j) {
+    const Eigen::Matrix2d block=expanded.middleCols(2*j,2);
+    f.col(j)=Eigen::Map<const Eigen::Vector4d>(block.data());
+  }
+  const Eigen::Matrix4d fi=f.inverse();
+  const Eigen::Vector4d diagonal=(fi.transpose()*fixture.hamiltonian*fi).diagonal();
+  const double shift=-0.07;
+  for (const int n_states:{1,2}) {
+    auto accepted=accepted_point(fixture,n_states,std::vector<double>(n_states,1.0/n_states));
+    accepted->complete_active_space=true;
+    accepted->same_spin_pair_cache.alpha_reuse_table.unique_determinants={{0},{1}};
+    accepted->same_spin_pair_cache.beta_reuse_table.unique_determinants={{0},{1}};
+    const xmvb::vb::StructureTangentOperator structure(accepted,fixture.action);
+    const int dimension=structure.tangent_size();
+    Eigen::MatrixXd l(4*n_states,dimension);
+    for (int j=0;j<dimension;++j) {
+      const auto raw=structure.expand(Eigen::VectorXd::Unit(dimension,j)).scaled_coefficients;
+      for (int s=0;s<n_states;++s) l.block(4*s,j,4,1)=f*raw.col(s);
+    }
+    const Eigen::MatrixXd g=l.transpose()*l;
+    const Eigen::MatrixXd gi=g.inverse();
+    Eigen::VectorXd inverse_diagonal(4*n_states);
+    for (int s=0;s<n_states;++s)
+      inverse_diagonal.segment(4*s,4)=
+          (diagonal.array()-fixture.eigenvalues[s]-shift).inverse().matrix();
+    const Eigen::MatrixXd expected=gi*l.transpose()*inverse_diagonal.asDiagonal()*l*gi;
+    Eigen::MatrixXd actual(dimension,dimension);
+    for (int j=0;j<dimension;++j)
+      actual.col(j)=structure.apply_inverse_augmented_hessian_diagonal(
+          Eigen::VectorXd::Unit(dimension,j),shift);
+    require((actual-expected).norm()<2e-11,
+        "carrier preconditioner did not apply both horizontal Riesz maps");
+    require((actual-actual.transpose()).norm()<2e-12,
+        "carrier preconditioner lost coordinate-space symmetry");
+  }
+}
+
 /** Check the forcing split without assuming a stationary carrier root. */
 void check_connection(const StructureFixture& fixture) {
   require(fixture.action.supports_integral_direction(), "fixture lacks direct CI");
@@ -493,6 +535,7 @@ int main() {
     check_unequal_weights_rejected(fixture);
     check_coupled_neo_coordinates(fixture);
     check_connection(fixture);
+    check_carrier_diagonal(fixture);
     check_metric_factorization(fixture);
     return 0;
   } catch (const std::exception& error) {

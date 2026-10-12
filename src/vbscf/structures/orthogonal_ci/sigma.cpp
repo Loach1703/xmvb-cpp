@@ -145,6 +145,44 @@ DirectCiSigmaAction::DirectCiSigmaAction(
   hamiltonian_pair_kernel_ = build_hamiltonian_pair_kernel(integrals, n_electrons);
 }
 
+Eigen::MatrixXd DirectCiSigmaAction::diagonal(
+    const Eigen::Ref<const Eigen::MatrixXd>& one_electron) const {
+  if (one_electron.rows()!=n_orbitals_ || one_electron.cols()!=n_orbitals_ ||
+      !one_electron.allFinite())
+    throw std::invalid_argument("invalid direct-CI diagonal one-electron matrix");
+  Eigen::MatrixXd coulomb(n_orbitals_,n_orbitals_);
+  Eigen::MatrixXd exchange(n_orbitals_,n_orbitals_);
+  for (int p=0;p<n_orbitals_;++p) for (int q=0;q<n_orbitals_;++q) {
+    const int pp=TwoElectronIndexer::packed_pair_index(p,p);
+    const int qq=TwoElectronIndexer::packed_pair_index(q,q);
+    const int pq=TwoElectronIndexer::packed_pair_index(p,q);
+    coulomb(p,q)=pair_kernel_(pp,qq);
+    exchange(p,q)=pair_kernel_(pq,pq);
+  }
+  const auto spin_diagonal=[&](const SpinConnections& links,
+      Eigen::MatrixXd* occupations) {
+    const Eigen::Index count=links.occupied.size();
+    occupations->setZero(count,n_orbitals_);
+    Eigen::VectorXd result=Eigen::VectorXd::Zero(count);
+    for (Eigen::Index string=0;string<count;++string) {
+      for (const int p:links.occupied[string]) {
+        (*occupations)(string,p)=1.0;
+        result[string]+=one_electron(p,p);
+        for (const int q:links.occupied[string])
+          result[string]+=0.5*(coulomb(p,q)-exchange(p,q));
+      }
+    }
+    return result;
+  };
+  Eigen::MatrixXd alpha_occupations,beta_occupations;
+  const Eigen::VectorXd alpha_energy=spin_diagonal(*alpha_,&alpha_occupations);
+  const Eigen::VectorXd beta_energy=spin_diagonal(beta_connections(),&beta_occupations);
+  Eigen::MatrixXd result=alpha_occupations*coulomb*beta_occupations.transpose();
+  result.colwise()+=alpha_energy;
+  result.rowwise()+=beta_energy.transpose();
+  return result;
+}
+
 DirectCiSigmaAction::SpinConnections
 DirectCiSigmaAction::build_spin_connections(
     const std::vector<std::vector<int>>& determinants) const {

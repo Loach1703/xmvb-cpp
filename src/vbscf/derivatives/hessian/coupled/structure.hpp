@@ -206,8 +206,11 @@ public:
       double shift) const;
 
   /**
-   * @brief Applies the signed CIAH diagonal
-   * @f$(\operatorname{diag}C-\omega\operatorname{diag}M_s)^{-1}@f$.
+   * @brief Applies the signed CIAH diagonal model in its admitted representation.
+   * Complete spin sectors with a budgeted carrier use the symmetric inverse
+   * @f$G_s^{-1}L^TD^{-1}LG_s^{-1}@f$, where @f$L=FZ@f$ and
+   * @f$D=\operatorname{diag}H_{\mathrm{orth}}-E_s-\omega@f$.
+   * Other variational spaces retain their horizontal raw-structure Jacobi model.
    */
   Eigen::VectorXd apply_inverse_augmented_hessian_diagonal(
       const Eigen::VectorXd& covector,

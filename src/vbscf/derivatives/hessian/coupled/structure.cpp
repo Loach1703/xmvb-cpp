@@ -530,6 +530,20 @@ StructureTangentOperator::apply_inverse_augmented_hessian_diagonal(
         "structure AH preconditioner eigenvalue must be finite");
   }
 
+  if (metric_inverse_ && action_->supports_carrier_diagonal()) {
+    const auto riesz=[&](const Eigen::VectorXd& rhs) {
+      return core::solve_metric(rhs,
+          [this](const Eigen::VectorXd& x) {return apply_metric_coordinates(x);},
+          [this](const Eigen::VectorXd& x) {return apply_inverse_metric_model(x);});
+    };
+    // L=FZ, G_s=L^T L. The symmetric pulled-back inverse is
+    // G_s^-1 L^T D^-1 L G_s^-1, not a copied carrier diagonal.
+    const Eigen::MatrixXd coefficients=expand(riesz(covector)).scaled_coefficients;
+    const Eigen::MatrixXd image=action_->apply_inverse_carrier_diagonal(
+        coefficients,energies_,eigenvalue);
+    return riesz(project_coordinates(image));
+  }
+
   Eigen::MatrixXd ambient = expand(covector).scaled_coefficients;
   constexpr double kDenominatorFloor = 1.0e-8;
   for (int state = 0; state < n_states_; ++state) {

@@ -420,6 +420,14 @@ void check_sigma_action() {
   const xmvb::vb::DirectCiSigmaAction sigma_direction(
       alpha, beta, orthogonal_direction);
 
+  const Eigen::MatrixXd diagonal=sigma_action.diagonal(orthogonal.one_electron);
+  for (Eigen::Index a=0;a<diagonal.rows();++a) for (Eigen::Index b=0;b<diagonal.cols();++b) {
+    Eigen::MatrixXd probe=Eigen::MatrixXd::Zero(diagonal.rows(),diagonal.cols());
+    probe(a,b)=1.0;
+    require(std::abs(sigma_action.apply(probe)(a,b)-diagonal(a,b))<1e-12,
+        "occupation-only carrier diagonal differs from exact sigma diagonal");
+  }
+
   constexpr int block_width = 2;
   Eigen::MatrixXd coefficients(
       static_cast<int>(alpha.size()),

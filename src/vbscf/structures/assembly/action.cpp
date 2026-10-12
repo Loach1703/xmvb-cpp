@@ -383,6 +383,7 @@ struct StructureAction::OrthogonalDirectCiData {
   ExteriorOrbitalTransform alpha_transform;
   std::unique_ptr<ExteriorOrbitalTransform> distinct_beta_transform;
   DirectCiSigmaAction sigma;
+  mutable std::optional<Eigen::MatrixXd> carrier_diagonal;
 
   OrthogonalDirectCiData(
       const std::vector<std::vector<int>>& alpha_determinants,
@@ -425,6 +426,7 @@ struct StructureAction::OrthogonalDirectCiData {
              ? distinct_beta_transform->dynamic_bytes()
              : 0) +
         sigma.dynamic_bytes();
+    if (carrier_diagonal) bytes+=carrier_diagonal->size()*sizeof(double);
     return bytes;
   }
 };
@@ -906,6 +908,40 @@ Eigen::MatrixXd StructureAction::expand_structure_tile(
     }
   }
   return tile;
+}
+
+bool StructureAction::supports_carrier_diagonal() const noexcept {
+  if (!direct_ci_) return false;
+  const double n_active=direct_ci_->integrals.one_electron.rows();
+  // Include the occupation/GEMM workspace used to build the shared diagonal,
+  // important for strongly unequal alpha/beta string counts.
+  const double elements=4.0*n_unique_alpha_*n_unique_beta_+
+      3.0*(n_unique_alpha_+static_cast<double>(n_unique_beta_))*n_active+2.0*n_active*n_active;
+  return sizeof(double)*elements<=static_cast<double>(kStructureActionWorkspaceBytes);
+}
+
+Eigen::MatrixXd StructureAction::apply_inverse_carrier_diagonal(
+    const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+    const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const {
+  if (!supports_carrier_diagonal() || vectors.rows()!=n_structures_ ||
+      vectors.cols()!=energies.size() || !energies.allFinite() || !std::isfinite(eigenvalue))
+    throw std::invalid_argument("invalid structure carrier diagonal inverse");
+  if (!direct_ci_->carrier_diagonal)
+    direct_ci_->carrier_diagonal=direct_ci_->sigma.diagonal(direct_ci_->integrals.one_electron);
+  Eigen::MatrixXd result(n_structures_,vectors.cols());
+  for (Eigen::Index state=0;state<vectors.cols();++state) {
+    Eigen::MatrixXd carrier=orthogonalize_structure_block(vectors.col(state));
+    for (Eigen::Index j=0;j<carrier.cols();++j) for (Eigen::Index i=0;i<carrier.rows();++i) {
+      double denominator=(*direct_ci_->carrier_diagonal)(i,j)-energies[state]-eigenvalue;
+      // Same signed denominator protection as the existing CIAH inverse.
+      if (std::abs(denominator)<1.0e-8) denominator=1.0e-8;
+      carrier(i,j)/=denominator;
+    }
+    direct_ci_->beta_transform().apply_adjoint_right(&carrier);
+    direct_ci_->alpha_transform.apply_adjoint_left(&carrier);
+    result.col(state)=contract_spin_product_block(carrier).col(0);
+  }
+  return result;
 }
 
 StructureActionResult StructureAction::apply_streamed(

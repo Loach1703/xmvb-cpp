@@ -223,6 +223,18 @@ public:
   Eigen::MatrixXd orthogonalize_structure_block(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
 
+  /** @brief Whether the carrier diagonal and one-column workspace fit the action budget. */
+  bool supports_carrier_diagonal() const noexcept;
+
+  /** @brief Applies F^T(diag(H_orth)-E-omega)^-1 F to structure vectors.
+   * F is the exact exterior/structure map, not an assumed orthogonal VB basis.
+   * Callers supply the two horizontal Riesz maps for a coordinate-space inverse.
+   * Carrier storage is shared and columns are processed sequentially.
+   */
+  Eigen::MatrixXd apply_inverse_carrier_diagonal(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const;
+
   /** @brief Physical Ritz residual in the orthogonal spin-string carrier.
    * Valid as a structure-space certificate only for a complete variational
    * spin sector, not an arbitrary selected structure subspace. The caller
