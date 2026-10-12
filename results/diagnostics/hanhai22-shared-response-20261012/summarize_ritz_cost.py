@@ -26,6 +26,8 @@ forward = [v for _, v in events.get("ciah_forward_cost", [])]
 diagonals = [v for _, v in events.get("ciah_diagonal_cost", [])]
 projection_updates = [v for _, v in events.get("ciah_projection_update_cost", [])]
 norm_costs = [v for _, v in events.get("ciah_norm_cost", [])]
+diagonal_sections = [v for _, v in events.get("ciah_diagonal_sections", [])]
+density_batches = [v for _, v in events.get("ciah_diagonal_density_batch", [])]
 rows = list(csv.DictReader((run / "neo.tsv").open(), delimiter="\t"))
 summary = {
     "macros": len(rows),
@@ -45,6 +47,16 @@ summary = {
     "projection_update_seconds": sum(float(v["seconds"]) for v in projection_updates),
     "diagonal_builds": len(diagonals),
     "diagonal_build_seconds": sum(float(v["seconds"]) for v in diagonals),
+    "diagonal_section_seconds": {
+        key: sum(float(v[key]) for v in diagonal_sections)
+        for key in (diagonal_sections[0] if diagonal_sections else [])
+        if key.endswith("_seconds")},
+    "density_batch_builds": len(density_batches),
+    "density_graph_sweeps": sum(
+        (int(v["channels"])+int(v["width"])-1)//int(v["width"])
+        for v in density_batches) if density_batches else None,
+    "max_density_workspace_bytes": max(
+        (int(v["workspace_bytes"]) for v in density_batches), default=None),
     "forward_evaluations": len(forward),
     "forward_seconds": {key: sum(float(v[key]) for v in forward) for key in
                         ("orbital", "ao_effective", "active_one", "active_two",

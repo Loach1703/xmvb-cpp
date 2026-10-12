@@ -35,6 +35,13 @@ void apply_symmetric_ao_h1e_batch(
     const AoIntegralInput& ao, int n_threads,
     AoH1eBatchWorkspace* workspace, Eigen::MatrixXd* response);
 
+/** @brief Consume already interleaved workspace sources without copying them.
+ * Each worker retains only packed symmetric AO output channels. The returned
+ * columns are complete physical AO matrices, including doubled raw diagonals.
+ */
+void apply_symmetric_ao_h1e_channels(const AoIntegralInput& ao, int n_threads,
+    AoH1eBatchWorkspace* workspace, Eigen::MatrixXd* response);
+
 /**
  * @brief Applies two symmetric AO sources with a common two-lane stencil.
  *

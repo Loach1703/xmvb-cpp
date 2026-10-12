@@ -78,67 +78,108 @@ void validate(
   }
 }
 
-/** @brief Diagonal MO image of G[C W C^T] for symmetric source weights.
- *
- * Since G[D]=2J[D]-K[D], a single occupied-density contraction provides
- * every external-orbital exchange diagonal. No external-by-occupied pair
- * transform or full four-index MO tensor is required. The exact integral
- * sweeps use contracted density channels rather than external-by-occupied
- * mixed-pair channels. Only AO-sized worker outputs
- * are used, with their aggregate storage bounded before choosing a team.
- */
-Eigen::VectorXd density_operator_diagonal(
+/** @brief RI diagonal of G[C W C^T], using the existing signed factorization. */
+Eigen::VectorXd ri_density_operator_diagonal(
     const VbScfInput& input, const Eigen::MatrixXd& mo,
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
     const Eigen::Ref<const Eigen::MatrixXd>& weights) {
   const int n_bf = static_cast<int>(mo.rows());
   Eigen::MatrixXd image;
-  if (input.standard_two_electron_mode ==
-      StandardTwoElectronMode::ResolutionOfIdentity) {
-    if (!input.ri_factorization) {
-      throw std::invalid_argument("RI diagonal requires accepted AO factors");
-    }
-    AoEffectiveOneElectronRiLowRankFactors factors;
-    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(weights);
-    if (spectrum.info() != Eigen::Success || !spectrum.eigenvalues().allFinite()) {
-      throw std::runtime_error("failed to factor active diagonal density source");
-    }
-    factors.scaled_factor_matrix.resize(n_bf,weights.rows());
-    int positive = 0;
-    for (Eigen::Index j = 0; j < weights.rows(); ++j)
-      if (spectrum.eigenvalues()[j] >= 0.0) ++positive;
-    factors.n_positive_components = positive;
-    factors.n_negative_components = weights.rows()-positive;
-    int positive_column = 0, negative_column = positive;
-    for (Eigen::Index j = 0; j < weights.rows(); ++j) {
-      const double eigenvalue = spectrum.eigenvalues()[j];
-      const int column = eigenvalue >= 0.0 ? positive_column++ : negative_column++;
-      factors.scaled_factor_matrix.col(column).noalias() =
-          std::sqrt(std::abs(eigenvalue)) * coefficients * spectrum.eigenvectors().col(j);
-    }
-    const auto storage = apply_ao_effective_one_electron_ri_operator(
-        factors, *input.ri_factorization, n_bf);
-    image = Eigen::Map<const Eigen::MatrixXd>(storage.data(), n_bf, n_bf);
-  } else {
-    const Eigen::MatrixXd density = coefficients * weights * coefficients.transpose();
-    constexpr std::size_t worker_budget = 64 * 1024 * 1024;
-    const std::size_t image_bytes =
-        sizeof(double) * static_cast<std::size_t>(n_bf) * n_bf;
-    const int threads = std::min(
-        effective_openmp_thread_count(),
-        static_cast<int>(std::max<std::size_t>(1, worker_budget / image_bytes)));
-    auto storage = apply_ao_h1e(density.data(), input.ao_integral_input, threads);
-    Eigen::Map<Eigen::MatrixXd> triangular(storage.data(), n_bf, n_bf);
-    for (int mu = 0; mu < n_bf; ++mu)
-      for (int nu = 0; nu <= mu; ++nu) {
-        triangular(mu, nu) += triangular(nu, mu);
-        triangular(nu, mu) = triangular(mu, nu);
-      }
-    image = triangular;
+  if (!input.ri_factorization) {
+    throw std::invalid_argument("RI diagonal requires accepted AO factors");
   }
+  AoEffectiveOneElectronRiLowRankFactors factors;
+  const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(weights);
+  if (spectrum.info() != Eigen::Success || !spectrum.eigenvalues().allFinite()) {
+    throw std::runtime_error("failed to factor active diagonal density source");
+  }
+  factors.scaled_factor_matrix.resize(n_bf,weights.rows());
+  int positive = 0;
+  for (Eigen::Index j = 0; j < weights.rows(); ++j)
+    if (spectrum.eigenvalues()[j] >= 0.0) ++positive;
+  factors.n_positive_components = positive;
+  factors.n_negative_components = weights.rows()-positive;
+  int positive_column = 0, negative_column = positive;
+  for (Eigen::Index j = 0; j < weights.rows(); ++j) {
+    const double eigenvalue = spectrum.eigenvalues()[j];
+    const int column = eigenvalue >= 0.0 ? positive_column++ : negative_column++;
+    factors.scaled_factor_matrix.col(column).noalias() =
+        std::sqrt(std::abs(eigenvalue)) * coefficients * spectrum.eigenvectors().col(j);
+  }
+  const auto storage = apply_ao_effective_one_electron_ri_operator(
+      factors, *input.ri_factorization, n_bf);
+  image = Eigen::Map<const Eigen::MatrixXd>(storage.data(), n_bf, n_bf);
   const Eigen::MatrixXd products = image * mo;
   return (mo.array() * products.array()).colwise().sum().transpose();
 }
+
+/** @brief Shared, untruncated core/active density channels for exact integrals. */
+Eigen::MatrixXd density_diagonal_channels(const VbScfInput& input,
+    const Eigen::MatrixXd& mo,int n_core,int na,const Eigen::MatrixXd& active_weights) {
+  const int n_bf=mo.rows();
+  if (na*na!=active_weights.rows())
+    throw std::invalid_argument("invalid active density channels");
+  const int channels=n_core+active_weights.cols();
+  Eigen::MatrixXd result(n_bf,channels);
+  const auto active=mo.middleCols(n_core,na);
+  if (input.standard_two_electron_mode==StandardTwoElectronMode::ResolutionOfIdentity) {
+    for (int c=0;c<n_core;++c)
+      result.col(c)=ri_density_operator_diagonal(input,mo,mo.col(c),Eigen::MatrixXd::Ones(1,1));
+    for (int j=0;j<active_weights.cols();++j) {
+      const Eigen::Map<const Eigen::MatrixXd> weights(active_weights.col(j).data(),na,na);
+      result.col(n_core+j)=ri_density_operator_diagonal(input,mo,active,weights);
+    }
+    return result;
+  }
+  const std::size_t matrix_bytes=sizeof(double)*static_cast<std::size_t>(n_bf)*n_bf;
+  const std::size_t pair_bytes=sizeof(double)*static_cast<std::size_t>(n_bf)*(n_bf+1)/2;
+  const std::size_t active_temp=sizeof(double)*static_cast<std::size_t>(n_bf)*na;
+  // Budget all batch inputs, packed worker outputs, response and shared scratch.
+  // For exceptionally large AO bases the unavoidable one-channel/one-worker
+  // working set is the lower bound; the budget never enables further replicas.
+  const std::size_t budget=std::max<std::size_t>(64*1024*1024,
+      3*matrix_bytes+pair_bytes+sizeof(double)+active_temp);
+  const int workers=std::min(effective_openmp_thread_count(),static_cast<int>(
+      (budget-3*matrix_bytes-active_temp)/(pair_bytes+sizeof(double))));
+  int lanes=1;
+#if defined(__GNUC__) && defined(__x86_64__)
+  lanes=__builtin_cpu_supports("avx512f") ? 8 : __builtin_cpu_supports("avx2") ? 4 : 2;
+#endif
+  const std::size_t channel_bytes=2*matrix_bytes+workers*(pair_bytes+sizeof(double));
+  const int width=std::min({channels,lanes,static_cast<int>(
+      (budget-matrix_bytes-active_temp)/channel_bytes)});
+  AoH1eBatchWorkspace workspace;
+  Eigen::MatrixXd response,scratch(n_bf,n_bf);
+  for (int begin=0;begin<channels;begin+=width) {
+    const int count=std::min(width,channels-begin);
+    workspace.sources.resize(static_cast<Eigen::Index>(n_bf)*n_bf,count);
+    for (int j=0;j<count;++j) {
+      const int channel=begin+j;
+      if (channel<n_core) scratch.noalias()=mo.col(channel)*mo.col(channel).transpose();
+      else {
+        const Eigen::Map<const Eigen::MatrixXd> weights(
+            active_weights.col(channel-n_core).data(),na,na);
+        scratch.noalias()=active*weights*active.transpose();
+      }
+      for (Eigen::Index row=0;row<scratch.size();++row)
+        workspace.sources(row,j)=scratch.data()[row];
+    }
+    apply_symmetric_ao_h1e_channels(input.ao_integral_input,workers,&workspace,&response);
+    for (int j=0;j<count;++j) {
+      const Eigen::Map<const Eigen::MatrixXd> image(response.col(j).data(),n_bf,n_bf);
+      scratch.noalias()=image*mo;
+      result.col(begin+j)=(mo.array()*scratch.array()).colwise().sum().transpose();
+    }
+  }
+  diagnostics::neo_trace("ciah_diagonal_density_batch",
+      "channels=%d,width=%d,workers=%d,workspace_bytes=%zu,budget_bytes=%zu",
+      channels,width,workers,matrix_bytes+active_temp+width*channel_bytes,budget);
+  return result;
+}
+
+struct DensityDiagonals {
+  Eigen::MatrixXd core,active;
+};
 
 struct DiagonalContractions {
   /** @brief Total effective-potential diagonal, including inactive reference. */
@@ -219,7 +260,7 @@ Eigen::MatrixXd assemble_rotation_diagonal(
  * min(n_active_pairs,2*n_active+1). There is no numerical rank cutoff,
  * division by a small singular value, or approximate density compression.
  */
-Eigen::MatrixXd contracted_density_images(
+DensityDiagonals contracted_density_images(
     const VbScfInput& input, const Eigen::MatrixXd& mo, int n_core,
     const Eigen::MatrixXd& dm1, const std::vector<double>& dm2) {
   const int n = dm1.rows();
@@ -246,18 +287,17 @@ Eigen::MatrixXd contracted_density_images(
   const Eigen::MatrixXd basis = qr.householderQ()*Eigen::MatrixXd::Identity(n_pairs,width);
   const Eigen::MatrixXd reconstruction =
       qr.matrixQR().topRows(width).template triangularView<Eigen::Upper>();
-  Eigen::MatrixXd images(mo.cols(),width);
-  const auto active = mo.middleCols(n_core,n);
+  Eigen::MatrixXd weights(n*n,width);
   for (int j = 0; j < width; ++j) {
-    Eigen::MatrixXd weights(n,n);
+    Eigen::Map<Eigen::MatrixXd> matrix(weights.col(j).data(),n,n);
     for (int w = 0; w < n; ++w)
       for (int z = 0; z <= w; ++z) {
         const int pair = TwoElectronIndexer::packed_pair_index(w,z);
-        weights(w,z) = weights(z,w) = basis(pair,j)*(w == z ? 1.0 : 0.5);
+        matrix(w,z) = matrix(z,w) = basis(pair,j)*(w == z ? 1.0 : 0.5);
       }
-    images.col(j) = density_operator_diagonal(input,mo,active,weights);
   }
-  return images*reconstruction;
+  const auto images=density_diagonal_channels(input,mo,n_core,n,weights);
+  return {images.leftCols(n_core),images.rightCols(width)*reconstruction};
 }
 
 Eigen::VectorXd diagonal_gradient(
@@ -600,8 +640,13 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
               TwoElectronIndexer::packed_pair_index(a, b),
               TwoElectronIndexer::packed_pair_index(c, d));
   const auto dm2 = unpack_symmetric_active_two_rdm(packed_dm2,n_active);
-  const Eigen::MatrixXd density_images =
+  const auto active_end = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
+  const auto densities =
       contracted_density_images(input,mo,n_core,dm1,dm2);
+  const auto& density_images=densities.active;
+  const auto density_end = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   DiagonalContractions contractions;
   contractions.potential = x.v_core.diagonal()+0.5*density_images.col(0);
   contractions.gradient = diagonal_gradient(x,dm1,dm2,contractions.potential);
@@ -627,30 +672,46 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
     }
   x.j_pc = Eigen::MatrixXd::Zero(n_bf, n_core);
   x.k_pc = Eigen::MatrixXd::Zero(n_bf, n_core);
-  ExactCtxPairMatrix core_diagonal_map(
-      static_cast<Eigen::Index>(n_bf) * (n_bf + 1) / 2, n_core);
-  Eigen::Index ao_pair = 0;
-  for (int mu = 0; mu < n_bf; ++mu)
-    for (int nu = 0; nu <= mu; ++nu, ++ao_pair)
-      for (int c = 0; c < n_core; ++c)
-        core_diagonal_map(ao_pair, c) =
-            mo(mu, c) * mo(nu, c) * (mu == nu ? 1.0 : 2.0);
-  const ExactCtxPairMatrix core_diagonal_products =
-      apply_ao_pair_operator(input, core_diagonal_map);
-  for (int p = 0; p < n_bf; ++p) {
-    Eigen::VectorXd diagonal_pair(core_diagonal_map.rows());
-    ao_pair = 0;
+  const auto core_start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
+  const Eigen::Index n_ao_pairs=static_cast<Eigen::Index>(n_bf)*(n_bf+1)/2;
+  // The pair map is dead after the AO action. Do not retain it during the
+  // projection/exchange sweeps alongside its equally large integral image.
+  const ExactCtxPairMatrix core_diagonal_products = [&] {
+    ExactCtxPairMatrix map(n_ao_pairs,n_core);
+    Eigen::Index pair=0;
+    for (int mu=0;mu<n_bf;++mu)
+      for (int nu=0;nu<=mu;++nu,++pair)
+        for (int c=0;c<n_core;++c)
+          map(pair,c)=mo(mu,c)*mo(nu,c)*(mu==nu ? 1.0 : 2.0);
+    return apply_ao_pair_operator(input,map);
+  }();
+  const auto pair_end = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
+  // Independent output rows share the pair products. Workers own only one
+  // packed AO-pair vector; their aggregate is bounded by the existing 64 MiB
+  // diagonal worker budget, rather than copying the AO-by-core matrix.
+  constexpr std::size_t worker_budget=64*1024*1024;
+  const std::size_t pair_bytes=sizeof(double)*static_cast<std::size_t>(n_ao_pairs);
+  const int workers=std::min(effective_openmp_thread_count(),
+      static_cast<int>(std::max<std::size_t>(1,worker_budget/pair_bytes)));
+#pragma omp parallel for schedule(static) num_threads(workers)
+  for (int p = 0; p < (n_core ? n_bf : 0); ++p) {
+    Eigen::VectorXd diagonal_pair(n_ao_pairs);
+    Eigen::Index ao_pair=0;
     for (int mu = 0; mu < n_bf; ++mu)
       for (int nu = 0; nu <= mu; ++nu, ++ao_pair)
         diagonal_pair[ao_pair] =
             mo(mu, p) * mo(nu, p) * (mu == nu ? 1.0 : 2.0);
     x.j_pc.row(p) = diagonal_pair.transpose() * core_diagonal_products;
   }
-
+  const auto projection_end = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   for (int c = 0; c < n_core; ++c)
     x.k_pc.col(c) =
-        2.0 * x.j_pc.col(c) - density_operator_diagonal(
-            input,mo,mo.col(c),Eigen::MatrixXd::Ones(1,1));
+        2.0 * x.j_pc.col(c) - densities.core.col(c);
+  const auto exchange_end = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   AnalyticOrbitalDiagonal result;
   result.mo_coefficients = std::move(mo);
   result.rotation_diagonal =
@@ -662,6 +723,15 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
   result.active_inverse_transform = inverse_active_transform;
   if (trace) diagnostics::neo_trace("ciah_diagonal_cost", "seconds=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
+  if (trace) diagnostics::neo_trace("ciah_diagonal_sections",
+      "frame_active_seconds=%.17g,active_density_seconds=%.17g,density_contraction_seconds=%.17g,core_pair_seconds=%.17g,core_projection_seconds=%.17g,core_exchange_seconds=%.17g,projection_workers=%d,projection_worker_bytes=%zu",
+      std::chrono::duration<double>(active_end-start).count(),
+      std::chrono::duration<double>(density_end-active_end).count(),
+      std::chrono::duration<double>(core_start-density_end).count(),
+      std::chrono::duration<double>(pair_end-core_start).count(),
+      std::chrono::duration<double>(projection_end-pair_end).count(),
+      std::chrono::duration<double>(exchange_end-projection_end).count(),
+      workers,pair_bytes*workers);
   return result;
 }
 

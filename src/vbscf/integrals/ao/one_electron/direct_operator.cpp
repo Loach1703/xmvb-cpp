@@ -163,6 +163,7 @@ void contract_symmetric_integrals(
 }
 
 /** @brief Common-left-pair stencil, vectorized over interleaved batch channels. */
+template<bool Packed>
 #if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
 __attribute__((target_clones("avx512f", "avx2", "default")))
 #endif
@@ -172,6 +173,12 @@ void contract_symmetric_block(
   const auto& graph = ao.pair_graph;
   const int n_bf = ao.n_basis_functions;
   const bool compact = graph.has_compact_integral_stream();
+  const auto output = [&](int row,int column) -> Eigen::Index {
+    if constexpr (Packed) {
+      const Eigen::Index hi=std::max(row,column),lo=std::min(row,column);
+      return (hi*(hi+1)/2+lo)*width;
+    } else return (column*n_bf+row)*width;
+  };
   while (begin < end) {
     const int left = graph.integral_rows[begin];
     const int i = graph.pair_first[left], j = graph.pair_second[left];
@@ -186,24 +193,24 @@ void contract_symmetric_block(
       if (k == l) value *= 0.5;
       if (left == right) value *= 0.5;
       const Eigen::Index kl = (l * n_bf + k) * width;
-      const Eigen::Index ik = (k * n_bf + i) * width, jl = (l * n_bf + j) * width;
-      const Eigen::Index il = (l * n_bf + i) * width, jk = (k * n_bf + j) * width;
       const Eigen::Index lj = (j * n_bf + l) * width, ki = (i * n_bf + k) * width;
       const Eigen::Index kj = (j * n_bf + k) * width, li = (i * n_bf + l) * width;
+      const Eigen::Index tkl=output(k,l),tik=output(i,k),tjl=output(j,l);
+      const Eigen::Index til=output(i,l),tjk=output(j,k);
 #pragma omp simd
       for (Eigen::Index channel = 0; channel < width; ++channel) {
         coulomb[channel] += (4.0 * value) * source[kl + channel];
-        target[kl + channel] += (4.0 * value) * source[ij + channel];
-        target[ik + channel] -= value * source[lj + channel];
-        target[jl + channel] -= value * source[ki + channel];
-        target[il + channel] -= value * source[kj + channel];
-        target[jk + channel] -= value * source[li + channel];
+        target[tkl + channel] += (4.0 * value) * source[ij + channel];
+        target[tik + channel] -= value * source[lj + channel];
+        target[tjl + channel] -= value * source[ki + channel];
+        target[til + channel] -= value * source[kj + channel];
+        target[tjk + channel] -= value * source[li + channel];
       }
       ++begin;
     } while (begin < end && graph.integral_rows[begin] == left);
 #pragma omp simd
     for (Eigen::Index channel = 0; channel < width; ++channel)
-      target[ij + channel] += coulomb[channel];
+      target[output(i,j) + channel] += coulomb[channel];
   }
 }
 
@@ -353,25 +360,24 @@ std::vector<double> apply_ao_h1e_transpose(
   return result;
 }
 
-void apply_symmetric_ao_h1e_batch(
-    const Eigen::Ref<const Eigen::MatrixXd>& sources,
-    const AoIntegralInput& ao, int n_threads,
-    AoH1eBatchWorkspace* workspace, Eigen::MatrixXd* response) {
+/** @brief One contraction/reduction implementation for distinct storage roles. */
+template<bool Packed>
+void apply_symmetric_channels(const AoIntegralInput& ao,int n_threads,
+    AoH1eBatchWorkspace* workspace,Eigen::MatrixXd* response) {
   diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
-  const std::size_t size = matrix_size(ao);
-  if (workspace == nullptr || response == nullptr || sources.rows() !=
-      static_cast<Eigen::Index>(size))
-    throw std::invalid_argument("invalid symmetric AO response batch");
-  const Eigen::Index width = sources.cols();
+  const std::size_t size=matrix_size(ao);
+  if (!workspace || !response || workspace->sources.rows()!=static_cast<Eigen::Index>(size))
+    throw std::invalid_argument("invalid interleaved AO response channels");
+  const Eigen::Index width = workspace->sources.cols();
   response->resize(size, width);
   if (width == 0) return;
   const std::size_t n_integrals = ao.pair_graph.integral_count();
   n_threads = bounded_openmp_thread_count(n_threads, n_integrals);
   const auto chunk = openmp_chunk_size(n_integrals, n_threads);
-  workspace->sources = sources;
   workspace->partial.resize(n_threads);
   workspace->coulomb.resize(n_threads);
   const int n_bf = ao.n_basis_functions;
+  const Eigen::Index n_pairs=static_cast<Eigen::Index>(n_bf)*(n_bf+1)/2;
   diagnostics::WorkerLoopTimes work(n_threads);
 #pragma omp parallel num_threads(n_threads)
   {
@@ -381,18 +387,23 @@ void apply_symmetric_ao_h1e_batch(
     team_size = omp_get_num_threads();
 #endif
     auto& local = workspace->partial[thread];
-    local.setZero(size, width);
+    local.setZero(Packed ? n_pairs : static_cast<Eigen::Index>(size), width);
     auto& coulomb = workspace->coulomb[thread];
     coulomb.resize(width);
     work.start(thread);
 #pragma omp for schedule(dynamic, 1) nowait
     for (std::size_t begin = 0; begin < n_integrals; begin += chunk) {
-      if (width == 1)
-        contract_integrals<true, false>(ao, begin, std::min(begin + chunk, n_integrals),
-            workspace->sources.data(), nullptr, local.data(), nullptr);
-      else
-        contract_symmetric_block(ao, begin, std::min(begin + chunk, n_integrals),
+      if constexpr (Packed) {
+        contract_symmetric_block<true>(ao, begin, std::min(begin + chunk, n_integrals),
             workspace->sources.data(), local.data(), width, coulomb.data());
+      } else {
+        if (width==1)
+          contract_integrals<true,false>(ao,begin,std::min(begin+chunk,n_integrals),
+              workspace->sources.data(),nullptr,local.data(),nullptr);
+        else
+          contract_symmetric_block<false>(ao,begin,std::min(begin+chunk,n_integrals),
+              workspace->sources.data(),local.data(),width,coulomb.data());
+      }
     }
     work.stop(thread);
 #pragma omp barrier
@@ -401,17 +412,35 @@ void apply_symmetric_ao_h1e_batch(
       for (int row = column; row < n_bf; ++row) {
         const Eigen::Index index = column * n_bf + row;
         const Eigen::Index partner = row * n_bf + column;
+        const Eigen::Index pair=static_cast<Eigen::Index>(row)*(row+1)/2+column;
         for (Eigen::Index channel = 0; channel < width; ++channel) {
           double sum = 0.0;
-          for (int worker = 0; worker < team_size; ++worker)
-            sum += workspace->partial[worker](index, channel) +
-                   workspace->partial[worker](partner, channel);
+          for (int worker = 0; worker < team_size; ++worker) {
+            if constexpr (Packed) sum+=workspace->partial[worker](pair,channel);
+            else sum+=workspace->partial[worker](index,channel)+workspace->partial[worker](partner,channel);
+          }
+          if constexpr (Packed) if (row==column) sum*=2.0;
           (*response)(index, channel) = (*response)(partner, channel) = sum;
         }
       }
     }
   }
   work.finish(diagnostics::Phase::AoH1eFused);
+}
+
+void apply_symmetric_ao_h1e_batch(const Eigen::Ref<const Eigen::MatrixXd>& sources,
+    const AoIntegralInput& ao,int n_threads,AoH1eBatchWorkspace* workspace,
+    Eigen::MatrixXd* response) {
+  const std::size_t size=matrix_size(ao);
+  if (!workspace || !response || sources.rows()!=static_cast<Eigen::Index>(size))
+    throw std::invalid_argument("invalid symmetric AO response batch");
+  workspace->sources=sources;
+  apply_symmetric_channels<false>(ao,n_threads,workspace,response);
+}
+
+void apply_symmetric_ao_h1e_channels(const AoIntegralInput& ao,int n_threads,
+    AoH1eBatchWorkspace* workspace,Eigen::MatrixXd* response) {
+  apply_symmetric_channels<true>(ao,n_threads,workspace,response);
 }
 
 void apply_symmetric_ao_h1e_fused_batch(
@@ -466,7 +495,7 @@ void apply_symmetric_ao_h1e_fused_batch(
     work.start(thread);
 #pragma omp for schedule(dynamic, 1) nowait
     for (std::size_t begin = 0; begin < n_integrals; begin += chunk)
-      contract_symmetric_block(ao, begin, std::min(begin + chunk, n_integrals),
+      contract_symmetric_block<false>(ao, begin, std::min(begin + chunk, n_integrals),
           workspace->sources.data(), local.data(), width, coulomb.data());
     work.stop(thread);
 #pragma omp barrier

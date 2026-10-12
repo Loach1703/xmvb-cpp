@@ -12,6 +12,7 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/integrals/ao/pairs/two_electron_index.hpp"
 #include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
 
 namespace {
 
@@ -169,6 +170,39 @@ void check_contracted_density_span() {
         }
   input.ao_integral_input.pair_graph =
       xmvb::vb::build_ao_pair_graph(left,right,values,n);
+  // Independent four-index reference, including diagonal/repeated AO indices.
+  for (int width : {1,2,3,8}) {
+    Eigen::MatrixXd sources(n*n,width);
+    for (int channel=0;channel<width;++channel)
+      for (int mu=0;mu<n;++mu)
+        for (int nu=0;nu<n;++nu)
+          sources(mu+nu*n,channel)=std::cos(0.13*(mu+nu+1)*(channel+1));
+    for (int threads : {1,4}) {
+      xmvb::vb::AoH1eBatchWorkspace workspace;
+      Eigen::MatrixXd result;
+      workspace.sources=sources;
+      xmvb::vb::apply_symmetric_ao_h1e_channels(input.ao_integral_input,
+          threads,&workspace,&result);
+      for (int channel=0;channel<width;++channel)
+        for (int mu=0;mu<n;++mu)
+          for (int nu=0;nu<n;++nu) {
+            double expected=0.0;
+            for (int k=0;k<n;++k)
+              for (int l=0;l<n;++l)
+                expected+=(2.0*eri(g,mu,nu,k,l,n)-eri(g,mu,k,nu,l,n))*sources(k+l*n,channel);
+            if (std::abs(result(mu+nu*n,channel)-expected)>5.0e-12)
+              throw std::runtime_error("packed symmetric density batch changed the AO operator");
+          }
+      for (const auto& partial : workspace.partial)
+        if (partial.rows()!=n*(n+1)/2)
+          throw std::runtime_error("symmetric density batch retained a full worker matrix");
+      Eigen::MatrixXd full;
+      xmvb::vb::apply_symmetric_ao_h1e_batch(sources,input.ao_integral_input,
+          threads,&workspace,&full);
+      if ((full-result).cwiseAbs().maxCoeff()>5.0e-12)
+        throw std::runtime_error("full and packed AO channel contractions disagree");
+    }
+  }
   auto ri = std::make_shared<xmvb::vb::RiAoFactorization>();
   ri->n_basis_functions = n;
   ri->n_auxiliary_functions = 4;
@@ -192,7 +226,7 @@ void check_contracted_density_span() {
   input.standard_two_electron_mode = use_ri
       ? xmvb::vb::StandardTwoElectronMode::ResolutionOfIdentity
       : xmvb::vb::StandardTwoElectronMode::Exact;
-  for (const int nc : {0,1}) {
+  for (const int nc : {0,1,2}) {
     xmvb::vb::AcceptedPointContext accepted;
     accepted.n_active_orbitals = na;
     auto& prepared = accepted.prepared_active_space;
