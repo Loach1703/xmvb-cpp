@@ -14,7 +14,6 @@
 #include "vbscf/optimization/driver/result.hpp"
 #include "vbscf/optimization/globalization/line_search.hpp"
 #include "vbscf/optimization/neo/ciah.hpp"
-#include "vbscf/optimization/neo/globalization.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 
 namespace xmvb::vb::optimizer_detail {
@@ -166,23 +165,8 @@ bool build_ciah_macro_step(
   Eigen::VectorXd displacement = Eigen::VectorXd::Zero(dimension);
   Eigen::VectorXd hessian_displacement = displacement;
   Eigen::VectorXd predicted_gradient = initial_gradient;
+  CiahEnergyModel energy_model(energy, initial_gradient);
   Eigen::VectorXd last_step = displacement;
-  Eigen::VectorXd descent_displacement, descent_image, descent_last_step;
-  double best_predicted_reduction = 0.0;
-  // Keyframe corrections need not preserve descent from the macro origin.
-  // Retain only prefixes left in place by the existing microstep checks.
-  // A negative origin slope allows nonlinear backtracking to find descent;
-  // no extra Hessian action is needed to retain its frozen model image.
-  const auto retain_descent_prefix = [&] {
-    const double slope = initial_gradient.dot(displacement);
-    const double reduction = -slope - 0.5 * displacement.dot(hessian_displacement);
-    if (slope < 0.0 && reduction > best_predicted_reduction) {
-      best_predicted_reduction = reduction;
-      descent_displacement = displacement;
-      descent_image = hessian_displacement;
-      descent_last_step = last_step;
-    }
-  };
   double keyframe_norm = dual_norm(initial_gradient);
   // newton_casscf.kernel passes 0.3 * its outer gradient tolerance to
   // update_orb_ci; the microstep/keyframe tests use that inner tolerance.
@@ -191,7 +175,6 @@ bool build_ciah_macro_step(
   const char* micro_stop = "unset";
   CiahResult candidate;
   while (true) {
-    retain_descent_prefix();
     candidate = workspace.next(predicted_gradient);
     ++record->micro_iterations;
     const bool ready = candidate.converged || candidate.exhaustion ||
@@ -213,6 +196,7 @@ bool build_ciah_macro_step(
     const Eigen::VectorXd previous_step = last_step;
     displacement += step;
     hessian_displacement += image;
+    energy_model.add(step, image);
     predicted_gradient += image;
     last_step = step;
     ++micro_steps;
@@ -226,6 +210,7 @@ bool build_ciah_macro_step(
     if (micro_steps > 3 && predicted_norm > gradient_trust * keyframe_norm) {
       displacement -= step;
       hessian_displacement -= image;
+      energy_model.remove(step, image);
       predicted_gradient = previous_gradient;
       last_step = previous_step;
       ++record->rejected_trial_count;
@@ -257,11 +242,18 @@ bool build_ciah_macro_step(
           static_cast<int>(keep_keyframe));
       if (keep_keyframe) {
         predicted_gradient = exact.gradient;
+        energy_model.refresh(exact.energy, exact.gradient);
+        diagnostics::neo_trace("ciah_model_refresh",
+            "energy=%.17g,source_energy=%.17g,anchored_prediction=%.17g,origin_prediction=%.17g",
+            exact.energy, energy, energy - exact.energy,
+            -initial_gradient.dot(displacement) -
+                0.5 * displacement.dot(hessian_displacement));
         keyframe_norm = actual_norm;
         since_keyframe = 0;
       } else {
         displacement -= step;
         hessian_displacement -= image;
+        energy_model.remove(step, image);
         predicted_gradient = previous_gradient;
         last_step = previous_step;
         ++record->rejected_trial_count;
@@ -282,23 +274,7 @@ bool build_ciah_macro_step(
         candidate.residual_norm);
   }
 
-  retain_descent_prefix();
-  const double final_slope = initial_gradient.dot(displacement);
-  const double final_reduction =
-      -final_slope - 0.5 * displacement.dot(hessian_displacement);
-  bool restored_prefix = false;
-  // Preserve legitimate finite negative-curvature steps with positive model
-  // reduction, even if their initial slope is uphill.
-  if (final_reduction <= 0.0 &&
-      best_predicted_reduction > 0.0) {
-    diagnostics::neo_trace("ciah_descent_prefix",
-        "discarded_linear=%.17g,discarded_prediction=%.17g,prefix_prediction=%.17g",
-        final_slope, final_reduction, best_predicted_reduction);
-    displacement = std::move(descent_displacement);
-    hessian_displacement = std::move(descent_image);
-    last_step = std::move(descent_last_step);
-    restored_prefix = true;
-  }
+  const double final_reduction = energy - energy_model.energy();
 
   accepted->parameters = build_nonredundant_lifted_trial_parameters(
       orbitals, chart, layout, displacement.head(no));
@@ -307,26 +283,35 @@ bool build_ciah_macro_step(
     result->termination_reason = "ciah_zero_macro_step";
     return false;
   }
-  // The frozen CIAH microsteps do not replace the VBSCF energy acceptance
-  // contract. Reuse their accumulated H image to screen a shorter macro
-  // displacement, without repeating any HVP or building another Hessian.
+  // PySCF commits the coupled keyframe sequence and then reoptimizes CI.
+  // It does not veto that sequence with the original frozen trust model.
+  // Retain our real-energy descent safeguard, but do not replace the coupled
+  // candidate by an old prefix because its obsolete origin model is uphill.
   double scale = 1.0;
   const double linear = initial_gradient.dot(displacement);
   const double quadratic = displacement.dot(hessian_displacement);
+  double accepted_prediction = 0.0;
   while (true) {
     accepted->trial = objective->evaluate_trial_with_structure_guess(
         accepted->parameters, coefficients(scale * displacement));
-    const auto globalization = globalize_neo_trial(energy, accepted->trial.energy,
-        scale * linear, scale * scale * quadratic, false,
-        *trust_radius, options.minimum_step_size);
+    // Keyframe refreshes both the gradient and the energy anchor. Testing the
+    // full microstep sequence against g0*p + p*H0*p/2 discards that update.
+    // A shortened origin-chart displacement is a different path: use its
+    // origin model, not a scaled prediction for the keyframe sequence.
+    const double model_linear = scale == 1.0
+        ? -final_reduction - 0.5 * quadratic : scale * linear;
+    const double prediction = -model_linear - 0.5 * scale * scale * quadratic;
+    const double reduction = energy - accepted->trial.energy;
+    const double ratio = prediction > 0.0 ? reduction / prediction
+        : -std::numeric_limits<double>::infinity();
+    const bool keep_trial = reduction > 0.0;
     diagnostics::neo_trace("ciah_macro_trial",
         "scale=%.17g,linear=%.17g,quadratic=%.17g,current_energy=%.17g,trial_energy=%.17g,predicted=%.17g,actual=%.17g,rho=%.17g,accepted=%d",
-        scale, scale * linear, scale * scale * quadratic, energy,
-        accepted->trial.energy, globalization.predicted_reduction,
-        globalization.actual_reduction, globalization.rho,
-        static_cast<int>(globalization.accepted));
-    if (globalization.accepted) {
-      *trust_radius = globalization.next_radius;
+        scale, model_linear, scale * scale * quadratic, energy,
+        accepted->trial.energy, prediction, reduction, ratio,
+        static_cast<int>(keep_trial));
+    if (keep_trial) {
+      accepted_prediction = prediction;
       break;
     }
     ++record->rejected_trial_count;
@@ -347,11 +332,11 @@ bool build_ciah_macro_step(
     // It is NOT the last Ritz residual or a nonlinear stationarity certificate.
     const Eigen::VectorXd frozen_gradient = initial_gradient + hessian_displacement;
     diagnostics::neo_trace("ciah_macro_model",
-        "source=%.17g,frozen_model=%.17g,orbital=%.17g,structure_diagonal=%.17g,last_ritz=%.17g,restored_prefix=%d,scale=%.17g",
+        "source=%.17g,frozen_model=%.17g,orbital=%.17g,structure_diagonal=%.17g,last_ritz=%.17g,scale=%.17g",
         dual_norm(initial_gradient), dual_norm(frozen_gradient),
         metric.dual_norm(frozen_gradient.head(no)),
         ns ? structure.diagonal_dual_norm(frozen_gradient.tail(ns)) : 0.0,
-        candidate.residual_norm, static_cast<int>(restored_prefix), scale);
+        candidate.residual_norm, scale);
     if (diagnostics::neo_candidate_audit_enabled()) {
       // One additional fixed-C keyframe, only in explicit nonlinear audit mode.
       // The accepted relaxed gradient is the normal production completion,
@@ -375,8 +360,7 @@ bool build_ciah_macro_step(
       structure.coefficient_response_coordinates(last_step.tail(ns));
   record->gradient_dot_step = initial_gradient.dot(displacement);
   record->step_dot_hessian_step = displacement.dot(hessian_displacement);
-  record->predicted_reduction =
-      -record->gradient_dot_step - 0.5 * record->step_dot_hessian_step;
+  record->predicted_reduction = accepted_prediction;
   record->actual_reduction = energy - accepted->trial.energy;
   record->orbital_step_norm = metric.norm(displacement.head(no));
   record->accepted_trial_radius = record->orbital_step_norm;
@@ -384,9 +368,9 @@ bool build_ciah_macro_step(
   record->kkt_residual_norm = candidate.residual_norm;
   record->kkt_residual_target = ciah_options.tolerance;
   record->shift = -candidate.eigenvalue;
-  // A restored prefix is not the final AH Ritz solution. The recorded AH
-  // residual describes that last solve, not a certification of this prefix.
-  record->approximate_step = restored_prefix || !candidate.converged;
+  // The recorded AH residual belongs to the last microstep, not the complete
+  // nonlinear macro displacement.
+  record->approximate_step = !candidate.converged || scale < 1.0;
   return true;
 }
 

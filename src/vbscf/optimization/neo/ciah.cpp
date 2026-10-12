@@ -207,10 +207,11 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   result.basis_size = basis_size();
   result.exhaustion = exhausted_ ||
       basis_size() >= std::min<int>(options_.max_cycle, problem_.size());
-  // A yielded microstep can change g even when this Ritz candidate was
-  // converged. Resume with its saved residual, as in davidson_cc; convergence
-  // of one candidate does not terminate the nonlinear caller's stream.
-  if (!result.exhaustion && result.residual_norm >= options_.lindep) {
+  // davidson_cc does not append a residual after yielding a converged root.
+  // Reproject a changed RHS in the retained space first; that new root can
+  // supply a new residual if it is no longer converged.
+  if (!result.converged && !result.exhaustion &&
+      result.residual_norm >= options_.lindep) {
     pending_residual_ = result.residual;
     pending_eigenvalue_ = result.eigenvalue;
   }

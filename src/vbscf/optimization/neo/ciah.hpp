@@ -11,6 +11,43 @@
 
 namespace xmvb::vb {
 
+/** @brief Frozen curvature with an energy/gradient anchor refreshed at keyframes.
+ *
+ * Only displacement since the last keyframe belongs in its quadratic model.
+ * The Hessian images remain reusable, as in PySCF's CIAH iteration.
+ */
+class CiahEnergyModel {
+public:
+  CiahEnergyModel(double energy, const Eigen::VectorXd& gradient)
+      : energy_(energy), gradient_(gradient),
+        step_(Eigen::VectorXd::Zero(gradient.size())), image_(step_) {}
+
+  void add(const Eigen::VectorXd& step, const Eigen::VectorXd& image) {
+    step_ += step;
+    image_ += image;
+  }
+
+  void remove(const Eigen::VectorXd& step, const Eigen::VectorXd& image) {
+    step_ -= step;
+    image_ -= image;
+  }
+
+  void refresh(double energy, const Eigen::VectorXd& gradient) {
+    energy_ = energy;
+    gradient_ = gradient;
+    step_.setZero();
+    image_.setZero();
+  }
+
+  double energy() const {
+    return energy_ + gradient_.dot(step_) + 0.5 * step_.dot(image_);
+  }
+
+private:
+  double energy_;
+  Eigen::VectorXd gradient_, step_, image_;
+};
+
 /** Controls one bounded, matrix-free CIAH Davidson workspace. */
 struct CiahOptions {
   /** Absolute tolerance in the problem's physical dual norm. */

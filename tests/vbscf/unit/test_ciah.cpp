@@ -259,6 +259,54 @@ void check_accumulated_microstep_images() {
           "macro residual diagnostics repeated a cached Hessian action");
 }
 
+/** @brief Energy anchoring must follow the same keyframe as the refreshed RHS. */
+void check_keyframe_energy_model() {
+  using xmvb::vb::CiahEnergyModel;
+  const Eigen::Vector2d g0(1.0, -0.5);
+  Eigen::Matrix2d h;
+  h << 2.0, 0.2, 0.2, 3.0;
+  CiahEnergyModel model(-10.0, g0);
+  const Eigen::Vector2d first(-0.1, 0.05);
+  model.add(first, h * first);
+  require(std::abs(model.energy() -
+      (-10.0 + g0.dot(first) + 0.5 * first.dot(h * first))) < 1e-13,
+      "CIAH origin energy model is inconsistent");
+  const Eigen::Vector2d gkf(0.4, -0.1);
+  model.refresh(-10.08, gkf);
+  require(std::abs(model.energy() + 10.08) < 1e-13,
+      "CIAH keyframe kept an obsolete energy anchor");
+  const Eigen::Vector2d second(-0.03, 0.02);
+  model.add(second, h * second);
+  require(std::abs(model.energy() -
+      (-10.08 + gkf.dot(second) + 0.5 * second.dot(h * second))) < 1e-13,
+      "CIAH model includes displacement preceding the keyframe");
+  model.remove(second, h * second);
+  require(std::abs(model.energy() + 10.08) < 1e-13,
+      "CIAH rejected microstep was not removed from the energy model");
+}
+
+/** @brief A converged AH root must not create another old-residual action. */
+void check_converged_root_reuse() {
+  Eigen::Matrix3d h;
+  h << 2.0, 0.1, 0.0, 0.1, 4.0, 0.2, 0.0, 0.2, 6.0;
+  const Eigen::Matrix3d m = Eigen::Matrix3d::Identity();
+  const Eigen::Vector3d g(1.0, 0.0, 0.0);
+  int actions = 0;
+  const auto problem = dense_problem(h, m, g, &actions);
+  CiahOptions options;
+  options.tolerance = 1.0;  // Deliberately converge with a nonzero residual.
+  CiahWorkspace workspace(problem, g, options);
+  workspace.next(g);
+  const auto converged = workspace.next(g);
+  require(converged.converged, "AH reuse test did not reach a converged root");
+  require(converged.residual_norm > options.lindep,
+      "AH reuse test needs a nonzero residual before full-space exhaustion");
+  const int before = actions;
+  const auto repeated = workspace.next(g);
+  require(repeated.new_hvp_actions == 0 && actions == before,
+      "converged AH root expanded an obsolete residual");
+}
+
 }  // namespace
 
 int main() {
@@ -268,6 +316,8 @@ int main() {
     check_gradient_refresh_and_preconditioner();
     check_metric_validation();
     check_accumulated_microstep_images();
+    check_keyframe_energy_model();
+    check_converged_root_reuse();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
