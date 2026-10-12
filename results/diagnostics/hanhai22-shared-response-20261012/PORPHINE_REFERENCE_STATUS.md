@@ -7,9 +7,9 @@ The earlier geometry-conversion hypothesis was disproved; do not revive it.
 | Spin / method | Job | State | Macro | Energy / Eh | GNU wall | RSS |
 |---|---|---|---:|---:|---:|---:|
 | Triplet PySCF default AH | 1248772_3 | Converged | 35 | -2244.7908349995173 | 2667.29 s | 83.16 GiB |
-| Triplet NEO | 1248745_2 | Running | 30 observed | -2244.7826442644 | Pending | Pending |
-| Singlet PySCF default AH | 1248772_1 | Running | 30 observed | -2244.73272213814 | Pending | Pending |
-| Singlet NEO | 1248745_0 | Running | 39 observed | -2244.7252037002 | Pending | Pending |
+| Triplet NEO | 1248745_2 | Energy rejection, not converged | 50 accepted | -2244.790272699886 | 5177 s | 38.63 GiB |
+| Singlet PySCF default AH | 1248772_1 | Running | 62 observed | -2244.74099511752 | Pending | Pending |
+| Singlet NEO | 1248745_0 | Energy rejection, not converged | 64 accepted | -2244.739920658597 | 5313 s | 38.62 GiB |
 
 PySCF reports 639 JK and 117 micro iterations for the completed triplet;
 those counts are not equivalent to NEO HVP counts. HVP count was not recorded
@@ -19,9 +19,11 @@ is 2664.76 s, distinct from end-to-end GNU wall above.
 
 The NEO jobs use the frozen d6f195c1 executable from build 1248744, before
 the composed frame-component correction of 6d1f4853 and the later diagnostics.
-They were not silently updated during execution. Neither NEO endpoint is
-established yet, so the goal's numerical equivalence and efficiency comparison
-remain unproven. No replacement porphine run was submitted this round.
+They were not silently updated during execution. Both NEO jobs have now
+terminated with `ciah_macro_energy_rejected`, Slurm exit 2. They are not
+converged endpoints. Triplet differs from converged PySCF by +0.56230 mEh.
+The goal's numerical equivalence and efficiency comparison remain unproven.
+No replacement porphine run was submitted this round.
 
 Triplet PySCF result, trajectory, resource record, node and hashes have been
 copied to `porphine-rotation-1248772/triplet/pyscf-ah/` beside this note.
@@ -49,7 +51,19 @@ includes work outside the reported program end-to-end timer; preserve its
 raw resource record separately.
 
 No replacement unbounded NEO job is submitted based on these four-macro
-results. The existing long jobs and the PySCF singlet are still running;
-terminal energy equivalence remains unverified. Next, investigate whether
-the already computed pure-orbital/pure-structure images should enrich the
-actual AH trial space, rather than only its residual preconditioner.
+results. Both old NEO jobs are now terminal; only PySCF singlet remains running.
+Terminal energy equivalence remains unverified. The later split-Ritz experiment
+did not improve FeCl2 and was removed; see `FECL2_SPLIT_AH.md`.
+
+## Terminal rejection evidence
+
+Singlet attempted macro 65 has an accepted keyframe at -2244.739935866974 Eh,
+below source -2244.739920658597 Eh. Later frozen-curvature microsteps yield an
+uphill full trial and the whole-step line search fails. Triplet attempted
+macro 51 has its accepted keyframe at -2244.790247284049 Eh, already above
+source -2244.790272699886 Eh. Final scaled directions in both cases have
+positive origin derivatives, so shrinking toward zero cannot create descent.
+This motivates examining nonlinear commitment and keyframe backtracking,
+not invalidating an origin HVP at its own origin. Original-guess accepted HVP
+totals are 667 singlet / 528 triplet; the final rejected macro's actions are
+not included in those trajectory rows.

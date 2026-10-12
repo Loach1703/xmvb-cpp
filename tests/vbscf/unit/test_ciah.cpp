@@ -343,6 +343,14 @@ void check_coarse_balancing_inverse() {
     const Eigen::VectorXd mixed=v.col(0)+v.col(1);
     coarse.observe(mixed,h*mixed,g*mixed);
     for (int i=2;i<4;++i) coarse.observe(v.col(i),h*v.col(i),g*v.col(i));
+    const auto sampled = coarse.orbital_spectrum(5,
+        [&](const Eigen::VectorXd& rhs) -> Eigen::VectorXd { return h.fullPivLu().solve(rhs); });
+    require(sampled.dimension == 4 && sampled.positive_curvature == (first > 0),
+        "sampled orbital curvature rank or sign is incorrect");
+    if (first > 0)
+      require(std::abs(sampled.preconditioned_min-1.0)<2.0e-12 &&
+          std::abs(sampled.preconditioned_max-1.0)<2.0e-12,
+          "exact orbital inverse is not the identity in the sampled spectrum");
     const Eigen::MatrixXd base=Eigen::VectorXd::LinSpaced(5,0.2,0.8).asDiagonal();
     for (const double omega : {0.0,-0.2}) {
       const Eigen::MatrixXd l=h-omega*g;

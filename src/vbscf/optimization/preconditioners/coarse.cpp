@@ -4,7 +4,9 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <vector>
 #include <Eigen/LU>
+#include <Eigen/Eigenvalues>
 
 namespace xmvb::vb {
 
@@ -73,6 +75,48 @@ Eigen::VectorXd CoarsePreconditioner::apply(const Eigen::VectorXd& residual,
   const Eigen::VectorXd fine = inverse(residual-lv*a);
   const Eigen::VectorXd b = solve(lv.transpose()*fine);
   return fine+v*(a-b);
+}
+
+CoarseSpectrum CoarsePreconditioner::orbital_spectrum(int no,
+    const std::function<Eigen::VectorXd(const Eigen::VectorXd&)>& inverse) const {
+  if (no <= 0 || no > basis_.rows())
+    throw std::invalid_argument("invalid sampled orbital dimension");
+  std::vector<int> indices;
+  for (int i=0;i<size_;++i)
+    if (basis_.col(i).head(no).squaredNorm() > 0.0 &&
+        basis_.col(i).tail(basis_.rows()-no).squaredNorm() == 0.0)
+      indices.push_back(i);
+  CoarseSpectrum result;
+  result.dimension = static_cast<int>(indices.size());
+  if (!result.dimension) return result;
+  Eigen::MatrixXd v(no,result.dimension), av(no,result.dimension), pav(no,result.dimension);
+  for (int j=0;j<result.dimension;++j) {
+    v.col(j) = basis_.col(indices[j]).head(no);
+    av.col(j) = images_.col(indices[j]).head(no);
+    Eigen::VectorXd rhs = Eigen::VectorXd::Zero(basis_.rows());
+    rhs.head(no) = av.col(j);
+    const Eigen::VectorXd image = inverse(rhs);
+    if (image.size() != basis_.rows() || !image.allFinite())
+      throw std::runtime_error("invalid sampled base inverse image");
+    pav.col(j) = image.head(no);
+  }
+  Eigen::MatrixXd e = v.transpose()*av;
+  e = (0.5*(e+e.transpose())).eval();
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> curvature(e,Eigen::EigenvaluesOnly);
+  if (curvature.info() != Eigen::Success)
+    throw std::runtime_error("sampled orbital spectrum failed");
+  result.curvature_min = curvature.eigenvalues()[0];
+  result.curvature_max = curvature.eigenvalues().tail(1)[0];
+  result.positive_curvature = result.curvature_min > lindep_*result.curvature_max;
+  if (!result.positive_curvature) return result;
+  Eigen::MatrixXd t = av.transpose()*pav;
+  t = (0.5*(t+t.transpose())).eval();
+  Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(t,e,Eigen::EigenvaluesOnly);
+  if (spectrum.info() != Eigen::Success)
+    throw std::runtime_error("sampled preconditioned spectrum failed");
+  result.preconditioned_min = spectrum.eigenvalues()[0];
+  result.preconditioned_max = spectrum.eigenvalues().tail(1)[0];
+  return result;
 }
 
 }  // namespace xmvb::vb

@@ -427,6 +427,15 @@ bool build_ciah_macro_step(
   }
 
   const double final_reduction = energy - energy_model.energy();
+  if (ns && diagnostics::neo_candidate_audit_enabled()) {
+    const auto spectrum = coarse.orbital_spectrum(static_cast<int>(no),
+        [&](const Eigen::VectorXd& v) { return diagonal_precondition(v,0.0); });
+    diagnostics::neo_trace("ciah_orbital_preconditioner_spectrum",
+        "dimension=%d,positive_curvature=%d,curvature_min=%.17g,curvature_max=%.17g,preconditioned_min=%.17g,preconditioned_max=%.17g",
+        spectrum.dimension, static_cast<int>(spectrum.positive_curvature),
+        spectrum.curvature_min, spectrum.curvature_max,
+        spectrum.preconditioned_min, spectrum.preconditioned_max);
+  }
 
   accepted->parameters = build_nonredundant_lifted_trial_parameters(
       orbitals, chart, layout, displacement.head(no));

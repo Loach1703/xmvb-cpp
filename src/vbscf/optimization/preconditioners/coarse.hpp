@@ -5,6 +5,14 @@
 
 namespace xmvb::vb {
 
+/** @brief Sampled orbital spectra; diagnostic only, never a stopping rule. */
+struct CoarseSpectrum {
+  int dimension = 0;
+  bool positive_curvature = false;
+  double curvature_min = 0.0, curvature_max = 0.0;
+  double preconditioned_min = 0.0, preconditioned_max = 0.0;
+};
+
 /** @brief Symmetric balancing inverse on an exact sampled coupled space.
  * Images and metric images must belong to the same frozen accepted point.
  * No operator evaluation or cross-point history is retained by this class.
@@ -19,6 +27,12 @@ public:
   Eigen::VectorXd apply(const Eigen::VectorXd& residual, double eigenvalue,
       const std::function<Eigen::VectorXd(const Eigen::VectorXd&)>& inverse) const;
   int size() const noexcept { return size_; }
+  /** @brief Compare a base inverse against cached orbital-only curvature.
+   * Uses no new operator images and only a small sampled generalized spectrum.
+   * The inverse callback receives full-size vectors with zero structure tail.
+   */
+  CoarseSpectrum orbital_spectrum(int orbital_dimension,
+      const std::function<Eigen::VectorXd(const Eigen::VectorXd&)>& inverse) const;
 
 private:
   int size_ = 0;
