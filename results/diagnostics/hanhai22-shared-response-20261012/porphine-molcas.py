@@ -19,7 +19,10 @@ if stage == "prepare":
         "N": "N.cc-pVDZ.Dunning.9s4p1d.3s2p1d.",
         "Fe": "Fe.cc-pVDZ.Balabanov.20s16p8d2f.6s5p3d1f.",
     }
-    lines = ["&GATEWAY", "Title = Fe porphine triplet shared low-energy frame", "Group = Nosym"]
+    # Explicit basis/atom blocks use the legacy gateway grammar (as in the
+    # successful FeCl2 reference). GROUP belongs to COORD/XYZ input only.
+    # List every atom; do not supply symmetry generators. NSYM is checked below.
+    lines = ["&GATEWAY", "Title = Fe porphine triplet shared low-energy frame"]
     for atom in range(mol.natm):
         symbol = mol.atom_pure_symbol(atom)
         xyz = " ".join(f"{x:.16e}" for x in mol.atom_coord(atom))

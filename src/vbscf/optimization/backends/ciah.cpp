@@ -188,6 +188,7 @@ bool build_ciah_macro_step(
   // update_orb_ci; the microstep/keyframe tests use that inner tolerance.
   const double micro_gradient_tolerance = 0.3 * options.gradient_tolerance;
   int micro_steps = 0, since_keyframe = 0;
+  const char* micro_stop = "unset";
   CiahResult candidate;
   while (true) {
     retain_descent_prefix();
@@ -203,10 +204,10 @@ bool build_ciah_macro_step(
     double largest = chart.maximum_rotation_component(step.head(no));
     if (ns) largest = std::max(largest,
         structure.maximum_coefficient_component_coordinates(step.tail(ns)));
-    if (largest > max_component) {
-      const double scale = max_component / largest;
-      step *= scale;
-      image *= scale;
+    const double step_scale = largest > max_component ? max_component / largest : 1.0;
+    if (step_scale < 1.0) {
+      step *= step_scale;
+      image *= step_scale;
     }
     const Eigen::VectorXd previous_gradient = predicted_gradient;
     const Eigen::VectorXd previous_step = last_step;
@@ -218,21 +219,27 @@ bool build_ciah_macro_step(
     ++since_keyframe;
     const double predicted_norm = dual_norm(predicted_gradient);
     diagnostics::neo_trace("ciah_micro",
-        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g",
+        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g",
         candidate.basis_size, micro_steps, candidate.eigenvalue,
-        candidate.reference_weight, candidate.residual_norm, predicted_norm);
+        candidate.reference_weight, candidate.residual_norm, predicted_norm,
+        step_scale, largest);
     if (micro_steps > 3 && predicted_norm > gradient_trust * keyframe_norm) {
       displacement -= step;
       hessian_displacement -= image;
       predicted_gradient = previous_gradient;
       last_step = previous_step;
       ++record->rejected_trial_count;
+      micro_stop = "gradient_growth";
       break;
     }
     const int micro_limit = std::max(base_micro_cycles,
         base_micro_cycles - static_cast<int>(2.0 * std::log(keyframe_norm + 1.0e-7)));
     if (micro_steps >= micro_limit ||
-        predicted_norm < 0.3 * micro_gradient_tolerance || candidate.exhaustion) break;
+        predicted_norm < 0.3 * micro_gradient_tolerance || candidate.exhaustion) {
+      micro_stop = predicted_norm < 0.3 * micro_gradient_tolerance ? "micro_gradient" :
+          candidate.exhaustion ? "subspace_exhaustion" : "micro_budget";
+      break;
+    }
 
     const double length = std::sqrt(std::max(0.0,
         displacement.dot(metric_action(displacement))));
@@ -242,11 +249,13 @@ bool build_ciah_macro_step(
       const Keyframe exact = evaluate_keyframe(displacement);
       const double actual_norm = dual_norm(exact.gradient);
       const double mismatch = dual_norm(exact.gradient - predicted_gradient);
+      const bool keep_keyframe = mismatch < gradient_trust * predicted_norm ||
+          actual_norm < gradient_trust * micro_gradient_tolerance;
       diagnostics::neo_trace("ciah_keyframe",
-          "actual=%.17g,predicted=%.17g,mismatch=%.17g,energy=%.17g",
-          actual_norm, predicted_norm, mismatch, exact.energy);
-      if (mismatch < gradient_trust * predicted_norm ||
-          actual_norm < gradient_trust * micro_gradient_tolerance) {
+          "actual=%.17g,predicted=%.17g,mismatch=%.17g,energy=%.17g,accepted=%d",
+          actual_norm, predicted_norm, mismatch, exact.energy,
+          static_cast<int>(keep_keyframe));
+      if (keep_keyframe) {
         predicted_gradient = exact.gradient;
         keyframe_norm = actual_norm;
         since_keyframe = 0;
@@ -256,9 +265,21 @@ bool build_ciah_macro_step(
         predicted_gradient = previous_gradient;
         last_step = previous_step;
         ++record->rejected_trial_count;
+        micro_stop = "keyframe_mismatch";
         break;
       }
     }
+  }
+
+  if (diagnostics::neo_event_trace_enabled()) {
+    // These belong to the kept microstep sequence before prefix restoration.
+    // A keyframe changes the RHS, not the immutable Hessian images.
+    const Eigen::VectorXd frozen_gradient = initial_gradient + hessian_displacement;
+    diagnostics::neo_trace("ciah_micro_end",
+        "reason=%s,source=%.17g,predicted=%.17g,frozen_model=%.17g,keyframe_correction=%.17g,last_ritz=%.17g",
+        micro_stop, dual_norm(initial_gradient), dual_norm(predicted_gradient),
+        dual_norm(frozen_gradient), dual_norm(predicted_gradient - frozen_gradient),
+        candidate.residual_norm);
   }
 
   retain_descent_prefix();
@@ -320,6 +341,35 @@ bool build_ciah_macro_step(
   displacement *= scale;
   hessian_displacement *= scale;
   last_step *= scale;
+  if (diagnostics::neo_event_trace_enabled()) {
+    // r = g0 + H0*p is the unshifted frozen Newton residual of the actual
+    // accepted displacement. It reuses accumulated images, adding no HVP.
+    // It is NOT the last Ritz residual or a nonlinear stationarity certificate.
+    const Eigen::VectorXd frozen_gradient = initial_gradient + hessian_displacement;
+    diagnostics::neo_trace("ciah_macro_model",
+        "source=%.17g,frozen_model=%.17g,orbital=%.17g,structure_diagonal=%.17g,last_ritz=%.17g,restored_prefix=%d,scale=%.17g",
+        dual_norm(initial_gradient), dual_norm(frozen_gradient),
+        metric.dual_norm(frozen_gradient.head(no)),
+        ns ? structure.diagonal_dual_norm(frozen_gradient.tail(ns)) : 0.0,
+        candidate.residual_norm, static_cast<int>(restored_prefix), scale);
+    if (diagnostics::neo_candidate_audit_enabled()) {
+      // One additional fixed-C keyframe, only in explicit nonlinear audit mode.
+      // The accepted relaxed gradient is the normal production completion,
+      // brought forward and cached so the caller does not repeat its backprop.
+      const Keyframe exact = evaluate_keyframe(displacement);
+      if (!accepted->trial.gradient_ready) objective->complete_trial(&accepted->trial);
+      const Eigen::VectorXd relaxed =
+          chart.project_reduced_gradient(accepted->trial.gradient);
+      diagnostics::neo_trace("ciah_macro_gradient",
+          "source=%.17g,fixed=%.17g,fixed_orbital=%.17g,fixed_structure_diagonal=%.17g,linearization_error=%.17g,relaxed_orbital=%.17g,relaxation_change=%.17g,fixed_energy=%.17g,relaxed_energy=%.17g",
+          dual_norm(initial_gradient), dual_norm(exact.gradient),
+          metric.dual_norm(exact.gradient.head(no)),
+          ns ? structure.diagonal_dual_norm(exact.gradient.tail(ns)) : 0.0,
+          dual_norm(exact.gradient - frozen_gradient), metric.dual_norm(relaxed),
+          metric.dual_norm(relaxed - exact.gradient.head(no)),
+          exact.energy, accepted->trial.energy);
+    }
+  }
   accepted->next_orbital_guess_packed = chart.expand_step(last_step.head(no));
   if (ns) accepted->next_structure_guess =
       structure.coefficient_response_coordinates(last_step.tail(ns));

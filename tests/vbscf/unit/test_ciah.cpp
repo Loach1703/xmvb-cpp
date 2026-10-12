@@ -219,6 +219,46 @@ void check_metric_validation() {
   require(rejected, "CIAH accepted a rank-deficient projected metric");
 }
 
+/** @brief Keyframe corrections are not part of the cached frozen H*p image. */
+void check_accumulated_microstep_images() {
+  Eigen::Matrix3d hessian = Eigen::Matrix3d::Zero();
+  hessian.diagonal() << 2.0, 4.0, 7.0;
+  const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
+  const Eigen::Vector3d initial(0.3, -0.2, 0.1);
+  const Eigen::Vector3d correction(0.01, 0.02, -0.03);
+  int actions = 0;
+  const NeoProblem problem = dense_problem(hessian, metric, initial, &actions);
+  CiahWorkspace workspace(problem, initial);
+  Eigen::VectorXd displacement = Eigen::VectorXd::Zero(3);
+  Eigen::VectorXd image = displacement;
+  Eigen::VectorXd predicted = initial;
+  Eigen::VectorXd prefix, prefix_image;
+  for (int micro = 0; micro < 3; ++micro) {
+    const auto candidate = workspace.next(predicted);
+    const double scale = micro == 0 ? 0.5 : 0.75;
+    displacement += scale * candidate.step;
+    image += scale * candidate.hessian_step;
+    predicted += scale * candidate.hessian_step;
+    if (micro == 0) predicted += correction;
+    if (micro == 1) {
+      prefix = displacement;
+      prefix_image = image;
+    }
+  }
+  const int previous_actions = actions;
+  const Eigen::VectorXd frozen_residual = initial + image;
+  require_close(image, hessian * displacement, 2.0e-12,
+                "accumulated microstep image does not equal H*p");
+  require_close(frozen_residual, initial + hessian * displacement, 2.0e-12,
+                "macro frozen residual is inconsistent");
+  require_close(predicted - frozen_residual, correction, 2.0e-12,
+                "keyframe correction was confused with the frozen residual");
+  require_close(prefix_image, hessian * prefix, 2.0e-12,
+                "retained prefix image is inconsistent");
+  require(actions == previous_actions && actions == workspace.basis_size(),
+          "macro residual diagnostics repeated a cached Hessian action");
+}
+
 }  // namespace
 
 int main() {
@@ -227,6 +267,7 @@ int main() {
     check_indefinite_root_selection();
     check_gradient_refresh_and_preconditioner();
     check_metric_validation();
+    check_accumulated_microstep_images();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
