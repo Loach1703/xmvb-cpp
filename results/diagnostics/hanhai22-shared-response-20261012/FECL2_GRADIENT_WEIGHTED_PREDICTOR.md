@@ -1,6 +1,8 @@
 # Next gated experiment: gradient-weighted coupled AH startup predictor
 
-This is a design, not an implemented or benchmarked improvement.
+The design was implemented and tested in 1249671/1249674, then removed.
+It reduced total FeCl2 actions modestly but did not improve the tail budget
+exits. No production predictor API or runtime switch remains.
 
 ## Evidence and distinction from rejected trials
 
@@ -68,3 +70,56 @@ hidden as an inaccurate current HVP or relaxed residual certificate.
 Natural-frame 1249642 is a caution: 142 versus 251 HVPs and lower runtime
 looked promising, but its endpoint differed by 0.288 mEh and was rejected.
 The new predictor is not allowed to redefine success around action count.
+
+## Measured result and rejection
+
+Build/run 1249671 used Hanhai22 anode31, 32 bound threads, exact integrals,
+the unchanged analytic diagonal, chart, HVP, microstep controls and outer
+criteria. All five unit executables passed before chemistry. Independent
+dense tests covered generalized AH agreement, basis covariance, dependent
+transported columns and fresh current-point HVP images. Restart tests
+covered structure phase alignment. The first development build 1249666
+failed a test because its test fixture retained a reference to a temporary
+NeoProblem; it did not execute chemistry. That fixture was corrected.
+
+| Original-guess FeCl2 | Archived 1249596 | Predictor 1249671 |
+|---|---:|---:|
+| Node | anode31 | anode31 |
+| Accepted macros | 12 | 12 |
+| Orbital HVPs | 251 | 228 |
+| Final energy / Eh | -2181.624464871899 | -2181.624464855227 |
+| Difference from PySCF coupled-Newton reference / Eh | +1.1834e-8 | +2.8506e-8 |
+| GNU wall / s | 8.30 | 7.87 |
+| GNU peak RSS / MiB | 516.23 | 491.64 |
+| Complete orbital norm work / s | 0.29137 | 0.24712 |
+| Complete structure norm work / s | 0.10630 | 0.10359 |
+| Predictor construction / s | 0 | 0.15680 |
+| Last micro-model gradient norm | 1.02985e-4 | 3.73360e-4 |
+| Final physical orbital gradient norm | 1.10852e-4 | 3.69804e-4 |
+
+The single-run time reduction is 5.2%, and the HVP reduction is 9.2%.
+They are not evidence of a resolved tail: macros 9--12 still exit on
+budget, and their terminal complete model residuals are larger. Both
+endpoints satisfy the existing criteria and agree in energy, but this
+experiment's purpose was better tail enrichment, not a less accurate
+endpoint reached under the same stopping rules. No thresholds were changed.
+
+Regression array 1249674 also converged. Archived comparisons are 1249602;
+241/MnF2 nodes differ, so these times are not matched speedup claims.
+
+| Case | Node old/new | Macros old/new | HVPs old/new | Energy difference new-old / Eh | Wall old/new / s | RSS old/new / MiB |
+|---|---|---:|---:|---:|---:|---:|
+| F2 | anode31/anode31 | 3/3 | 23/23 | 0 | 0.35/0.31 | 17.61/18.38 |
+| 241 | anode07/anode43 | 3/3 | 21/20 | +3.8e-11 | 2.02/2.07 | 861.08/852.17 |
+| MnF2 | anode07/anode43 | 10/10 | 137/138 | -3.41e-10 | 4.79/4.70 | 508.86/542.21 |
+
+Conclusion: an approximate multivariate old-point model compressed into
+one freshly checked startup direction does not cure this tail. This does
+not disprove genuine current-point block enrichment or prove a specific
+unrepresented eigenmode. The existing scalar evidence still places the
+unresolved residual primarily in the orbital complement, not in the small
+eigensolve or structure-metric inverse. No new iron task was submitted.
+The experiment's source was deleted, leaving only this evidence and frozen
+test artifacts; the user-owned RI edits were preserved.
+Restored-source build-only job 1249679 subsequently passed all five unit
+executables with scalar diagnostics enabled. It ran no molecular baseline.
