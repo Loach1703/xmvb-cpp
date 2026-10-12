@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -8,6 +9,9 @@
 
 #include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
+#include "vbscf/derivatives/hessian/context/accepted_point.hpp"
+#include "vbscf/integrals/ao/pairs/two_electron_index.hpp"
+#include "vbscf/integrals/ao/ri/factorization.hpp"
 
 namespace {
 
@@ -174,6 +178,103 @@ int main() {
   const auto x = make_intermediates(h,g,nc,na);
   const Eigen::MatrixXd diagonal =
       xmvb::vb::build_analytic_rotation_hessian_diagonal(x,dm1,packed);
+  // Exercise the complete AO-to-diagonal path against explicitly transformed
+  // four-index integrals. Dense orbitals test off-diagonal density channels,
+  // including all coincident-index ERI multiplicities.
+  Eigen::MatrixXd mo = Eigen::MatrixXd::Identity(n, n);
+  for (int p = 1; p < n; ++p) {
+    Eigen::MatrixXd rotation = Eigen::MatrixXd::Identity(n, n);
+    const double angle = 0.17 * p;
+    rotation(0,0) = rotation(p,p) = std::cos(angle);
+    rotation(0,p) = -std::sin(angle);
+    rotation(p,0) = std::sin(angle);
+    mo = (mo * rotation).eval();
+  }
+  const auto rotated_g = rotate_eri(g, mo);
+  const auto rotated_x = make_intermediates(mo.transpose()*h*mo,rotated_g,nc,na);
+  const Eigen::MatrixXd reference =
+      xmvb::vb::build_analytic_rotation_hessian_diagonal(rotated_x,dm1,packed);
+  xmvb::vb::VbScfInput input;
+  input.standard_two_electron_mode = xmvb::vb::StandardTwoElectronMode::Exact;
+  input.orbital_preparation_input.n_basis_functions = n;
+  input.orbital_preparation_input.ao_overlap_matrix = Eigen::MatrixXd::Identity(n,n);
+  input.ao_integral_input.n_basis_functions = n;
+  input.ao_integral_input.ao_core_hamiltonian_matrix = h;
+  std::vector<int> left, right;
+  std::vector<double> values;
+  for (int p = 0; p < n; ++p)
+    for (int q = 0; q <= p; ++q)
+      for (int r = 0; r < n; ++r)
+        for (int s = 0; s <= r; ++s) {
+          const int pq = p*(p+1)/2+q, rs = r*(r+1)/2+s;
+          if (pq < rs) continue;
+          left.push_back(pq);
+          right.push_back(rs);
+          values.push_back(eri(g,p,q,r,s,n));
+        }
+  input.ao_integral_input.pair_graph =
+      xmvb::vb::build_ao_pair_graph(left,right,values,n);
+  xmvb::vb::AcceptedPointContext accepted;
+  accepted.n_active_orbitals = na;
+  auto& prepared = accepted.prepared_active_space;
+  prepared.n_inactive_doubly_occupied_orbitals = nc;
+  auto& orbitals = prepared.orbital_result;
+  orbitals.auxiliary_orbital_matrix = mo;
+  orbitals.active_orbital_overlap_matrix.assign(na*na,0.0);
+  for (int a = 0; a < na; ++a)
+    orbitals.active_orbital_overlap_matrix[a*na+a] = 1.0;
+  orbitals.physical_orbital_frame.inactive_orthonormal_orbital_matrix = mo.leftCols(nc);
+  orbitals.physical_orbital_frame.localized_representative_selector
+      .inactive_inverse_transpose_right_transform = Eigen::MatrixXd::Identity(nc,nc);
+  prepared.ao_effective_one_electron_result.ao_coulomb_exchange_matrix =
+      mo * rotated_x.v_core * mo.transpose();
+  accepted.active_one_electron_gradient.assign(dm1.data(),dm1.data()+dm1.size());
+  accepted.packed_active_two_electron_gradient = packed;
+  const auto built = xmvb::vb::build_analytic_orbital_diagonal(input,accepted);
+  const double contraction_error =
+      (built.rotation_diagonal-reference).cwiseAbs().maxCoeff();
+  if (contraction_error > 2.0e-12) {
+    std::cerr << "density-contracted diagonal error = " << contraction_error << '\n';
+    return 1;
+  }
+  // Independent factorized-ERI reference for signed rank-two RI sources.
+  auto ri = std::make_shared<xmvb::vb::RiAoFactorization>();
+  ri->n_basis_functions = n;
+  ri->n_auxiliary_functions = 3;
+  ri->n_packed_ao_pairs = n*(n+1)/2;
+  ri->metric_whitened_ao_pair_factors.resize(3,ri->n_packed_ao_pairs);
+  for (int auxiliary = 0; auxiliary < 3; ++auxiliary)
+    for (int pair = 0; pair < ri->n_packed_ao_pairs; ++pair)
+      ri->metric_whitened_ao_pair_factors(auxiliary,pair) =
+          0.2 * std::sin(0.3 * (auxiliary+1) * (pair+1));
+  std::vector<double> ri_g(g.size());
+  for (int p = 0; p < n; ++p)
+    for (int q = 0; q < n; ++q)
+      for (int r = 0; r < n; ++r)
+        for (int s = 0; s < n; ++s) {
+          const int pq = xmvb::vb::TwoElectronIndexer::packed_pair_index(p,q);
+          const int rs = xmvb::vb::TwoElectronIndexer::packed_pair_index(r,s);
+          ri_g[eri_index(p,q,r,s,n)] =
+              ri->metric_whitened_ao_pair_factors.col(pq).dot(
+                  ri->metric_whitened_ao_pair_factors.col(rs));
+        }
+  const auto ri_x = make_intermediates(
+      mo.transpose()*h*mo,rotate_eri(ri_g,mo),nc,na);
+  const auto ri_reference =
+      xmvb::vb::build_analytic_rotation_hessian_diagonal(ri_x,dm1,packed);
+  input.standard_two_electron_mode = xmvb::vb::StandardTwoElectronMode::ResolutionOfIdentity;
+  input.ri_factorization = ri;
+  prepared.ao_effective_one_electron_result.ao_coulomb_exchange_matrix =
+      mo * ri_x.v_core * mo.transpose();
+  const auto ri_built = xmvb::vb::build_analytic_orbital_diagonal(input,accepted);
+  const double ri_error =
+      (ri_built.rotation_diagonal-ri_reference).cwiseAbs().maxCoeff();
+  if (ri_error > 2.0e-12) {
+    std::cerr << "RI density-contracted diagonal error = " << ri_error << '\n';
+    return 1;
+  }
+  std::cout << "Density-contracted diagonal errors: exact=" << contraction_error
+            << ", RI=" << ri_error << '\n';
   const double step = 2.0e-4;
   const double e0 = energy(h,g,dm1,dm2,nc);
   double max_error = 0.0;

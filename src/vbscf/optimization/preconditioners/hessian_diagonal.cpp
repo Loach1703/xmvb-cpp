@@ -7,6 +7,7 @@
 
 #include <Eigen/Cholesky>
 
+#include "core/openmp.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
@@ -14,6 +15,8 @@
 #include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/packed_pair_map.hpp"
 #include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
+#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -71,31 +74,59 @@ void validate(
   }
 }
 
-ExactCtxPairMatrix build_mixed_pair_map(
-    const Eigen::Ref<const Eigen::MatrixXd>& left,
-    const Eigen::Ref<const Eigen::MatrixXd>& right) {
-  if (left.rows() != right.rows()) {
-    throw std::invalid_argument("mixed pair maps require common AO rows");
-  }
-  const int n_bf = static_cast<int>(left.rows());
-  const int n_left = static_cast<int>(left.cols());
-  const int n_right = static_cast<int>(right.cols());
-  ExactCtxPairMatrix result(
-      static_cast<Eigen::Index>(n_bf) * (n_bf + 1) / 2,
-      n_left * n_right);
-  Eigen::Index pair = 0;
-  for (int mu = 0; mu < n_bf; ++mu) {
-    for (int nu = 0; nu <= mu; ++nu, ++pair) {
-      for (int p = 0; p < n_left; ++p) {
-        for (int q = 0; q < n_right; ++q) {
-          double value = left(mu, p) * right(nu, q);
-          if (mu != nu) value += left(nu, p) * right(mu, q);
-          result(pair, p * n_right + q) = value;
-        }
-      }
+/** @brief Diagonal MO image of G[D_ab], D_ab=(a b^T+b a^T)/2.
+ *
+ * Since G[D]=2J[D]-K[D], a single occupied-density contraction provides
+ * every external-orbital exchange diagonal. No external-by-occupied pair
+ * transform or full four-index MO tensor is required. The exact integral
+ * sweeps carry n_active*(n_active+1)/2+n_core density channels, instead of
+ * n_bf*(n_active+n_core) mixed-pair channels. Only AO-sized worker outputs
+ * are used, with their aggregate storage bounded before choosing a team.
+ */
+Eigen::VectorXd density_operator_diagonal(
+    const VbScfInput& input,
+    const Eigen::MatrixXd& mo, int a, int b) {
+  const int n_bf = static_cast<int>(mo.rows());
+  Eigen::MatrixXd image;
+  if (input.standard_two_electron_mode ==
+      StandardTwoElectronMode::ResolutionOfIdentity) {
+    if (!input.ri_factorization) {
+      throw std::invalid_argument("RI diagonal requires accepted AO factors");
     }
+    AoEffectiveOneElectronRiLowRankFactors factors;
+    factors.n_positive_components = 1;
+    if (a == b) {
+      factors.scaled_factor_matrix = mo.col(a);
+    } else {
+      factors.n_negative_components = 1;
+      factors.scaled_factor_matrix.resize(n_bf, 2);
+      factors.scaled_factor_matrix.col(0) = 0.5 * (mo.col(a) + mo.col(b));
+      factors.scaled_factor_matrix.col(1) = 0.5 * (mo.col(a) - mo.col(b));
+    }
+    const auto storage = apply_ao_effective_one_electron_ri_operator(
+        factors, *input.ri_factorization, n_bf);
+    image = Eigen::Map<const Eigen::MatrixXd>(storage.data(), n_bf, n_bf);
+  } else {
+    const Eigen::MatrixXd density =
+        0.5 * (mo.col(a) * mo.col(b).transpose() +
+               mo.col(b) * mo.col(a).transpose());
+    constexpr std::size_t worker_budget = 64 * 1024 * 1024;
+    const std::size_t image_bytes =
+        sizeof(double) * static_cast<std::size_t>(n_bf) * n_bf;
+    const int threads = std::min(
+        effective_openmp_thread_count(),
+        static_cast<int>(std::max<std::size_t>(1, worker_budget / image_bytes)));
+    auto storage = apply_ao_h1e(density.data(), input.ao_integral_input, threads);
+    Eigen::Map<Eigen::MatrixXd> triangular(storage.data(), n_bf, n_bf);
+    for (int mu = 0; mu < n_bf; ++mu)
+      for (int nu = 0; nu <= mu; ++nu) {
+        triangular(mu, nu) += triangular(nu, mu);
+        triangular(nu, mu) = triangular(mu, nu);
+      }
+    image = triangular;
   }
-  return result;
+  const Eigen::MatrixXd products = image * mo;
+  return (mo.array() * products.array()).colwise().sum().transpose();
 }
 
 Eigen::MatrixXd build_pair_transform(
@@ -494,27 +525,17 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
           x.active_eri[tensor4_index(a, b, c, d, n_active)] = active_pairs(
               TwoElectronIndexer::packed_pair_index(a, b),
               TwoElectronIndexer::packed_pair_index(c, d));
-  const int transform_block_width = std::max(1, 2 * n_active);
-  for (int p_begin = 0; p_begin < n_bf; p_begin += transform_block_width) {
-    const int p_count = std::min(transform_block_width, n_bf - p_begin);
-    const ExactCtxPairMatrix block_map = build_mixed_pair_map(
-        mo.middleCols(p_begin, p_count),
-        mo.middleCols(n_core, n_active));
-    const ExactCtxPairMatrix block_products =
-        apply_ao_pair_operator(input, block_map);
-    // (pa|pb), not the unused full (pa|qb) tensor. Read-only pair blocks
-    // are shared; each worker contracts just one n_active-square slice.
-#pragma omp parallel for schedule(static)
-    for (int local_p = 0; local_p < p_count; ++local_p) {
-      const Eigen::MatrixXd contraction =
-          block_map.middleCols(local_p * n_active, n_active).transpose() *
-          block_products.middleCols(local_p * n_active, n_active);
-      for (int a = 0; a < n_active; ++a)
-        for (int b = 0; b < n_active; ++b)
-          x.k_active[slice_index(p_begin + local_p, a, b, n_active)] =
-              contraction(a, b);
+  for (int a = 0; a < n_active; ++a)
+    for (int b = 0; b <= a; ++b) {
+      const Eigen::VectorXd image =
+          density_operator_diagonal(input, mo, n_core + a, n_core + b);
+      for (int p = 0; p < n_bf; ++p) {
+        const double exchange =
+            2.0 * x.j_active[slice_index(p, a, b, n_active)] - image[p];
+        x.k_active[slice_index(p, a, b, n_active)] = exchange;
+        x.k_active[slice_index(p, b, a, n_active)] = exchange;
+      }
     }
-  }
   x.j_pc = Eigen::MatrixXd::Zero(n_bf, n_core);
   x.k_pc = Eigen::MatrixXd::Zero(n_bf, n_core);
   ExactCtxPairMatrix core_diagonal_map(
@@ -537,19 +558,9 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
     x.j_pc.row(p) = diagonal_pair.transpose() * core_diagonal_products;
   }
 
-  for (int p_begin = 0; p_begin < n_bf; p_begin += transform_block_width) {
-    const int p_count = std::min(transform_block_width, n_bf - p_begin);
-    const ExactCtxPairMatrix block_map = build_mixed_pair_map(
-        mo.middleCols(p_begin, p_count), mo.leftCols(n_core));
-    const ExactCtxPairMatrix block_products =
-        apply_ao_pair_operator(input, block_map);
-    for (int local_p = 0; local_p < p_count; ++local_p)
-      for (int c = 0; c < n_core; ++c) {
-        const int column = local_p * n_core + c;
-        x.k_pc(p_begin + local_p, c) =
-            block_map.col(column).dot(block_products.col(column));
-      }
-  }
+  for (int c = 0; c < n_core; ++c)
+    x.k_pc.col(c) =
+        2.0 * x.j_pc.col(c) - density_operator_diagonal(input, mo, c, c);
   AnalyticOrbitalDiagonal result;
   result.mo_coefficients = std::move(mo);
   result.rotation_diagonal =
