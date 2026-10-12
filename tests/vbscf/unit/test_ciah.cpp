@@ -246,6 +246,68 @@ void check_gradient_refresh_and_preconditioner() {
           "repeated CIAH query recomputed a Hessian image");
 }
 
+/** @brief Incremental projections agree with full rebuilding after every admission. */
+void check_incremental_projection() {
+  constexpr int n = 7;
+  Eigen::MatrixXd h = Eigen::MatrixXd::Zero(n,n);
+  Eigen::MatrixXd g = Eigen::MatrixXd::Zero(n,n);
+  Eigen::VectorXd gradient(n);
+  for (int i=0;i<n;++i) {
+    gradient[i] = 0.3/(i+1);
+    for (int j=0;j<n;++j) {
+      h(i,j) = 0.2/(i+j+1) + (i==j ? i+1.0 : 0.0);
+      g(i,j) = 0.1/(i+j+1) + (i==j ? 0.2*(i+1) : 0.0);
+    }
+  }
+  int actions = 0;
+  std::vector<Eigen::VectorXd> directions;
+  CiahOptions options;
+  options.max_cycle = n;
+  options.observe_images = [&](const Eigen::VectorXd& v,const Eigen::VectorXd&) {
+    directions.push_back(v);
+  };
+  const auto problem = dense_problem(h,g,gradient,&actions);
+  CiahWorkspace workspace(problem,gradient,options);
+  for (int iteration=0;iteration<n+3;++iteration) {
+    // Refresh the RHS even after full-space exhaustion: frozen projections
+    // must remain reusable without either a Hessian or metric evaluation.
+    Eigen::VectorXd rhs = gradient;
+    rhs[iteration%n] += 0.01*(iteration+1);
+    const auto result = workspace.next(rhs);
+    const int m = directions.size();
+    Eigen::MatrixXd q(n,m);
+    for (int i=0;i<m;++i) q.col(i)=directions[i];
+    Eigen::MatrixXd a=Eigen::MatrixXd::Zero(m+1,m+1);
+    a.bottomRightCorner(m,m)=q.transpose()*h*q;
+    a.block(1,0,m,1)=q.transpose()*rhs;
+    a.block(0,1,1,m)=rhs.transpose()*q;
+    Eigen::MatrixXd metric=Eigen::MatrixXd::Identity(m+1,m+1);
+    metric.bottomRightCorner(m,m)=q.transpose()*g*q;
+    Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> reference(a,metric);
+    require(reference.info()==Eigen::Success,"rebuilt CIAH reference failed");
+    int selected=0;
+    while (selected<=m && std::abs(reference.eigenvectors()(0,selected))<=0.1)
+      ++selected;
+    require(selected<=m,"rebuilt CIAH reference has no selected root");
+    const Eigen::VectorXd step=q*reference.eigenvectors().col(selected).tail(m)/
+        reference.eigenvectors()(0,selected);
+    require_close(result.step,step,3.0e-11,"incremental AH projection changed a Ritz step");
+    check_images_and_residual(h,g,rhs,result);
+    require(actions==m,"incremental AH projection repeated a Hessian action");
+  }
+  // An actually asymmetric action must still fail the two-sided certificate.
+  Eigen::Matrix2d nonsymmetric;
+  nonsymmetric << 2.0,0.7,0.0,3.0;
+  const auto bad=dense_problem(nonsymmetric,Eigen::Matrix2d::Identity(),
+      Eigen::Vector2d(1.0,1.0));
+  CiahWorkspace invalid(bad,Eigen::VectorXd::Unit(2,0));
+  invalid.next(Eigen::Vector2d(1.0,1.0));
+  bool rejected=false;
+  try { invalid.next(Eigen::Vector2d(1.0,1.0)); }
+  catch (const std::runtime_error&) { rejected=true; }
+  require(rejected,"incremental AH projection concealed an asymmetric action");
+}
+
 void check_metric_validation() {
   const Eigen::Matrix2d hessian = Eigen::Matrix2d::Identity();
   Eigen::Matrix2d metric = Eigen::Matrix2d::Zero();
@@ -508,6 +570,7 @@ int main() {
     check_anisotropic_spd();
     check_indefinite_root_selection();
     check_gradient_refresh_and_preconditioner();
+    check_incremental_projection();
     check_metric_validation();
     check_accumulated_microstep_images();
     check_keyframe_energy_model();

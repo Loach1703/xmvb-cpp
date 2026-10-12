@@ -10,32 +10,31 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
 
-#include "vbscf/optimization/neo/symmetry.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 namespace xmvb::vb {
 namespace {
 
-Eigen::MatrixXd columns(const std::vector<Eigen::VectorXd>& vectors) {
-  Eigen::MatrixXd result(vectors.front().size(), vectors.size());
-  for (Eigen::Index j = 0; j < result.cols(); ++j) {
-    result.col(j) = vectors[static_cast<std::size_t>(j)];
-  }
-  return result;
-}
-
 void check_projected_symmetry(
-    const Eigen::MatrixXd& basis,
-    const Eigen::MatrixXd& images,
+    Eigen::Index dimension,
+    double basis_norm, double images_norm,
+    const Eigen::MatrixXd& magnitude,
     const Eigen::MatrixXd& action,
     const char* name,
     double relative_action_error = 0.0) {
   const Eigen::MatrixXd skew = action - action.transpose();
-  const double roundoff = neo_detail::projection_skew_roundoff(
-      basis, images, action);
+  // The same dot-product certificate as projection_skew_roundoff, with
+  // positive dot sums cached when each row/column was first constructed.
+  const double u = 0.5 * std::numeric_limits<double>::epsilon();
+  const double nu = static_cast<double>(dimension) * u;
+  const double gamma = nu / (1.0 - nu);
+  const Eigen::MatrixXd error =
+      (gamma / (1.0 - gamma)) * (magnitude + magnitude.transpose()) +
+      u * (action.cwiseAbs() + action.transpose().cwiseAbs());
+  const double roundoff = error.stableNorm();
   const double tolerance = 256.0 * std::numeric_limits<double>::epsilon() *
       static_cast<double>(action.rows()) * std::max(1.0, action.norm()) +
-      roundoff + relative_action_error * basis.norm() * images.norm();
+      roundoff + relative_action_error * basis_norm * images_norm;
   if (!std::isfinite(skew.norm()) || skew.norm() > tolerance) {
     throw std::runtime_error(name);
   }
@@ -62,6 +61,11 @@ CiahWorkspace::CiahWorkspace(
        !initial_direction_->allFinite())) {
     throw std::invalid_argument("invalid CIAH initial direction");
   }
+  const Eigen::Index capacity = std::min<Eigen::Index>(options_.max_cycle, problem_.size());
+  hessian_projection_ = Eigen::MatrixXd::Zero(capacity, capacity);
+  metric_projection_ = hessian_projection_;
+  hessian_magnitude_ = hessian_projection_;
+  metric_magnitude_ = hessian_projection_;
 }
 
 Eigen::VectorXd CiahWorkspace::precondition(
@@ -122,6 +126,27 @@ bool CiahWorkspace::append(Eigen::VectorXd direction) {
   basis_.push_back(std::move(direction));
   metric_images_.push_back(std::move(metric_image));
   hessian_images_.push_back(std::move(hessian_image));
+  const auto projection_start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
+  const Eigen::Index j = basis_size() - 1;
+  for (Eigen::Index i = 0; i <= j; ++i) {
+    // Keep both orientations: symmetrizing an assumed-symmetric triangle
+    // would conceal inconsistent matrix-free images.
+    hessian_projection_(i,j) = basis_[i].dot(hessian_images_[j]);
+    hessian_projection_(j,i) = basis_[j].dot(hessian_images_[i]);
+    metric_projection_(i,j) = basis_[i].dot(metric_images_[j]);
+    metric_projection_(j,i) = basis_[j].dot(metric_images_[i]);
+    hessian_magnitude_(i,j) = basis_[i].cwiseAbs().dot(hessian_images_[j].cwiseAbs());
+    hessian_magnitude_(j,i) = basis_[j].cwiseAbs().dot(hessian_images_[i].cwiseAbs());
+    metric_magnitude_(i,j) = basis_[i].cwiseAbs().dot(metric_images_[j].cwiseAbs());
+    metric_magnitude_(j,i) = basis_[j].cwiseAbs().dot(metric_images_[i].cwiseAbs());
+  }
+  basis_squared_norm_ += basis_[j].squaredNorm();
+  hessian_squared_norm_ += hessian_images_[j].squaredNorm();
+  metric_squared_norm_ += metric_images_[j].squaredNorm();
+  if (trace) diagnostics::neo_trace("ciah_projection_update_cost",
+      "basis=%d,seconds=%.17g", basis_size(),
+      std::chrono::duration<double>(std::chrono::steady_clock::now()-projection_start).count());
   return true;
 }
 
@@ -181,17 +206,17 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   const bool trace = diagnostics::neo_event_trace_enabled();
   const auto projection_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
-  const Eigen::MatrixXd q = columns(basis_);
-  const Eigen::MatrixXd hq = columns(hessian_images_);
-  const Eigen::MatrixXd gq = columns(metric_images_);
-  const Eigen::MatrixXd projected_hessian_action = q.transpose() * hq;
-  const Eigen::MatrixXd projected_metric_action = q.transpose() * gq;
+  const Eigen::Index m = basis_size();
+  const Eigen::MatrixXd projected_hessian_action = hessian_projection_.topLeftCorner(m,m);
+  const Eigen::MatrixXd projected_metric_action = metric_projection_.topLeftCorner(m,m);
   check_projected_symmetry(
-      q, hq, projected_hessian_action,
+      problem_.size(), std::sqrt(basis_squared_norm_), std::sqrt(hessian_squared_norm_),
+      hessian_magnitude_.topLeftCorner(m,m), projected_hessian_action,
       "CIAH Hessian action is not symmetric",
       options_.operator_relative_accuracy);
   check_projected_symmetry(
-      q, gq, projected_metric_action,
+      problem_.size(), std::sqrt(basis_squared_norm_), std::sqrt(metric_squared_norm_),
+      metric_magnitude_.topLeftCorner(m,m), projected_metric_action,
       "CIAH metric action is not symmetric");
 
   const Eigen::MatrixXd projected_hessian = 0.5 *
@@ -207,9 +232,10 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
     throw std::runtime_error("CIAH projected metric is not positive definite or is rank deficient");
   }
 
-  const Eigen::Index m = q.cols();
   Eigen::MatrixXd augmented_hessian = Eigen::MatrixXd::Zero(m + 1, m + 1);
-  const Eigen::VectorXd projected_gradient = q.transpose() * current_gradient;
+  Eigen::VectorXd projected_gradient(m);
+  for (Eigen::Index i = 0; i < m; ++i)
+    projected_gradient[i] = basis_[i].dot(current_gradient);
   augmented_hessian.block(0, 1, 1, m) = projected_gradient.transpose();
   augmented_hessian.block(1, 0, m, 1) = projected_gradient;
   augmented_hessian.bottomRightCorner(m, m) = projected_hessian;
@@ -239,9 +265,14 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
       spectrum.eigenvectors().col(selected).tail(m) / alpha;
   result.eigenvalue = spectrum.eigenvalues()[selected];
   result.reference_weight = std::abs(alpha);
-  result.step = q * coefficients;
-  result.hessian_step = hq * coefficients;
-  result.metric_step = gq * coefficients;
+  result.step = Eigen::VectorXd::Zero(problem_.size());
+  result.hessian_step = result.step;
+  result.metric_step = result.step;
+  for (Eigen::Index i = 0; i < m; ++i) {
+    result.step.noalias() += coefficients[i] * basis_[i];
+    result.hessian_step.noalias() += coefficients[i] * hessian_images_[i];
+    result.metric_step.noalias() += coefficients[i] * metric_images_[i];
+  }
   result.residual = alpha *
       (current_gradient + result.hessian_step -
        result.eigenvalue * result.metric_step);
@@ -259,12 +290,17 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
     throw std::runtime_error("CIAH model gradient norm is invalid");
   }
   result.model_gradient_norm = std::sqrt(squared_model_norm);
-  if (trace) diagnostics::neo_trace("ciah_ritz_cost",
+  if (trace) {
+    Eigen::VectorXd projected_residual(m);
+    for (Eigen::Index i = 0; i < m; ++i)
+      projected_residual[i] = basis_[i].dot(result.residual);
+    diagnostics::neo_trace("ciah_ritz_cost",
       "basis=%d,projection_seconds=%.17g,spectrum_image_seconds=%.17g,norm_seconds=%.17g,gradient_euclidean=%.17g,residual_euclidean=%.17g,galerkin_residual=%.17g",
       basis_size(), std::chrono::duration<double>(spectrum_start - projection_start).count(),
       std::chrono::duration<double>(norm_start - spectrum_start).count(),
       std::chrono::duration<double>(std::chrono::steady_clock::now() - norm_start).count(),
-      current_gradient.norm(), result.residual.norm(), (q.transpose()*result.residual).norm());
+      current_gradient.norm(), result.residual.norm(), projected_residual.norm());
+  }
   result.converged = previous_eigenvalue_ &&
       std::abs(result.eigenvalue - *previous_eigenvalue_) < options_.tolerance &&
       result.residual_norm < std::sqrt(options_.tolerance);

@@ -24,6 +24,7 @@ expansions = [v for _, v in events.get("ciah_expansion_cost", [])]
 preconditions = [v for _, v in events.get("ciah_precondition_cost", [])]
 forward = [v for _, v in events.get("ciah_forward_cost", [])]
 diagonals = [v for _, v in events.get("ciah_diagonal_cost", [])]
+projection_updates = [v for _, v in events.get("ciah_projection_update_cost", [])]
 rows = list(csv.DictReader((run / "neo.tsv").open(), delimiter="\t"))
 summary = {
     "macros": len(rows),
@@ -37,6 +38,7 @@ summary = {
         (float(v["relative_residual"]) for v in norms), default=0),
     "ritz_calls": len(ritz),
     "precondition_seconds": sum(float(v["seconds"]) for v in preconditions),
+    "projection_update_seconds": sum(float(v["seconds"]) for v in projection_updates),
     "diagonal_builds": len(diagonals),
     "diagonal_build_seconds": sum(float(v["seconds"]) for v in diagonals),
     "forward_evaluations": len(forward),

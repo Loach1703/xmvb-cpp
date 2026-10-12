@@ -165,6 +165,14 @@ private:
   std::vector<Eigen::VectorXd> basis_;
   std::vector<Eigen::VectorXd> hessian_images_;
   std::vector<Eigen::VectorXd> metric_images_;
+  /** @brief Cached raw projections and positive dot sums for symmetry certification.
+   * Only the newly admitted row/column is evaluated; keyframe RHS updates
+   * do not modify these frozen-operator projections.
+   */
+  Eigen::MatrixXd hessian_projection_, metric_projection_;
+  Eigen::MatrixXd hessian_magnitude_, metric_magnitude_;
+  double basis_squared_norm_ = 0.0;
+  double hessian_squared_norm_ = 0.0, metric_squared_norm_ = 0.0;
   Eigen::MatrixXd projected_metric_;
   bool exhausted_ = false;
 };
