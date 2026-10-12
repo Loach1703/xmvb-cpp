@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -46,6 +47,7 @@ struct Options {
   int curvature_steps = 0;
   int response_spectrum_limit = 0;
   int compare_exchange_mib = 0;
+  int operator_timing_repeats = 0;
 };
 
 void print_usage() {
@@ -62,6 +64,7 @@ void print_usage() {
       << " [--diagonal-samples count]"
       << " [--curvature-steps count]"
       << " [--compare-exchange-mib budget]"
+      << " [--operator-timing-repeats count]"
       << " [--response-spectrum-limit count]\n";
 }
 
@@ -77,6 +80,8 @@ Options parse_arguments(int argc, char** argv) {
     const std::string value = argv[argument + 1];
     if (name == "--orbital-value-table-bin") {
       options.orbital_value_table_bin_path = value;
+    } else if (name == "--operator-timing-repeats") {
+      options.operator_timing_repeats = std::stoi(value);
     } else if (name == "--compare-exchange-mib") {
       options.compare_exchange_mib = std::stoi(value);
     } else if (name == "--step") {
@@ -142,6 +147,7 @@ Options parse_arguments(int argc, char** argv) {
       options.diagonal_samples < 0 || options.curvature_steps < 0 ||
       options.response_spectrum_limit < 0 ||
       options.compare_exchange_mib < 0 ||
+      options.operator_timing_repeats < 0 || options.operator_timing_repeats > 20 ||
       !(options.response_tolerance > 0.0)) {
     throw std::invalid_argument("finite-difference tolerances must be non-negative");
   }
@@ -488,6 +494,49 @@ int main(int argc, char** argv) {
       }
       if (!std::isfinite(worst) || worst > 1.0e-10)
         throw std::runtime_error("accepted-point exchange operator comparison failed");
+      if (options.operator_timing_repeats > 0) {
+        // Interleave both equivalent current-code operators on identical
+        // directions. Warm both workspaces before measuring; never time setup.
+        Eigen::VectorXd timed_direction =
+            chart.apply_inverse_reduced_block_preconditioner(-accepted_reduced_gradient);
+        timed_direction.normalize();
+        reference.apply_orbital_coupling(timed_direction);
+        transformed.apply_orbital_coupling(timed_direction);
+        const auto ref_before = reference.diagnostics();
+        const auto new_before = transformed.diagnostics();
+        double ref_seconds = 0.0, new_seconds = 0.0, checksum = 0.0;
+        const auto time_call = [&](const auto& op, double& seconds) {
+          const auto start = std::chrono::steady_clock::now();
+          const auto image = op.apply_orbital_coupling(timed_direction);
+          seconds += std::chrono::duration<double>(
+              std::chrono::steady_clock::now() - start).count();
+          checksum += image.orbital_hessian.squaredNorm();
+        };
+        for (int repeat = 0; repeat < options.operator_timing_repeats; ++repeat) {
+          if (repeat % 2 == 0) {
+            time_call(reference, ref_seconds);
+            time_call(transformed, new_seconds);
+          } else {
+            time_call(transformed, new_seconds);
+            time_call(reference, ref_seconds);
+          }
+        }
+        const auto print_timing = [&](const char* label, double seconds,
+                                     const auto& before, const auto& after) {
+          const double calls = options.operator_timing_repeats;
+          std::cout << "OPERATOR_TIMING,path=" << label << ",calls=" << calls
+                    << ",wall_per_call=" << seconds / calls
+                    << ",ao_per_call=" << (after.ao_effective_one_electron_fused_wall_time_seconds -
+                         before.ao_effective_one_electron_fused_wall_time_seconds) / calls
+                    << ",active_two_electron_per_call=" << (after.active_two_electron_wall_time_seconds -
+                         before.active_two_electron_wall_time_seconds) / calls
+                    << ",setup_per_call=" << (after.core_setup_wall_time_seconds -
+                         before.core_setup_wall_time_seconds) / calls
+                    << ",checksum=" << checksum << std::endl;
+        };
+        print_timing("graph", ref_seconds, ref_before, reference.diagnostics());
+        print_timing("exchange", new_seconds, new_before, transformed.diagnostics());
+      }
       // The recorded first six microsteps have zero structure dimension and
       // zero shift. Reproduce that orbital Galerkin prefix on one shared chart
       // to measure error amplification, without taking an outer orbital step.
@@ -498,11 +547,13 @@ int main(int argc, char** argv) {
         Eigen::MatrixXd steps(direction.size(), 6);
         Eigen::VectorXd next = chart.apply_inverse_reduced_block_preconditioner(-gradient);
         for (int column = 0; column < 6; ++column) {
+          const double raw_direction_norm = next.stableNorm();
           for (int pass = 0; pass < 2; ++pass) {
             const Eigen::VectorXd weights = basis.leftCols(column).transpose() * next;
             next.noalias() -= basis.leftCols(column) * weights;
           }
-          next /= next.stableNorm();
+          const double orthogonal_norm = next.stableNorm();
+          next /= orthogonal_norm;
           basis.col(column) = next;
           images.col(column) = op.apply_orbital_coupling(next).orbital_hessian;
           Eigen::MatrixXd projected = basis.leftCols(column + 1).transpose() * images.leftCols(column + 1);
@@ -511,9 +562,18 @@ int main(int argc, char** argv) {
           const Eigen::VectorXd coefficients = projected.ldlt().solve(rhs);
           steps.col(column).noalias() = basis.leftCols(column + 1) * coefficients;
           const Eigen::VectorXd residual = gradient + images.leftCols(column + 1) * coefficients;
+          const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(projected);
+          const double min_abs = spectrum.eigenvalues().cwiseAbs().minCoeff();
+          const double max_abs = spectrum.eigenvalues().cwiseAbs().maxCoeff();
           std::cout << "EXCHANGE_PREFIX,path=" << label << ",micro=" << column + 1
                     << ",ro=" << metric.dual_norm(residual)
-                    << ",step=" << metric.norm(steps.col(column)) << std::endl;
+                    << ",step=" << metric.norm(steps.col(column))
+                    << ",raw_direction_norm=" << raw_direction_norm
+                    << ",retained=" << orthogonal_norm / raw_direction_norm
+                    << ",residual_norm=" << residual.stableNorm()
+                    << ",image_norm=" << images.col(column).stableNorm()
+                    << ",projected_min_abs=" << min_abs
+                    << ",projected_condition=" << max_abs / min_abs << std::endl;
           next = chart.apply_inverse_reduced_block_preconditioner(-residual);
         }
         return steps;
