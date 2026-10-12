@@ -114,10 +114,40 @@ The new eight-step result is approximately 29.14 microhartree lower and has
 44.33 to 15.18 microhartree. The projected infinity gradient is 6.92e-4, but
 the last energy change is about 4.95e-5 Eh, so convergence is not reached.
 The eight-step historical comparison includes the preceding workflow repairs;
-it does not isolate the effect of the norm alone.
+it does not isolate the effect of the norm alone. The full-convergence test
+below supersedes any suggestion of an overall improvement from these eight steps.
 
 1248698 process wall time is 10.27 s and peak RSS 483.8 MiB, including the
 dense metric and finite-difference diagnostics. Do not claim a production speedup
-or compare this time with a historical full-convergence timing. An audit-free
-timing and completed small-system convergence remain necessary before any claim
-of total-cost improvement. No iron-porphine long run has been submitted.
+or compare this time with a historical full-convergence timing.
+
+## Audit-free convergence validation: overall regression
+
+Job **1248707** rebuilds the final source, passes `test_ciah` and
+`test_coupled_structure`, and runs from the same original FeCl2 input with
+extra candidate auditing disabled. It has a bounded 32-macro diagnostic cap
+but converges normally after 24; it is not a restarted step count. No dense
+metric or finite-difference keyframes are allocated in this run.
+
+| Implementation | Macros | HVPs | Energy, Eh | Process wall time, s | Peak RSS, MiB |
+|---|---:|---:|---:|---:|---:|---:|
+| Archived CIAH, 1248081 | 21 | 456 | -2181.6244646722 | 14.04 | 483.96 |
+| Full norm and current workflow, 1248707 | 24 | 545 | -2181.6244646059 | 24.58 | 498.03 |
+
+Both endpoints agree with the reference at approximately 1e-7 Eh accuracy.
+The new gradient is 0.00064538 in the physical orbital norm; its last energy
+change is -6.92e-8 Eh. Convergence follows the unchanged existing energy and
+projected-gradient rules, not an added stability condition.
+
+This fails the overall convergence/cost improvement requirement: three extra
+macros, 19.5% more HVPs, and approximately 75% more wall time in these historical
+single-run comparisons on Hanhai22. Prior workflow changes are included, and
+these are not an isolated norm-only or simultaneous timing comparison. The
+eight-step energy advantage cannot be used to hide the final regression.
+
+The norm is now consistent with the selected generalized AH metric, but that
+consistency alone does not demonstrate a better CIAH algorithm. The final six
+macros all exit on `micro_budget`, with 25-27 actions per macro. Next inspect
+the AH/root continuation and its actual progress against that budget, and the
+cost of repeated Riesz solves. Do not change accuracy/trust constants to force
+a favorable result. No iron-porphine calculation has been submitted.
