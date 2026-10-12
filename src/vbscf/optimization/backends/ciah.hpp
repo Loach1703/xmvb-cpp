@@ -1,0 +1,43 @@
+#pragma once
+
+#include "vbscf/optimization/objective/function.hpp"
+#include "vbscf/orbitals/charts/chart.hpp"
+
+namespace xmvb::vb {
+struct VbScfOptimizerOptions;
+struct VbScfOptimizerResult;
+struct NeoIterationRecord;
+class ExactHvpOperator;
+class StructureTangentOperator;
+class NonredundantRetractionMetric;
+namespace optimizer_detail {
+
+/** @brief One CIAH macro step with a fully relaxed final structure solve. */
+struct CiahMacroStep {
+  VbScfObjective::TrialEvaluation trial;
+  Eigen::VectorXd parameters;
+  Eigen::VectorXd next_orbital_guess_packed;
+  Eigen::MatrixXd next_structure_guess;
+};
+
+/** @brief Single-state coupled CIAH in an immutable nonorthogonal chart. */
+bool build_ciah_macro_step(
+    VbScfObjective* objective,
+    const SparseParameterLayout& layout,
+    const VbScfOptimizerOptions& options,
+    const OrbitalChart& chart,
+    const NonredundantRetractionMetric& metric,
+    ExactHvpOperator& hessian,
+    const StructureTangentOperator& structure,
+    const Eigen::VectorXd& gradient,
+    const Eigen::VectorXd& orbital_guess_packed,
+    const Eigen::MatrixXd& structure_guess,
+    bool use_structure_response,
+    double energy,
+    double* trust_radius,
+    NeoIterationRecord* record,
+    VbScfOptimizerResult* result,
+    CiahMacroStep* accepted);
+
+}  // namespace optimizer_detail
+}  // namespace xmvb::vb

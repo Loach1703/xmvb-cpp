@@ -523,7 +523,7 @@ OrbitalChart::OrbitalChart(
   const Eigen::MatrixXd stable_inactive_span_basis =
       build_stable_inactive_span_basis(global_inactive_orbitals, ao_overlap);
   std::optional<InactiveOrbitalProjector> inactive_projector;
-  if (ao_effective_h1e != nullptr && hessian_diagonal == nullptr)
+  if (ao_effective_h1e != nullptr)
     inactive_projector.emplace(*ao_effective_h1e, ao_overlap, global_inactive_orbitals);
   const bool use_active_subspace_gauge =
       complete_active_space && input.orbital_type == kOrbitalTypeOeo;
@@ -839,7 +839,8 @@ OrbitalChart::OrbitalChart(
         proj.curvature_block = std::move(positive_block.matrix);
         proj.inverse_curvature_block = std::move(positive_block.inverse);
         has_reduced_curvature_diagonal_ = true;
-      } else if (ao_effective_h1e != nullptr && proj.local_reduced_size > 0) {
+      }
+      if (ao_effective_h1e != nullptr && proj.local_reduced_size > 0) {
         const auto& stored_rows = m.block_row_for_slot;
         const bool inactive_target = m.orbital_index < n_inactive;
         std::vector<int> stored_support(stored_rows.size());
@@ -865,6 +866,13 @@ OrbitalChart::OrbitalChart(
         proj.curvature_diagonal = normalize_curvature_diagonal(curv);
         PositiveCurvatureBlock positive_block =
             build_positive_curvature_block(block_curv);
+        if (hessian_diagonal != nullptr) {
+          // Keep the physical step map, but honor the explicitly selected
+          // one-electron model for signed AH residual preconditioning.
+          proj.hessian_diagonal = curv;
+          proj.ah_block_eigenvalues = positive_block.signed_eigenvalues;
+          proj.ah_block_eigenvectors = positive_block.eigenvectors;
+        }
         proj.curvature_block = std::move(positive_block.matrix);
         proj.inverse_curvature_block = std::move(positive_block.inverse);
         has_reduced_curvature_diagonal_ = true;

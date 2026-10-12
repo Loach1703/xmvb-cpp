@@ -120,6 +120,7 @@ set(XMVB_VBSCF_DIAGNOSTIC_SOURCES
 )
 
 set(XMVB_VBSCF_OPTIMIZATION_SOURCES
+  vbscf/optimization/backends/ciah.cpp
   vbscf/optimization/backends/lbfgs.cpp
   vbscf/optimization/backends/neo.cpp
   vbscf/optimization/backends/projected_gradient.cpp
@@ -128,6 +129,7 @@ set(XMVB_VBSCF_OPTIMIZATION_SOURCES
   vbscf/optimization/globalization/line_search.cpp
   vbscf/optimization/driver/session.cpp
   vbscf/optimization/neo/coordinates.cpp
+  vbscf/optimization/neo/ciah.cpp
   vbscf/optimization/neo/curvature.cpp
   vbscf/optimization/neo/globalization.cpp
   vbscf/optimization/neo/problem.cpp

@@ -13,6 +13,7 @@ set(_xmvb_vbscf_unit_targets
   test_hessian_diagonal
   test_cofactor_differential
   test_coupled_structure
+  test_ciah
   test_curvature_decomposition
   test_davidson
   test_eigen_response
@@ -47,6 +48,7 @@ foreach(target_name IN LISTS _xmvb_vbscf_unit_targets)
 endforeach()
 
 if (BUILD_TESTING)
+  add_test(NAME ciah COMMAND test_ciah)
   add_test(NAME spinor_strings COMMAND test_spinor_strings)
   add_test(NAME spinor_projection COMMAND test_spinor_projection)
   set_tests_properties(spinor_strings spinor_projection PROPERTIES

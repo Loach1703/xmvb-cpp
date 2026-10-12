@@ -17,7 +17,8 @@ namespace xmvb::vb::optimizer_detail {
 OrbitalChart build_orbital_chart(
     const VbScfObjective& objective,
     const SparseParameterLayout& parameter_view,
-    OrbitalPreconditioner preconditioner) {
+    OrbitalPreconditioner preconditioner,
+    bool need_ah_mapping) {
   const auto& orbital_preparation_input =
       objective.input().orbital_preparation_input;
   const auto& orbital_preparation_result =
@@ -39,7 +40,7 @@ OrbitalChart build_orbital_chart(
         "orbital-chart construction requires a resolved preconditioner");
   }
   std::optional<AnalyticOrbitalDiagonal> hessian_diagonal;
-  if (preconditioner == OrbitalPreconditioner::HessianDiagonal) {
+  if (preconditioner == OrbitalPreconditioner::HessianDiagonal || need_ah_mapping) {
     const auto& context = objective.second_order_context();
     if (!context) {
       throw std::invalid_argument(

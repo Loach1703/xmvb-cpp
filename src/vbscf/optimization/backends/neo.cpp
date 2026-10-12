@@ -1,4 +1,5 @@
 #include "vbscf/optimization/backends/neo.hpp"
+#include "vbscf/optimization/backends/ciah.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 #include <algorithm>
@@ -39,8 +40,9 @@ OrbitalPreconditioner resolve_neo_preconditioner(
     const VbScfObjective& objective,
     OrbitalPreconditioner requested) {
   if (requested != OrbitalPreconditioner::Automatic) return requested;
-  static_cast<void>(objective);
-  return OrbitalPreconditioner::OneElectron;
+  return objective.second_order_context()->selected_state_indices.size() == 1
+      ? OrbitalPreconditioner::HessianDiagonal
+      : OrbitalPreconditioner::OneElectron;
 }
 
 double neo_forcing_term(
@@ -106,6 +108,7 @@ struct AcceptedNeoKeyframe {
   VbScfObjective::TrialEvaluation trial;
   Eigen::VectorXd parameters;
   Eigen::VectorXd next_orbital_guess_packed;
+  Eigen::MatrixXd next_structure_guess;
 };
 
 /** @brief Measures a completed trial gradient in its own physical chart. */
@@ -133,6 +136,7 @@ bool build_accepted_neo_keyframe(
     const Eigen::VectorXd& reduced_gradient,
     const Eigen::VectorXd& current_parameters,
     const Eigen::VectorXd& orbital_guess_packed,
+    const Eigen::MatrixXd& structure_guess,
     double energy,
     double* trust_radius,
     NeoIterationRecord* record,
@@ -160,6 +164,18 @@ bool build_accepted_neo_keyframe(
       admit_structure_response(
           *objective, structure_hessian, orbital_hessian.structure_action(),
           chart.reduced_size());
+  if (objective->second_order_context()->selected_state_indices.size() == 1) {
+    CiahMacroStep macro;
+    if (!build_ciah_macro_step(objective, parameter_view, options, chart,
+            orbital_metric, orbital_hessian, structure_hessian,
+            reduced_gradient, orbital_guess_packed, structure_guess, use_structure_response,
+            energy, trust_radius, record, result, &macro)) return false;
+    accepted->trial = std::move(macro.trial);
+    accepted->parameters = std::move(macro.parameters);
+    accepted->next_orbital_guess_packed = std::move(macro.next_orbital_guess_packed);
+    accepted->next_structure_guess = std::move(macro.next_structure_guess);
+    return true;
+  }
   record->model_dimension = std::max(
       record->model_dimension,
       static_cast<int>(
@@ -603,13 +619,16 @@ BackendRunResult run_neo_backend(
       std::max(options.minimum_step_size, options.initial_step_size);
   const OrbitalPreconditioner preconditioner =
       resolve_neo_preconditioner(*objective, options.orbital_preconditioner);
+  const bool use_ciah =
+      objective->second_order_context()->selected_state_indices.size() == 1;
   OrbitalChart chart = build_orbital_chart(
-      *objective, parameter_view, preconditioner);
+      *objective, parameter_view, preconditioner, use_ciah);
   auto projected = chart.project_gradient(gradient);
   double final_gradient_inf =
       gradient_infinity_norm(projected.reduced_gradient);
   double final_gradient_l2 = projected.reduced_gradient.norm();
   Eigen::VectorXd orbital_guess_packed;
+  Eigen::MatrixXd structure_guess;
   double recycle_gradient_target =
       neo_forcing_term(final_gradient_l2, chart.reduced_size()) *
       final_gradient_l2;
@@ -643,6 +662,7 @@ BackendRunResult run_neo_backend(
             projected.reduced_gradient,
             parameters,
             orbital_guess_packed,
+            structure_guess,
             energy,
             &trust_radius,
             &iteration_record,
@@ -659,7 +679,10 @@ BackendRunResult run_neo_backend(
     objective->commit(std::move(accepted.trial));
     parameters = std::move(accepted.parameters);
     orbital_guess_packed = std::move(accepted.next_orbital_guess_packed);
-    iteration_record.keyframes = 1;
+    structure_guess = std::move(accepted.next_structure_guess);
+    // CIAH may evaluate several fixed-structure keyframes before this final
+    // relaxed point. Include the macro endpoint without discarding that work.
+    ++iteration_record.keyframes;
 
     // Every accepted point has a new exact gradient and a new local model.
     // It is therefore an outer iteration, including for iteration limits and
@@ -667,7 +690,7 @@ BackendRunResult run_neo_backend(
     // Preconditioning changes only curvature surrogates, not the quotient
     // maps. Use one chart for stationarity, reporting, and the next solve.
     OrbitalChart next_geometry = build_orbital_chart(
-        *objective, parameter_view, preconditioner);
+        *objective, parameter_view, preconditioner, use_ciah);
     auto next_projected = next_geometry.project_gradient(gradient);
     final_gradient_inf =
         gradient_infinity_norm(next_projected.reduced_gradient);
@@ -682,8 +705,9 @@ BackendRunResult run_neo_backend(
     // Retain the packed trial direction only while following the same
     // exact-gradient keyframe sequence. All accepted points are still
     // counted and reported independently.
-    if (final_gradient_inf < options.gradient_tolerance ||
-        final_gradient_l2 <= recycle_gradient_target) {
+    if (objective->second_order_context()->selected_state_indices.size() != 1 &&
+        (final_gradient_inf < options.gradient_tolerance ||
+         final_gradient_l2 <= recycle_gradient_target)) {
       orbital_guess_packed.resize(0);
       recycle_gradient_target =
           neo_forcing_term(final_gradient_l2, next_geometry.reduced_size()) *

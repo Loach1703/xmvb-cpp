@@ -208,7 +208,7 @@ const char* orbital_preconditioner_name(
     xmvb::vb::OrbitalPreconditioner preconditioner) {
   switch (preconditioner) {
     case xmvb::vb::OrbitalPreconditioner::Automatic:
-      return "automatic (one-electron block)";
+      return "automatic (backend-selected)";
     case xmvb::vb::OrbitalPreconditioner::Identity:
       return "identity";
     case xmvb::vb::OrbitalPreconditioner::OneElectron:

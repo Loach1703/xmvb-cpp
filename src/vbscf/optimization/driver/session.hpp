@@ -18,7 +18,8 @@ namespace optimizer_detail {
 OrbitalChart build_orbital_chart(
     const VbScfObjective& objective,
     const SparseParameterLayout& parameter_view,
-    OrbitalPreconditioner preconditioner = OrbitalPreconditioner::OneElectron);
+    OrbitalPreconditioner preconditioner = OrbitalPreconditioner::OneElectron,
+    bool need_ah_mapping = false);
 
 /**
  * @brief Certifies the shared stopping target in the accepted orbital chart.
