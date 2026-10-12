@@ -87,6 +87,38 @@ struct CiahResult {
   bool exhaustion = false;
 };
 
+/** @brief A true-energy keyframe and its frozen origin-chart images. */
+struct CiahCheckpoint {
+  double energy = 0.0;
+  Eigen::VectorXd displacement, image, last_step;
+  double residual_norm = 0.0, eigenvalue = 0.0;
+  bool converged = false;
+};
+
+/** @brief Retain the lowest evaluated descending keyframe, without new actions. */
+class CiahKeyframes {
+public:
+  explicit CiahKeyframes(double source_energy) : lowest_energy_(source_energy) {}
+  void save(double energy, const Eigen::VectorXd& displacement,
+      const Eigen::VectorXd& image, const Eigen::VectorXd& last_step,
+      const CiahResult& ritz) {
+    if (!(energy < lowest_energy_)) return;
+    lowest_energy_ = energy;
+    checkpoint_ = CiahCheckpoint{energy, displacement, image, last_step,
+        ritz.residual_norm, ritz.eigenvalue, ritz.converged};
+  }
+  bool available() const noexcept { return checkpoint_.has_value(); }
+  /** @brief Consume a checkpoint so backtracking cannot retry it indefinitely. */
+  CiahCheckpoint take() {
+    CiahCheckpoint point = std::move(checkpoint_.value());
+    checkpoint_.reset();
+    return point;
+  }
+private:
+  double lowest_energy_;
+  std::optional<CiahCheckpoint> checkpoint_;
+};
+
 /**
  * Davidson iteration for the generalized augmented Hessian of one fixed model.
  *

@@ -246,6 +246,7 @@ bool build_ciah_macro_step(
   Eigen::VectorXd hessian_displacement = displacement;
   Eigen::VectorXd predicted_gradient = initial_gradient;
   CiahEnergyModel energy_model(energy, initial_gradient);
+  CiahKeyframes keyframes(energy);
   Eigen::VectorXd last_step = displacement;
   double keyframe_norm = dual_norm(initial_gradient);
   double diagonal_keyframe_norm = audit_structure_metric
@@ -388,6 +389,7 @@ bool build_ciah_macro_step(
             mismatch_orbital, std::max(0.0,mismatch*mismatch-mismatch_orbital*mismatch_orbital));
       }
       if (keep_keyframe) {
+        keyframes.save(exact.energy,displacement,hessian_displacement,last_step,candidate);
         predicted_gradient = exact.gradient;
         energy_model.refresh(exact.energy, exact.gradient);
         diagnostics::neo_trace("ciah_model_refresh",
@@ -426,7 +428,7 @@ bool build_ciah_macro_step(
         candidate.residual_norm);
   }
 
-  const double final_reduction = energy - energy_model.energy();
+  double final_reduction = energy - energy_model.energy();
   if (ns && diagnostics::neo_candidate_audit_enabled()) {
     const auto spectrum = coarse.orbital_spectrum(static_cast<int>(no),
         [&](const Eigen::VectorXd& v) { return diagonal_precondition(v,0.0); });
@@ -440,17 +442,21 @@ bool build_ciah_macro_step(
   accepted->parameters = build_nonredundant_lifted_trial_parameters(
       orbitals, chart, layout, displacement.head(no));
   if ((accepted->parameters - layout.pack(orbitals)).norm() <=
-      std::numeric_limits<double>::epsilon() * layout.pack(orbitals).norm()) {
+      std::numeric_limits<double>::epsilon() * layout.pack(orbitals).norm() &&
+      !keyframes.available()) {
     result->termination_reason = "ciah_zero_macro_step";
     return false;
   }
   // PySCF commits the coupled keyframe sequence and then reoptimizes CI.
   // It does not veto that sequence with the original frozen trust model.
-  // Retain our real-energy descent safeguard, but do not replace the coupled
-  // candidate by an old prefix because its obsolete origin model is uphill.
+  // Backtrack along evaluated nonlinear keyframes before scaling an origin
+  // ray. Only true-energy checkpoints qualify, never obsolete quadratic prefixes.
   double scale = 1.0;
-  const double linear = initial_gradient.dot(displacement);
-  const double quadratic = displacement.dot(hessian_displacement);
+  double linear = initial_gradient.dot(displacement);
+  double quadratic = displacement.dot(hessian_displacement);
+  double last_ritz_norm = candidate.residual_norm;
+  double last_eigenvalue = candidate.eigenvalue;
+  bool last_converged = candidate.converged, keyframe_backtracked = false;
   double accepted_prediction = 0.0;
   while (true) {
     accepted->trial = objective->evaluate_trial_with_structure_guess(
@@ -476,6 +482,26 @@ bool build_ciah_macro_step(
       break;
     }
     ++record->rejected_trial_count;
+    if (keyframes.available()) {
+      auto point = keyframes.take();
+      diagnostics::neo_trace("ciah_keyframe_backtrack",
+          "current_energy=%.17g,rejected_energy=%.17g,keyframe_energy=%.17g",
+          energy,accepted->trial.energy,point.energy);
+      displacement = std::move(point.displacement);
+      hessian_displacement = std::move(point.image);
+      last_step = std::move(point.last_step);
+      last_ritz_norm = point.residual_norm;
+      last_eigenvalue = point.eigenvalue;
+      last_converged = point.converged;
+      final_reduction = energy-point.energy;
+      linear = initial_gradient.dot(displacement);
+      quadratic = displacement.dot(hessian_displacement);
+      scale = 1.0;
+      keyframe_backtracked = true;
+      accepted->parameters = build_nonredundant_lifted_trial_parameters(
+          orbitals,chart,layout,displacement.head(no));
+      continue;
+    }
     scale *= 0.5;
     if (scale * metric.norm(displacement.head(no)) <= options.minimum_step_size) {
       result->termination_reason = "ciah_macro_energy_rejected";
@@ -497,7 +523,7 @@ bool build_ciah_macro_step(
         dual_norm(initial_gradient), dual_norm(frozen_gradient),
         metric.dual_norm(frozen_gradient.head(no)),
         ns ? structure.diagonal_dual_norm(frozen_gradient.tail(ns)) : 0.0,
-        candidate.residual_norm, scale);
+        last_ritz_norm, scale);
     if (diagnostics::neo_candidate_audit_enabled()) {
       // One additional fixed-C keyframe, only in explicit nonlinear audit mode.
       // The accepted relaxed gradient is the normal production completion,
@@ -526,12 +552,12 @@ bool build_ciah_macro_step(
   record->orbital_step_norm = metric.norm(displacement.head(no));
   record->accepted_trial_radius = record->orbital_step_norm;
   record->next_trust_radius = *trust_radius;
-  record->kkt_residual_norm = candidate.residual_norm;
+  record->kkt_residual_norm = last_ritz_norm;
   record->kkt_residual_target = ciah_options.tolerance;
-  record->shift = -candidate.eigenvalue;
+  record->shift = -last_eigenvalue;
   // The recorded AH residual belongs to the last microstep, not the complete
   // nonlinear macro displacement.
-  record->approximate_step = !candidate.converged || scale < 1.0;
+  record->approximate_step = !last_converged || scale < 1.0 || keyframe_backtracked;
   return true;
 }
 

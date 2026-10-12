@@ -320,6 +320,27 @@ void check_converged_root_reuse() {
       "converged AH root expanded an obsolete residual");
 }
 
+/** @brief Backtracking retains actual descent and matching immutable images. */
+void check_keyframe_checkpoint() {
+  xmvb::vb::CiahKeyframes keyframes(-10.0);
+  require(!keyframes.available(),"empty keyframe history is available");
+  const Eigen::Vector2d p(.1,-.2), hp(.3,-.8), last(.02,-.01);
+  CiahResult ritz;
+  ritz.residual_norm=.02;
+  ritz.eigenvalue=-.004;
+  keyframes.save(-9.9,p,hp,last,ritz);
+  require(!keyframes.available(),"uphill keyframe became a descent checkpoint");
+  keyframes.save(-10.1,p,hp,last,ritz);
+  keyframes.save(-10.05,2*p,2*hp,2*last,ritz);
+  const auto point=keyframes.take();
+  require(point.energy == -10.1 && point.residual_norm == ritz.residual_norm &&
+      point.eigenvalue == ritz.eigenvalue,"keyframe checkpoint metadata is inconsistent");
+  require_close(point.displacement,p,1e-14,"keyframe displacement was overwritten");
+  require_close(point.image,hp,1e-14,"keyframe HVP image was overwritten");
+  require_close(point.last_step,last,1e-14,"keyframe restart direction was overwritten");
+  require(!keyframes.available(),"consumed keyframe can be retried indefinitely");
+}
+
 /** @brief Verify symmetry, exact coarse inverse and shifted signed models. */
 void check_coarse_balancing_inverse() {
   for (const double first : {2.0,-2.0}) {
@@ -382,6 +403,7 @@ int main() {
     check_keyframe_energy_model();
     check_converged_root_reuse();
     check_coarse_balancing_inverse();
+    check_keyframe_checkpoint();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
