@@ -49,7 +49,10 @@ std::vector<double> unpack_symmetric_active_two_rdm(
     int n_active);
 
 /**
- * @brief Builds the fixed-structure orthogonal-frame orbital Hessian diagonal.
+ * @brief Builds the explicit-slice reference for the fixed-structure diagonal.
+ *
+ * Numerical tests use this entry point to compare independently transformed
+ * integrals. Production contracts the required density sources first.
  *
  * The result is an `n_mo x n_mo` matrix. Entry `(p,q)` is the diagonal
  * curvature associated with the antisymmetric orbital rotation between

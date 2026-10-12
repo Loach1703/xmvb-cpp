@@ -143,9 +143,97 @@ xmvb::vb::AnalyticDiagonalIntermediates make_intermediates(
   return x;
 }
 
+/** @brief Exercise fewer density channels, including dependent source columns. */
+void check_contracted_density_span() {
+  constexpr int n = 7;
+  constexpr int na = 5;
+  const auto g = make_symmetric_eri(n);
+  const Eigen::MatrixXd h = Eigen::MatrixXd::Identity(n,n);
+  xmvb::vb::VbScfInput input;
+  input.standard_two_electron_mode = xmvb::vb::StandardTwoElectronMode::Exact;
+  input.orbital_preparation_input.n_basis_functions = n;
+  input.orbital_preparation_input.ao_overlap_matrix = Eigen::MatrixXd::Identity(n,n);
+  input.ao_integral_input.n_basis_functions = n;
+  input.ao_integral_input.ao_core_hamiltonian_matrix = h;
+  std::vector<int> left, right;
+  std::vector<double> values;
+  for (int p = 0; p < n; ++p)
+    for (int q = 0; q <= p; ++q)
+      for (int r = 0; r < n; ++r)
+        for (int s = 0; s <= r; ++s) {
+          const int pq = p*(p+1)/2+q, rs = r*(r+1)/2+s;
+          if (pq < rs) continue;
+          left.push_back(pq);
+          right.push_back(rs);
+          values.push_back(eri(g,p,q,r,s,n));
+        }
+  input.ao_integral_input.pair_graph =
+      xmvb::vb::build_ao_pair_graph(left,right,values,n);
+  auto ri = std::make_shared<xmvb::vb::RiAoFactorization>();
+  ri->n_basis_functions = n;
+  ri->n_auxiliary_functions = 4;
+  ri->n_packed_ao_pairs = n*(n+1)/2;
+  ri->metric_whitened_ao_pair_factors.resize(4,ri->n_packed_ao_pairs);
+  for (int auxiliary = 0; auxiliary < 4; ++auxiliary)
+    for (int pair = 0; pair < ri->n_packed_ao_pairs; ++pair)
+      ri->metric_whitened_ao_pair_factors(auxiliary,pair) =
+          0.13*std::cos(0.29*(auxiliary+1)*(pair+1));
+  std::vector<double> ri_g(g.size());
+  for (int p = 0; p < n; ++p)
+    for (int q = 0; q < n; ++q)
+      for (int r = 0; r < n; ++r)
+        for (int s = 0; s < n; ++s)
+          ri_g[eri_index(p,q,r,s,n)] = ri->metric_whitened_ao_pair_factors.col(
+              xmvb::vb::TwoElectronIndexer::packed_pair_index(p,q)).dot(
+              ri->metric_whitened_ao_pair_factors.col(
+                  xmvb::vb::TwoElectronIndexer::packed_pair_index(r,s)));
+  input.ri_factorization = ri;
+  for (const bool use_ri : {false,true}) {
+  input.standard_two_electron_mode = use_ri
+      ? xmvb::vb::StandardTwoElectronMode::ResolutionOfIdentity
+      : xmvb::vb::StandardTwoElectronMode::Exact;
+  for (const int nc : {0,1}) {
+    xmvb::vb::AcceptedPointContext accepted;
+    accepted.n_active_orbitals = na;
+    auto& prepared = accepted.prepared_active_space;
+    prepared.n_inactive_doubly_occupied_orbitals = nc;
+    auto& orbitals = prepared.orbital_result;
+    orbitals.auxiliary_orbital_matrix = Eigen::MatrixXd::Identity(n,n);
+    orbitals.active_orbital_overlap_matrix.assign(na*na,0.0);
+    for (int a = 0; a < na; ++a)
+      orbitals.active_orbital_overlap_matrix[a*na+a] = 1.0;
+    orbitals.physical_orbital_frame.inactive_orthonormal_orbital_matrix =
+        orbitals.auxiliary_orbital_matrix.leftCols(nc);
+    orbitals.physical_orbital_frame.localized_representative_selector
+        .inactive_inverse_transpose_right_transform = Eigen::MatrixXd::Identity(nc,nc);
+    const auto reference = make_intermediates(h,use_ri ? ri_g : g,nc,na);
+    prepared.ao_effective_one_electron_result.ao_coulomb_exchange_matrix = reference.v_core;
+    for (const double scale : {0.0,1.0}) {
+      Eigen::MatrixXd dm1(na,na);
+      for (int a = 0; a < na; ++a)
+        for (int b = 0; b < na; ++b)
+          dm1(a,b) = scale*(0.2*std::cos(a+b)+(a == b ? 0.9 : 0.0));
+      accepted.active_one_electron_gradient.assign(dm1.data(),dm1.data()+dm1.size());
+      const int pairs = na*(na+1)/2;
+      accepted.packed_active_two_electron_gradient.resize(pairs*(pairs+1)/2);
+      for (std::size_t j = 0; j < accepted.packed_active_two_electron_gradient.size(); ++j)
+        accepted.packed_active_two_electron_gradient[j] =
+            scale*0.03*std::sin(0.19*(j+1));
+      const auto expected = xmvb::vb::build_analytic_rotation_hessian_diagonal(
+          reference,dm1,accepted.packed_active_two_electron_gradient);
+      const auto actual = xmvb::vb::build_analytic_orbital_diagonal(input,accepted);
+      const double error = (actual.rotation_diagonal-expected).cwiseAbs().maxCoeff();
+      if (error > 5.0e-12)
+        throw std::runtime_error("contracted density span changed analytic diagonal");
+    }
+  }
+  }
+}
+
 }  // namespace
 
 int main() {
+  check_contracted_density_span();
   constexpr int n = 5;
   constexpr int nc = 1;
   constexpr int na = 2;
