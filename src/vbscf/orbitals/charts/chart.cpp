@@ -1256,6 +1256,7 @@ double OrbitalChart::maximum_rotation_component(
       reduced_step,
       static_cast<Eigen::Index>(reduced_size_),
       "orbital-chart AH step");
+  if (has_rotation_inverse_) return maximum_frame_component(reduced_step);
   double maximum = 0.0;
   for (const auto& block : block_bases_) {
     for (const auto& orbital : block.orbitals) {

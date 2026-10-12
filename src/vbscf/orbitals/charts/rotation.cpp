@@ -107,4 +107,23 @@ Eigen::VectorXd OrbitalChart::apply_inverse_rotation_diagonal(
   return result;
 }
 
+double OrbitalChart::maximum_frame_component(const Eigen::VectorXd& step) const {
+  std::array<Eigen::MatrixXd, 2> rotations;
+  for (int group = 0; group < 2; ++group)
+    rotations[group] = Eigen::MatrixXd::Zero(
+        rotation_diagonals_[group].rows(), rotation_diagonals_[group].cols());
+  for (const auto& block : block_bases_)
+    for (const auto& orbital : block.orbitals) {
+      const int group = orbital.orbital_index < rotation_core_count_ ? 0 : 1;
+      const Eigen::VectorXd external =
+          orbital.ah_rotation_components.bottomRows(rotations[group].rows()) *
+          step.segment(orbital.local_reduced_offset, orbital.local_reduced_size);
+      rotations[group].noalias() += external * orbital.ah_source_weights.transpose();
+    }
+  double maximum = 0.0;
+  for (const auto& rotation : rotations)
+    if (rotation.size()) maximum = std::max(maximum, rotation.cwiseAbs().maxCoeff());
+  return maximum;
+}
+
 }  // namespace xmvb::vb

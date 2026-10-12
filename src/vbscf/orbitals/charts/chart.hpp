@@ -240,6 +240,7 @@ private:
                               const AnalyticOrbitalDiagonal& model);
   Eigen::VectorXd apply_inverse_rotation_diagonal(
       const Eigen::VectorXd& covector, double eigenvalue) const;
+  double maximum_frame_component(const Eigen::VectorXd& step) const;
 
   std::vector<BlockBasis> block_bases_;
   bool active_subspace_gauge_ = false;

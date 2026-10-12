@@ -784,7 +784,9 @@ void check_analytic_block_pullback(
           "factorized AH inverse differs from its dense pullback reference");
   require((chart.augmented_hessian_diagonal()-signed_reference.diagonal()).norm() < 1.0e-10,
           "fused analytic pullback changed signed diagonal");
-  require(std::abs(chart.maximum_rotation_component(probe)-maximum_rotation) < 1.0e-10,
+  const double expected_maximum = full_frame
+      ? (rotation_map*probe).cwiseAbs().maxCoeff() : maximum_rotation;
+  require(std::abs(chart.maximum_rotation_component(probe)-expected_maximum) < 1.0e-10,
           "fused projection changed maximum rotation component");
 }
 
