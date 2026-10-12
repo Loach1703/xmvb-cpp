@@ -7,6 +7,9 @@
 #include <vector>
 #include <Eigen/LU>
 #include <Eigen/Eigenvalues>
+#include <Eigen/SVD>
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "vbscf/optimization/neo/symmetry.hpp"
 
 namespace xmvb::vb {
 
@@ -19,6 +22,7 @@ CoarsePreconditioner::CoarsePreconditioner(
   basis_.resize(dimension,std::min(dimension,capacity));
   images_.resize(dimension,basis_.cols());
   metrics_.resize(dimension,basis_.cols());
+  sample_factor_ = Eigen::MatrixXd::Zero(basis_.cols(),basis_.cols());
 }
 
 void CoarsePreconditioner::observe(const Eigen::VectorXd& direction,
@@ -31,18 +35,49 @@ void CoarsePreconditioner::observe(const Eigen::VectorXd& direction,
   Eigen::VectorXd v = direction, h = image, g = metric_image;
   const double initial = v.stableNorm();
   if (!(initial > 0)) return;
+  Eigen::VectorXd coefficients = Eigen::VectorXd::Zero(size_);
+  if (diagnostics::neo_event_trace_enabled() && size_) {
+    const Eigen::VectorXd forward = basis_.leftCols(size_).transpose()*image;
+    const Eigen::VectorXd backward = images_.leftCols(size_).transpose()*direction;
+    diagnostics::neo_trace("coarse_source_reciprocity",
+        "size=%d,direction_norm=%.17g,image_norm=%.17g,skew=%.17g",
+        size_,initial,image.norm(),(forward-backward).norm());
+  }
   for (int pass = 0; pass < 2; ++pass)
     for (int i = 0; i < size_; ++i) {
       const double coefficient = basis_.col(i).dot(v);
+      coefficients[i] += coefficient;
       v.noalias() -= coefficient*basis_.col(i);
       h.noalias() -= coefficient*images_.col(i);
       g.noalias() -= coefficient*metrics_.col(i);
     }
   const double norm = v.stableNorm();
-  if (!(norm > std::max(lindep_,64*std::numeric_limits<double>::epsilon())*initial)) return;
+  if (diagnostics::neo_event_trace_enabled()) diagnostics::neo_trace(
+      "coarse_sample_condition","size=%d,remaining_fraction=%.17g,source_image=%.17g,transformed_image=%.17g",
+      size_,norm/initial,image.norm(),norm > 0.0 ? h.norm()/norm : 0.0);
+  // Certify the entire original sample Gram, not just the new column
+  // against an already orthonormalized basis. Images are transformed after
+  // their evaluation: recursively ill-conditioned QR factors amplify their
+  // original errors even if every individual orthogonalization looks safe.
+  Eigen::MatrixXd factor = Eigen::MatrixXd::Zero(size_+1,size_+1);
+  factor.topLeftCorner(size_,size_) = sample_factor_.topLeftCorner(size_,size_);
+  factor.col(size_).head(size_) = coefficients/initial;
+  factor(size_,size_) = norm/initial;
+  Eigen::JacobiSVD<Eigen::MatrixXd> spectrum(factor);
+  const double singular_ratio = spectrum.singularValues().tail(1)[0]/
+      spectrum.singularValues()[0];
+  const double ratio = singular_ratio*singular_ratio;
+  diagnostics::neo_trace("coarse_sample_gram","size=%d,gram_ratio=%.17g",size_,ratio);
+  if (!(ratio > lindep_)) {
+    diagnostics::neo_trace("coarse_sample_rank_rejected",
+        "size=%d,remaining_fraction=%.17g,gram_ratio=%.17g,rank_tolerance=%.17g",
+        size_,norm/initial,ratio,lindep_);
+    return;
+  }
   basis_.col(size_) = v/norm;
   images_.col(size_) = h/norm;
   metrics_.col(size_) = g/norm;
+  sample_factor_.topLeftCorner(size_+1,size_+1) = factor;
   ++size_;
 }
 
@@ -57,8 +92,13 @@ Eigen::VectorXd CoarsePreconditioner::apply(const Eigen::VectorXd& residual,
   const Eigen::MatrixXd raw = v.transpose()*lv;
   const double skew_bound = 256*std::numeric_limits<double>::epsilon()*size_*
       std::max(1.0,raw.norm())+action_accuracy_*v.norm()*images_.leftCols(size_).norm();
-  if ((raw-raw.transpose()).norm() > skew_bound)
+  if ((raw-raw.transpose()).norm() > skew_bound) {
+    diagnostics::neo_trace("coarse_symmetry_failure",
+        "size=%d,skew=%.17g,bound=%.17g,projection_roundoff=%.17g,image_norm=%.17g",
+        size_,(raw-raw.transpose()).norm(),skew_bound,
+        neo_detail::projection_skew_roundoff(v,lv,raw),lv.norm());
     throw std::runtime_error("coarse sampled shifted operator is not symmetric");
+  }
   const Eigen::MatrixXd e = 0.5*(raw+raw.transpose());
   Eigen::FullPivLU<Eigen::MatrixXd> factor(e);
   if (!factor.isInvertible())

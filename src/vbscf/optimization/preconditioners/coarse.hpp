@@ -38,6 +38,8 @@ private:
   int size_ = 0;
   double lindep_, action_accuracy_;
   Eigen::MatrixXd basis_, images_, metrics_;
+  /** Normalized original samples equal basis_ times this small QR factor. */
+  Eigen::MatrixXd sample_factor_;
 };
 
 }  // namespace xmvb::vb

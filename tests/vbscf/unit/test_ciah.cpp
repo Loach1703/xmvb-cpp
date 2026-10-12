@@ -391,6 +391,31 @@ void check_coarse_balancing_inverse() {
   }
 }
 
+/** @brief Cached-image rank tests use Gram eigenvalues, not singular values. */
+void check_coarse_sample_rank() {
+  xmvb::vb::CoarsePreconditioner coarse(3,3,1.0e-14);
+  const Eigen::Matrix3d h=Eigen::Vector3d(2.0,3.0,4.0).asDiagonal();
+  const Eigen::Vector3d first=Eigen::Vector3d::Unit(0);
+  coarse.observe(first,h*first,first);
+  const Eigen::Vector3d unresolved=first+1.0e-8*Eigen::Vector3d::Unit(1);
+  coarse.observe(unresolved,h*unresolved,unresolved);
+  require(coarse.size()==1,
+      "coarse inverse admitted a sample with an unresolved Gram eigenvalue");
+  const Eigen::Vector3d resolved=first+1.0e-3*Eigen::Vector3d::Unit(1);
+  coarse.observe(resolved,h*resolved,resolved);
+  require(coarse.size()==2,"coarse inverse rejected a resolved independent sample");
+  xmvb::vb::CoarsePreconditioner chained(3,3,1.0e-14);
+  chained.observe(first,h*first,first);
+  const Eigen::Vector3d second=first+1.0e-4*Eigen::Vector3d::Unit(1);
+  chained.observe(second,h*second,second);
+  require(chained.size()==2,"coarse inverse rejected a resolved sample pair");
+  const Eigen::Vector3d third=Eigen::Vector3d::Unit(1)+
+      1.0e-4*Eigen::Vector3d::Unit(2);
+  chained.observe(third,h*third,third);
+  require(chained.size()==2,
+      "coarse inverse certified local rank but missed global sample dependence");
+}
+
 }  // namespace
 
 int main() {
@@ -404,6 +429,7 @@ int main() {
     check_converged_root_reuse();
     check_coarse_balancing_inverse();
     check_keyframe_checkpoint();
+    check_coarse_sample_rank();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
