@@ -16,6 +16,16 @@ libstdc++ shadowed GCC's runtime. The corrected build puts GCC's runtime
 first. The calculation's dependency was updated to the corrected job; no
 duplicate calculation was submitted.
 
+Build 1248208 subsequently failed because the compute node could not download
+libwignernj. The successful Hanhai25 configuration uses bundled v0.6.0, commit
+`0c907ee4e726343e333be1d4c8663172da95cbe8`, static, Fortran interface enabled,
+baseline Fortran flags (not global Molcas I8 flags). Its tracked source was
+transferred offline to Hanhai22. The build script now installs that dependency
+locally and supplies its CMake package prefix to OpenMolcas; no download is
+needed for this dependency.
+Corrected offline build job: **1248254**; calculation **1248206** now depends
+on `afterok:1248254`. The dependency was observed compiling successfully.
+
 ## Matched physical problem
 
 Fe porphine, neutral, triplet, CAS(8,11), 89 inactive orbitals, 469 Cartesian
