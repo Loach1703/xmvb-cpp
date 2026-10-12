@@ -1,0 +1,682 @@
+CROSS_FRAME {"ao_overlap_error": 1.0547118733938987e-15, "gram_error": 7.661228719073631e-13, "available_cpus": 32, "pyscf_threads": 32}
+CROSS_RDM_READY 0.029378503561019897
+CROSS_DIRECTION {"ao_overlap_error": 1.0547118733938987e-15, "gram_error": 7.661228719073631e-13, "orbital_gradient_norm": 0.005713244264616009, "directional_derivative": -0.002920577126473974, "occupied_tangent_orthogonality_error": 5.897363311965098e-10, "spin_square": 2.000000000000023}
+
+******** <class 'pyscf.mcscf.mc1step.CASSCF'> ********
+CAS (5e+3e, 11o), ncore = 89, nvir = 369
+max_cycle_macro = 2
+max_cycle_micro = 4
+conv_tol = 1e-07
+conv_tol_grad = 0.001
+orbital rotation max_stepsize = 0.02
+orbital rotation threshold for CI restart = 0.01
+augmented hessian ah_max_cycle = 30
+augmented hessian ah_conv_tol = 1e-12
+augmented hessian ah_linear dependence = 1e-14
+augmented hessian ah_level shift = 1e-08
+augmented hessian ah_start_tol = 2.5
+augmented hessian ah_start_cycle = 3
+augmented hessian ah_grad_trust_region = 3
+kf_trust_region = 3
+kf_interval = 4
+ci_response_space = 4
+ci_grad_trust_region = 3
+with_dep4 0
+natorb = False
+canonicalization = True
+sorting_mo_energy = False
+ao2mo_level = 2
+chkfile = cross-restart.chk
+max_memory 120000 MB (current use 49055 MB)
+internal_rotation = False
+******** <class 'pyscf.fci.addons.SpinPenaltyFCISolver'> ********
+max. cycles = 200
+conv_tol = 1e-10
+davidson only = True
+linear dependence = 1e-12
+level shift = 0.001
+max iter space = 12
+max_memory 120000 MB
+nroots = 1
+pspace_size = 400
+spin = 2
+Start 1-step CASSCF
+Start CASCI
+    CPU time for integral transformation to CAS space      0.00 sec, wall time      0.00 sec
+core energy = -2233.3183258812
+    CPU time for effective h1e in CAS space      0.00 sec, wall time      0.00 sec
+davidson 0 1  |r|= 1.03e-07  e= [-11.47246]  max|de|= -11.5  lindep=    1
+Linear dependency in trial subspace. |r| for each state [1.03213099e-07]
+    CPU time for FCI solver      2.35 sec, wall time      0.08 sec
+CAS space CI energy = -11.4724599981810
+CASCI E = -2244.79078587938  S^2 = 2.0000000
+    CPU time for Initializing 1-step CASSCF   1005.77 sec, wall time     33.59 sec
+    CPU time for CAS DM      0.49 sec, wall time      0.02 sec
+    |g|=0.00571
+    CPU time for gen h_op     14.11 sec, wall time      0.46 sec
+    imic  1( 3)  |g[o]|=0.00615  |dxi|=0.0269  max(|x|)=0.00647  |dr|=0.0269  eig=-3.06e-05  seig=3.15e-05
+    imic  2( 4)  |g[o]|=0.00519  |dxi|=0.00593  max(|x|)=0.00121  |dr|=0.0313  eig=-3.75e-06  seig=3.15e-05
+    imic  3( 5)  |g[o]|=0.00238  |dxi|=0.00461  max(|x|)=0.00104  |dr|=0.0344  eig=-2.35e-06  seig=3.14e-05
+    imic  4( 6)  |g[o]|=0.00188  |dxi|=0.00347  max(|x|)=0.000779  |dr|=0.0362  eig=-1.23e-06  seig=3.14e-05
+    CPU time for aug_hess in  4 inner iters    345.27 sec, wall time     10.83 sec
+    CPU time for orbital rotation    359.39 sec, wall time     11.29 sec
+    CPU time for update CAS DM      7.46 sec, wall time      0.23 sec
+micro  1  |u-1|=0.0512  |g[o]|=0.00571  |g[c]|=0.000574  |ddm|=0.000418
+    CPU time for micro iter  1      0.00 sec, wall time      0.00 sec
+    |g|=0.00191 (keyframe), |g-correction|=0.000253
+    CPU time for gen h_op     61.55 sec, wall time      1.92 sec
+    imic  5( 7)  |g[o]|=0.00191  |dxi|=0.00305  max(|x|)=0.000753  |dr|=0.00305  eig=-8.2e-07  seig=3.13e-05
+    imic  6( 8)  |g[o]|=0.00221  |dxi|=0.00229  max(|x|)=0.000542  |dr|=0.005  eig=-5.22e-07  seig=3.13e-05
+    imic  7( 9)  |g[o]|=0.00118  |dxi|=0.00127  max(|x|)=0.000232  |dr|=0.006  eig=-2.47e-07  seig=3.13e-05
+    imic  8(10)  |g[o]|=0.0012  |dxi|=0.0015  max(|x|)=0.000334  |dr|=0.00699  eig=-2.42e-07  seig=3.13e-05
+    imic  9(11)  |g[o]|=0.00148  |dxi|=0.000978  max(|x|)=0.000206  |dr|=0.00751  eig=-1.43e-07  seig=3.12e-05
+    CPU time for aug_hess in  9 inner iters    289.72 sec, wall time      9.05 sec
+    CPU time for orbital rotation    351.28 sec, wall time     10.98 sec
+    CPU time for update CAS DM      7.55 sec, wall time      0.24 sec
+micro  2  |u-1|=0.0559  |g[o]|=0.00191  |g[c]|=0.000252  |ddm|=0.00136
+    CPU time for micro iter  2      0.00 sec, wall time      0.00 sec
+    |g|=0.0015 (keyframe), |g-correction|=0.000322
+    CPU time for gen h_op     62.96 sec, wall time      2.01 sec
+    imic 10(12)  |g[o]|=0.00103  |dxi|=0.00121  max(|x|)=0.000242  |dr|=0.00121  eig=-1.47e-07  seig=3.11e-05
+    imic 11(13)  |g[o]|=0.00143  |dxi|=0.00109  max(|x|)=0.00026  |dr|=0.00216  eig=-1.54e-07  seig=3.11e-05
+    imic 12(14)  |g[o]|=0.000889  |dxi|=0.000593  max(|x|)=0.000159  |dr|=0.00262  eig=-8.31e-08  seig=3.09e-05
+    imic 13(15)  |g[o]|=0.000947  |dxi|=0.00113  max(|x|)=0.000292  |dr|=0.00326  eig=-1.27e-07  seig=3.09e-05
+    imic 14(16)  |g[o]|=0.000798  |dxi|=0.000437  max(|x|)=0.000151  |dr|=0.0035  eig=-4.47e-08  seig=3.09e-05
+    imic 15(17)  |g[o]|=0.000684  |dxi|=0.000842  max(|x|)=0.000269  |dr|=0.00388  eig=-6.97e-08  seig=3.09e-05
+    CPU time for aug_hess in 15 inner iters    345.17 sec, wall time     10.87 sec
+    CPU time for orbital rotation    408.14 sec, wall time     12.88 sec
+    CPU time for update CAS DM      6.74 sec, wall time      0.21 sec
+micro  3  |u-1|=0.0562  |g[o]|=0.0015  |g[c]|=0.000372  |ddm|=0.00191
+    CPU time for micro iter  3      0.00 sec, wall time      0.00 sec
+    |g|=0.00074 (keyframe), |g-correction|=0.000251
+    CPU time for gen h_op     63.42 sec, wall time      1.98 sec
+    imic 16(18)  |g[o]|=0.000775  |dxi|=0.00064  max(|x|)=0.000214  |dr|=0.00064  eig=-4.11e-08  seig=3.09e-05
+    imic 17(19)  |g[o]|=0.000536  |dxi|=0.000566  max(|x|)=0.000135  |dr|=0.00114  eig=-4.28e-08  seig=3.09e-05
+    imic 18(20)  |g[o]|=0.000505  |dxi|=0.000431  max(|x|)=0.000149  |dr|=0.0014  eig=-2.79e-08  seig=3.09e-05
+    imic 19(21)  |g[o]|=0.000461  |dxi|=0.000258  max(|x|)=6.96e-05  |dr|=0.00156  eig=-1.62e-08  seig=3.09e-05
+    imic 20(22)  |g[o]|=0.000306  |dxi|=0.000367  max(|x|)=6.33e-05  |dr|=0.00175  eig=-1.72e-08  seig=3.08e-05
+    imic 21(23)  |g[o]|=0.000291  |dxi|=0.000117  max(|x|)=2.51e-05  |dr|=0.00181  eig=-4.76e-09  seig=3.08e-05
+    imic 22(24)  |g[o]|=0.000321  |dxi|=0.000203  max(|x|)=5.03e-05  |dr|=0.00188  eig=-6.17e-09  seig=3.08e-05
+    CPU time for aug_hess in 22 inner iters    416.11 sec, wall time     13.05 sec
+    CPU time for orbital rotation    479.54 sec, wall time     15.03 sec
+micro  4  |u-1|=0.0564  |g[o]|=0.00074
+Active space overlap to initial guess, SVD = [1.         0.99999999 0.99999995 0.99999981 0.99999974 0.99999912
+ 0.99999344 0.99998743 0.99993809 0.99983977 0.99944793]
+Active space overlap to last step, SVD = [1.         0.99999999 0.99999995 0.99999981 0.99999974 0.99999912
+ 0.99999344 0.99998743 0.99993809 0.99983977 0.99944793]
+    CPU time for update eri   1014.53 sec, wall time     33.70 sec
+Start CASCI
+    CPU time for integral transformation to CAS space      0.00 sec, wall time      0.00 sec
+core energy = -2233.31919280032
+    CPU time for effective h1e in CAS space      0.00 sec, wall time      0.00 sec
+davidson 0 1  |r|= 0.000529  e= [-11.47163416]  max|de|= -11.5  lindep=    1
+davidson 1 2  |r|= 0.000749  e= [-11.47163455]  max|de|= -3.89e-07  lindep= 0.994
+davidson 2 3  |r|= 0.000863  e= [-11.4716351]  max|de|= -5.48e-07  lindep= 0.831
+davidson 3 4  |r|= 0.000571  e= [-11.47163551]  max|de|= -4.09e-07  lindep= 0.977
+davidson 4 5  |r|= 0.000475  e= [-11.47163561]  max|de|= -9.51e-08  lindep= 0.766
+davidson 5 6  |r|= 0.000295  e= [-11.4716357]  max|de|= -9.97e-08  lindep= 0.916
+davidson 6 7  |r|= 0.00026  e= [-11.47163574]  max|de|= -3.08e-08  lindep= 0.846
+davidson 7 8  |r|= 0.000177  e= [-11.47163575]  max|de|= -1.94e-08  lindep= 0.879
+davidson 8 9  |r|= 0.000105  e= [-11.47163576]  max|de|= -9.35e-09  lindep= 0.865
+davidson 9 10  |r|= 6.37e-05  e= [-11.47163577]  max|de|= -4.38e-09  lindep= 0.906
+davidson 10 11  |r|= 4.48e-05  e= [-11.47163577]  max|de|= -9.2e-10  lindep= 0.879
+davidson 11 12  |r|= 2.33e-05  e= [-11.47163577]  max|de|= -6.99e-10  lindep= 0.835
+davidson 12 1  |r|= 2.33e-05  e= [-11.47163577]  max|de|=    0  lindep= 0.949
+davidson 13 2  |r|= 1.75e-05  e= [-11.47163577]  max|de|= -1.15e-10  lindep= 0.983
+davidson 14 3  |r|= 1.01e-05  e= [-11.47163577]  max|de|= -1.06e-10  lindep= 0.967
+root 0 converged  |r|= 8.59e-06  e= -11.47163577055877  max|de|= -5.49e-11
+converged 15 4  |r|= 8.59e-06  e= [-11.47163577]  max|de|= -5.49e-11
+    CPU time for FCI solver      6.32 sec, wall time      0.20 sec
+CAS space CI energy = -11.4716357705588
+macro iter   1 ( 27 JK    4 micro), CASSCF E = -2244.79082857088  dE = -4.26914999e-05  S^2 = 2.0000000
+               |grad[o]|=0.00571  |grad[c]|=0.000372  |ddm|=0.00191  |maxRot[o]|=0.009
+    CPU time for CASCI solver      7.17 sec, wall time      0.22 sec
+    CPU time for macro iter  1   2642.30 sec, wall time     84.80 sec
+    |g|=0.00176
+    CPU time for gen h_op      8.14 sec, wall time      0.25 sec
+    imic  1( 3)  |g[o]|=0.0014  |dxi|=0.00194  max(|x|)=0.000578  |dr|=0.00194  eig=-6.74e-07  seig=3.35e-08
+    imic  2( 4)  |g[o]|=0.00122  |dxi|=0.000447  max(|x|)=7.1e-05  |dr|=0.00188  eig=-9e-08  seig=3.31e-08
+    imic  3( 5)  |g[o]|=0.00102  |dxi|=0.000347  max(|x|)=7.83e-05  |dr|=0.00196  eig=-5.61e-08  seig=3.31e-08
+    imic  4( 6)  |g[o]|=0.00139  |dxi|=0.000469  max(|x|)=0.000156  |dr|=0.00224  eig=-6.95e-08  seig=3.23e-08
+    imic  5( 7)  |g[o]|=0.00115  |dxi|=0.00124  max(|x|)=0.000423  |dr|=0.00319  eig=-1.52e-07  seig=2.84e-08
+    imic  6( 8)  |g[o]|=0.000948  |dxi|=0.000508  max(|x|)=0.000193  |dr|=0.00361  eig=-5.94e-08  seig=2.77e-08
+    CPU time for aug_hess in  6 inner iters    479.16 sec, wall time     14.98 sec
+    CPU time for orbital rotation    487.51 sec, wall time     15.24 sec
+    CPU time for update CAS DM      7.19 sec, wall time      0.22 sec
+micro  1  |u-1|=0.00511  |g[o]|=0.00176  |g[c]|=0.000223  |ddm|=0.000974
+    CPU time for micro iter  1      0.00 sec, wall time      0.00 sec
+    |g|=0.00094 (keyframe), |g-correction|=0.000261
+    CPU time for gen h_op     63.93 sec, wall time      2.00 sec
+    imic  7( 9)  |g[o]|=0.000979  |dxi|=0.00109  max(|x|)=0.000429  |dr|=0.00109  eig=-9.34e-08  seig=2.74e-08
+    imic  8(10)  |g[o]|=0.000792  |dxi|=0.000443  max(|x|)=0.000157  |dr|=0.00147  eig=-4.44e-08  seig=2.63e-08
+    imic  9(11)  |g[o]|=0.000606  |dxi|=0.000389  max(|x|)=0.000105  |dr|=0.00174  eig=-3.01e-08  seig=2.61e-08
+    imic 10(12)  |g[o]|=0.00049  |dxi|=0.000369  max(|x|)=0.00014  |dr|=0.00199  eig=-2.25e-08  seig=2.6e-08
+    imic 11(13)  |g[o]|=0.000378  |dxi|=0.000193  max(|x|)=7.4e-05  |dr|=0.00211  eig=-9.19e-09  seig=2.6e-08
+    imic 12(14)  |g[o]|=0.000325  |dxi|=0.000275  max(|x|)=8.3e-05  |dr|=0.00228  eig=-1.04e-08  seig=2.6e-08
+    imic 13(15)  |g[o]|=0.000208  |dxi|=9.84e-05  max(|x|)=2.72e-05  |dr|=0.00234  eig=-3.17e-09  seig=2.59e-08
+    CPU time for aug_hess in 13 inner iters    397.39 sec, wall time     12.42 sec
+    CPU time for orbital rotation    461.33 sec, wall time     14.42 sec
+    CPU time for update CAS DM      6.98 sec, wall time      0.22 sec
+micro  2  |u-1|=0.00769  |g[o]|=0.00094  |g[c]|=0.000428  |ddm|=0.00116
+    CPU time for micro iter  2      0.00 sec, wall time      0.00 sec
+    |g|=0.000267 (keyframe), |g-correction|=0.000141
+    CPU time for gen h_op     58.69 sec, wall time      1.83 sec
+    imic 14(16)  |g[o]|=0.000269  |dxi|=0.000219  max(|x|)=8.27e-05  |dr|=0.000219  eig=-4.91e-09  seig=2.57e-08
+    imic 15(17)  |g[o]|=0.000271  |dxi|=0.000111  max(|x|)=2.82e-05  |dr|=0.000312  eig=-3.79e-09  seig=2.56e-08
+    imic 16(18)  |g[o]|=0.000222  |dxi|=0.00014  max(|x|)=2.9e-05  |dr|=0.000406  eig=-4.84e-09  seig=2.56e-08
+    imic 17(19)  |g[o]|=0.000154  |dxi|=6.79e-05  max(|x|)=1.37e-05  |dr|=0.000442  eig=-1.93e-09  seig=2.5e-08
+    imic 18(20)  |g[o]|=0.000114  |dxi|=5.33e-05  max(|x|)=1.05e-05  |dr|=0.000464  eig=-1.16e-09  seig=2.49e-08
+    imic 19(21)  |g[o]|=8.99e-05  |dxi|=5.02e-05  max(|x|)=8.8e-06  |dr|=0.000479  eig=-7.99e-10  seig=2.41e-08
+    CPU time for orbital rotation    409.26 sec, wall time     12.79 sec
+    CPU time for update CAS DM      8.39 sec, wall time      0.26 sec
+micro  3  |u-1|=0.00807  |g[o]|=0.000267  |g[c]|=0.000406  |ddm|=0.0016
+    CPU time for micro iter  3      0.00 sec, wall time      0.00 sec
+Active space overlap to initial guess, SVD = [1.         0.99999999 0.99999994 0.99999975 0.99999967 0.99999868
+ 0.99999327 0.99996071 0.99993025 0.99982292 0.99944015]
+Active space overlap to last step, SVD = [1.         1.         1.         1.         0.99999999 0.99999996
+ 0.99999985 0.99999984 0.99999923 0.99999255 0.99999232]
+    CPU time for update eri   1011.76 sec, wall time     33.83 sec
+Start CASCI
+    CPU time for integral transformation to CAS space      0.00 sec, wall time      0.00 sec
+core energy = -2233.31922925858
+    CPU time for effective h1e in CAS space      0.00 sec, wall time      0.00 sec
+davidson 0 1  |r|= 0.000437  e= [-11.47160094]  max|de|= -11.5  lindep=    1
+davidson 1 2  |r|= 0.000628  e= [-11.47160118]  max|de|= -2.36e-07  lindep= 0.993
+davidson 2 3  |r|= 0.000721  e= [-11.47160135]  max|de|= -1.7e-07  lindep= 0.984
+davidson 3 4  |r|= 0.000575  e= [-11.47160155]  max|de|= -2.01e-07  lindep= 0.813
+davidson 4 5  |r|= 0.000435  e= [-11.47160175]  max|de|= -2.02e-07  lindep= 0.962
+davidson 5 6  |r|= 0.000345  e= [-11.47160179]  max|de|= -4.38e-08  lindep= 0.793
+davidson 6 7  |r|= 0.000202  e= [-11.47160183]  max|de|= -3.85e-08  lindep= 0.906
+davidson 7 8  |r|= 0.000175  e= [-11.47160185]  max|de|= -1.57e-08  lindep= 0.855
+davidson 8 9  |r|= 0.000127  e= [-11.47160186]  max|de|= -8.55e-09  lindep= 0.897
+davidson 9 10  |r|= 7.16e-05  e= [-11.47160186]  max|de|= -4.83e-09  lindep= 0.913
+davidson 10 11  |r|= 4.52e-05  e= [-11.47160186]  max|de|= -1.63e-09  lindep= 0.922
+davidson 11 12  |r|= 2.97e-05  e= [-11.47160186]  max|de|= -5.12e-10  lindep= 0.863
+davidson 12 1  |r|= 2.97e-05  e= [-11.47160186]  max|de|= 5.51e-14  lindep=    1
+davidson 13 2  |r|= 1.98e-05  e= [-11.47160186]  max|de|= -1.92e-10  lindep= 0.924
+davidson 14 3  |r|= 1.13e-05  e= [-11.47160186]  max|de|= -1.35e-10  lindep= 0.983
+root 0 converged  |r|= 9.69e-06  e= -11.471601864576833  max|de|= -7.38e-11
+converged 15 4  |r|= 9.69e-06  e= [-11.47160186]  max|de|= -7.38e-11
+    CPU time for FCI solver      6.73 sec, wall time      0.21 sec
+CAS space CI energy = -11.4716018645768
+macro iter   2 ( 23 JK    3 micro), CASSCF E = -2244.79083112315  dE = -2.55227815e-06  S^2 = 2.0000000
+               |grad[o]|=0.00176  |grad[c]|=0.000406  |ddm|=0.0016  |maxRot[o]|=0.00239
+    CPU time for CASCI solver      7.62 sec, wall time      0.24 sec
+    CPU time for macro iter  2   2400.06 sec, wall time     77.22 sec
+1-step CASSCF not converged,   2 macro ( 50 JK   7 micro) steps
+CASSCF canonicalization
+Density matrix diagonal elements [1.870826   0.9979955  1.93359978 1.91694904 0.11116015 0.07085092
+ 0.02846502 1.04403482 0.01584798 0.00504151 0.00522927]
+i = 1  <i|F|i> = -261.30183426
+i = 2  <i|F|i> = -31.87175910
+i = 3  <i|F|i> = -27.35351354
+i = 4  <i|F|i> = -27.35333986
+i = 5  <i|F|i> = -27.34546355
+i = 6  <i|F|i> = -15.55915343
+i = 7  <i|F|i> = -15.55915262
+i = 8  <i|F|i> = -15.55675593
+i = 9  <i|F|i> = -15.55675504
+i = 10  <i|F|i> = -11.27474787
+i = 11  <i|F|i> = -11.27474715
+i = 12  <i|F|i> = -11.27472179
+i = 13  <i|F|i> = -11.27472172
+i = 14  <i|F|i> = -11.27317941
+i = 15  <i|F|i> = -11.27317865
+i = 16  <i|F|i> = -11.27315328
+i = 17  <i|F|i> = -11.27315319
+i = 18  <i|F|i> = -11.24335696
+i = 19  <i|F|i> = -11.24335693
+i = 20  <i|F|i> = -11.24243617
+i = 21  <i|F|i> = -11.24243608
+i = 22  <i|F|i> = -11.24243579
+i = 23  <i|F|i> = -11.24243532
+i = 24  <i|F|i> = -11.24185270
+i = 25  <i|F|i> = -11.24185260
+i = 26  <i|F|i> = -11.24161090
+i = 27  <i|F|i> = -11.24161084
+i = 28  <i|F|i> = -11.24018523
+i = 29  <i|F|i> = -11.24018511
+i = 30  <i|F|i> =  -4.09338844
+i = 31  <i|F|i> =  -2.67558312
+i = 32  <i|F|i> =  -2.67520661
+i = 33  <i|F|i> =  -2.66401827
+i = 34  <i|F|i> =  -1.28241765
+i = 35  <i|F|i> =  -1.26973065
+i = 36  <i|F|i> =  -1.26944602
+i = 37  <i|F|i> =  -1.25652957
+i = 38  <i|F|i> =  -1.10381157
+i = 39  <i|F|i> =  -1.06856011
+i = 40  <i|F|i> =  -1.06764064
+i = 41  <i|F|i> =  -1.05327145
+i = 42  <i|F|i> =  -1.04629383
+i = 43  <i|F|i> =  -1.04299984
+i = 44  <i|F|i> =  -1.04052349
+i = 45  <i|F|i> =  -1.00292080
+i = 46  <i|F|i> =  -0.97198916
+i = 47  <i|F|i> =  -0.89445159
+i = 48  <i|F|i> =  -0.88972919
+i = 49  <i|F|i> =  -0.81725335
+i = 50  <i|F|i> =  -0.79036037
+i = 51  <i|F|i> =  -0.77567221
+i = 52  <i|F|i> =  -0.77553128
+i = 53  <i|F|i> =  -0.76871198
+i = 54  <i|F|i> =  -0.74429106
+i = 55  <i|F|i> =  -0.74237018
+i = 56  <i|F|i> =  -0.71697948
+i = 57  <i|F|i> =  -0.71573300
+i = 58  <i|F|i> =  -0.69984212
+i = 59  <i|F|i> =  -0.67719750
+i = 60  <i|F|i> =  -0.67711408
+i = 61  <i|F|i> =  -0.62037326
+i = 62  <i|F|i> =  -0.59403569
+i = 63  <i|F|i> =  -0.59085057
+i = 64  <i|F|i> =  -0.59062091
+i = 65  <i|F|i> =  -0.58768183
+i = 66  <i|F|i> =  -0.58273378
+i = 67  <i|F|i> =  -0.57336850
+i = 68  <i|F|i> =  -0.56345776
+i = 69  <i|F|i> =  -0.56305054
+i = 70  <i|F|i> =  -0.54957366
+i = 71  <i|F|i> =  -0.54952458
+i = 72  <i|F|i> =  -0.54911094
+i = 73  <i|F|i> =  -0.54678442
+i = 74  <i|F|i> =  -0.53676022
+i = 75  <i|F|i> =  -0.53151346
+i = 76  <i|F|i> =  -0.53007116
+i = 77  <i|F|i> =  -0.52764015
+i = 78  <i|F|i> =  -0.51863492
+i = 79  <i|F|i> =  -0.48953318
+i = 80  <i|F|i> =  -0.47254978
+i = 81  <i|F|i> =  -0.46990471
+i = 82  <i|F|i> =  -0.46822696
+i = 83  <i|F|i> =  -0.43695564
+i = 84  <i|F|i> =  -0.37190664
+i = 85  <i|F|i> =  -0.37177499
+i = 86  <i|F|i> =  -0.36548773
+i = 87  <i|F|i> =  -0.35651794
+i = 88  <i|F|i> =  -0.35361025
+i = 89  <i|F|i> =  -0.34540849
+i = 90  <i|F|i> =  -0.41493039
+i = 91  <i|F|i> =  -0.09017057
+i = 92  <i|F|i> =  -0.24307302
+i = 93  <i|F|i> =  -0.21639746
+i = 94  <i|F|i> =   0.00555655
+i = 95  <i|F|i> =   0.02658635
+i = 96  <i|F|i> =   0.36925469
+i = 97  <i|F|i> =  -0.10467878
+i = 98  <i|F|i> =   1.16016552
+i = 99  <i|F|i> =   1.53978758
+i = 100  <i|F|i> =   1.51828196
+i = 101  <i|F|i> =   0.11786570
+i = 102  <i|F|i> =   0.11978550
+i = 103  <i|F|i> =   0.12557504
+i = 104  <i|F|i> =   0.15622138
+i = 105  <i|F|i> =   0.15670383
+i = 106  <i|F|i> =   0.18655698
+i = 107  <i|F|i> =   0.19973532
+i = 108  <i|F|i> =   0.20002874
+i = 109  <i|F|i> =   0.20056014
+i = 110  <i|F|i> =   0.20144960
+i = 111  <i|F|i> =   0.21108657
+i = 112  <i|F|i> =   0.22140610
+i = 113  <i|F|i> =   0.22142740
+i = 114  <i|F|i> =   0.23391162
+i = 115  <i|F|i> =   0.24041227
+i = 116  <i|F|i> =   0.24293582
+i = 117  <i|F|i> =   0.25007514
+i = 118  <i|F|i> =   0.25450328
+i = 119  <i|F|i> =   0.26463568
+i = 120  <i|F|i> =   0.27286304
+i = 121  <i|F|i> =   0.27316937
+i = 122  <i|F|i> =   0.28692465
+i = 123  <i|F|i> =   0.28878642
+i = 124  <i|F|i> =   0.33447684
+i = 125  <i|F|i> =   0.33454887
+i = 126  <i|F|i> =   0.36355962
+i = 127  <i|F|i> =   0.36411707
+i = 128  <i|F|i> =   0.37817095
+i = 129  <i|F|i> =   0.38022610
+i = 130  <i|F|i> =   0.38056300
+i = 131  <i|F|i> =   0.39814507
+i = 132  <i|F|i> =   0.40941223
+i = 133  <i|F|i> =   0.41232280
+i = 134  <i|F|i> =   0.42499350
+i = 135  <i|F|i> =   0.44100335
+i = 136  <i|F|i> =   0.46485987
+i = 137  <i|F|i> =   0.46788888
+i = 138  <i|F|i> =   0.47324451
+i = 139  <i|F|i> =   0.47577197
+i = 140  <i|F|i> =   0.47801222
+i = 141  <i|F|i> =   0.50360319
+i = 142  <i|F|i> =   0.50403612
+i = 143  <i|F|i> =   0.52730024
+i = 144  <i|F|i> =   0.55878483
+i = 145  <i|F|i> =   0.56136352
+i = 146  <i|F|i> =   0.56488731
+i = 147  <i|F|i> =   0.57461769
+i = 148  <i|F|i> =   0.59162991
+i = 149  <i|F|i> =   0.59821129
+i = 150  <i|F|i> =   0.60067765
+i = 151  <i|F|i> =   0.60983430
+i = 152  <i|F|i> =   0.61023617
+i = 153  <i|F|i> =   0.61114321
+i = 154  <i|F|i> =   0.61873368
+i = 155  <i|F|i> =   0.61933042
+i = 156  <i|F|i> =   0.62008196
+i = 157  <i|F|i> =   0.62834260
+i = 158  <i|F|i> =   0.64799901
+i = 159  <i|F|i> =   0.65195433
+i = 160  <i|F|i> =   0.65199246
+i = 161  <i|F|i> =   0.66377289
+i = 162  <i|F|i> =   0.67473916
+i = 163  <i|F|i> =   0.68404609
+i = 164  <i|F|i> =   0.69018332
+i = 165  <i|F|i> =   0.69369228
+i = 166  <i|F|i> =   0.69376754
+i = 167  <i|F|i> =   0.69684616
+i = 168  <i|F|i> =   0.70288205
+i = 169  <i|F|i> =   0.70384900
+i = 170  <i|F|i> =   0.70699969
+i = 171  <i|F|i> =   0.71575980
+i = 172  <i|F|i> =   0.72543470
+i = 173  <i|F|i> =   0.74020432
+i = 174  <i|F|i> =   0.74200924
+i = 175  <i|F|i> =   0.74366255
+i = 176  <i|F|i> =   0.74399792
+i = 177  <i|F|i> =   0.75122189
+i = 178  <i|F|i> =   0.75245739
+i = 179  <i|F|i> =   0.77618718
+i = 180  <i|F|i> =   0.78227276
+i = 181  <i|F|i> =   0.78372626
+i = 182  <i|F|i> =   0.78381528
+i = 183  <i|F|i> =   0.79772224
+i = 184  <i|F|i> =   0.80084911
+i = 185  <i|F|i> =   0.80685729
+i = 186  <i|F|i> =   0.81944797
+i = 187  <i|F|i> =   0.83016255
+i = 188  <i|F|i> =   0.83054051
+i = 189  <i|F|i> =   0.84441753
+i = 190  <i|F|i> =   0.85014756
+i = 191  <i|F|i> =   0.85073012
+i = 192  <i|F|i> =   0.85147578
+i = 193  <i|F|i> =   0.86886210
+i = 194  <i|F|i> =   0.87135504
+i = 195  <i|F|i> =   0.87294820
+i = 196  <i|F|i> =   0.87831348
+i = 197  <i|F|i> =   0.87973335
+i = 198  <i|F|i> =   0.89483714
+i = 199  <i|F|i> =   0.89572351
+i = 200  <i|F|i> =   0.90568952
+i = 201  <i|F|i> =   0.90977187
+i = 202  <i|F|i> =   0.91446059
+i = 203  <i|F|i> =   0.92852198
+i = 204  <i|F|i> =   0.93432582
+i = 205  <i|F|i> =   0.93535749
+i = 206  <i|F|i> =   0.94396775
+i = 207  <i|F|i> =   0.96308785
+i = 208  <i|F|i> =   0.96369150
+i = 209  <i|F|i> =   0.96383880
+i = 210  <i|F|i> =   0.96490825
+i = 211  <i|F|i> =   0.96657824
+i = 212  <i|F|i> =   0.97137072
+i = 213  <i|F|i> =   0.99063807
+i = 214  <i|F|i> =   0.99311097
+i = 215  <i|F|i> =   0.99332371
+i = 216  <i|F|i> =   1.00674818
+i = 217  <i|F|i> =   1.03366172
+i = 218  <i|F|i> =   1.03932410
+i = 219  <i|F|i> =   1.07440148
+i = 220  <i|F|i> =   1.07550778
+i = 221  <i|F|i> =   1.09498887
+i = 222  <i|F|i> =   1.10980230
+i = 223  <i|F|i> =   1.11260187
+i = 224  <i|F|i> =   1.11586220
+i = 225  <i|F|i> =   1.12555557
+i = 226  <i|F|i> =   1.12931522
+i = 227  <i|F|i> =   1.13045476
+i = 228  <i|F|i> =   1.13242273
+i = 229  <i|F|i> =   1.13764412
+i = 230  <i|F|i> =   1.13978751
+i = 231  <i|F|i> =   1.14819919
+i = 232  <i|F|i> =   1.16063165
+i = 233  <i|F|i> =   1.16141565
+i = 234  <i|F|i> =   1.17218404
+i = 235  <i|F|i> =   1.17245303
+i = 236  <i|F|i> =   1.18584076
+i = 237  <i|F|i> =   1.19452981
+i = 238  <i|F|i> =   1.19820279
+i = 239  <i|F|i> =   1.21751078
+i = 240  <i|F|i> =   1.22167326
+i = 241  <i|F|i> =   1.22272653
+i = 242  <i|F|i> =   1.22422293
+i = 243  <i|F|i> =   1.22841215
+i = 244  <i|F|i> =   1.23057098
+i = 245  <i|F|i> =   1.25847175
+i = 246  <i|F|i> =   1.26345683
+i = 247  <i|F|i> =   1.26450925
+i = 248  <i|F|i> =   1.26809855
+i = 249  <i|F|i> =   1.26953312
+i = 250  <i|F|i> =   1.28565998
+i = 251  <i|F|i> =   1.29172430
+i = 252  <i|F|i> =   1.29939697
+i = 253  <i|F|i> =   1.30138451
+i = 254  <i|F|i> =   1.30467587
+i = 255  <i|F|i> =   1.30533232
+i = 256  <i|F|i> =   1.31169533
+i = 257  <i|F|i> =   1.31340175
+i = 258  <i|F|i> =   1.31405754
+i = 259  <i|F|i> =   1.33540075
+i = 260  <i|F|i> =   1.33767129
+i = 261  <i|F|i> =   1.34682908
+i = 262  <i|F|i> =   1.35902985
+i = 263  <i|F|i> =   1.35952244
+i = 264  <i|F|i> =   1.38801726
+i = 265  <i|F|i> =   1.38972916
+i = 266  <i|F|i> =   1.39338795
+i = 267  <i|F|i> =   1.39743486
+i = 268  <i|F|i> =   1.39914741
+i = 269  <i|F|i> =   1.48837593
+i = 270  <i|F|i> =   1.49041086
+i = 271  <i|F|i> =   1.49680848
+i = 272  <i|F|i> =   1.53414764
+i = 273  <i|F|i> =   1.53507875
+i = 274  <i|F|i> =   1.54482665
+i = 275  <i|F|i> =   1.54724231
+i = 276  <i|F|i> =   1.55030146
+i = 277  <i|F|i> =   1.58224900
+i = 278  <i|F|i> =   1.58346801
+i = 279  <i|F|i> =   1.59474965
+i = 280  <i|F|i> =   1.59719530
+i = 281  <i|F|i> =   1.61870526
+i = 282  <i|F|i> =   1.61937566
+i = 283  <i|F|i> =   1.64362969
+i = 284  <i|F|i> =   1.66060293
+i = 285  <i|F|i> =   1.66676809
+i = 286  <i|F|i> =   1.67064332
+i = 287  <i|F|i> =   1.67114504
+i = 288  <i|F|i> =   1.67976575
+i = 289  <i|F|i> =   1.68116733
+i = 290  <i|F|i> =   1.70758750
+i = 291  <i|F|i> =   1.75262032
+i = 292  <i|F|i> =   1.75380192
+i = 293  <i|F|i> =   1.75707669
+i = 294  <i|F|i> =   1.76252696
+i = 295  <i|F|i> =   1.76434891
+i = 296  <i|F|i> =   1.76810636
+i = 297  <i|F|i> =   1.79013352
+i = 298  <i|F|i> =   1.79828496
+i = 299  <i|F|i> =   1.80005278
+i = 300  <i|F|i> =   1.80118370
+i = 301  <i|F|i> =   1.81219960
+i = 302  <i|F|i> =   1.81724143
+i = 303  <i|F|i> =   1.83757923
+i = 304  <i|F|i> =   1.85192421
+i = 305  <i|F|i> =   1.85562664
+i = 306  <i|F|i> =   1.85605208
+i = 307  <i|F|i> =   1.86461896
+i = 308  <i|F|i> =   1.87113170
+i = 309  <i|F|i> =   1.87364338
+i = 310  <i|F|i> =   1.87806598
+i = 311  <i|F|i> =   1.88203032
+i = 312  <i|F|i> =   1.88249352
+i = 313  <i|F|i> =   1.88346391
+i = 314  <i|F|i> =   1.88457011
+i = 315  <i|F|i> =   1.88645623
+i = 316  <i|F|i> =   1.90883767
+i = 317  <i|F|i> =   1.92337023
+i = 318  <i|F|i> =   1.92338978
+i = 319  <i|F|i> =   1.95421826
+i = 320  <i|F|i> =   1.95565631
+i = 321  <i|F|i> =   1.96590512
+i = 322  <i|F|i> =   1.98228780
+i = 323  <i|F|i> =   1.98432582
+i = 324  <i|F|i> =   1.99868237
+i = 325  <i|F|i> =   2.00090768
+i = 326  <i|F|i> =   2.02442310
+i = 327  <i|F|i> =   2.02910016
+i = 328  <i|F|i> =   2.03119107
+i = 329  <i|F|i> =   2.04129572
+i = 330  <i|F|i> =   2.04700405
+i = 331  <i|F|i> =   2.04906533
+i = 332  <i|F|i> =   2.05142490
+i = 333  <i|F|i> =   2.05179814
+i = 334  <i|F|i> =   2.08032277
+i = 335  <i|F|i> =   2.08111188
+i = 336  <i|F|i> =   2.09090574
+i = 337  <i|F|i> =   2.09507901
+i = 338  <i|F|i> =   2.10132579
+i = 339  <i|F|i> =   2.10200844
+i = 340  <i|F|i> =   2.10288429
+i = 341  <i|F|i> =   2.10865881
+i = 342  <i|F|i> =   2.12513925
+i = 343  <i|F|i> =   2.13127526
+i = 344  <i|F|i> =   2.14065279
+i = 345  <i|F|i> =   2.14727000
+i = 346  <i|F|i> =   2.14788201
+i = 347  <i|F|i> =   2.14971852
+i = 348  <i|F|i> =   2.15626308
+i = 349  <i|F|i> =   2.16913402
+i = 350  <i|F|i> =   2.20331954
+i = 351  <i|F|i> =   2.20667158
+i = 352  <i|F|i> =   2.21154743
+i = 353  <i|F|i> =   2.21213201
+i = 354  <i|F|i> =   2.21377412
+i = 355  <i|F|i> =   2.21404388
+i = 356  <i|F|i> =   2.21552344
+i = 357  <i|F|i> =   2.21772486
+i = 358  <i|F|i> =   2.27133109
+i = 359  <i|F|i> =   2.28349139
+i = 360  <i|F|i> =   2.28424190
+i = 361  <i|F|i> =   2.28437546
+i = 362  <i|F|i> =   2.30530187
+i = 363  <i|F|i> =   2.30537264
+i = 364  <i|F|i> =   2.30642346
+i = 365  <i|F|i> =   2.31914999
+i = 366  <i|F|i> =   2.32432871
+i = 367  <i|F|i> =   2.44495783
+i = 368  <i|F|i> =   2.45007311
+i = 369  <i|F|i> =   2.45089006
+i = 370  <i|F|i> =   2.45337672
+i = 371  <i|F|i> =   2.45621157
+i = 372  <i|F|i> =   2.46468075
+i = 373  <i|F|i> =   2.46859076
+i = 374  <i|F|i> =   2.46909331
+i = 375  <i|F|i> =   2.48439983
+i = 376  <i|F|i> =   2.50055248
+i = 377  <i|F|i> =   2.50617769
+i = 378  <i|F|i> =   2.50730096
+i = 379  <i|F|i> =   2.50797661
+i = 380  <i|F|i> =   2.53718670
+i = 381  <i|F|i> =   2.55895550
+i = 382  <i|F|i> =   2.56070176
+i = 383  <i|F|i> =   2.56808099
+i = 384  <i|F|i> =   2.58055075
+i = 385  <i|F|i> =   2.62454941
+i = 386  <i|F|i> =   2.62924793
+i = 387  <i|F|i> =   2.62934070
+i = 388  <i|F|i> =   2.63132696
+i = 389  <i|F|i> =   2.63442507
+i = 390  <i|F|i> =   2.70600901
+i = 391  <i|F|i> =   2.71661463
+i = 392  <i|F|i> =   2.72556715
+i = 393  <i|F|i> =   2.73285424
+i = 394  <i|F|i> =   2.74268538
+i = 395  <i|F|i> =   2.74599116
+i = 396  <i|F|i> =   2.75942234
+i = 397  <i|F|i> =   2.76430993
+i = 398  <i|F|i> =   2.77514628
+i = 399  <i|F|i> =   2.77705481
+i = 400  <i|F|i> =   2.77860115
+i = 401  <i|F|i> =   2.78972000
+i = 402  <i|F|i> =   2.79038059
+i = 403  <i|F|i> =   2.79965305
+i = 404  <i|F|i> =   2.80914524
+i = 405  <i|F|i> =   2.81332886
+i = 406  <i|F|i> =   2.81352521
+i = 407  <i|F|i> =   2.81663403
+i = 408  <i|F|i> =   2.83832610
+i = 409  <i|F|i> =   2.91790990
+i = 410  <i|F|i> =   2.91968165
+i = 411  <i|F|i> =   2.96771624
+i = 412  <i|F|i> =   3.00180407
+i = 413  <i|F|i> =   3.00314689
+i = 414  <i|F|i> =   3.01442936
+i = 415  <i|F|i> =   3.02603372
+i = 416  <i|F|i> =   3.02851447
+i = 417  <i|F|i> =   3.09172717
+i = 418  <i|F|i> =   3.09235112
+i = 419  <i|F|i> =   3.09514009
+i = 420  <i|F|i> =   3.10302743
+i = 421  <i|F|i> =   3.11155461
+i = 422  <i|F|i> =   3.12198534
+i = 423  <i|F|i> =   3.12418978
+i = 424  <i|F|i> =   3.19615645
+i = 425  <i|F|i> =   3.20021233
+i = 426  <i|F|i> =   3.20230665
+i = 427  <i|F|i> =   3.20704239
+i = 428  <i|F|i> =   3.20716767
+i = 429  <i|F|i> =   3.25115859
+i = 430  <i|F|i> =   3.25363441
+i = 431  <i|F|i> =   3.26045787
+i = 432  <i|F|i> =   3.26631181
+i = 433  <i|F|i> =   3.27192281
+i = 434  <i|F|i> =   3.30043850
+i = 435  <i|F|i> =   3.30294914
+i = 436  <i|F|i> =   3.35067117
+i = 437  <i|F|i> =   3.42781059
+i = 438  <i|F|i> =   3.48412638
+i = 439  <i|F|i> =   3.48499728
+i = 440  <i|F|i> =   3.52033799
+i = 441  <i|F|i> =   3.53134204
+i = 442  <i|F|i> =   3.58509379
+i = 443  <i|F|i> =   3.59578010
+i = 444  <i|F|i> =   3.60717987
+i = 445  <i|F|i> =   3.61199090
+i = 446  <i|F|i> =   3.61574978
+i = 447  <i|F|i> =   3.63983399
+i = 448  <i|F|i> =   3.65014359
+i = 449  <i|F|i> =   3.65242456
+i = 450  <i|F|i> =   3.70126640
+i = 451  <i|F|i> =   3.71679432
+i = 452  <i|F|i> =   3.79430388
+i = 453  <i|F|i> =   3.95275326
+i = 454  <i|F|i> =   3.95608337
+i = 455  <i|F|i> =   4.10381429
+i = 456  <i|F|i> =   4.10933663
+i = 457  <i|F|i> =   4.11542917
+i = 458  <i|F|i> =   4.26575975
+i = 459  <i|F|i> =   4.35417527
+i = 460  <i|F|i> =   4.35805827
+i = 461  <i|F|i> =   4.46311573
+i = 462  <i|F|i> =   5.15670459
+i = 463  <i|F|i> =   5.15835907
+i = 464  <i|F|i> =   5.18390851
+i = 465  <i|F|i> =   5.18727927
+i = 466  <i|F|i> =   5.54799471
+i = 467  <i|F|i> =   8.25704981
+i = 468  <i|F|i> =   8.27382010
+i = 469  <i|F|i> =  38.30964765
+    CPU time for 1-step CASSCF   6051.55 sec, wall time    195.72 sec
+CASSCF energy = -2244.79083112315
+CASCI E = -2244.79083112315  E(CI) = -11.4716018645768  S^2 = 2.0000000
+CROSS_RESTART {"mode": "default-ah", "converged": false, "energy": -2244.790831123155, "elapsed_seconds": 259.3877163082361, "spin_square": 2.0000000000487024}
