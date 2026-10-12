@@ -331,7 +331,8 @@ void print_summary(
   const int effective_thread_count = allocated_cpu_thread_count();
 
   std::cout << "\n"
-            << (command_converged ? "                        VBSCF converged in "
+            << (result.energy_only ? "                  Fixed-orbital ENERGY completed in "
+                : command_converged ? "                        VBSCF converged in "
                                   : "                    VBSCF did not converge in ")
             << std::setw(5) << result.n_iterations << " iterations\n\n"
             << "                  Total Energy:   "
@@ -360,18 +361,31 @@ void print_summary(
         "Final Davidson max rel. residual",
         format_scientific_double(davidson.maximum_relative_residual, 8));
   }
+  if (result.scf_result.tnvb_diagnostics.has_value()) {
+    const auto& tensor=*result.scf_result.tnvb_diagnostics;
+    print_log_field("TNVB structure bond", std::to_string(tensor.structure_bond));
+    if (tensor.gradient_evaluated) {
+      print_log_field("TNVB total-state bond", std::to_string(tensor.total_bond));
+      print_log_field("TNVB fit energy discrepancy", format_scientific_double(tensor.fit_energy_error));
+      print_log_field("TNVB RDM identity error", format_scientific_double(tensor.rdm_identity_error));
+      print_log_field("TNVB final RDM wall time", format_seconds(tensor.rdm_wall_seconds));
+    }
+    print_log_field("TNVB final state/H/S wall time", format_seconds(tensor.state_and_hs_wall_seconds));
+  }
   if (trace_sample_directory.has_value()) {
     print_log_field("Trace sample directory", trace_sample_directory->string());
   }
   if (molden_output_path.has_value()) {
     print_log_field("Molden output", molden_output_path->string());
   }
-  print_log_field("Gradient metric", gradient_tolerance_metric_name(options.backend));
+  if (!result.energy_only) {
+    print_log_field("Gradient metric", gradient_tolerance_metric_name(options.backend));
   print_log_field(
       "Convergence threshold",
       format_convergence_threshold_summary(
           options.energy_tolerance,
           options.gradient_tolerance));
+  }
   print_log_field(
       "Nuclear repulsion energy",
       format_fixed_double(load_result.nuclear_repulsion_energy, 12));
@@ -405,7 +419,8 @@ void print_summary(
   print_log_field(
       "Average structure overlap",
       format_fixed_double(result.scf_result.average_structure_overlap, 12));
-  print_log_field(
+  if (!result.energy_only) {
+    print_log_field(
       "Final gradient |g|_inf",
       format_scientific_double(result.final_gradient_inf_norm, 8));
   print_log_field(
@@ -421,6 +436,7 @@ void print_summary(
     print_log_field(
         "Final physical |g|_(G^-1)",
         format_scientific_double(result.final_physical_gradient_norm, 8));
+  }
   }
   if (options.backend ==
       xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton) {

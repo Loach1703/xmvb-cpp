@@ -582,15 +582,33 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
           ? StandardTwoElectronMode::ResolutionOfIdentity
           : StandardTwoElectronMode::Exact;
   load_result.requested_scf_max_iterations =
-      input_deck_metadata.requested_scf_max_iterations > 0
+      (input_deck_metadata.requested_scf_max_iterations > 0 ||
+       (input_deck_metadata.tnvb.enabled &&
+        input_deck_metadata.has_explicit_scf_max_iterations))
           ? input_deck_metadata.requested_scf_max_iterations
           : 2000;
   load_result.scf_optimizer = input_deck_metadata.scf_optimizer;
   load_result.structure_eigensolver =
-      input_deck_metadata.structure_eigensolver;
+      input_deck_metadata.tnvb.enabled &&
+              !input_deck_metadata.has_explicit_structure_eigensolver
+          ? StructureEigensolver::Dense
+          : input_deck_metadata.structure_eigensolver;
   load_result.state_average_count = input_deck_metadata.state_average_count;
   load_result.request_molden_output = input_deck_metadata.request_molden_output;
   result.standard_two_electron_mode = load_result.standard_two_electron_mode;
+  result.tnvb = input_deck_metadata.tnvb;
+  if (result.tnvb.enabled) {
+    if (!input_deck.has_explicit_raw_structures ||
+        resolved_spin_multiplicity != 1 ||
+        input_deck_metadata.wavefunction_type != kWavefunctionTypeStructure ||
+        input_deck_metadata.vb_function_type != kVbFunctionTypeDeterminant) {
+      throw std::invalid_argument(
+          "TNVB requires explicit singlet VB structures with WFNTYP=STR, VBFTYP=DET");
+    }
+    if (result.tnvb.structure_bond <= 0) {
+      throw std::invalid_argument("TNVB requires TNBOND to be specified");
+    }
+  }
   result.orbital_preparation_input.n_basis_functions = static_topology.n_basis_functions;
   result.orbital_preparation_input.n_orbitals = resolved_n_orbitals;
   result.orbital_preparation_input.n_active_orbitals = resolved_n_active_orbitals;
@@ -731,7 +749,7 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
           .count();
 
   result.complete_active_space =
-      load_result.raw_structure_source ==
+      !result.tnvb.enabled && load_result.raw_structure_source ==
           RawStructureSource::GeneratedFromStructureClass &&
       input_deck_metadata.structure_class_keyword.find("FULL") !=
           std::string::npos &&
@@ -759,7 +777,7 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
   static_molecule_metadata.ao_cartesian_exponents =
       static_topology.ao_cartesian_exponents;
 
-  if (options.expand_selected_raw_structures) {
+  if (options.expand_selected_raw_structures && !result.tnvb.enabled) {
     const auto structure_expansion_start_time = std::chrono::steady_clock::now();
     FullDeterminantStructureExpander expander;
     result.structure_data = expander.expand(selected_raw_structure_data);
@@ -771,6 +789,9 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
       throw std::invalid_argument(
           "NSTATE exceeds the number of expanded VB structures");
     }
+  }
+  if (result.tnvb.enabled) {
+    result.raw_structure_data = selected_raw_structure_data;
   }
   load_result.input = std::move(result);
   load_result.raw_structure_data = std::move(selected_raw_structure_data);

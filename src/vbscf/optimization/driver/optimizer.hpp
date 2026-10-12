@@ -5,6 +5,7 @@
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/optimization/driver/options.hpp"
+#include "vbscf/derivatives/gradient/active_space/backend.hpp"
 
 namespace xmvb::vb {
 
@@ -21,6 +22,8 @@ public:
    */
   explicit VbScfOptimizer(
       VbScfOptimizerOptions options = {});
+  VbScfOptimizer(VbScfOptimizerOptions options,
+                std::shared_ptr<const ElectronicStateBackend> electronic_backend);
 
   /**
    * @brief Creates an optimizer with explicit helper components.
@@ -52,6 +55,7 @@ public:
 private:
   OrbitalGradientEvaluator orbital_gradient_evaluator_;
   VbScfOptimizerOptions options_;
+  std::shared_ptr<const ElectronicStateBackend> electronic_backend_;
 };
 
 }  // namespace xmvb::vb

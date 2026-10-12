@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Test-only bridge to a specified frozen old worker; never used in production.
+
+Use the configured Block2 Python and runtime for both subprocesses. The input
+is exported by export_tnvb_request; old and new receive identical integrals.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import struct
+import subprocess
+import sys
+import tempfile
+
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+import numpy as np
+
+
+def array(stream, count):
+    data = stream.read(count * 8)
+    if len(data) != count * 8:
+        raise ValueError("truncated interop response")
+    return np.frombuffer(data, dtype="<f8").copy()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("request")
+    parser.add_argument("new_worker")
+    parser.add_argument("old_worker")
+    parser.add_argument("report")
+    args = parser.parse_args()
+    content = Path(args.request).read_bytes()
+    if content[:8] != b"CPTNREQ1":
+        raise ValueError("bad exported request")
+    version, n, k, nae, nel, d, s, mode = struct.unpack("<8i", content[8:40])
+    if version != 1 or mode != 1:
+        raise ValueError("requires a gradient request")
+    with tempfile.TemporaryDirectory(prefix="cpp-tnvb-interop-") as folder:
+        folder = Path(folder)
+        old_request = folder / "old.request"
+        old_request.write_bytes(b"XMB2RD1\0" + struct.pack("<11i", 7, n, k, nae, nel, d, s, 0, 0, 0, 0) + content[40:])
+        responses = [folder / "new.response", folder / "old.response"]
+        env = os.environ.copy()
+        env["XMVB_BLOCK2_RDM_CHECK_TOL"] = "1e-8"
+        env["XMVB_BLOCK2_WORKERS"] = "1"
+        for worker, request, response in zip(
+                [args.new_worker, args.old_worker], [args.request, old_request], responses):
+            # Per-worker scratch/cache isolation, including separate total MPSs.
+            with tempfile.TemporaryDirectory(prefix="worker-", dir=folder) as scratch:
+                env["XMVB_BLOCK2_SCRATCH_PARENT"] = scratch
+                env["XMVB_BLOCK2_WARM_CACHE"] = str(Path(scratch) / "warm")
+                subprocess.run([sys.executable, str(Path(worker).resolve()), str(Path(request).resolve()), str(response)], env=env, check=True)
+        with responses[0].open("rb") as stream:
+            if stream.read(8) != b"CPTNRES1":
+                raise ValueError("bad new response")
+            header = struct.unpack("<8i", stream.read(32))
+            if header != (1, 0, n, k, 1, n, 0, 0):
+                raise ValueError("bad new response dimensions")
+            hn, sn = array(stream, n*n), array(stream, n*n)
+            en, cn = array(stream, n), array(stream, n*n).reshape((n,n), order="F")[:,0]
+            diagnostics = array(stream, 4)
+            pn, pin, gn = array(stream, k*k), array(stream, k**4), array(stream, k*k)
+            if stream.read(1):
+                raise ValueError("trailing new response")
+        with responses[1].open("rb") as stream:
+            if stream.read(8) != b"XMB2RO1\0" or struct.unpack("<2i", stream.read(8)) != (7, 0):
+                raise ValueError("bad old response")
+            old_fit = array(stream, 1)[0]
+            ho, so = array(stream, n*n), array(stream, n*n)
+            eo, co = array(stream, 1)[0], array(stream, n)
+            po, pio, go = array(stream, k*k), array(stream, k**4), array(stream, k*k)
+            if stream.read(1):
+                raise ValueError("trailing old response")
+        if np.dot(cn, co) < 0:
+            cn = -cn
+        error = {name: float(np.max(np.abs(a-b))) for name, a, b in [
+            ("H",hn,ho), ("S",sn,so), ("coefficients",cn,co),
+            ("P",pn,po), ("Pi",pin,pio), ("D3G",gn,go)]}
+        error["energy"] = float(abs(en[0]-eo))
+        limits = dict(H=1e-8, S=1e-10, coefficients=1e-8, P=1e-8, Pi=1e-8, D3G=1e-7, energy=1e-9)
+        report = dict(passed=all(np.isfinite(value) and value <= limits[key] for key, value in error.items()),
+                      errors=error, limits=limits, new_fit=float(diagnostics[0]), old_fit=float(old_fit),
+                      old_worker=str(Path(args.old_worker).resolve()))
+        Path(args.report).write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+        print(json.dumps(report, allow_nan=False))
+        return 0 if report["passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

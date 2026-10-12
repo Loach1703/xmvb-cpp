@@ -32,9 +32,10 @@ Eigen::MatrixXd build_one_particle_density_matrix(
     const OrbitalPreparationInput& orbital_input) {
   const auto& orbital_result = gradient_result.orbital_preparation_result;
   const auto& second_order_context = gradient_result.second_order_context;
-  if (second_order_context == nullptr) {
+  if (second_order_context == nullptr &&
+      gradient_result.active_one_electron_gradient.size() == 0) {
     throw std::invalid_argument(
-        "final one-particle density requires an accepted-point context");
+        "final one-particle density requires a first-order active density");
   }
 
   const int n_bf = static_cast<int>(orbital_input.n_basis_functions);
@@ -47,14 +48,19 @@ Eigen::MatrixXd build_one_particle_density_matrix(
       orbital_result.auxiliary_orbital_matrix.cols() != n_bf ||
       orbital_result.inactive_density_matrix.rows() != n_bf ||
       orbital_result.inactive_density_matrix.cols() != n_bf ||
-      second_order_context->active_one_electron_gradient.size() !=
-          static_cast<std::size_t>(n_active * n_active)) {
+      (second_order_context != nullptr
+          ? second_order_context->active_one_electron_gradient.size() !=
+                static_cast<std::size_t>(n_active * n_active)
+          : gradient_result.active_one_electron_gradient.rows() != n_active ||
+                gradient_result.active_one_electron_gradient.cols() != n_active)) {
     throw std::invalid_argument(
         "final one-particle density inputs have inconsistent dimensions");
   }
 
   const Eigen::Map<const Eigen::MatrixXd> active_density_adjoint(
-      second_order_context->active_one_electron_gradient.data(),
+      second_order_context != nullptr
+          ? second_order_context->active_one_electron_gradient.data()
+          : gradient_result.active_one_electron_gradient.data(),
       n_active,
       n_active);
   const auto active_orbitals =
@@ -78,6 +84,12 @@ VbScfOptimizer::VbScfOptimizer(
       options_(options) {}
 
 VbScfOptimizer::VbScfOptimizer(
+    VbScfOptimizerOptions options,
+    std::shared_ptr<const ElectronicStateBackend> electronic_backend)
+    : orbital_gradient_evaluator_(), options_(options),
+      electronic_backend_(std::move(electronic_backend)) {}
+
+VbScfOptimizer::VbScfOptimizer(
     OrbitalGradientEvaluator orbital_gradient_evaluator,
     VbScfOptimizerOptions options)
     : orbital_gradient_evaluator_(std::move(orbital_gradient_evaluator)),
@@ -96,6 +108,12 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
     double nuclear_repulsion_energy) const {
   if (options_.max_iterations <= 0) {
     throw std::invalid_argument("max_iterations must be positive");
+  }
+  if (input.tnvb.enabled &&
+      (!electronic_backend_ || options_.backend != VbScfOptimizerBackend::Lbfgs ||
+       options_.structure_eigensolver != StructureEigensolver::Dense ||
+       input.tnvb.total_bond < input.tnvb.structure_bond)) {
+    throw std::invalid_argument("TNVB optimization requires its electronic backend, ISCF=5, dense H/S and TNSUMBOND >= TNBOND");
   }
   if (options_.gradient_tolerance <= 0.0 ||
       options_.energy_tolerance <= 0.0 ||
@@ -135,7 +153,7 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
       StructureSolveAccuracy{
           options_.energy_tolerance,
           options_.gradient_tolerance},
-      &orbital_gradient_evaluator_);
+      &orbital_gradient_evaluator_, electronic_backend_);
   const int n = static_cast<int>(parameter_vector.size());
   int n_iterations = 0;
   double final_gradient_l2_norm = 0.0;

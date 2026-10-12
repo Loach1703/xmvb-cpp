@@ -1011,7 +1011,7 @@ Eigen::MatrixXd build_deleted_minor_matrix(
     throw std::invalid_argument("deleted-minor request is larger than the source matrix");
   }
 
-  Eigen::MatrixXd minor(
+  Eigen::MatrixXd deleted_minor(
       overlap_block.rows() - static_cast<int>(deleted_rows.size()),
       overlap_block.cols() - static_cast<int>(deleted_cols.size()));
   int minor_row = 0;
@@ -1024,12 +1024,12 @@ Eigen::MatrixXd build_deleted_minor_matrix(
       if (std::find(deleted_cols.begin(), deleted_cols.end(), col) != deleted_cols.end()) {
         continue;
       }
-      minor(minor_row, minor_col) = overlap_block(row, col);
+      deleted_minor(minor_row, minor_col) = overlap_block(row, col);
       ++minor_col;
     }
     ++minor_row;
   }
-  return minor;
+  return deleted_minor;
 }
 
 double calc_second_order_cofactor(
@@ -1139,7 +1139,7 @@ double calc_directional_second_order_cofactor(
     return 0.0;
   }
 
-  Eigen::MatrixXd minor(minor_dimension, minor_dimension);
+  Eigen::MatrixXd deleted_minor(minor_dimension, minor_dimension);
   Eigen::MatrixXd delta_minor(minor_dimension, minor_dimension);
   int minor_row = 0;
   for (int row = 0; row < n_electrons; ++row) {
@@ -1151,7 +1151,7 @@ double calc_directional_second_order_cofactor(
       if (col == left_first || col == left_second) {
         continue;
       }
-      minor(minor_row, minor_col) = overlap_block(row, col);
+      deleted_minor(minor_row, minor_col) = overlap_block(row, col);
       delta_minor(minor_row, minor_col) = delta_overlap_block(row, col);
       ++minor_col;
     }
@@ -1159,7 +1159,7 @@ double calc_directional_second_order_cofactor(
   }
 
   const DeterminantOverlapResult minor_result =
-      overlap_resolver.resolve_matrix(minor);
+      overlap_resolver.resolve_matrix(deleted_minor);
   const Eigen::MatrixXd minor_cofactor =
       calc_cofactor_1st(minor_result);
   const double sign =

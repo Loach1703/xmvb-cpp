@@ -1036,8 +1036,13 @@ void print_input_sections(
          << std::setw(4) << orbitals.spin_multiplicity << '\n'
          << " TOTAL NUMBER OF ATOMS                        = "
          << std::setw(4) << molecule.n_atoms << "\n\n";
-  print_ionic_class_summary(
-      output, load_result.raw_structure_data, input.structure_data);
+  if (!input.tnvb.enabled) {
+    print_ionic_class_summary(output, load_result.raw_structure_data, input.structure_data);
+  } else {
+    output << " TNVB SU(2) electronic backend: direct raw structures, no determinant expansion.\n"
+           << " Fixed structure / total bond: " << input.tnvb.structure_bond << " / "
+           << input.tnvb.total_bond << "\n\n";
+  }
   output << " Number of structures: " << std::setw(5)
          << load_result.raw_structure_data.n_structures << "\n\n"
          << " The following structures are used in calculation"
@@ -1178,11 +1183,13 @@ void print_final_state_sections(
     const auto& orbitals = result.optimized_input.orbital_preparation_input;
     const int n_inactive =
         (orbitals.n_total_electrons - orbitals.n_active_electrons) / 2;
-    print_determinant_coefficients(
+    if (!result.optimized_input.tnvb.enabled) {
+      print_determinant_coefficients(
         output,
         normalized.coefficients,
         result.optimized_input.structure_data,
         n_inactive);
+    }
     if (has_full_structure_matrices) {
       print_structure_weights(
           output,
@@ -1198,6 +1205,10 @@ void print_final_state_sections(
       output,
       load_result.static_molecule_metadata,
       result.optimized_input.orbital_preparation_input);
+  if (result.energy_only) {
+    output << "\n ENERGY-only evaluation: no total-state RDM or orbital gradient was requested.\n";
+    return;
+  }
   const auto& orbitals = result.optimized_input.orbital_preparation_input;
   const NaturalOrbitalAnalysis natural_orbitals = compute_natural_orbitals(
       result.one_particle_density_matrix,

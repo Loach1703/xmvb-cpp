@@ -106,4 +106,7 @@ uv.lock
 pyproject.toml
 scripts/
 article/
-docs/
+docs/*
+!docs/tnvb_gradient_conventions.md
+!docs/tnvb_acceptance_report.md
+!docs/tnvb_usage.md

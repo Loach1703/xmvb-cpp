@@ -113,6 +113,8 @@ struct OrbitalGradientResult {
    * @brief Column-major active-space effective one-electron matrix `HHO`.
    */
   Eigen::MatrixXd active_one_electron_integrals;
+  /** First-order active density/adjoint, without requiring a Hessian cache. */
+  Eigen::MatrixXd active_one_electron_gradient;
 
   /**
    * @brief Packed active-space two-electron integrals used to derive `J` and `K`.

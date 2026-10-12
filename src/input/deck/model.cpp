@@ -178,8 +178,22 @@ void apply_ctrl_assignment(
   }
   const std::string key = to_ascii_upper(raw_key);
   const std::string value_upper = to_ascii_upper(raw_value);
+  if (key == "TNBOND" || key == "TNSUMBOND") {
+    std::size_t consumed = 0;
+    const int bond = std::stoi(raw_value, &consumed);
+    if (bond <= 0 || consumed != raw_value.size()) {
+      throw std::invalid_argument(key + " must be a positive integer");
+    }
+    if (key == "TNBOND") {
+      metadata->tnvb.structure_bond = bond;
+    } else {
+      metadata->tnvb.total_bond = bond;
+    }
+    return;
+  }
   if (key == "ITMAX") {
     metadata->requested_scf_max_iterations = std::stoi(raw_value);
+    metadata->has_explicit_scf_max_iterations = true;
     return;
   }
   if (key == "NSTATE") {
@@ -260,6 +274,7 @@ void apply_ctrl_assignment(
         "ISCF=8 for block-LBFGS, or ISCF=9 for NEO");
   }
   if (key == "EIGENSOLVER") {
+    metadata->has_explicit_structure_eigensolver = true;
     if (value_upper == "DAVIDSON") {
       metadata->structure_eigensolver = StructureEigensolver::Davidson;
       return;
@@ -373,7 +388,9 @@ void apply_ctrl_flag(
     throw std::invalid_argument("metadata must not be null");
   }
   const std::string token = to_ascii_upper(raw_token);
-  if (token == "TBVBSCF") {
+  if (token == "TNVB") {
+    metadata->tnvb.enabled = true;
+  } else if (token == "TBVBSCF") {
     throw std::invalid_argument(
         "TBVBSCF is no longer supported; only the standard VBSCF path remains");
   } else if (token == "MOLDEN") {
