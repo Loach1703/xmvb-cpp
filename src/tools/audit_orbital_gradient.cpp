@@ -18,6 +18,7 @@
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
+#include "vbscf/derivatives/hessian/coupled/operator.hpp"
 #include "vbscf/optimization/driver/session.hpp"
 #include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
@@ -131,10 +132,11 @@ void run_audit(int argc, char** argv) {
     throw std::invalid_argument(
         "usage: audit_orbital_gradient INPUT [dense|davidson] "
         "[energy-tol] [gradient-tol] [packed-direction-f64.bin|gradient|random] "
-        "[full-hvp|probe-curvature|vector-hvp|balance-gauge] [orbital-table-f64.bin]");
+        "[full-hvp|probe-curvature|vector-hvp|balance-gauge|coupled-keyframe] [orbital-table-f64.bin]");
   }
   const bool balance_gauge = argc >= 7 && std::string(argv[6]) == "balance-gauge";
-  const bool audit_hvp = argc >= 7 && !balance_gauge;
+  const bool keyframe_audit = argc >= 7 && std::string(argv[6]) == "coupled-keyframe";
+  const bool audit_hvp = argc >= 7 && !balance_gauge && !keyframe_audit;
   const bool vector_hvp = audit_hvp && std::string(argv[6]) == "vector-hvp";
   const bool probe_curvature = audit_hvp && std::string(argv[6]) == "probe-curvature";
   if (audit_hvp && !probe_curvature && !vector_hvp &&
@@ -263,6 +265,64 @@ void run_audit(int argc, char** argv) {
             << "packed_gradient_count = " << packed_gradient.size() << '\n'
             << "binary_prefix = " << prefix << '\n';
   std::cout.flush();
+
+  if (keyframe_audit) {
+    ExactHvpOperator operation(objective.second_order_context(),
+                              &objective.input(), layout, &chart);
+    const auto& context = *objective.second_order_context();
+    const StructureAction& action = operation.structure_action();
+    const Eigen::MatrixXd carrier = action.orthogonalize_structure_block(
+        context.selected_state_eigenvectors);
+    write_doubles(prefix + "carrier_f64.bin", carrier.data(), carrier.size());
+    const auto write_strings = [&](const std::string& side,
+                                  const SpinDeterminantReuseTable& table) {
+      std::ofstream stream(prefix + side + "_strings.txt");
+      for (const auto& occupied : table.unique_determinants) {
+        for (const int orbital : occupied) stream << orbital << ' ';
+        stream << '\n';
+      }
+    };
+    write_strings("alpha", context.same_spin_pair_cache.alpha_reuse_table);
+    write_strings("beta", context.same_spin_pair_cache.beta_reuse_table);
+    std::cout << "carrier_rows = " << carrier.rows() << '\n'
+              << "carrier_cols = " << carrier.cols() << '\n'
+              << "carrier_norm = " << carrier.norm() << '\n';
+    StructureTangentOperator structure(objective.second_order_context(), action);
+    Eigen::VectorXd q(structure.tangent_size());
+    for (Eigen::Index i = 0; i < q.size(); ++i) q[i] = std::sin(0.73 * (i + 1));
+    q /= std::sqrt(structure.squared_norm(structure.expand(q)));
+    CoupledHessianOperator coupled(operation, structure);
+    const auto image = coupled.apply_coordinates(reduced_direction, q);
+    const Eigen::MatrixXd dc = structure.coefficient_response_coordinates(q);
+    const double coefficient_scale = std::sqrt(2.0 * context.normalized_state_weights[0]);
+    const auto gradient_at = [&](double h) {
+      const auto orbitals = chart.retract_step(
+          objective.input().orbital_preparation_input, reduced_direction, h);
+      const Eigen::MatrixXd c = context.selected_state_eigenvectors + h * dc;
+      const auto keyframe = objective.evaluate_coupled_keyframe(layout.pack(orbitals), c);
+      const auto normalized = keyframe.normalized_structure_coefficients.col(0);
+      const double norm = c.col(0).dot(normalized) / normalized.squaredNorm();
+      Eigen::VectorXd go = chart.project_reduced_gradient(keyframe.orbital_gradient);
+      Eigen::VectorXd gs = structure.project_coordinates(
+          (coefficient_scale / norm) * keyframe.structure_residuals);
+      return std::pair{std::move(go), std::move(gs)};
+    };
+    for (const double h : {1.0e-3, 3.0e-4}) {
+      const auto plus = gradient_at(h);
+      const auto minus = gradient_at(-h);
+      const Eigen::VectorXd fo = (plus.first - minus.first) / (2.0 * h);
+      const Eigen::VectorXd fs = (plus.second - minus.second) / (2.0 * h);
+      std::cout << "coupled_h = " << h << '\n'
+                << "coupled_orbital_image_norm = " << image.orbital.norm() << '\n'
+                << "coupled_orbital_fd_norm = " << fo.norm() << '\n'
+                << "coupled_orbital_error_norm = " << (image.orbital - fo).norm() << '\n'
+                << "coupled_structure_image_norm = " << image.structure.norm() << '\n'
+                << "coupled_structure_fd_norm = " << fs.norm() << '\n'
+                << "coupled_structure_error_norm = " << (image.structure - fs).norm() << '\n';
+      std::cout.flush();
+    }
+    return;
+  }
 
   double analytic_curvature = 0.0;
   Eigen::VectorXd full_image, fixed_image;

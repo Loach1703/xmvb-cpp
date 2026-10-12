@@ -262,6 +262,12 @@ bool build_ciah_macro_step(
     const auto globalization = globalize_neo_trial(energy, accepted->trial.energy,
         scale * linear, scale * scale * quadratic, false,
         *trust_radius, options.minimum_step_size);
+    diagnostics::neo_trace("ciah_macro_trial",
+        "scale=%.17g,linear=%.17g,quadratic=%.17g,current_energy=%.17g,trial_energy=%.17g,predicted=%.17g,actual=%.17g,rho=%.17g,accepted=%d",
+        scale, scale * linear, scale * scale * quadratic, energy,
+        accepted->trial.energy, globalization.predicted_reduction,
+        globalization.actual_reduction, globalization.rho,
+        static_cast<int>(globalization.accepted));
     if (globalization.accepted) {
       *trust_radius = globalization.next_radius;
       break;

@@ -97,3 +97,89 @@ No optimizer thresholds or production source were modified. Next checks must
 distinguish carrier spin preservation / physical variational space from
 keyframe/coupled-model inconsistency, and record rejected macrostep scalars;
 the current evidence does not establish the cause of the lower energies.
+
+## Follow-up: basis, actual carrier, coupled derivative, and rejected step
+
+Jobs `1247963` and `1247977` ran on Hanhai22. The sole production-source
+change adds scalar `ciah_macro_trial` logging; it does not change numerical
+decisions. A diagnostic-only `coupled-keyframe` mode compares the coupled
+operator with the derivative of the same finite-normalized keyframe covector
+used by production CIAH. It does not solve the relaxed structure response.
+
+### Actual reference basis
+
+The original PySCF checkpoint was copied from its existing Hanhai25 run.
+For Fe, C, N, and H, its parsed shell exponents and contraction coefficients
+equal `parse_gaussian.load` of the actual CPP input's `cc-pvdz.gbs`, with
+`optimize=False`. The basis SHA256 is
+`d53e7e02d55fb99cdf823d50cf13fec375e0cbe1220ff61816aee7ab38e38ec9`,
+matching the original guess audit and repository file. The checkpoint has
+37 atoms, 469 Cartesian AO functions, 186 electrons, zero charge, no spatial
+symmetry, empty ECP, and no pseudopotential. Thus a differently named basis or
+an ECP is not an explanation for this comparison.
+
+### Actual transformed triplet carrier
+
+Exporting `StructureAction::orthogonalize_structure_block` yields a
+462-by-165 coefficient matrix. Its occupations are explicitly reordered into
+PySCF's canonical string order before spin analysis; no assumed string order
+or printed target spin-square is used.
+
+- Carrier norm: 0.99999999999999434.
+- PySCF measured spin-square: 1.999999999999978.
+- PySCF spin-eigenvector residual norm: 2.487646800588102e-16.
+
+There is no observed spin leakage in this actual triplet wavefunction. This
+does not by itself certify every unprojected sigma image or every singlet
+endpoint, which was not saved by the cancelled job.
+
+### Coupled HVP versus production keyframe covector
+
+The joint direction combines a physically normalized negative orbital
+gradient with an independently chosen, structure-metric-normalized CI tangent.
+The coefficient normalization derivative is included exactly as in production.
+
+| h | Orbital image norm | Orbital error norm | Structure image norm | Structure error norm |
+|---:|---:|---:|---:|---:|
+| 0.001 | 46.6821156556 | 2.26217027e-5 | 11.5930118551 | 1.37279492e-5 |
+| 0.0003 | 46.6821156556 | 2.03648550e-6 | 11.5930118551 | 1.23550313e-6 |
+
+Both errors decrease by approximately 11.1 times, as expected for a centered
+difference with the squared step-size ratio. The smaller-step relative vector
+errors are approximately 4.36e-8 and 1.07e-7. This direction shows no coupled
+HVP/keyframe inconsistency at the accepted point. It does not prove uniform
+finite-step model accuracy throughout an entire macrostep.
+
+### Bounded restart: concrete macro rejection
+
+This restart uses the exported triplet endpoint, no retained seed, and a
+two-macrostep cap. It is **not** an exact replay of the original macro 29.
+The original orbitals/seed at the failed macro were not checkpointed.
+
+At microstep 9, the frozen gradient prediction has norm 0.01480096, whereas
+the actual keyframe gradient has norm 0.04762050. The mismatch is 0.04208605.
+The current existing rule accepts that keyframe. Subsequent microsteps
+produce an accumulated direction that is uphill for the initial gradient:
+
+| Scale | Linear term | Quadratic term | Predicted reduction | Actual reduction |
+|---:|---:|---:|---:|---:|
+| 1 | 6.78865399e-5 | 1.40617575e-3 | -7.70974414e-4 | -1.95780881e-3 |
+| 0.5 | 3.39432699e-5 | 3.51543937e-4 | -2.09715239e-4 | -2.89956079e-4 |
+| 0.125 | 8.48581749e-6 | 2.19714961e-5 | -1.94715655e-5 | -2.00086943e-5 |
+| 0.0009765625 | 6.62954491e-8 | 1.34103370e-9 | -6.69659660e-8 | -6.70088411e-8 |
+
+Positive linear and quadratic terms imply negative predicted reduction for
+**every positive scale**, not merely these sampled scales. Therefore halving
+cannot satisfy the current acceptance contract. The diagnostic was stopped
+after capturing this proof and repeated actual energy increases, avoiding
+further pointless CI solves for ever-smaller scales. The completed coupled
+derivative test took 99 s; the bounded restart was stopped after 264 s.
+
+This establishes a failure of the accumulated microstep/globalization
+combination at this restart point, not an explanation for previously accepted
+lower energies. Changing the acceptance ratio cannot turn this direction into
+a descent direction. The next algorithm investigation must address keyframe
+anchoring, preservation of useful earlier candidates, and reconstruction of a
+descent macrostep, not threshold tuning. Energy lowering versus PySCF remains
+unresolved; it must not be attributed to spin contamination or ECPs after
+these tests, nor assumed to be a correct lower minimum without further evidence.
