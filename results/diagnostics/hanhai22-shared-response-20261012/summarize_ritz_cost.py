@@ -25,6 +25,7 @@ preconditions = [v for _, v in events.get("ciah_precondition_cost", [])]
 forward = [v for _, v in events.get("ciah_forward_cost", [])]
 diagonals = [v for _, v in events.get("ciah_diagonal_cost", [])]
 projection_updates = [v for _, v in events.get("ciah_projection_update_cost", [])]
+norm_costs = [v for _, v in events.get("ciah_norm_cost", [])]
 rows = list(csv.DictReader((run / "neo.tsv").open(), delimiter="\t"))
 summary = {
     "macros": len(rows),
@@ -38,6 +39,9 @@ summary = {
         (float(v["relative_residual"]) for v in norms), default=0),
     "ritz_calls": len(ritz),
     "precondition_seconds": sum(float(v["seconds"]) for v in preconditions),
+    # These encompass the structure norm timer: do not add both totals.
+    "coupled_norm_seconds": {key: sum(float(v[key]) for v in norm_costs)
+                             for key in ("orbital_seconds", "structure_seconds")},
     "projection_update_seconds": sum(float(v["seconds"]) for v in projection_updates),
     "diagonal_builds": len(diagonals),
     "diagonal_build_seconds": sum(float(v["seconds"]) for v in diagonals),
@@ -70,6 +74,8 @@ summary = {
         v["diagonal_keep"] != v["full_keep"] or
         v["diagonal_trigger"] != v["full_trigger"]
         for _, v in events.get("ciah_keyframe_metric_audit", [])),
+    "micro_stops": [dict(macro=macro, **v)
+                    for macro, v in events.get("ciah_micro_stop", [])],
     "tail": [],
 }
 for macro, end in events.get("ciah_micro_end", [])[-8:]:

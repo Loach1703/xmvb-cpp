@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -91,10 +92,21 @@ bool build_ciah_macro_step(
         ns ? structure.diagonal_dual_norm(g.tail(ns)) : 0.0);
   };
   const auto dual_norm = [&](const Eigen::VectorXd& g) {
+    const bool trace = diagnostics::neo_event_trace_enabled();
+    const auto start = trace ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
     const double orbital_norm = metric.dual_norm(g.head(no));
+    const auto structure_start = trace ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
     const double structure_norm = ns ? structure.dual_norm(g.tail(ns)) : 0.0;
+    const auto end = trace ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
     diagnostics::neo_trace("ciah_coupled_norm", "orbital=%.17g,structure=%.17g",
         orbital_norm, structure_norm);
+    if (trace) diagnostics::neo_trace("ciah_norm_cost",
+        "orbital_seconds=%.17g,structure_seconds=%.17g",
+        std::chrono::duration<double>(structure_start-start).count(),
+        std::chrono::duration<double>(end-structure_start).count());
     return std::hypot(orbital_norm, structure_norm);
   };
   // Explicitly bounded diagnostic only; never assemble a production metric.
@@ -380,6 +392,11 @@ bool build_ciah_macro_step(
         predicted_norm < 0.3 * micro_gradient_tolerance || candidate.exhaustion) {
       micro_stop = predicted_norm < 0.3 * micro_gradient_tolerance ? "micro_gradient" :
           candidate.exhaustion ? "subspace_exhaustion" : "micro_budget";
+      diagnostics::neo_trace("ciah_micro_stop",
+          "reason=%s,micro=%d,budget=%d,basis=%d,keyframe_norm=%.17g,predicted=%.17g,target=%.17g,residual=%.17g,ah_converged=%d",
+          micro_stop,micro_steps,micro_limit,candidate.basis_size,keyframe_norm,
+          predicted_norm,0.3*micro_gradient_tolerance,candidate.residual_norm,
+          static_cast<int>(candidate.converged));
       break;
     }
 
