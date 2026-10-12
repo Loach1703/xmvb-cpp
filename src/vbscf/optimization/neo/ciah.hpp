@@ -43,6 +43,9 @@ public:
     return energy_ + gradient_.dot(step_) + 0.5 * step_.dot(image_);
   }
 
+  /** @brief Incremental displacement since the last accepted keyframe. */
+  const Eigen::VectorXd& displacement() const noexcept { return step_; }
+
 private:
   double energy_;
   Eigen::VectorXd gradient_, step_, image_;

@@ -273,10 +273,14 @@ void check_keyframe_energy_model() {
       "CIAH origin energy model is inconsistent");
   const Eigen::Vector2d gkf(0.4, -0.1);
   model.refresh(-10.08, gkf);
+  require(model.displacement().norm() == 0.0,
+      "CIAH keyframe did not reset its interval displacement");
   require(std::abs(model.energy() + 10.08) < 1e-13,
       "CIAH keyframe kept an obsolete energy anchor");
   const Eigen::Vector2d second(-0.03, 0.02);
   model.add(second, h * second);
+  require_close(model.displacement(), second, 1e-13,
+      "CIAH keyframe interval includes the preceding macro displacement");
   require(std::abs(model.energy() -
       (-10.08 + gkf.dot(second) + 0.5 * second.dot(h * second))) < 1e-13,
       "CIAH model includes displacement preceding the keyframe");

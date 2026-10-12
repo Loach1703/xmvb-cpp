@@ -57,5 +57,57 @@ gradient-coordinate bug. It requires a derived model/transport treatment,
 not tolerance tuning. No porphine run is submitted before improvement is
 demonstrated on this small transition-metal test.
 
-Submission status: pending. No numerical certification or improvement is
-claimed before inspecting the actual output.
+## Completed directional audit
+
+1248679 completed, including a passed `test_ciah`; native molecular exit 2
+is the deliberate four-macro cap. The checks are at actual resumed directions,
+not another fixed-point energy comparison.
+
+| Macro | Analytic energy derivative | FD error, 1e-3 | FD error, 3e-4 | Local H-image norm | Origin/local H-image difference norm |
+|---:|---:|---:|---:|---:|---:|
+| 1 | -1.9282522e-5 | 2.63e-9 | 7.10e-9 | 0.11342621 | 0.00281615 |
+| 2 | -1.2403900e-4 | 6.12e-10 | 1.00e-8 | 0.01158251 | 0.00957352 |
+| 3 | -1.6239364e-4 | 7.00e-9 | 7.25e-9 | 0.01421298 | 0.01093458 |
+| 4 | -1.7891766e-3 | 2.98e-9 | 1.25e-8 | 0.07065843 | 0.03171874 |
+
+The sampled scalar derivatives agree at approximately 1e-8 absolute accuracy.
+The smaller spacing does not consistently improve the energy derivative,
+so this is not an all-directions exact-gradient certification. The gradient
+difference images are stable between both spacings. Curvature drift is real
+on these directions, but freezing macro-origin curvature is intentional in
+PySCF; these observations do not justify replacing the HVP formula.
+
+## Specific incremental-displacement correction
+
+One definite PySCF workflow difference remains: keyframe scheduling uses the
+norm of `dr`, which `extract_rotation` commits and then resets to zero. Our
+interval used the whole accumulated macro displacement even after refreshing
+the gradient. The energy model already owns the post-keyframe incremental
+displacement; use that vector for scheduling instead of the macro total.
+For the affine origin VB chart this is an exact subtraction/reset operation,
+not an adoption of orthogonal orbital rotations or a change of tolerance.
+
+New unit checks assert zero incremental displacement after refresh and that
+the subsequent interval contains only the new microstep. Short FeCl2 job
+**1248684** completed with passed units and the identical four-step audit
+protocol. Both molecular exits are the intended iteration cap, not convergence.
+
+| Implementation | Four-step HVP count | Physical orbital gradient at step 4 | Step-4 energy, Eh |
+|---|---:|---:|---:|
+| Before interval correction, 1248679 | 80 | approximately 0.0062743 | approximately -2181.6191672 |
+| Reset incremental interval, 1248684 | 75 | 0.00825465 | -2181.6191158569 |
+
+The HVP reduction is 6.25%, but the endpoint energy is about 51 microhartree
+higher and the gradient is larger. This is not demonstrated convergence
+improvement. Retain the mathematically correct interval bookkeeping, but do
+not present it as a solution to slow convergence. Iron porphine is not submitted.
+
+## Next identified consistency question
+
+The generalized AH equation uses the complete horizontal structure overlap
+metric. The residual and keyframe norms instead use `diagonal_dual_norm`,
+which is explicitly a Jacobi approximation, unlike PySCF's Euclidean norm
+in its orthonormal CI carrier. Thus the gradient pullback and the norm used
+to assess it are different questions. Quantify the effect of this approximation
+before changing the model or criteria; do not merely alter the trust constant.
+No new production metric inverse or dense structure matrix has been added.

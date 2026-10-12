@@ -255,8 +255,11 @@ bool build_ciah_macro_step(
       break;
     }
 
+    // PySCF resets dr after committing a keyframe. The update interval is a
+    // function of displacement since that keyframe, not the entire macro.
+    const auto& keyframe_step = energy_model.displacement();
     const double length = std::sqrt(std::max(0.0,
-        displacement.dot(metric_action(displacement))));
+        keyframe_step.dot(metric_action(keyframe_step))));
     const double interval = std::max<double>(keyframe_interval,
         keyframe_interval - std::log(length + 1.0e-7));
     if (since_keyframe >= interval || predicted_norm < keyframe_norm / gradient_trust) {
