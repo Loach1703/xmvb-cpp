@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
@@ -166,6 +167,22 @@ bool build_ciah_macro_step(
   Eigen::VectorXd hessian_displacement = displacement;
   Eigen::VectorXd predicted_gradient = initial_gradient;
   Eigen::VectorXd last_step = displacement;
+  Eigen::VectorXd descent_displacement, descent_image, descent_last_step;
+  double best_predicted_reduction = 0.0;
+  // Keyframe corrections need not preserve descent from the macro origin.
+  // Retain only prefixes left in place by the existing microstep checks.
+  // A negative origin slope allows nonlinear backtracking to find descent;
+  // no extra Hessian action is needed to retain its frozen model image.
+  const auto retain_descent_prefix = [&] {
+    const double slope = initial_gradient.dot(displacement);
+    const double reduction = -slope - 0.5 * displacement.dot(hessian_displacement);
+    if (slope < 0.0 && reduction > best_predicted_reduction) {
+      best_predicted_reduction = reduction;
+      descent_displacement = displacement;
+      descent_image = hessian_displacement;
+      descent_last_step = last_step;
+    }
+  };
   double keyframe_norm = dual_norm(initial_gradient);
   // newton_casscf.kernel passes 0.3 * its outer gradient tolerance to
   // update_orb_ci; the microstep/keyframe tests use that inner tolerance.
@@ -173,6 +190,7 @@ bool build_ciah_macro_step(
   int micro_steps = 0, since_keyframe = 0;
   CiahResult candidate;
   while (true) {
+    retain_descent_prefix();
     candidate = workspace.next(predicted_gradient);
     ++record->micro_iterations;
     const bool ready = candidate.converged || candidate.exhaustion ||
@@ -243,6 +261,24 @@ bool build_ciah_macro_step(
     }
   }
 
+  retain_descent_prefix();
+  const double final_slope = initial_gradient.dot(displacement);
+  const double final_reduction =
+      -final_slope - 0.5 * displacement.dot(hessian_displacement);
+  bool restored_prefix = false;
+  // Preserve legitimate finite negative-curvature steps with positive model
+  // reduction, even if their initial slope is uphill.
+  if (final_reduction <= 0.0 &&
+      best_predicted_reduction > 0.0) {
+    diagnostics::neo_trace("ciah_descent_prefix",
+        "discarded_linear=%.17g,discarded_prediction=%.17g,prefix_prediction=%.17g",
+        final_slope, final_reduction, best_predicted_reduction);
+    displacement = std::move(descent_displacement);
+    hessian_displacement = std::move(descent_image);
+    last_step = std::move(descent_last_step);
+    restored_prefix = true;
+  }
+
   accepted->parameters = build_nonredundant_lifted_trial_parameters(
       orbitals, chart, layout, displacement.head(no));
   if ((accepted->parameters - layout.pack(orbitals)).norm() <=
@@ -298,7 +334,9 @@ bool build_ciah_macro_step(
   record->kkt_residual_norm = candidate.residual_norm;
   record->kkt_residual_target = ciah_options.tolerance;
   record->shift = -candidate.eigenvalue;
-  record->approximate_step = !candidate.converged;
+  // A restored prefix is not the final AH Ritz solution. The recorded AH
+  // residual describes that last solve, not a certification of this prefix.
+  record->approximate_step = restored_prefix || !candidate.converged;
   return true;
 }
 

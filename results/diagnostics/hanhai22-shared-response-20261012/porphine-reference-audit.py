@@ -28,7 +28,8 @@ report = dict(basis_sha256=hashlib.sha256(basis_file.read_bytes()).hexdigest(),
               per_element=comparison, ecp=mol._ecp, pseudo=mol.pseudo,
               nuclear_charges=mol.atom_charges().tolist(),
               electrons=mol.nelectron, charge=mol.charge, cartesian=mol.cart,
-              n_bf=mol.nao_nr(), n_atoms=mol.natm, symmetry=mol.symmetry)
+              n_bf=mol.nao_nr(), n_atoms=mol.natm, symmetry=mol.symmetry,
+              nuclear_repulsion=float(mol.energy_nuc()))
 print("BASIS_AUDIT", json.dumps(report), flush=True)
 assert all(item["identical"] for item in comparison.values())
 assert not mol._ecp and not mol.pseudo and mol.nelectron == 186
