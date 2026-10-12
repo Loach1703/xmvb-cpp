@@ -36,10 +36,14 @@ def main():
         # Counters on an unfinished run are partial; do not report them as totals.
         final = result["status"] == "finished"
         hvp = result["recorded_orbital_hvp"] if final else "—"
+        if final and not result["converged"] and hvp != "":
+            hvp = f"{hvp}+"
         wall = f'{result["wall_s"]:.2f}' if final and result["wall_s"] != "" else "—"
         rss = f'{result["peak_RSS_MiB"]:.1f}' if final and result["peak_RSS_MiB"] != "" else "—"
         print(f'| {result["system"]} | {result["preconditioner"]} | {status} | '
-              f'{result["steps"] or "—"} | {hvp} | {result["energy_Eh"] or "—"} | {wall} | {rss} |')
+              f'{result["steps"] or (result["recorded_steps"] if final else "") or "—"} | '
+              f'{hvp} | {result["energy_Eh"] or "—"} | {wall} | {rss} |')
+    print("\nOn failed runs, steps are accepted steps; HVP marked '+' is only the recorded subtotal.")
     print("\nPaired energy differences (one-electron minus analytic diagonal):")
     for analytic, one_electron in zip(rows[::2], rows[1::2]):
         if analytic["converged"] and one_electron["converged"]:
