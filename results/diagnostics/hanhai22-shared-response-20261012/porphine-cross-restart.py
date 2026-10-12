@@ -17,12 +17,36 @@ root, mode = Path(sys.argv[1]), sys.argv[2]
 convergence_run = len(sys.argv) > 3 and sys.argv[3] == "converge"
 macro_limit = 1000 if convergence_run else 2
 source_mode = sys.argv[4] if len(sys.argv) > 4 else "endpoint"
+spin_tag = sys.argv[5] if len(sys.argv) > 5 else "triplet"
+assert spin_tag in ("singlet", "triplet")
+spin = 0 if spin_tag == "singlet" else 2
+assert spin_tag == "triplet" or source_mode == "original"
 assert source_mode in ("endpoint", "original")
 assert source_mode != "original" or convergence_run
 source = root / "porphine-coupled-audit-1247963"
 prefix = source / "audit_orbital_gradient_"
 mol, saved = scf.chkfile.load_scf(str(root / "porphine-reference.chk"))
-mol.spin = 2
+mol.spin = spin
+if source_mode == "original":
+    # Match the actual CPP coordinates rather than PySCF's different default
+    # Angstrom conversion constant. Preserve basis, AO convention, and ECP.
+    deck_text = (root / "inputs" / spin_tag / "input.xmi").read_text()
+    geometry_block = re.split(r"\$GEO\b", deck_text, flags=re.I)[1]
+    geometry = []
+    for line in geometry_block.splitlines():
+        if line.strip().upper() == "$END":
+            break
+        fields = line.split()
+        if fields:
+            assert len(fields) == 4
+            geometry.append((fields[0], tuple(float(x)/0.529177249 for x in fields[1:])))
+    assert len(geometry) == mol.natm
+    previous_coordinates = mol.atom_coords()
+    mol.set_geom_(geometry, unit="Bohr", inplace=True)
+    print("GEOMETRY_AUDIT", json.dumps(dict(
+        angstrom_per_bohr=0.529177249,
+        checkpoint_difference_bohr=float(np.max(np.abs(previous_coordinates-mol.atom_coords()))),
+        nuclear_repulsion=float(mol.energy_nuc()), cartesian=bool(mol.cart), ecp=mol._ecp)), flush=True)
 mol.build(False, False)
 assert mol.cart and mol.nao_nr() == 469 and mol.nelectron == 186 and not mol._ecp
 mf = scf.ROHF(mol)
@@ -34,7 +58,7 @@ cpp_s = np.fromfile(str(prefix) + "ao_overlap_f64.bin").reshape((469, 469), orde
 ao_error = float(np.max(np.abs(cpp_s - s / d[:, None] / d[None, :])))
 assert ao_error < 1e-8, f"AO normalization/order mismatch: {ao_error}"
 if source_mode == "original":
-    deck = root / "inputs/triplet/input.xmi"
+    deck = root / "inputs" / spin_tag / "input.xmi"
     text = deck.read_text()
     block = re.split(r"\$GUS\b", text, flags=re.I)[1]
     raw = np.zeros((469, 100))
@@ -103,13 +127,13 @@ if source_mode == "endpoint":
     ci = np.fromfile(str(prefix) + "carrier_f64.bin").reshape((462, 165), order="F")
     ci = ci[np.ix_([index_a[m] for m in ca], [index_b[m] for m in cb])]
     ci /= np.linalg.norm(ci)
-mc = mcscf.CASSCF(mf, 11, (5, 3))
+mc = mcscf.CASSCF(mf, 11, ((8+spin)//2, (8-spin)//2))
 mc.max_memory = 120000
 mc.conv_tol, mc.conv_tol_grad = 1e-7, 1e-3
 mc.max_cycle_macro = macro_limit
 mc.fcisolver.conv_tol, mc.fcisolver.max_cycle = 1e-10, 200
-mc.fcisolver.spin = 2
-mc.fix_spin_(ss=2)
+mc.fcisolver.spin = spin
+mc.fix_spin_(ss=(spin/2)*(spin/2+1))
 mc.chkfile = "cross-restart.chk"
 mc.verbose = 5
 
@@ -143,8 +167,9 @@ elif mode != "default-ah":
     raise ValueError(mode)
 mc.max_cycle_macro = macro_limit
 mc.kernel(mo, ci)
-report = dict(mode=mode, source=source_mode, converged=bool(mc.converged), energy=float(mc.e_tot),
+report = dict(mode=mode, source=source_mode, spin_tag=spin_tag,
+              converged=bool(mc.converged), energy=float(mc.e_tot),
               elapsed_seconds=time.monotonic() - start,
-              spin_square=float(fci.spin_op.spin_square(mc.ci, 11, (5, 3))[0]))
+              spin_square=float(fci.spin_op.spin_square(mc.ci, 11, mc.nelecas)[0]))
 Path("result.json").write_text(json.dumps(report, indent=2) + "\n")
 print("CROSS_RESTART", json.dumps(report), flush=True)

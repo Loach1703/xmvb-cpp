@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 #include <functional>
 #include <vector>
 
@@ -134,10 +135,11 @@ public:
   metric_block_inverse(const OrbitalPhysicalMetric& metric) const;
 
   /**
-   * @brief Applies @f$(J^TDJ-\omega I)^{-1}@f$ in quotient coordinates.
+   * @brief Applies the signed analytic AH preconditioner in quotient coordinates.
    *
-   * The reduced orbital basis is whitened in the physical tangent metric, so
-   * its local metric is identity.  Unlike the positive block
+   * Full-AO complete spaces use @f$F^{-1}(D-\omega I)^{-1}F^{-T}@f$,
+   * retaining source-orbital mixing. Constrained charts use their signed
+   * local pullbacks. Unlike the positive block
    * preconditioner used by MINRES and L-BFGS, this action deliberately keeps
    * the sign of the analytic rotation diagonal before its exact pullback by
    * the quotient-to-rotation Jacobian @f$J@f$.
@@ -200,6 +202,8 @@ private:
     Eigen::MatrixXd ah_block_eigenvectors;
     Eigen::MatrixXd ah_rotation_components;
     Eigen::VectorXd ah_source_weights;
+    /** @brief Inverse external-frame map for a full-AO quotient orbital. */
+    Eigen::MatrixXd ah_frame_inverse;
     // Positive spectral regularization of that local surrogate curvature;
     // this is not the exact relaxed VBSCF Hessian block.
     Eigen::MatrixXd curvature_block;
@@ -232,12 +236,22 @@ private:
       bool recover_tangent_coordinates,
       bool build_packed_projection) const;
 
+  void build_rotation_inverse(const OrbitalPreparationInput& input,
+                              const AnalyticOrbitalDiagonal& model);
+  Eigen::VectorXd apply_inverse_rotation_diagonal(
+      const Eigen::VectorXd& covector, double eigenvalue) const;
+
   std::vector<BlockBasis> block_bases_;
   bool active_subspace_gauge_ = false;
   int packed_parameter_size_ = 0;
   int reduced_size_ = 0;
   std::uint64_t rank_signature_ = 1469598103934665603ull;
   bool has_reduced_curvature_diagonal_ = false;
+  /** @brief Full-AO diagonal model with inter-orbital basis mixing retained. */
+  bool has_rotation_inverse_ = false;
+  int rotation_core_count_ = 0;
+  std::array<Eigen::MatrixXd, 2> rotation_diagonals_;
+  std::array<Eigen::MatrixXd, 2> rotation_source_inverses_;
 };
 
 }  // namespace xmvb::vb

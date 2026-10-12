@@ -884,6 +884,8 @@ OrbitalChart::OrbitalChart(
     block_bases_.push_back(std::move(bb));
     ++block_index;
   }
+  if (hessian_diagonal && active_subspace_gauge_)
+    build_rotation_inverse(input, *hessian_diagonal);
 }
 
 OrbitalChart::StructuralDiagnostics
@@ -1204,6 +1206,9 @@ Eigen::VectorXd OrbitalChart::apply_inverse_augmented_hessian_diagonal(
     throw std::logic_error(
         "augmented-Hessian preconditioning requires an analytic diagonal");
   }
+
+  if (has_rotation_inverse_)
+    return apply_inverse_rotation_diagonal(covector, eigenvalue);
 
   Eigen::VectorXd out = covector;
   constexpr double kDenominatorFloor = 1.0e-8;

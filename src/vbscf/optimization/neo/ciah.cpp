@@ -210,11 +210,11 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
       std::chrono::steady_clock::time_point{};
   result.residual_norm = problem_.dual_norm(result.residual);
   if (trace) diagnostics::neo_trace("ciah_ritz_cost",
-      "basis=%d,projection_seconds=%.17g,spectrum_image_seconds=%.17g,norm_seconds=%.17g,gradient_euclidean=%.17g,residual_euclidean=%.17g",
+      "basis=%d,projection_seconds=%.17g,spectrum_image_seconds=%.17g,norm_seconds=%.17g,gradient_euclidean=%.17g,residual_euclidean=%.17g,galerkin_residual=%.17g",
       basis_size(), std::chrono::duration<double>(spectrum_start - projection_start).count(),
       std::chrono::duration<double>(norm_start - spectrum_start).count(),
       std::chrono::duration<double>(std::chrono::steady_clock::now() - norm_start).count(),
-      current_gradient.norm(), result.residual.norm());
+      current_gradient.norm(), result.residual.norm(), (q.transpose()*result.residual).norm());
   result.converged = previous_eigenvalue_ &&
       std::abs(result.eigenvalue - *previous_eigenvalue_) < options_.tolerance &&
       result.residual_norm < std::sqrt(options_.tolerance);

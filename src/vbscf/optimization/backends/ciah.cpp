@@ -282,10 +282,10 @@ bool build_ciah_macro_step(
     ++since_keyframe;
     const double predicted_norm = dual_norm(predicted_gradient);
     diagnostics::neo_trace("ciah_micro",
-        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g",
+        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g",
         candidate.basis_size, micro_steps, candidate.eigenvalue,
         candidate.reference_weight, candidate.residual_norm, predicted_norm,
-        step_scale, largest);
+        step_scale, largest, candidate.residual.head(no).norm(), candidate.residual.tail(ns).norm());
     if (micro_steps > 3 && predicted_norm > gradient_trust * keyframe_norm) {
       displacement -= step;
       hessian_displacement -= image;
