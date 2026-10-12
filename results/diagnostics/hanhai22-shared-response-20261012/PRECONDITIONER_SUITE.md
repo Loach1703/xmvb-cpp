@@ -53,3 +53,17 @@ differences are not evidence of statistically significant speedups.
 
 This selected suite can establish performance on these inputs; it cannot
 establish universal superiority across all HAO/OEO wave functions.
+
+## Default decision
+
+On 2026-10-12, the user selected analytic Hessian-diagonal as the default on
+stability grounds. Single-state NEO already resolves `Automatic` to
+`HessianDiagonal`; no production change is required. Positive one-electron
+remains explicitly selectable for comparison, without molecule-dependent
+selection rules.
+
+This decision is validated for the single-state CIAH path tested here.
+State-averaged NEO uses a different backend and still resolves `Automatic`
+to `OneElectron`; this suite does not validate changing that separate default.
+The multistate behavior is therefore left unchanged, rather than silently
+extrapolating the single-state benchmarks.
