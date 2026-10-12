@@ -54,3 +54,50 @@ previous successful FeCl2 grammar: every atom listed explicitly, no symmetry
 generators, and a mandatory NSYM=1 certificate before conversion. Corrected
 Molcas calculation **1248287** was submitted; it is independent of the CIAH
 diagnostic. No C++ optimizer changes were made for the Molcas correction.
+
+## Completed two-step audit
+
+Job 1248292 completed; native exit 2 is the deliberate two-step cap, not a
+convergence flag. HVP counts remain 18/19. Endpoint energies differ from the
+existing first two steps by only about 1e-11 Eh, confirming that the audit
+did not materially change the recorded trajectory.
+
+| Accepted macro | Source gradient | Frozen Newton residual | Actual fixed-C gradient | Linearization error | Relaxed orbital gradient in origin chart |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 0.01136091 | 0.01480096 | 0.04762050 | 0.04208605 | 0.00663483 |
+| 2 | 0.00695461 | 0.00576313 | 0.01398770 | 0.01187466 | 0.00576176 |
+
+For macro 1, the retained prefix has fixed-C energy -2244.7907679919244 Eh,
+above the origin -2244.7907841974 Eh. The final structure reoptimization
+rescues it to -2244.7907984105095 Eh. The same prefix was a previously
+accepted keyframe: mismatch / predicted-gradient norm is approximately 2.84,
+below the current inherited trust factor 3. Thus the code accepts a keyframe
+with a much larger true joint gradient, while continuing with origin Hessian
+images. The final accumulated direction loses frozen-model descent, requiring
+the prefix repair. Macro 1 exits on micro budget; macro 2 exits on keyframe
+mismatch and also restores a prefix.
+
+These observations locate a failure of the finite coupled-step/model
+management: reliable energy decrease after CI relaxation is not evidence
+that the candidate was a good coupled Newton correction. They do not isolate
+every underlying cause or prove all HVP directions correct; earlier
+accepted-point derivative checks cover sampled directions only. No threshold
+or optimizer policy was changed as a result of this diagnosis.
+
+## Full comparison, not restarted step counts
+
+Array **1248419**, submitted on Hanhai22 with 32 CPUs per task:
+
+- `_0`: current NEO, analytic-diagonal preconditioner, from the unchanged
+  `inputs/triplet/input.xmi` ($GUS initial orbitals), not an optimized endpoint.
+- `_1`: PySCF default AH from the same raw $GUS orbitals, converted to a
+  core/active orthonormal frame without changing those subspaces. Each program
+  solves its own initial triplet CI problem. No endpoint CI vector is reused.
+
+CAS(8,11), Cartesian cc-pVDZ, no ECP/symmetry/RI, 1e-7 Eh and 1e-3 gradients,
+1000 macro safety limit, and the partition's 15-day scheduler limit are kept.
+The C++ executable is the already tested diagnostic build, with scalar events
+only and extra nonlinear auditing disabled. Original input/basis hashes are
+saved for both tasks. Both count macrosteps from original iteration zero.
+No new SCF guess is generated. This is an unchanged-policy full comparison,
+not a claimed convergence improvement.

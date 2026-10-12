@@ -1,7 +1,9 @@
 """PySCF restart from the actual CPP triplet wavefunction on Slurm."""
 import json
+import hashlib
 import os
 from pathlib import Path
+import re
 import sys
 import time
 
@@ -14,6 +16,9 @@ lib.num_threads(int(os.environ["SLURM_CPUS_PER_TASK"]))
 root, mode = Path(sys.argv[1]), sys.argv[2]
 convergence_run = len(sys.argv) > 3 and sys.argv[3] == "converge"
 macro_limit = 1000 if convergence_run else 2
+source_mode = sys.argv[4] if len(sys.argv) > 4 else "endpoint"
+assert source_mode in ("endpoint", "original")
+assert source_mode != "original" or convergence_run
 source = root / "porphine-coupled-audit-1247963"
 prefix = source / "audit_orbital_gradient_"
 mol, saved = scf.chkfile.load_scf(str(root / "porphine-reference.chk"))
@@ -28,8 +33,34 @@ d = np.sqrt(s.diagonal())
 cpp_s = np.fromfile(str(prefix) + "ao_overlap_f64.bin").reshape((469, 469), order="F")
 ao_error = float(np.max(np.abs(cpp_s - s / d[:, None] / d[None, :])))
 assert ao_error < 1e-8, f"AO normalization/order mismatch: {ao_error}"
-raw = np.fromfile(str(prefix) + "accepted_raw_f64.bin").reshape((469, 100), order="F")
-raw_tangent = np.fromfile(str(prefix) + "packed_tangent_f64.bin").reshape((469, 100), order="F")
+if source_mode == "original":
+    deck = root / "inputs/triplet/input.xmi"
+    text = deck.read_text()
+    block = re.split(r"\$GUS\b", text, flags=re.I)[1]
+    raw = np.zeros((469, 100))
+    seen = set()
+    orbital = None
+    for line in block.splitlines():
+        if line.strip().upper() == "$END":
+            break
+        match = re.search(r"#\s*ORBITAL\s+(\d+)\s+NAO\s*=\s*(\d+)", line, re.I)
+        if match:
+            orbital = int(match[1]) - 1
+            assert int(match[2]) == 469 and 0 <= orbital < 100
+            assert orbital not in seen
+            seen.add(orbital)
+        elif orbital is not None:
+            fields = line.split()
+            assert len(fields) % 2 == 0
+            for value, index in zip(fields[::2], fields[1::2]):
+                raw[int(index)-1, orbital] = float(value.replace("D", "E"))
+    assert seen == set(range(100))
+    print("ORIGINAL_GUESS", json.dumps(dict(input=str(deck),
+        sha256=hashlib.sha256(deck.read_bytes()).hexdigest())), flush=True)
+else:
+    raw = np.fromfile(str(prefix) + "accepted_raw_f64.bin").reshape((469, 100), order="F")
+    if not convergence_run:
+        raw_tangent = np.fromfile(str(prefix) + "packed_tangent_f64.bin").reshape((469, 100), order="F")
 
 def occupied_frame(values):
     """Mirror normalization, inactive projection, and active Cholesky gauge."""
@@ -63,13 +94,15 @@ if mode == "export-frame":
 def masks(side):
     return [sum(1 << int(i) for i in line.split()) for line in
             Path(str(prefix) + side + "_strings.txt").read_text().splitlines()]
-alpha, beta = masks("alpha"), masks("beta")
-index_a, index_b = {m: i for i, m in enumerate(alpha)}, {m: i for i, m in enumerate(beta)}
-ca = list(map(int, fci.cistring.make_strings(range(11), 5)))
-cb = list(map(int, fci.cistring.make_strings(range(11), 3)))
-ci = np.fromfile(str(prefix) + "carrier_f64.bin").reshape((462, 165), order="F")
-ci = ci[np.ix_([index_a[m] for m in ca], [index_b[m] for m in cb])]
-ci /= np.linalg.norm(ci)
+ci = None
+if source_mode == "endpoint":
+    alpha, beta = masks("alpha"), masks("beta")
+    index_a, index_b = {m: i for i, m in enumerate(alpha)}, {m: i for i, m in enumerate(beta)}
+    ca = list(map(int, fci.cistring.make_strings(range(11), 5)))
+    cb = list(map(int, fci.cistring.make_strings(range(11), 3)))
+    ci = np.fromfile(str(prefix) + "carrier_f64.bin").reshape((462, 165), order="F")
+    ci = ci[np.ix_([index_a[m] for m in ca], [index_b[m] for m in cb])]
+    ci /= np.linalg.norm(ci)
 mc = mcscf.CASSCF(mf, 11, (5, 3))
 mc.max_memory = 120000
 mc.conv_tol, mc.conv_tol_grad = 1e-7, 1e-3
@@ -110,7 +143,7 @@ elif mode != "default-ah":
     raise ValueError(mode)
 mc.max_cycle_macro = macro_limit
 mc.kernel(mo, ci)
-report = dict(mode=mode, converged=bool(mc.converged), energy=float(mc.e_tot),
+report = dict(mode=mode, source=source_mode, converged=bool(mc.converged), energy=float(mc.e_tot),
               elapsed_seconds=time.monotonic() - start,
               spin_square=float(fci.spin_op.spin_square(mc.ci, 11, (5, 3))[0]))
 Path("result.json").write_text(json.dumps(report, indent=2) + "\n")
