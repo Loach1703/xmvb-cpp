@@ -38,6 +38,8 @@ int run(Options command_line) {
   const auto command_start_steady_time = std::chrono::steady_clock::now();
   auto load_result =
       xmvb::vb::load_vbscf_input_with_timings(input_path, load_options);
+  load_result.input.ao_integral_input.exact_exchange_memory_budget_bytes =
+      command_line.exact_exchange_memory_budget_bytes;
   if (!command_line.optimizer_backend_explicit) {
     switch (load_result.scf_optimizer) {
       case xmvb::vb::InputScfOptimizer::Lbfgs:

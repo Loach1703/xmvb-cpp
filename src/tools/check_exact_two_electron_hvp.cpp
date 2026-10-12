@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -21,11 +22,13 @@ namespace {
 struct Options {
   std::string input_path;
   double step = 1.0e-6;
+  std::size_t exchange_budget = 64 * 1024 * 1024;
 };
 
 void print_usage() {
   std::cerr
-      << "usage: check_exact_two_electron_hvp <input.xmi> [--step h]\n";
+      << "usage: check_exact_two_electron_hvp <input.xmi> [--step h]"
+         " [--exact-exchange-memory-mib N]\n";
 }
 
 Options parse_arguments(int argc, char** argv) {
@@ -41,6 +44,15 @@ Options parse_arguments(int argc, char** argv) {
     const std::string value = argv[argument_index + 1];
     if (name == "--step") {
       options.step = std::stod(value);
+      continue;
+    }
+    if (name == "--exact-exchange-memory-mib") {
+      if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos)
+        throw std::invalid_argument("exchange budget must be a nonnegative integer");
+      const auto mib = std::stoull(value);
+      if (mib > std::numeric_limits<std::size_t>::max() / (1024 * 1024))
+        throw std::invalid_argument("exchange budget is too large");
+      options.exchange_budget = static_cast<std::size_t>(mib) * 1024 * 1024;
       continue;
     }
     throw std::invalid_argument("unknown argument: " + name);
@@ -114,8 +126,9 @@ int main(int argc, char** argv) {
     xmvb::vb::VbScfInputLoadOptions load_options;
     load_options.standard_two_electron_mode =
         xmvb::vb::StandardTwoElectronMode::Exact;
-    const auto load_result =
+    auto load_result =
         xmvb::vb::load_vbscf_input_with_timings(options.input_path, load_options);
+    load_result.input.ao_integral_input.exact_exchange_memory_budget_bytes = options.exchange_budget;
     const auto& input = load_result.input;
 
     xmvb::vb::ActiveSpaceGradientEvaluator evaluator;

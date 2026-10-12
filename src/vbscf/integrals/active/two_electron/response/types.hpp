@@ -43,8 +43,10 @@ struct ExactPackedActiveTwoElectronAdjointCache {
   /**
    * @brief Density-independent (AO active|AO active) integral image.
    *
-   * Rows are (mu, kappa), columns (b, d). Shared storage plus the primary
-   * construction/action workspaces is admitted under a 64 MiB bound.
+   * Rows are triangular AO pairs (mu >= kappa), columns (b, d), row-major.
+   * The reverse AO block is the active-index transpose, not a stored copy.
+   * Shared storage plus construction/action workspaces obey the explicit AO
+   * input memory budget. The image is reused throughout the accepted point.
    * This is a partial integral transform, not an orbital Hessian.
    */
   ExactCtxPairMatrix exchange_integrals;
