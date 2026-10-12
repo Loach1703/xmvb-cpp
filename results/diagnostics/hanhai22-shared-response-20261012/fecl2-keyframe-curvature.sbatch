@@ -25,7 +25,7 @@ cp "$root/fecl2-ritz-cost-1248947/native/def2-tzvp.gbs" "$run/"
 export LC_ALL=C OMP_NUM_THREADS=32 OMP_PLACES=cores OMP_PROC_BIND=close
 export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
 export LD_LIBRARY_PATH="/home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib:${LD_LIBRARY_PATH:-}"
-export XMVB_NEO_TRACE=scalar XMVB_NEO_CANDIDATE_AUDIT=1
+export XMVB_NEO_TRACE=1 XMVB_NEO_CANDIDATE_AUDIT=1
 cd "$run"
 hostname > node.txt
 lscpu > cpu.txt
@@ -41,3 +41,4 @@ srun --ntasks=1 --cpus-per-task=32 --cpu-bind=cores /usr/bin/time -v -o resource
  --exact-exchange-memory-mib 256 --neo-trace neo.tsv > output.out 2> run.err || status=$?
 printf '%s\n' "$status" > run.exit
 [[ "$status" == 0 || "$status" == 2 ]]
+grep -q 'ciah_keyframe_direction_audit' run.err

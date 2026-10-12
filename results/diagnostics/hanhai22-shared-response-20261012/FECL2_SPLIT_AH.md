@@ -108,3 +108,42 @@ Input SHA256: cd89d6f43c4ed3bd1dc221433426636c0723e4a4db8ba42297db88708583233c.
 Raw logs, flags, input and native GNU time are retained in
 `fecl2-ritz-cost-1249010/`. Scalar accounting is reproducible with
 `summarize_ritz_cost.py fecl2-ritz-cost-1249010/native`.
+
+## Nonzero-keyframe diagnostic result
+
+The follow-up 1249025 used the frozen retained binary, not the split experiment.
+It finished with 13 macros / 257 HVPs and energy -2181.624464863389 Eh.
+Its runtime is diagnostic overhead and is not a performance comparison.
+The initial submission 1249020 mistakenly combined scalar tracing with the
+expensive-audit flag: that flag requires full tracing and no directional
+audit was emitted. It is not derivative evidence. The corrected batch enables
+full tracing and fails if the requested directional events are absent.
+
+At the first accepted nonzero keyframe in each late macro:
+
+| Macro | Origin/current HVP difference divided by origin HVP norm | Energy directional derivative error at delta=1e-3 / Eh |
+|---|---:|---:|
+| 9 | 2.926% | 8.54e-9 |
+| 10 | 8.979% | 1.06e-8 |
+| 11 | 3.888% | 2.57e-9 |
+| 12 | 3.204% | 1.62e-8 |
+| 13 | 0.577% | 4.70e-9 |
+
+The HVP differences agree at delta=1e-3 and 3e-4. This is measured curvature
+variation between the origin and the current nonlinear point, not evidence
+that an origin Hessian must equal the local Hessian. The energy derivatives
+support consistency of the current gradient along these actual directions.
+This check does not certify all directions or the analytic local HVP itself.
+
+The bounded independently assembled full structure metric and its certified
+matrix-free inverse gave the same keyframe decisions. Diagonal versus full
+metric diagnostics also produced no keep/trigger disagreements in this run.
+Thus neither an inaccurate inverse nor changing the norm certificate explains
+these particular budget exits. No production accuracy was changed.
+
+These observations narrow the problem but do not solve it. A frozen model
+does change noticeably at intermediate tail keyframes; in the last macro
+the observed curvature change is much smaller, yet the complementary residual
+still contracts too slowly. Both the orbital preconditioner's spectral
+effectiveness and curvature reuse across keyframes need to be distinguished;
+the data do not justify declaring a gradient bug or simply increasing budgets.

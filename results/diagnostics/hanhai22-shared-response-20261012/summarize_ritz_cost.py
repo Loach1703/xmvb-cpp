@@ -36,6 +36,16 @@ summary = {
          max(float(v["residual_euclidean"]), 1.0e-300) for v in ritz), default=0),
     "ritz_seconds": {key: sum(float(v[key]) for v in ritz) for key in
                      ("projection_seconds", "spectrum_image_seconds", "norm_seconds")},
+    "keyframe_direction_audits": [
+        {"macro": macro, "delta": float(v["delta"]),
+         "derivative_error": float(v["derivative_error"]),
+         "relative_curvature_change": float(v["curvature_change"]) /
+             max(float(v["origin_curvature"]), 1.0e-300)}
+        for macro, v in events.get("ciah_keyframe_direction_audit", [])],
+    "metric_decision_disagreements": sum(
+        v["diagonal_keep"] != v["full_keep"] or
+        v["diagonal_trigger"] != v["full_trigger"]
+        for _, v in events.get("ciah_keyframe_metric_audit", [])),
     "tail": [],
 }
 for macro, end in events.get("ciah_micro_end", [])[-8:]:
