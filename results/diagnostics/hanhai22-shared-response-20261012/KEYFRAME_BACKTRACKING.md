@@ -1,5 +1,28 @@
 # True-energy CIAH keyframe backtracking
 
+## Completed original-guess PySCF references, latest check
+
+1248772_1 is now terminal `COMPLETED` with native exit zero. Its JSON and
+the CASSCF log both confirm singlet convergence from the original input,
+not a restart. The final macro is 128, E=-2244.741070284000 Eh,
+S^2=6.64451e-11, PySCF optimization wall 11958.18 s, GNU process wall
+3:19:20, GNU process peak RSS 85.16 GiB. The triplet reference 1248772_3
+already converged in 35 macros, E=-2244.790834999517 Eh, GNU process wall
+2667.29 s and peak RSS 83.16 GiB. Both are default AH references.
+
+The old original-guess NEO endpoints remain **unconverged**: singlet
+64 accepted macros / 667 HVPs, E=-2244.739920658597 Eh; triplet 50 / 528,
+E=-2244.790272699886 Eh. They are respectively +1.14963 and +0.562300 mEh
+above the completed PySCF endpoints. Their accepted counters exclude the
+subsequent rejected macro. Restarted short-run counts must not be compared
+as original-guess convergence counts.
+
+The single-spin PySCF task's Slurm `MaxRSS` reports 177943868 KiB,
+different from GNU time's 89296396 KiB. The values are retained separately;
+do not silently substitute the task-accounting value for process RSS or
+claim its discrepancy is explained. No new iron NEO long run is started
+while the FeCl2 efficiency gate remains unmet.
+
 ## Evidence and change
 
 Old porphine singlet job 1248745_0 accepted a nonlinear keyframe in attempted

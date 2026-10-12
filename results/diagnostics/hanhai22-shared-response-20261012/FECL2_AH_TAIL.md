@@ -361,3 +361,79 @@ it cannot explain or remove the complementary residual.
 
 No iron-porphine long run is started on the basis of these modest/variable
 FeCl2 timings. The requested robust reduction in HVPs remains outstanding.
+
+## Orbital-block inverse experiment
+
+Two short, original-guess tests replaced only the analytic orbital
+preconditioner with a signed orbital-block inverse; the actual coupled AH
+operator, metric, retraction, keyframes and thresholds stayed unchanged.
+Local spectral factors already computed by the chart were retained, rather
+than recomputing a Hessian or creating a dense global orbital matrix.
+
+1249343 used the existing local Euclidean shift. This changes both the
+block approximation and the auxiliary shift representation, and therefore
+is not an isolated test of block Jacobi. 1249346 instead tested genuine
+block Jacobi of the same full-frame shifted model. With frame map $T$,
+diagonal frame curvature $D$ and per-orbital column block $T_i$, its inverse
+uses
+
+$$
+K_i=T_i^TDT_i,\qquad J_i=T_i^TT_i,\qquad
+P_i(\omega)=(K_i-\omega J_i)^{-1}.
+$$
+
+A generalized local eigendecomposition satisfies
+
+$$
+K_iW_i=J_iW_i\Lambda_i,\quad W_i^TJ_iW_i=I,\quad
+P_i(\omega)=W_i(\Lambda_i-\omega I)^{-1}W_i^T.
+$$
+
+The independent bounded dense pullback test was updated to check exactly
+this inverse, while retaining the original chart and component-cap tests.
+Five unit executables passed in both runs.
+
+| Run | Macros | HVP | Energy / Eh | GNU wall / s | GNU RSS / MiB |
+|---|---:|---:|---:|---:|---:|
+| 1249343, local Euclidean shift | 15 | 325 | -2181.624464010912 | 10.63 | 499.6 |
+| 1249346, same-model block Jacobi | 16 | 346 | -2181.624464648738 | 12.53 | 489.2 |
+
+Neither improves on retained 13--14 macro / 254--282 HVP observations.
+The first endpoint differs from independent PySCF coupled Newton by
++8.72821e-7 Eh; the second by +2.34995e-7 Eh. Against the separately
+retained PySCF default-AH endpoint, the differences are +6.91984e-7 and
++5.41577e-8 Eh, respectively. These are optimizer endpoint differences,
+not a change in Hamiltonian or spin space. A completed run under the shared
+criteria is not proof of a particular absolute-energy error.
+
+Both experimental implementations and their tests were removed from the
+workspace and execution mirror. No block-Jacobi selector, parameter or
+fallback is retained. The result supports keeping the current full-frame
+inverse rather than dropping its cross-orbital representation merely for
+local simplicity; it does not rule out other better orbital models.
+
+## Metric-orthogonal AH experiment
+
+1249350 replaced Euclidean basis orthogonalization by two-pass physical
+$G$ orthogonalization, updating cached metric images with the same
+coefficients. Five units passed, including independently checked physical
+normalization/orthogonality. The actual FeCl2 trial stopped before accepting
+a macro, after eleven HVP expansions, at the existing projected-metric
+symmetry check. This exposes cancellation amplification in the experimental
+image recurrence; it is not evidence that the retained metric operator is
+asymmetric. The check was not widened.
+
+1249359 reapplied the actual metric to each admitted vector before its HVP,
+rather than trusting its recursively subtracted image. This adds a second
+metric action per admitted direction, but no extra HVP. Five units passed
+and FeCl2 converged in 14 macros / 281 HVPs, E=-2181.624464863864 Eh,
+GNU wall 9.92 s, RSS 496.5 MiB. The final four macros still stop at the
+microstep budget. It provides no HVP reduction over the retained algorithm;
+its extra metric work is therefore not retained. Both orthogonalization
+experiments and their test changes were removed locally and from the mirror.
+
+These experiments narrow the next action: compare physical integral coupling
+with representation-induced carrier coupling before changing another
+preconditioner or eigensolver policy. The exact decomposition and selected-
+space caveats are recorded in `FECL2_CARRIER_CONNECTION.md`; they are not
+yet a validated diagnosis or an implementation change.
