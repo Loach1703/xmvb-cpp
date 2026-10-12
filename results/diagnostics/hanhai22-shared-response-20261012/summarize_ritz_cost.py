@@ -42,6 +42,8 @@ for macro, end in events.get("ciah_micro_end", [])[-8:]:
     micro = [v for k, v in events.get("ciah_micro", []) if k == macro]
     keyframes = [v for k, v in events.get("ciah_keyframe", []) if k == macro]
     additions = [v for k, v in events.get("ciah_expansion_cost", []) if k == macro]
+    blocks = [v for k, v in events.get("ciah_block_curvature", []) if k == macro]
+    corrections = [v for k, v in events.get("ciah_keyframe_blocks", []) if k == macro]
     summary["tail"].append({
         "macro": macro, "stop": end["reason"],
         "micro": len(micro), "source": float(end["source"]),
@@ -56,5 +58,19 @@ for macro, end in events.get("ciah_micro_end", [])[-8:]:
         "max_keyframe_relative_mismatch": max(
             (float(v["mismatch"]) / max(float(v["predicted"]), 1.0e-300)
              for v in keyframes), default=0),
+        "max_coupling_fraction": max(
+            (abs(float(v["coupling_forward"])+float(v["coupling_backward"])) /
+             max(abs(float(v["orbital"]))+abs(float(v["structure"])),1.0e-300)
+             for v in blocks), default=None),
+        "min_positive_diagonal_curvature_retained": min(
+            ((float(v["orbital"])+float(v["structure"])+
+              float(v["coupling_forward"])+float(v["coupling_backward"])) /
+             (float(v["orbital"])+float(v["structure"]))
+             for v in blocks
+             if float(v["orbital"]) > 0 and float(v["structure"]) > 0), default=None),
+        "keyframe_mismatch_orbital_fractions": [
+            float(v["mismatch_orbital"])**2 /
+            max(float(v["mismatch_orbital"])**2+float(v["mismatch_structure_squared"]),1.0e-300)
+            for v in corrections],
     })
 print(json.dumps(summary, indent=2))

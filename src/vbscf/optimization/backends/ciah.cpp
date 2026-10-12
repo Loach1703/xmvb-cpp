@@ -121,11 +121,21 @@ bool build_ciah_macro_step(
     } else {
       const auto orbital = hessian.apply_orbital_coupling(x.head(no));
       const auto ci = structure.apply_coupling_coordinates(x.tail(ns));
-      image.head(no) = orbital.orbital_hessian +
-          hessian.apply_structure_coupling_adjoint(
-              ci.coefficient_response, ci.adjoint_multipliers);
-      image.tail(ns) = structure.project_coordinates(
-          orbital.scaled_structure_forcing) + ci.hessian_coordinates;
+      const Eigen::VectorXd adjoint = hessian.apply_structure_coupling_adjoint(
+          ci.coefficient_response, ci.adjoint_multipliers);
+      const Eigen::VectorXd forcing = structure.project_coordinates(
+          orbital.scaled_structure_forcing);
+      image.head(no) = orbital.orbital_hessian + adjoint;
+      image.tail(ns) = forcing + ci.hessian_coordinates;
+      if (diagnostics::neo_event_trace_enabled()) {
+        const double orbital_energy = x.head(no).dot(orbital.orbital_hessian);
+        const double structure_energy = x.tail(ns).dot(ci.hessian_coordinates);
+        const double backward_coupling = x.head(no).dot(adjoint);
+        const double forward_coupling = x.tail(ns).dot(forcing);
+        diagnostics::neo_trace("ciah_block_curvature",
+            "orbital=%.17g,structure=%.17g,coupling_forward=%.17g,coupling_backward=%.17g",
+            orbital_energy, structure_energy, forward_coupling, backward_coupling);
+      }
       ++record->structure_response_actions;
     }
     ++record->orbital_hvp_actions;
@@ -342,6 +352,17 @@ bool build_ciah_macro_step(
           "actual=%.17g,predicted=%.17g,mismatch=%.17g,energy=%.17g,accepted=%d",
           actual_norm, predicted_norm, mismatch, exact.energy,
           static_cast<int>(keep_keyframe));
+      if (diagnostics::neo_event_trace_enabled()) {
+        const double actual_orbital = metric.dual_norm(exact.gradient.head(no));
+        const double predicted_orbital = metric.dual_norm(predicted_gradient.head(no));
+        const double mismatch_orbital = metric.dual_norm(
+            (exact.gradient-predicted_gradient).head(no));
+        diagnostics::neo_trace("ciah_keyframe_blocks",
+            "actual_orbital=%.17g,actual_structure_squared=%.17g,predicted_orbital=%.17g,predicted_structure_squared=%.17g,mismatch_orbital=%.17g,mismatch_structure_squared=%.17g",
+            actual_orbital, std::max(0.0,actual_norm*actual_norm-actual_orbital*actual_orbital),
+            predicted_orbital, std::max(0.0,predicted_norm*predicted_norm-predicted_orbital*predicted_orbital),
+            mismatch_orbital, std::max(0.0,mismatch*mismatch-mismatch_orbital*mismatch_orbital));
+      }
       if (keep_keyframe) {
         predicted_gradient = exact.gradient;
         energy_model.refresh(exact.energy, exact.gradient);
