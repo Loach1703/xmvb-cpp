@@ -8,7 +8,7 @@ not a restart. The final macro is 128, E=-2244.741070284000 Eh,
 S^2=6.64451e-11, PySCF optimization wall 11958.18 s, GNU process wall
 3:19:20, GNU process peak RSS 85.16 GiB. The triplet reference 1248772_3
 already converged in 35 macros, E=-2244.790834999517 Eh, GNU process wall
-2667.29 s and peak RSS 83.16 GiB. Both are default AH references.
+2667.29 s and peak RSS 85.15 GiB. Both are default AH references.
 
 The old original-guess NEO endpoints remain **unconverged**: singlet
 64 accepted macros / 667 HVPs, E=-2244.739920658597 Eh; triplet 50 / 528,
