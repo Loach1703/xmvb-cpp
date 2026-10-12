@@ -25,6 +25,7 @@
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/orbitals/charts/physical_metric.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
+#include "vbscf/optimization/trust_region/retraction.hpp"
 
 namespace {
 
@@ -44,6 +45,7 @@ struct Options {
   bool coupled_finite_difference = false;
   int curvature_steps = 0;
   int response_spectrum_limit = 0;
+  int compare_exchange_mib = 0;
 };
 
 void print_usage() {
@@ -59,6 +61,7 @@ void print_usage() {
       << " [--stream-pair-products 0|1]"
       << " [--diagonal-samples count]"
       << " [--curvature-steps count]"
+      << " [--compare-exchange-mib budget]"
       << " [--response-spectrum-limit count]\n";
 }
 
@@ -74,6 +77,8 @@ Options parse_arguments(int argc, char** argv) {
     const std::string value = argv[argument + 1];
     if (name == "--orbital-value-table-bin") {
       options.orbital_value_table_bin_path = value;
+    } else if (name == "--compare-exchange-mib") {
+      options.compare_exchange_mib = std::stoi(value);
     } else if (name == "--step") {
       options.step = std::stod(value);
     } else if (name == "--max-rel-error") {
@@ -136,6 +141,7 @@ Options parse_arguments(int argc, char** argv) {
   if (!(options.step > 0.0) || !(options.max_relative_error >= 0.0) ||
       options.diagonal_samples < 0 || options.curvature_steps < 0 ||
       options.response_spectrum_limit < 0 ||
+      options.compare_exchange_mib < 0 ||
       !(options.response_tolerance > 0.0)) {
     throw std::invalid_argument("finite-difference tolerances must be non-negative");
   }
@@ -338,9 +344,9 @@ int main(int argc, char** argv) {
     const Options options = parse_arguments(argc, argv);
     xmvb::vb::VbScfInputLoadOptions load_options;
     load_options.standard_two_electron_mode = options.two_electron_mode;
-    const auto loaded =
+    auto loaded =
         xmvb::vb::load_vbscf_input_with_timings(options.input_path, load_options);
-    xmvb::vb::VbScfInput input = loaded.input;
+    auto& input = loaded.input;
     if (options.two_electron_mode ==
         xmvb::vb::StandardTwoElectronMode::ResolutionOfIdentity) {
       // RI derivative checks must remain factor-native.  Removing any exact
@@ -432,6 +438,105 @@ int main(int argc, char** argv) {
       }
       accepted.second_order_context->prepared_active_space
           .active_space_two_electron_result.dense_ao_pair_products.resize(0, 0);
+    }
+    if (options.compare_exchange_mib > 0) {
+      if (options.two_electron_mode != xmvb::vb::StandardTwoElectronMode::Exact)
+        throw std::invalid_argument("exchange comparison requires exact integrals");
+      // Both operators borrow ONE integral graph, chart and accepted context.
+      // Only the second operator constructs the additional exchange image.
+      input.ao_integral_input.exact_exchange_memory_budget_bytes = 0;
+      xmvb::vb::ExactHvpOperator reference(accepted.second_order_context, &input, layout, &chart);
+      input.ao_integral_input.exact_exchange_memory_budget_bytes =
+          static_cast<std::size_t>(options.compare_exchange_mib) * 1024 * 1024;
+      xmvb::vb::ExactHvpOperator transformed(accepted.second_order_context, &input, layout, &chart);
+      std::cout << "exchange_comparison_extra_resident_bytes = "
+                << (transformed.diagnostics().resident_exact_pair_elements -
+                    reference.diagnostics().resident_exact_pair_elements) * sizeof(double)
+                << std::endl;
+      xmvb::vb::StructureTangentOperator structure(accepted.second_order_context, reference.structure_action());
+      Eigen::VectorXd z(structure.tangent_size());
+      for (Eigen::Index i = 0; i < z.size(); ++i) z[i] = std::sin(0.37 * (i + 1));
+      const auto tangent = structure.expand(z);
+      const auto structure_image = structure.apply_coupling(tangent);
+      const Eigen::MatrixXd& q = structure_image.coefficient_response;
+      const Eigen::MatrixXd& multipliers = structure_image.adjoint_multipliers;
+      const Eigen::VectorXd adjoint_ref = reference.apply_structure_coupling_adjoint(q, multipliers);
+      const Eigen::VectorXd adjoint_new = transformed.apply_structure_coupling_adjoint(q, multipliers);
+      const double adjoint_error = relative_matrix_error(adjoint_new, adjoint_ref);
+      std::cout << "exchange_comparison_adjoint_relative_error = " << adjoint_error << std::endl;
+      double worst = adjoint_error;
+      Eigen::VectorXd probe = chart.apply_inverse_reduced_block_preconditioner(accepted_reduced_gradient);
+      for (int sample = 0; sample < 6; ++sample) {
+        if (sample >= 1 && sample <= 3)
+          for (Eigen::Index i = 0; i < probe.size(); ++i)
+            probe[i] = std::sin((sample + 1) * 0.17 * (i + 1));
+        probe.normalize();
+        const auto ref = reference.apply_orbital_coupling(probe);
+        const auto value = transformed.apply_orbital_coupling(probe);
+        const double orbital_error = relative_matrix_error(value.orbital_hessian, ref.orbital_hessian);
+        const double forcing_error = relative_matrix_error(value.scaled_structure_forcing, ref.scaled_structure_forcing);
+        const Eigen::VectorXd ref_preconditioned = chart.apply_inverse_reduced_block_preconditioner(ref.orbital_hessian);
+        const Eigen::VectorXd new_preconditioned = chart.apply_inverse_reduced_block_preconditioner(value.orbital_hessian);
+        const double preconditioned_error = relative_matrix_error(new_preconditioned, ref_preconditioned);
+        std::cout << std::setprecision(17) << "EXCHANGE_COMPARE,sample=" << sample
+                  << ",orbital_inf=" << infinity_norm(value.orbital_hessian - ref.orbital_hessian)
+                  << ",orbital_relative=" << orbital_error
+                  << ",forcing_relative=" << forcing_error
+                  << ",preconditioned_relative=" << preconditioned_error << std::endl;
+        worst = std::max({worst, orbital_error, forcing_error});
+        probe = ref_preconditioned;
+      }
+      if (!std::isfinite(worst) || worst > 1.0e-10)
+        throw std::runtime_error("accepted-point exchange operator comparison failed");
+      // The recorded first six microsteps have zero structure dimension and
+      // zero shift. Reproduce that orbital Galerkin prefix on one shared chart
+      // to measure error amplification, without taking an outer orbital step.
+      xmvb::vb::NonredundantRetractionMetric metric(chart, layout, input.orbital_preparation_input);
+      const auto prefix = [&](const xmvb::vb::ExactHvpOperator& op, const char* label,
+                              const Eigen::VectorXd& gradient) {
+        Eigen::MatrixXd basis(direction.size(), 6), images(direction.size(), 6);
+        Eigen::MatrixXd steps(direction.size(), 6);
+        Eigen::VectorXd next = chart.apply_inverse_reduced_block_preconditioner(-gradient);
+        for (int column = 0; column < 6; ++column) {
+          for (int pass = 0; pass < 2; ++pass) {
+            const Eigen::VectorXd weights = basis.leftCols(column).transpose() * next;
+            next.noalias() -= basis.leftCols(column) * weights;
+          }
+          next /= next.stableNorm();
+          basis.col(column) = next;
+          images.col(column) = op.apply_orbital_coupling(next).orbital_hessian;
+          Eigen::MatrixXd projected = basis.leftCols(column + 1).transpose() * images.leftCols(column + 1);
+          projected = (0.5 * (projected + projected.transpose())).eval();
+          const Eigen::VectorXd rhs = -basis.leftCols(column + 1).transpose() * gradient;
+          const Eigen::VectorXd coefficients = projected.ldlt().solve(rhs);
+          steps.col(column).noalias() = basis.leftCols(column + 1) * coefficients;
+          const Eigen::VectorXd residual = gradient + images.leftCols(column + 1) * coefficients;
+          std::cout << "EXCHANGE_PREFIX,path=" << label << ",micro=" << column + 1
+                    << ",ro=" << metric.dual_norm(residual)
+                    << ",step=" << metric.norm(steps.col(column)) << std::endl;
+          next = chart.apply_inverse_reduced_block_preconditioner(-residual);
+        }
+        return steps;
+      };
+      const Eigen::MatrixXd prefix_ref = prefix(reference, "graph", accepted_reduced_gradient);
+      const Eigen::MatrixXd prefix_new = prefix(transformed, "exchange", accepted_reduced_gradient);
+      for (int column = 0; column < 6; ++column)
+        std::cout << "EXCHANGE_PREFIX_DIFFERENCE,micro=" << column + 1
+                  << ",step_norm=" << (prefix_new.col(column) - prefix_ref.col(column)).stableNorm()
+                  << ",physical_step_norm=" << metric.norm(prefix_new.col(column) - prefix_ref.col(column)) << std::endl;
+      // Controlled perturbation, not a reconstruction of an unrecorded old
+      // gradient: isolate input sensitivity from the exchange representation.
+      Eigen::VectorXd perturbation(direction.size());
+      for (Eigen::Index i = 0; i < perturbation.size(); ++i)
+        perturbation[i] = std::sin(0.31 * (i + 1));
+      perturbation *= 1.0e-13 / perturbation.stableNorm();
+      std::cout << "exchange_gradient_perturbation_norm = " << perturbation.stableNorm() << std::endl;
+      const Eigen::MatrixXd perturbed = prefix(transformed, "perturbed_gradient",
+          accepted_reduced_gradient + perturbation);
+      for (int column = 0; column < 6; ++column)
+        std::cout << "EXCHANGE_INPUT_SENSITIVITY,micro=" << column + 1
+                  << ",physical_step_difference=" << metric.norm(perturbed.col(column) - prefix_new.col(column)) << std::endl;
+      return 0;
     }
     xmvb::vb::ExactHvpOperator exact_hvp(
         accepted.second_order_context,
