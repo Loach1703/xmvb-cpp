@@ -168,6 +168,49 @@ double CiahWorkspace::projected_dual_norm(const Eigen::VectorXd& covector) const
   return std::sqrt(squared);
 }
 
+CiahInverseSpectrum CiahWorkspace::inverse_spectrum(double shift,
+    const std::function<Eigen::VectorXd(const Eigen::VectorXd&)>& inverse) const {
+  if (!std::isfinite(shift) || !inverse)
+    throw std::invalid_argument("invalid CIAH inverse spectrum input");
+  CiahInverseSpectrum result;
+  const int m = basis_size();
+  result.dimension = m;
+  if (!m) return result;
+  const Eigen::MatrixXd raw = hessian_projection_.topLeftCorner(m,m) -
+      shift * metric_projection_.topLeftCorner(m,m);
+  const Eigen::MatrixXd e = 0.5 * (raw+raw.transpose());
+  const Eigen::MatrixXd g = 0.5 *
+      (metric_projection_.topLeftCorner(m,m) +
+       metric_projection_.topLeftCorner(m,m).transpose());
+  const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> curvature(
+      e,g,Eigen::EigenvaluesOnly);
+  if (curvature.info() != Eigen::Success)
+    throw std::runtime_error("CIAH trial curvature spectrum failed");
+  result.curvature_min = curvature.eigenvalues()[0];
+  result.curvature_max = curvature.eigenvalues().tail(1)[0];
+  result.positive_curvature = result.curvature_min >
+      options_.lindep * result.curvature_max;
+  if (!result.positive_curvature) return result;
+  Eigen::MatrixXd t(m,m);
+  for (int j=0;j<m;++j) {
+    const Eigen::VectorXd rhs = hessian_images_[j] - shift*metric_images_[j];
+    const Eigen::VectorXd image = inverse(rhs);
+    if (image.size() != problem_.size() || !image.allFinite())
+      throw std::runtime_error("invalid CIAH diagnostic inverse image");
+    for (int i=0;i<m;++i)
+      t(i,j) = hessian_images_[i].dot(image) - shift*metric_images_[i].dot(image);
+  }
+  result.inverse_skew = (t-t.transpose()).norm()/std::max(1.0,t.norm());
+  t = (0.5*(t+t.transpose())).eval();
+  const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(
+      t,e,Eigen::EigenvaluesOnly);
+  if (spectrum.info() != Eigen::Success)
+    throw std::runtime_error("CIAH trial inverse spectrum failed");
+  result.inverse_min = spectrum.eigenvalues()[0];
+  result.inverse_max = spectrum.eigenvalues().tail(1)[0];
+  return result;
+}
+
 CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   if (current_gradient.size() != problem_.size() ||
       !current_gradient.allFinite()) {

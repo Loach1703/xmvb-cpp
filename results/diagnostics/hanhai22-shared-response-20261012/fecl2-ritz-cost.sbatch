@@ -40,7 +40,7 @@ done
 cd "$artifact/native"
 sha256sum ../xmvb-cpp.exe input.xmi def2-tzvp.gbs > hashes.txt
 unset XMVB_NEO_CANDIDATE_AUDIT
-export XMVB_NEO_TRACE=scalar
+export XMVB_NEO_TRACE="${XMVB_AUDIT_TRACE_MODE:-scalar}"
 status=0
 srun --ntasks=1 --cpus-per-task=32 --cpu-bind=cores /usr/bin/time -v -o resource.time \
  ../xmvb-cpp.exe input.xmi --optimizer-backend neo --eigensolver davidson \

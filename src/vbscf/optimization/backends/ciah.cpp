@@ -498,6 +498,23 @@ bool build_ciah_macro_step(
   }
 
   double final_reduction = energy - energy_model.energy();
+  if (diagnostics::neo_trace_enabled()) {
+    // A diagnostic of the actual coupled trial space, not just its A block.
+    // Neither inverse callback evaluates an HVP or changes the retained space.
+    const auto base = workspace.inverse_spectrum(candidate.eigenvalue,
+        [&](const Eigen::VectorXd& v) {
+          return diagonal_precondition(v,candidate.eigenvalue);
+        });
+    const auto balanced = workspace.inverse_spectrum(candidate.eigenvalue,
+        [&](const Eigen::VectorXd& v) {
+          return precondition(v,candidate.eigenvalue);
+        });
+    diagnostics::neo_trace("ciah_inverse_spectrum",
+        "dimension=%d,positive_curvature=%d,curvature_min=%.17g,curvature_max=%.17g,base_min=%.17g,base_max=%.17g,balanced_min=%.17g,balanced_max=%.17g,base_skew=%.17g,balanced_skew=%.17g",
+        base.dimension,static_cast<int>(base.positive_curvature),
+        base.curvature_min,base.curvature_max,base.inverse_min,base.inverse_max,
+        balanced.inverse_min,balanced.inverse_max,base.inverse_skew,balanced.inverse_skew);
+  }
   if (ns && diagnostics::neo_event_trace_enabled()) {
     const auto schur = coarse.schur_spectrum(static_cast<int>(no));
     diagnostics::neo_trace("ciah_schur_spectrum",

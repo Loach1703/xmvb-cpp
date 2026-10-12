@@ -563,6 +563,50 @@ void check_sampled_schur_spectrum() {
   }
 }
 
+/** @brief Cached-image diagnostics match an independent full-space spectrum. */
+void check_inverse_spectrum() {
+  Eigen::Matrix3d h;
+  h << 2.0,0.2,0.1,0.2,5.0,0.3,0.1,0.3,9.0;
+  const Eigen::Matrix3d g=Eigen::Vector3d(0.2,1.0,3.0).asDiagonal();
+  const Eigen::Vector3d gradient(0.2,0.3,0.7);
+  int actions=0;
+  const auto problem=dense_problem(h,g,gradient,&actions);
+  CiahWorkspace workspace(problem,gradient);
+  for (int i=0;i<3;++i) workspace.next(gradient);
+  require(workspace.basis_size()==3,"inverse spectrum fixture did not span the space");
+  const int before=actions;
+  const double shift=-0.07;
+  const Eigen::Matrix3d l=h-shift*g;
+  const Eigen::LDLT<Eigen::Matrix3d> factor(l);
+  const auto exact=workspace.inverse_spectrum(shift,[&](const Eigen::VectorXd& r) {
+    return Eigen::VectorXd(factor.solve(r));
+  });
+  require(exact.positive_curvature && std::abs(exact.inverse_min-1.0)<2.0e-11 &&
+      std::abs(exact.inverse_max-1.0)<2.0e-11 && exact.inverse_skew<2.0e-12,
+      "exact inverse diagnostic is not the identity spectrum");
+  const auto identity=workspace.inverse_spectrum(shift,
+      [](const Eigen::VectorXd& r) { return r; });
+  const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> reference(l);
+  const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::Matrix3d> physical(l,g);
+  require(std::abs(identity.inverse_min-reference.eigenvalues()[0])<2.0e-10 &&
+      std::abs(identity.inverse_max-reference.eigenvalues()[2])<2.0e-10 &&
+      std::abs(identity.curvature_min-physical.eigenvalues()[0])<2.0e-10 &&
+      std::abs(identity.curvature_max-physical.eigenvalues()[2])<2.0e-10,
+      "cached inverse spectrum differs from independent dense reference");
+  const auto negative=workspace.inverse_spectrum(shift,
+      [&](const Eigen::VectorXd& r) { return Eigen::VectorXd(-factor.solve(r)); });
+  require(std::abs(negative.inverse_min+1.0)<2.0e-11 &&
+      std::abs(negative.inverse_max+1.0)<2.0e-11,
+      "diagnostic concealed an indefinite inverse");
+  int calls=0;
+  const auto indefinite=workspace.inverse_spectrum(100.0,[&](const Eigen::VectorXd& r) {
+    ++calls; return r;
+  });
+  require(!indefinite.positive_curvature && !calls,
+      "inverse diagnostic treated indefinite curvature as SPD");
+  require(actions==before,"inverse spectrum diagnostic performed a Hessian action");
+}
+
 }  // namespace
 
 int main() {
@@ -580,6 +624,8 @@ int main() {
     check_coarse_sample_rank();
     check_projected_dual_norm();
     check_sampled_schur_spectrum();
+    check_inverse_spectrum();
+    check_restart_phase();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

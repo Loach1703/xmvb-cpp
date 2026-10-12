@@ -91,6 +91,15 @@ struct CiahResult {
   bool exhaustion = false;
 };
 
+/** @brief Trial-space inverse spectrum, diagnostic only, not a stopping rule. */
+struct CiahInverseSpectrum {
+  int dimension = 0;
+  bool positive_curvature = false;
+  double curvature_min = 0.0, curvature_max = 0.0;
+  double inverse_min = 0.0, inverse_max = 0.0;
+  double inverse_skew = 0.0;
+};
+
 /** @brief A true-energy keyframe and its frozen origin-chart images. */
 struct CiahCheckpoint {
   double energy = 0.0;
@@ -136,6 +145,13 @@ public:
    * Diagnostic projection using cached metric images; no operator evaluation.
    */
   double projected_dual_norm(const Eigen::VectorXd& covector) const;
+  /** @brief Measure an inverse on cached shifted Hessian images.
+   * Computes eigenvalues of (LQ)^T P (LQ) relative to Q^T LQ when the
+   * latter is positive definite. Only small matrices and one inverse image
+   * are allocated; no Hessian or metric actions are evaluated.
+   */
+  CiahInverseSpectrum inverse_spectrum(double shift,
+      const std::function<Eigen::VectorXd(const Eigen::VectorXd&)>& inverse) const;
   explicit CiahWorkspace(
       const NeoProblem& problem,
       std::optional<Eigen::VectorXd> initial_direction = std::nullopt,
