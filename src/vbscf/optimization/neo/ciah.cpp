@@ -125,6 +125,24 @@ bool CiahWorkspace::append(Eigen::VectorXd direction) {
   return true;
 }
 
+double CiahWorkspace::projected_dual_norm(const Eigen::VectorXd& covector) const {
+  if (covector.size() != problem_.size() || !covector.allFinite())
+    throw std::invalid_argument("invalid CIAH diagnostic covector");
+  if (basis_.empty()) return 0.0;
+  if (projected_metric_.rows() != basis_size())
+    throw std::logic_error("CIAH diagnostic requires a completed Ritz solve");
+  Eigen::VectorXd rhs(basis_size());
+  for (int i = 0; i < basis_size(); ++i) rhs[i] = basis_[i].dot(covector);
+  const Eigen::LLT<Eigen::MatrixXd> factor(projected_metric_);
+  if (factor.info() != Eigen::Success)
+    throw std::runtime_error("CIAH diagnostic metric factorization failed");
+  const Eigen::VectorXd solution = factor.solve(rhs);
+  const double squared = rhs.dot(solution);
+  if (!(squared >= 0.0) || !std::isfinite(squared))
+    throw std::runtime_error("CIAH diagnostic projection norm is invalid");
+  return std::sqrt(squared);
+}
+
 CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   if (current_gradient.size() != problem_.size() ||
       !current_gradient.allFinite()) {
@@ -180,6 +198,7 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
       (projected_hessian_action + projected_hessian_action.transpose());
   const Eigen::MatrixXd projected_metric = 0.5 *
       (projected_metric_action + projected_metric_action.transpose());
+  projected_metric_ = projected_metric;
   Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> metric_spectrum(
       projected_metric, Eigen::EigenvaluesOnly);
   if (metric_spectrum.info() != Eigen::Success ||

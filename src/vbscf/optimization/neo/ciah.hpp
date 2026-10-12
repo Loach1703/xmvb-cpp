@@ -132,6 +132,10 @@ private:
  */
 class CiahWorkspace {
 public:
+  /** @brief Dual norm captured by the current AH trial space.
+   * Diagnostic projection using cached metric images; no operator evaluation.
+   */
+  double projected_dual_norm(const Eigen::VectorXd& covector) const;
   explicit CiahWorkspace(
       const NeoProblem& problem,
       std::optional<Eigen::VectorXd> initial_direction = std::nullopt,
@@ -161,6 +165,7 @@ private:
   std::vector<Eigen::VectorXd> basis_;
   std::vector<Eigen::VectorXd> hessian_images_;
   std::vector<Eigen::VectorXd> metric_images_;
+  Eigen::MatrixXd projected_metric_;
   bool exhausted_ = false;
 };
 

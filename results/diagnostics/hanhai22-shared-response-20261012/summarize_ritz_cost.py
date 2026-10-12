@@ -56,6 +56,12 @@ summary = {
          "relative_curvature_change": float(v["curvature_change"]) /
              max(float(v["origin_curvature"]), 1.0e-300)}
         for macro, v in events.get("ciah_keyframe_direction_audit", [])],
+    "keyframe_secants": [
+        {"macro": macro, "mismatch": float(v["mismatch"]),
+         "captured_squared_fraction": (float(v["captured"]) /
+             max(float(v["mismatch"]), 1.0e-300))**2,
+         "secant_cosine": float(v["secant_cosine"])}
+        for macro, v in events.get("ciah_keyframe_secant", [])],
     "metric_decision_disagreements": sum(
         v["diagonal_keep"] != v["full_keep"] or
         v["diagonal_trigger"] != v["full_trigger"]

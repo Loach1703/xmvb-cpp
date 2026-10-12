@@ -394,6 +394,15 @@ bool build_ciah_macro_step(
       const Keyframe exact = evaluate_keyframe(displacement);
       const double actual_norm = dual_norm(exact.gradient);
       const double mismatch = dual_norm(exact.gradient - predicted_gradient);
+      if (diagnostics::neo_event_trace_enabled()) {
+        const Eigen::VectorXd correction = exact.gradient - predicted_gradient;
+        const double captured = workspace.projected_dual_norm(correction);
+        const double secant = correction.dot(keyframe_step);
+        diagnostics::neo_trace("ciah_keyframe_secant",
+            "mismatch=%.17g,captured=%.17g,displacement_norm=%.17g,secant=%.17g,secant_cosine=%.17g",
+            mismatch, captured, length, secant,
+            mismatch > 0.0 && length > 0.0 ? secant / (mismatch * length) : 0.0);
+      }
       const bool keep_keyframe = mismatch < gradient_trust * predicted_norm ||
           actual_norm < gradient_trust * micro_gradient_tolerance;
       if (audit_structure_metric) {

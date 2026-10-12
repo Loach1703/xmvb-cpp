@@ -451,6 +451,25 @@ void check_coarse_sample_rank() {
       "coarse inverse certified local rank but missed global sample dependence");
 }
 
+void check_projected_dual_norm() {
+  const Eigen::Matrix3d h = Eigen::Vector3d(2.0,3.0,4.0).asDiagonal();
+  Eigen::Matrix3d g;
+  g << 2.0,0.4,0.1, 0.4,3.0,0.2, 0.1,0.2,4.0;
+  const Eigen::Vector3d gradient(0.1,0.2,0.3);
+  int actions = 0;
+  const auto problem = dense_problem(h,g,gradient,&actions);
+  const Eigen::Vector3d seed(1.0,2.0,0.0);
+  CiahWorkspace workspace(problem,Eigen::VectorXd(seed));
+  require(workspace.projected_dual_norm(gradient) == 0.0,
+      "empty CIAH space captures a nonzero covector norm");
+  workspace.next(gradient);
+  const Eigen::Vector3d covector(0.4,-0.1,0.8);
+  const double expected = std::abs(seed.dot(covector))/std::sqrt(seed.dot(g*seed));
+  require(std::abs(workspace.projected_dual_norm(covector)-expected)<2.0e-14,
+      "CIAH projected norm differs from independent metric projection");
+  require(actions == 1,"CIAH projected norm evaluated an extra Hessian image");
+}
+
 }  // namespace
 
 int main() {
@@ -465,6 +484,7 @@ int main() {
     check_coarse_balancing_inverse();
     check_keyframe_checkpoint();
     check_coarse_sample_rank();
+    check_projected_dual_norm();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
