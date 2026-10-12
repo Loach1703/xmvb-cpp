@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include <Eigen/Cholesky>
+
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
@@ -64,9 +66,53 @@ bool build_ciah_macro_step(
   record->source_gradient_norm = gradient.norm();
   record->source_physical_gradient_norm = metric.dual_norm(gradient);
 
-  const auto dual_norm = [&](const Eigen::VectorXd& g) {
+  const auto diagonal_norm = [&](const Eigen::VectorXd& g) {
     return std::hypot(metric.dual_norm(g.head(no)),
         ns ? structure.diagonal_dual_norm(g.tail(ns)) : 0.0);
+  };
+  const auto dual_norm = [&](const Eigen::VectorXd& g) {
+    return std::hypot(metric.dual_norm(g.head(no)),
+        ns ? structure.dual_norm(g.tail(ns)) : 0.0);
+  };
+  // Explicitly bounded diagnostic only; never assemble a production metric.
+  // FeCl2 has 419 structure coordinates (about 1.34 MiB per matrix).
+  Eigen::LLT<Eigen::MatrixXd> audit_metric;
+  const bool audit_structure_metric = ns > 0 &&
+      diagnostics::neo_event_trace_enabled() &&
+      diagnostics::neo_candidate_audit_enabled() &&
+      static_cast<double>(ns) * ns * sizeof(double) <= 16.0 * 1024 * 1024;
+  if (audit_structure_metric) {
+    Eigen::MatrixXd matrix(ns, ns);
+    for (Eigen::Index begin = 0; begin < ns; begin += 32) {
+      const Eigen::Index width = std::min<Eigen::Index>(32, ns - begin);
+      Eigen::MatrixXd probes = Eigen::MatrixXd::Zero(ns, width);
+      probes.middleRows(begin, width).setIdentity();
+      matrix.middleCols(begin, width) =
+          structure.apply_coupling_coordinate_block(probes).metric_coordinates;
+    }
+    const double skew = (matrix - matrix.transpose()).norm();
+    const double tolerance = 256.0 * std::numeric_limits<double>::epsilon() *
+        ns * std::max(1.0, matrix.norm());
+    if (skew > tolerance) throw std::runtime_error("CIAH audit metric is not symmetric");
+    audit_metric.compute(0.5 * (matrix + matrix.transpose()));
+    if (audit_metric.info() != Eigen::Success)
+      throw std::runtime_error("CIAH audit metric is not positive definite");
+    diagnostics::neo_trace("ciah_structure_metric_audit",
+        "dimension=%ld,matrix_bytes=%ld,skew=%.17g",
+        static_cast<long>(ns), static_cast<long>(ns * ns * sizeof(double)), skew);
+  }
+  const auto full_dual_norm = [&](const Eigen::VectorXd& g) {
+    const Eigen::VectorXd structure_g = g.tail(ns);
+    const Eigen::VectorXd inverse = audit_metric.solve(structure_g);
+    const Eigen::VectorXd residual =
+        structure.apply_metric_coordinates(inverse) - structure_g;
+    diagnostics::neo_trace("ciah_structure_metric_solve_audit",
+        "rhs_norm=%.17g,residual=%.17g,solution_norm=%.17g",
+        structure_g.norm(), residual.norm(), inverse.norm());
+    const double squared = structure_g.dot(inverse);
+    if (!(squared >= 0.0) || !std::isfinite(squared))
+      throw std::runtime_error("CIAH audit structure dual norm is invalid");
+    return std::hypot(metric.dual_norm(g.head(no)), std::sqrt(squared));
   };
   const auto action = [&](const Eigen::VectorXd& x) {
     Eigen::VectorXd image(dimension);
@@ -168,6 +214,10 @@ bool build_ciah_macro_step(
   CiahEnergyModel energy_model(energy, initial_gradient);
   Eigen::VectorXd last_step = displacement;
   double keyframe_norm = dual_norm(initial_gradient);
+  double diagonal_keyframe_norm = audit_structure_metric
+      ? diagonal_norm(initial_gradient) : 0.0;
+  double audit_keyframe_norm = audit_structure_metric
+      ? full_dual_norm(initial_gradient) : 0.0;
   // newton_casscf.kernel passes 0.3 * its outer gradient tolerance to
   // update_orb_ci; the microstep/keyframe tests use that inner tolerance.
   const double micro_gradient_tolerance = 0.3 * options.gradient_tolerance;
@@ -268,6 +318,26 @@ bool build_ciah_macro_step(
       const double mismatch = dual_norm(exact.gradient - predicted_gradient);
       const bool keep_keyframe = mismatch < gradient_trust * predicted_norm ||
           actual_norm < gradient_trust * micro_gradient_tolerance;
+      if (audit_structure_metric) {
+        const double diagonal_actual = diagonal_norm(exact.gradient);
+        const double diagonal_predicted = diagonal_norm(predicted_gradient);
+        const double diagonal_mismatch = diagonal_norm(exact.gradient - predicted_gradient);
+        const bool diagonal_keep = diagonal_mismatch < gradient_trust * diagonal_predicted ||
+            diagonal_actual < gradient_trust * micro_gradient_tolerance;
+        const double full_actual = full_dual_norm(exact.gradient);
+        const double full_predicted = full_dual_norm(predicted_gradient);
+        const double full_mismatch = full_dual_norm(exact.gradient - predicted_gradient);
+        const bool full_keep = full_mismatch < gradient_trust * full_predicted ||
+            full_actual < gradient_trust * micro_gradient_tolerance;
+        diagnostics::neo_trace("ciah_keyframe_metric_audit",
+            "diagonal_actual=%.17g,full_actual=%.17g,diagonal_predicted=%.17g,full_predicted=%.17g,diagonal_mismatch=%.17g,full_mismatch=%.17g,diagonal_keep=%d,full_keep=%d,diagonal_trigger=%d,full_trigger=%d",
+            diagonal_actual, full_actual, diagonal_predicted, full_predicted,
+            diagonal_mismatch, full_mismatch, static_cast<int>(diagonal_keep),
+            static_cast<int>(full_keep),
+            static_cast<int>(diagonal_predicted < diagonal_keyframe_norm / gradient_trust),
+            static_cast<int>(full_predicted < audit_keyframe_norm / gradient_trust));
+        if (keep_keyframe) audit_keyframe_norm = full_actual;
+      }
       diagnostics::neo_trace("ciah_keyframe",
           "actual=%.17g,predicted=%.17g,mismatch=%.17g,energy=%.17g,accepted=%d",
           actual_norm, predicted_norm, mismatch, exact.energy,
@@ -281,6 +351,8 @@ bool build_ciah_macro_step(
             -initial_gradient.dot(displacement) -
                 0.5 * displacement.dot(hessian_displacement));
         keyframe_norm = actual_norm;
+        if (audit_structure_metric)
+          diagonal_keyframe_norm = diagonal_norm(exact.gradient);
         since_keyframe = 0;
         audit_next_keyframe_step = !audited_keyframe_step &&
             diagnostics::neo_event_trace_enabled() &&

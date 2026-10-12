@@ -177,6 +177,15 @@ public:
   /** @brief Jacobi approximation to the dual norm induced by the overlap metric. */
   double diagonal_dual_norm(const Eigen::VectorXd& covector) const;
 
+  /** @brief Complete horizontal overlap dual norm; no dense metric is stored.
+   * The matrix-free Riesz solve certifies its true residual at sqrt(machine
+   * epsilon), matching the orbital metric's numerical accuracy contract.
+   */
+  double dual_norm(const Eigen::VectorXd& covector) const;
+
+  /** @brief Positive Jacobi Riesz preconditioner, not a dual-norm substitute. */
+  Eigen::VectorXd apply_inverse_metric_diagonal(const Eigen::VectorXd& covector) const;
+
   /**
    * @brief Applies an SPD Jacobi inverse for @f$C+\lambda M_s@f$.
    *

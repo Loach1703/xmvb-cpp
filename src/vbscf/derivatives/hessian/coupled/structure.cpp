@@ -12,6 +12,7 @@
 
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "core/metric_solve.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -419,7 +420,7 @@ double StructureTangentOperator::metric_inner_product(
   return product;
 }
 
-double StructureTangentOperator::diagonal_dual_norm(
+Eigen::VectorXd StructureTangentOperator::apply_inverse_metric_diagonal(
     const Eigen::VectorXd& covector) const {
   if (covector.size() != tangent_size() || !covector.allFinite()) {
     throw std::invalid_argument(
@@ -429,7 +430,12 @@ double StructureTangentOperator::diagonal_dual_norm(
   for (int state = 0; state < n_states_; ++state) {
     ambient.col(state).array() /= metric_diagonal_.array();
   }
-  const Eigen::VectorXd inverse_image = project_coordinates(ambient);
+  return project_coordinates(ambient);
+}
+
+double StructureTangentOperator::diagonal_dual_norm(
+    const Eigen::VectorXd& covector) const {
+  const Eigen::VectorXd inverse_image = apply_inverse_metric_diagonal(covector);
   const double squared_norm = covector.dot(inverse_image);
   const double tolerance = 1024.0 * std::numeric_limits<double>::epsilon() *
       std::max(1.0, covector.squaredNorm());
@@ -438,6 +444,18 @@ double StructureTangentOperator::diagonal_dual_norm(
         "structure diagonal dual norm is not positive semidefinite");
   }
   return std::sqrt(std::max(0.0, squared_norm));
+}
+
+double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector) const {
+  if (covector.size() != tangent_size() || !covector.allFinite())
+    throw std::invalid_argument("invalid structure metric covector");
+  const Eigen::VectorXd inverse = xmvb::core::solve_metric(covector,
+      [this](const Eigen::VectorXd& x) { return apply_metric_coordinates(x); },
+      [this](const Eigen::VectorXd& x) { return apply_inverse_metric_diagonal(x); });
+  const double squared = covector.dot(inverse);
+  if (!(squared >= 0.0) || !std::isfinite(squared))
+    throw std::runtime_error("invalid complete structure dual norm");
+  return std::sqrt(squared);
 }
 
 Eigen::VectorXd

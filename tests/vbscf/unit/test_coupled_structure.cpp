@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
 
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
@@ -193,6 +194,16 @@ void check_single_state(const StructureFixture& fixture) {
   require(std::abs(structure.squared_norm(tangent) - expected_norm) < 2.0e-13,
           "structure physical norm differs from z^T S z");
   require(expected_norm > 0.0, "test structure tangent has zero physical norm");
+  const Eigen::VectorXd covector = structure.coordinates(tangent);
+  Eigen::MatrixXd metric(covector.size(), covector.size());
+  for (Eigen::Index col = 0; col < metric.cols(); ++col)
+    metric.col(col) = structure.apply_metric_coordinates(
+        Eigen::VectorXd::Unit(covector.size(), col));
+  const double dense_dual = std::sqrt(covector.dot(metric.ldlt().solve(covector)));
+  require(std::abs(structure.dual_norm(covector) - dense_dual) < 1e-10,
+      "complete structure dual norm differs from dense Riesz reference");
+  require(structure.dual_norm(Eigen::VectorXd::Zero(covector.size())) == 0.0,
+      "zero structure covector has nonzero dual norm");
 }
 
 void check_equal_weight_multistate(const StructureFixture& fixture) {

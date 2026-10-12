@@ -22,12 +22,13 @@ mkdir -p "$artifact"
 export LC_ALL=C OMP_NUM_THREADS=32 OMP_PLACES=cores OMP_PROC_BIND=close OMP_MAX_ACTIVE_LEVELS=1
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
 export LD_LIBRARY_PATH="/home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib:${LD_LIBRARY_PATH:-}"
-cmake --build "$source_dir/build" --target xmvb test_ciah -j8 > "$artifact/build.log" 2>&1
+cmake --build "$source_dir/build" --target xmvb test_ciah test_coupled_structure -j8 > "$artifact/build.log" 2>&1
 srun --ntasks=1 --cpus-per-task=32 --cpu-bind=cores "$source_dir/build/src/test_ciah" > "$artifact/unit.out" 2> "$artifact/unit.err"
+srun --ntasks=1 --cpus-per-task=32 --cpu-bind=cores "$source_dir/build/src/test_coupled_structure" > "$artifact/structure-unit.out" 2> "$artifact/structure-unit.err"
 cp "$source_dir/build/src/xmvb-cpp.exe" "$artifact/"
 cp "$root/ciah-preconditioners-1247579/FeCl2/input.xmi" "$artifact/"
 cp "$root/ciah-preconditioners-1247579/FeCl2/def2-tzvp.gbs" "$artifact/"
-sed -i -E 's/itmax=[0-9]+/itmax=4/g' "$artifact/input.xmi"
+sed -i -E 's/itmax=[0-9]+/itmax=8/g' "$artifact/input.xmi"
 cd "$artifact"
 sha256sum xmvb-cpp.exe input.xmi def2-tzvp.gbs > hashes.txt
 export XMVB_NEO_TRACE=1 XMVB_NEO_CANDIDATE_AUDIT=1
