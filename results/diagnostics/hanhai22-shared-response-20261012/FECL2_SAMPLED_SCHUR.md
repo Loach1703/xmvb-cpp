@@ -95,3 +95,56 @@ of reconstruction/admission, not an increase of the AH budget.
 
 Raw logs, hashes and GNU resource records: fecl2-ritz-cost-1249478/native/.
 summarize_ritz_cost.py extracts the sampled spectra programmatically.
+
+## Fresh-innovation reconstruction: tested and rejected
+
+The proposed component reconstruction was implemented. Orbital and structure
+components were separately projected against cached orthonormal samples,
+their independent normalized residuals were evaluated directly, and full
+operator images were reconstructed by linearity. Small unadmitted residuals
+were still evaluated; no residual component was truncated. Only directly
+evaluated independent images were admitted. Complete metric images used
+the same fresh directions. Original rank criteria, action precision,
+CIAH policies and nonlinear acceptance were unchanged.
+
+Independent dense unit tests checked cross-block coupling, the chained-source
+case rejected by the original Gram certificate, full operator reconstruction,
+one action per nonzero innovation and evaluation of a below-admission
+residual with a large Hessian image. All five unit executables passed in
+both experiment jobs.
+
+| FeCl2 path | Job | Macro / orbital HVP | Energy / Eh | GNU wall / s | RSS / MiB | Expansion scope / s |
+|---|---:|---:|---:|---:|---:|---:|
+| Archived retained diagnostic | 1249478 | 14 / 281 | -2181.624464869630 | 9.93 | 492.6 | 2.447 |
+| Fresh orbital and structure components | 1249491 | 14 / 280 | -2181.624464867051 | 10.19 | 511.6 | 2.837 |
+| Fresh structure component only | 1249494 | 14 / 281 | -2181.624464866901 | 10.05 | 500.0 | 2.755 |
+
+All observations are native runs on Hanhai22 anode31 at 32 bound cores;
+the old binary was not rerun. All endpoints agree with the PySCF
+coupled-Newton reference to about 1.7e-8 Eh. The all-fresh path ends with
+28 orbital and 28 structure samples, resolving the old 29/18 admission
+imbalance. It nevertheless does not reduce macro steps or materially
+reduce HVP counts. Additional metric evaluations and reconstruction work
+coexist with a larger measured expansion scope; that scope alone does not
+attribute its increase to a specific instruction or allocation.
+
+This rejects sample admission as the dominant FeCl2 tail bottleneck.
+The prior rejection is a legitimate cached-image conditioning certificate,
+not evidence that the physical HVP loses those directions: rejected samples
+were absent from the *preconditioner*, not from the complete coupled AH
+action. The new path made richer samples trustworthy but did not demonstrate
+an effective convergence improvement. Its method, driver refactor and trial
+unit test were deleted locally and from the cluster source mirror. There is
+no retained switch or fallback. The mirror executable was restored from
+frozen 1249478 without running another old benchmark.
+
+The next unresolved question is representation consistency of the approximate
+inverse: the analytic orbital rotation diagonal is built in an accepted
+orthogonal carrier frame, whereas the complete coupled Hessian acts on raw
+nonorthogonal orbital/structure coordinates. Existing source/frame transforms
+are present and independently tested, so their absence must not be asserted.
+What remains to inspect is whether the carrier connection belongs in a
+coupled congruence of the *preconditioning model*. This is not a proposed
+change to orbital retraction, the exact Hessian or stopping rules. The
+connection audit already exists, but a production congruence has not been
+implemented or validated. No new iron long run was launched.
