@@ -503,133 +503,120 @@ std::vector<double> apply_low_rank_ri_operator(
   const int n_auxiliary = ri_factorization.n_auxiliary_functions;
   const int rank = factorization.effective_rank;
 
-  // Store Z_(A,k),mu = sum_nu L_(A,mu,nu) U_(nu,k) as a
-  // (n_aux * rank)-by-n_bf matrix.  Each AO slice is obtained by one GEMM from
-  // a contiguous auxiliary-major view of the packed RI tensor.  This replaces
-  // n_aux small symmetric matrix products and rank updates by n_bf level-3
-  // transformations followed by two large SYRK contractions.
-  Eigen::MatrixXd transformed(n_auxiliary * rank, n_basis_functions);
+  // The auxiliary-major Z tile is shared. Workers own AO row slices and
+  // disjoint output panels, never full exchange output replicas.
+  constexpr std::size_t workspace_bytes = 64ULL * 1024 * 1024;
   const int n_threads = std::min(
-      xmvb::effective_openmp_thread_count(),
-      n_basis_functions);
-#pragma omp parallel num_threads(n_threads)
-  {
-    Eigen::MatrixXd ao_slice(n_auxiliary, n_basis_functions);
-#pragma omp for schedule(static)
-    for (int first = 0; first < n_basis_functions; ++first) {
-      for (int second = 0; second < n_basis_functions; ++second) {
-        const int larger = std::max(first, second);
-        const int smaller = std::min(first, second);
-        const Eigen::Index packed_index =
-            static_cast<Eigen::Index>(larger) * (larger + 1) / 2 + smaller;
-        ao_slice.col(second) = packed_factor_matrix.col(packed_index);
-      }
-      Eigen::Map<Eigen::MatrixXd> transformed_slice(
-          transformed.col(first).data(),
-          n_auxiliary,
-          rank);
-      transformed_slice.noalias() =
-          ao_slice * factorization.scaled_eigenvectors;
+      xmvb::effective_openmp_thread_count(), n_basis_functions);
+  // At least one near-square lower-triangle block per worker; the number
+  // follows p(p+1)/2 >= workers, not a molecule-specific block dimension.
+  const int n_panels = std::min(n_basis_functions, static_cast<int>(std::ceil(
+      (std::sqrt(1.0 + 8.0 * n_threads) - 1.0) / 2.0)));
+  std::vector<std::pair<int, int>> output_blocks;
+  for (int row = 0; row < n_panels; ++row) {
+    for (int column = 0; column <= row; ++column) {
+      output_blocks.emplace_back(row, column);
     }
   }
-
-  std::vector<Eigen::VectorXd> partial_projections;
-  partial_projections.reserve(n_threads);
-  for (int thread = 0; thread < n_threads; ++thread) {
-    partial_projections.emplace_back(Eigen::VectorXd::Zero(n_auxiliary));
-  }
-#pragma omp parallel num_threads(n_threads)
-  {
-    int thread = 0;
-#ifdef _OPENMP
-    thread = omp_get_thread_num();
-#endif
-#pragma omp for schedule(static)
-    for (int orbital = 0; orbital < n_basis_functions; ++orbital) {
-      const Eigen::Map<const Eigen::MatrixXd> transformed_slice(
-          transformed.col(orbital).data(),
-          n_auxiliary,
-          rank);
-      for (int component = 0;
-           component < factorization.n_positive_components;
-           ++component) {
-        partial_projections[thread].noalias() +=
-            factorization.scaled_eigenvectors(orbital, component) *
-            transformed_slice.col(component);
-      }
-      for (int component = factorization.n_positive_components;
-           component < rank;
-           ++component) {
-        partial_projections[thread].noalias() -=
-            factorization.scaled_eigenvectors(orbital, component) *
-            transformed_slice.col(component);
-      }
-    }
-  }
-  Eigen::VectorXd auxiliary_projection =
-      Eigen::VectorXd::Zero(n_auxiliary);
-  for (const auto& partial_projection : partial_projections) {
-    auxiliary_projection += partial_projection;
-  }
-
+  const std::size_t per_auxiliary_elements =
+      static_cast<std::size_t>(n_basis_functions) * (rank + n_threads) +
+      n_threads;
+  const int tile_width = static_cast<int>(std::min<std::size_t>(
+      std::max(1, n_auxiliary),
+      std::max<std::size_t>(
+          1, workspace_bytes / sizeof(double) / per_auxiliary_elements)));
+  Eigen::VectorXd auxiliary_projection = Eigen::VectorXd::Zero(n_auxiliary);
   Eigen::Map<Eigen::MatrixXd> output(
-      output_storage.data(),
-      n_basis_functions,
-      n_basis_functions);
-  std::vector<Eigen::MatrixXd> partial_exchange;
-  partial_exchange.reserve(n_threads);
-  for (int thread = 0; thread < n_threads; ++thread) {
-    partial_exchange.emplace_back(
-        Eigen::MatrixXd::Zero(n_basis_functions, n_basis_functions));
-  }
+      output_storage.data(), n_basis_functions, n_basis_functions);
+  for (int first_auxiliary = 0; first_auxiliary < n_auxiliary;
+       first_auxiliary += tile_width) {
+    const int count = std::min(tile_width, n_auxiliary - first_auxiliary);
+    Eigen::MatrixXd transformed(
+        static_cast<Eigen::Index>(count) * rank, n_basis_functions);
+    std::vector<Eigen::VectorXd> partial_projections(
+        n_threads, Eigen::VectorXd::Zero(count));
 #pragma omp parallel num_threads(n_threads)
-  {
-    int thread = 0;
+    {
+      int thread = 0;
 #ifdef _OPENMP
-    thread = omp_get_thread_num();
+      thread = omp_get_thread_num();
 #endif
-    Eigen::MatrixXd& local_exchange = partial_exchange[thread];
-    const int positive_rows =
-        n_auxiliary * factorization.n_positive_components;
-    const int positive_begin = positive_rows * thread / n_threads;
-    const int positive_end = positive_rows * (thread + 1) / n_threads;
-    if (positive_end > positive_begin) {
-      cblas_dsyrk(
-          CblasColMajor,
-          CblasLower,
-          CblasTrans,
-          n_basis_functions,
-          positive_end - positive_begin,
-          -1.0,
-          transformed.data() + positive_begin,
-          transformed.rows(),
-          0.0,
-          local_exchange.data(),
-          n_basis_functions);
-    }
-    const int negative_rows =
-        n_auxiliary * factorization.n_negative_components;
-    const int negative_begin = negative_rows * thread / n_threads;
-    const int negative_end = negative_rows * (thread + 1) / n_threads;
-    if (negative_end > negative_begin) {
-      cblas_dsyrk(
-          CblasColMajor,
-          CblasLower,
-          CblasTrans,
-          n_basis_functions,
-          negative_end - negative_begin,
-          1.0,
-          transformed.data() + positive_rows + negative_begin,
-          transformed.rows(),
-          positive_end > positive_begin ? 1.0 : 0.0,
-          local_exchange.data(),
-          n_basis_functions);
-    }
-  }
-  for (const auto& local_exchange : partial_exchange) {
-    output += local_exchange;
-  }
+      Eigen::MatrixXd ao_slice(count, n_basis_functions);
+#pragma omp for schedule(static)
+      for (int mu = 0; mu < n_basis_functions; ++mu) {
+        for (int nu = 0; nu < n_basis_functions; ++nu) {
+          const int larger = std::max(mu, nu);
+          const int smaller = std::min(mu, nu);
+          const Eigen::Index pair =
+              static_cast<Eigen::Index>(larger) * (larger + 1) / 2 + smaller;
+          ao_slice.col(nu) = packed_factor_matrix.col(pair).segment(
+              first_auxiliary, count);
+        }
+        Eigen::Map<Eigen::MatrixXd> image(
+            transformed.col(mu).data(), count, rank);
+        image.noalias() = ao_slice * factorization.scaled_eigenvectors;
+        // Consume each just-transformed AO slice before it leaves cache.
+        for (int k = 0; k < rank; ++k) {
+          const double sign = k < factorization.n_positive_components
+              ? 1.0 : -1.0;
+          partial_projections[thread].noalias() +=
+              (sign * factorization.scaled_eigenvectors(mu, k)) * image.col(k);
+        }
+      }
+#pragma omp single
+      {
+        for (const auto& projection : partial_projections) {
+          auxiliary_projection.segment(first_auxiliary, count) += projection;
+        }
+      }
 
+      // Blocks own disjoint output rectangles. Near-square GEMMs avoid
+      // extremely narrow full-height panels at high worker counts.
+#pragma omp for schedule(dynamic, 1)
+      for (std::size_t block = 0; block < output_blocks.size(); ++block) {
+        const auto [row_panel, column_panel] = output_blocks[block];
+        const int row_begin = row_panel * n_basis_functions / n_panels;
+        const int row_end = (row_panel + 1) * n_basis_functions / n_panels;
+        const int begin = column_panel * n_basis_functions / n_panels;
+        const int end = (column_panel + 1) * n_basis_functions / n_panels;
+        const int width = end - begin;
+        const int leading = static_cast<int>(transformed.rows());
+        for (int sign_channel = 0; sign_channel < 2; ++sign_channel) {
+          const int components = sign_channel == 0
+              ? factorization.n_positive_components
+              : factorization.n_negative_components;
+          const int rows = count * components;
+          if (rows == 0) continue;
+          const int offset = sign_channel == 0
+              ? 0 : count * factorization.n_positive_components;
+          const double scale = sign_channel == 0 ? -1.0 : 1.0;
+          const double* panel =
+              transformed.data() + static_cast<Eigen::Index>(begin) * leading +
+              offset;
+          if (row_panel == column_panel) {
+            // Diagonal panel: SYRK writes only its lower triangle.
+            cblas_dsyrk(
+              CblasColMajor, CblasLower, CblasTrans, width, rows, scale,
+              panel, leading, 1.0,
+              output.data() + static_cast<Eigen::Index>(begin) *
+                                  n_basis_functions + begin,
+              n_basis_functions);
+          } else {
+            // Strictly lower rectangle: every entry is owned by this block.
+            cblas_dgemm(
+                CblasColMajor, CblasTrans, CblasNoTrans,
+                row_end - row_begin, width, rows, scale,
+                transformed.data() +
+                    static_cast<Eigen::Index>(row_begin) * leading + offset,
+                leading, panel, leading, 1.0,
+                output.data() + static_cast<Eigen::Index>(begin) *
+                                    n_basis_functions + row_begin,
+                n_basis_functions);
+          }
+        }
+      }
+    }
+  }
   const Eigen::VectorXd packed_coulomb =
       2.0 * packed_factor_matrix.transpose() * auxiliary_projection;
   Eigen::Index packed_index = 0;

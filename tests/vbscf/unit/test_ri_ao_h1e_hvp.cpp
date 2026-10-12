@@ -3,6 +3,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -194,6 +195,56 @@ void check_ri_builder_and_directional_action() {
                 reference_ri_action(direction, ri),
                 2.0e-9,
                 "RI builder directional action mismatch");
+}
+
+/** @brief Checks signed exchange panel ownership against explicit L X L. */
+void check_signed_factor_panels(int n_bf = 13, int n_aux = 7,
+                               int n_positive = 3, int n_negative = 2) {
+  RiAoFactorization ri;
+  ri.n_basis_functions = n_bf;
+  ri.n_auxiliary_functions = n_aux;
+  ri.n_packed_ao_pairs = n_bf * (n_bf + 1) / 2;
+  ri.metric_whitened_ao_pair_factors.resize(n_aux, ri.n_packed_ao_pairs);
+  for (Eigen::Index i = 0; i < ri.metric_whitened_ao_pair_factors.size(); ++i) {
+    ri.metric_whitened_ao_pair_factors.data()[i] =
+        0.1 * std::sin(0.137 * (i + 1));
+  }
+#ifdef _OPENMP
+  const int saved_threads = omp_get_max_threads();
+#endif
+  for (const int requested : {1, 4, 32}) {
+#ifdef _OPENMP
+    omp_set_num_threads(requested);
+#endif
+    for (const auto counts : {std::pair{n_positive, 0},
+                              std::pair{0, n_negative},
+                              std::pair{n_positive, n_negative},
+                              std::pair{0, 0}}) {
+      xmvb::vb::AoEffectiveOneElectronRiLowRankFactors factors;
+      factors.n_positive_components = counts.first;
+      factors.n_negative_components = counts.second;
+      factors.scaled_factor_matrix.resize(n_bf, counts.first + counts.second);
+      for (Eigen::Index i = 0; i < factors.scaled_factor_matrix.size(); ++i) {
+        factors.scaled_factor_matrix.data()[i] =
+            0.2 * std::cos(0.173 * (i + 2));
+      }
+      Matrix density = Matrix::Zero(n_bf, n_bf);
+      for (int k = 0; k < factors.scaled_factor_matrix.cols(); ++k) {
+        const double sign = k < counts.first ? 1.0 : -1.0;
+        density.noalias() += sign * factors.scaled_factor_matrix.col(k) *
+                            factors.scaled_factor_matrix.col(k).transpose();
+      }
+      const Matrix reference = reference_ri_action(density, ri);
+      require_close(map_square(
+          xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+              factors, ri, n_bf), n_bf),
+          reference, 2.0e-12 * std::max(1.0, reference.cwiseAbs().maxCoeff()),
+          "signed RI panels changed a physical matrix element");
+    }
+  }
+#ifdef _OPENMP
+  omp_set_num_threads(saved_threads);
+#endif
 }
 
 void check_ri_backpropagation_adjoint_identity() {
@@ -444,6 +495,10 @@ void check_exact_parallel_actions(int n_bf = 2) {
 int main() {
   try {
     check_raw_and_fused_operator();
+    check_signed_factor_panels();
+    // At 32 workers the signed full-width transform crosses the 64 MiB
+    // auxiliary workspace boundary. Other team widths exercise one tile.
+    check_signed_factor_panels(64, 1600, 32, 32);
     check_ri_builder_and_directional_action();
     check_ri_backpropagation_adjoint_identity();
     check_exact_builder_triangular_regression();
