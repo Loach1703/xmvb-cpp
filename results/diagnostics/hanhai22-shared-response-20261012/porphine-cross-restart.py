@@ -54,6 +54,12 @@ print("CROSS_FRAME", json.dumps(dict(ao_overlap_error=ao_error,
       gram_error=gram_error, available_cpus=len(os.sched_getaffinity(0)),
       pyscf_threads=lib.num_threads())), flush=True)
 
+if mode == "export-frame":
+    # Molcas performs its own spin-adapted CI solve from this occupied frame.
+    # Export before any PySCF CI/gradient/optimization work.
+    np.save("shared-mo.npy", mo)
+    sys.exit(0)
+
 def masks(side):
     return [sum(1 << int(i) for i in line.split()) for line in
             Path(str(prefix) + side + "_strings.txt").read_text().splitlines()]
