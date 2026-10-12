@@ -3,10 +3,15 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <cmath>
 #include <functional>
+#include <fstream>
 #include <limits>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 #include <Eigen/Eigenvalues>
@@ -248,6 +253,20 @@ bool build_accepted_neo_keyframe(
                           const Eigen::MatrixXd& basis,
                           const Eigen::MatrixXd& core,
                           const Eigen::MatrixXd& model) mutable {
+        // Optional diagnostic export only. Do not retain or duplicate the
+        // large-space basis in the production solver.
+        if (const char* prefix = std::getenv("XMVB_NEO_MODEL_AUDIT")) {
+          const auto write = [prefix](const char* suffix, const Eigen::MatrixXd& matrix) {
+            std::ofstream stream(std::string(prefix) + suffix, std::ios::binary);
+            const std::int64_t shape[] = {matrix.rows(), matrix.cols()};
+            stream.write(reinterpret_cast<const char*>(shape), sizeof(shape));
+            stream.write(reinterpret_cast<const char*>(matrix.data()),
+                         matrix.size() * sizeof(double));
+            if (!stream) throw std::runtime_error("failed to export NEO model audit");
+          };
+          write("-basis.bin", basis);
+          write("-model.bin", model);
+        }
         const Eigen::Index dimension = basis.cols();
         // Sample doubling dimensions only; structure enrichments at the same
         // dimension must not trigger repeated diagnostic matrix products.
@@ -451,7 +470,10 @@ bool build_accepted_neo_keyframe(
     // coordinate residual cannot certify an unresolved physical gradient.
     neo_options.absolute_residual_tolerance = options.gradient_tolerance;
     neo_options.maximum_subspace_dimension = 0;
-    neo_options.require_curvature_certificate = false;
+    // Select the lowest-curvature branch of the current microproblem, not
+    // merely a stationary Newton solution in a gradient-generated subspace.
+    // This is direction construction; outer convergence is unchanged.
+    neo_options.require_curvature_certificate = true;
     const ResponseNeoResult step = solve_step(neo_options, allow_early_trial);
     record->micro_iterations += step.iterations;
     record->coupled_block_actions += step.coupled_actions;

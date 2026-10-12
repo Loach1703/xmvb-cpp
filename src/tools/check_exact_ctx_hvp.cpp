@@ -13,6 +13,7 @@
 #include <utility>
 
 #include <Eigen/Core>
+#include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
 #include <Eigen/QR>
 
@@ -41,6 +42,7 @@ struct Options {
   bool preconditioned_direction = false;
   std::string orbital_sector;
   std::string packed_direction_path;
+  std::string projected_model_prefix;
   bool audit_oeo_chart = false;
   double step = 1.0e-4;
   double max_relative_error = std::numeric_limits<double>::infinity();
@@ -67,6 +69,7 @@ void print_usage() {
       << " [--orbital-sector inactive-active|inactive-external|active-external]"
       << " [--audit-oeo-chart 0|1]"
       << " [--packed-direction-bin path]"
+      << " [--projected-model-prefix path]"
       << " [--stream-pair-products 0|1]"
       << " [--diagonal-samples count]"
       << " [--curvature-steps count]"
@@ -89,6 +92,8 @@ Options parse_arguments(int argc, char** argv) {
       options.orbital_value_table_bin_path = value;
     } else if (name == "--packed-direction-bin") {
       options.packed_direction_path = value;
+    } else if (name == "--projected-model-prefix") {
+      options.projected_model_prefix = value;
     } else if (name == "--orbital-sector") {
       if (value != "inactive-active" && value != "inactive-external" &&
           value != "active-external")
@@ -706,6 +711,51 @@ int main(int argc, char** argv) {
         &input,
         layout,
         &chart);
+    if (!options.projected_model_prefix.empty()) {
+      const auto read_matrix = [](const std::string& path) {
+        std::ifstream stream(path, std::ios::binary);
+        std::int64_t shape[2] = {};
+        stream.read(reinterpret_cast<char*>(shape), sizeof(shape));
+        if (!stream || shape[0] < 1 || shape[0] > 100000 ||
+            shape[1] < 1 || shape[1] > 512)
+          throw std::runtime_error("invalid diagnostic basis dimensions");
+        Eigen::MatrixXd matrix(shape[0], shape[1]);
+        stream.read(reinterpret_cast<char*>(matrix.data()), matrix.size() * sizeof(double));
+        if (!stream || !matrix.allFinite())
+          throw std::runtime_error("invalid diagnostic basis data");
+        return matrix;
+      };
+      const Eigen::MatrixXd basis = read_matrix(options.projected_model_prefix + "-basis.bin");
+      const Eigen::MatrixXd model = read_matrix(options.projected_model_prefix + "-model.bin");
+      if (basis.rows() != chart.reduced_size() || model.rows() != basis.cols() ||
+          model.cols() != basis.cols())
+        throw std::runtime_error("diagnostic model dimensions do not match chart");
+      const xmvb::vb::NonredundantRetractionMetric metric(
+          chart, layout, input.orbital_preparation_input);
+      Eigen::MatrixXd metric_images(basis.rows(), basis.cols());
+      Eigen::MatrixXd images(basis.rows(), basis.cols());
+      for (Eigen::Index column = 0; column < basis.cols(); ++column) {
+        metric_images.col(column) = metric.apply(basis.col(column));
+        images.col(column) = exact_hvp.apply_reduced(basis.col(column));
+      }
+      const Eigen::MatrixXd gram = basis.transpose() * metric_images;
+      const Eigen::MatrixXd projected = basis.transpose() * images;
+      const Eigen::MatrixXd symmetric = 0.5 * (projected + projected.transpose());
+      Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> complete(symmetric, gram);
+      Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> original(model, gram);
+      if (complete.info() != Eigen::Success || original.info() != Eigen::Success)
+        throw std::runtime_error("projected Schur audit eigensolver failed");
+      const Eigen::VectorXd projected_mode = basis * gram.ldlt().solve(
+          basis.transpose() * metric.apply(direction));
+      std::cout << std::setprecision(14)
+                << "audited_orbital_basis_size = " << basis.cols() << '\n'
+                << "original_projected_min_curvature = " << original.eigenvalues()[0] << '\n'
+                << "complete_schur_projected_min_curvature = " << complete.eigenvalues()[0] << '\n'
+                << "complete_schur_model_difference = " << (symmetric-model).norm() << '\n'
+                << "known_mode_metric_coverage = " << metric.norm(projected_mode) / metric.norm(direction) << '\n'
+                << "projected_hessian_asymmetry = " << (projected-projected.transpose()).norm() << '\n';
+      return 0;
+    }
     if (options.response_spectrum_limit > 0) {
       Eigen::MatrixXd forcing;
       if (input.complete_active_space && selected_states.size() == 1 &&

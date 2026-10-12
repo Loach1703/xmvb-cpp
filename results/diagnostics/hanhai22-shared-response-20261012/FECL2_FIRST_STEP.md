@@ -2,8 +2,9 @@
 
 Scope: current exact-integral production implementation, FULL OEO, CAS(10,8),
 quintet, Davidson, 32 cores on Hanhai22. No archived executable was rerun.
-No production optimizer, stopping criterion or tolerance was changed.
-The only source changes extend the derivative diagnostic executable.
+The initial audits change only the diagnostic executable. The subsequent
+direction-construction repair enables the existing inner lowest-Ritz-root
+search; outer stopping criteria and tolerances remain unchanged.
 
 ## Jobs
 
@@ -70,12 +71,35 @@ coverage deficiency, not proof of an incorrect complete derivative. KKT
 stationarity accuracy alone cannot guarantee selecting the lowest-curvature
 branch. Do not fix this by adding endpoint stability convergence conditions.
 
-## Remaining localization
+## Projected-space localization and repair
 
-The evidence does NOT yet separate missing orbital directions from insufficient
-structure-response directions in the projected model. Compare its retained
-orbital basis under the complete Schur response with its current projected
-response; then measure coverage of the independently verified negative mode.
-That distinguishes orbital expansion from structure compression without
-changing convergence criteria. Nor does this audit yet prove that this single
-direction accounts for the entire 6.82 mEh endpoint difference.
+Job 1247378 reevaluated the retained 52 orbital directions with complete Schur
+response, using the same canonically balanced initial point as the NEO trace.
+The minimum physical curvature changed from 0.072598798799705 to
+0.07220731710594: it remained positive. The known negative direction's metric
+coverage was 0.48096068541678. Thus completing structure response alone within
+this orbital subspace does not expose the negative branch. An earlier audit
+using unbalanced input coefficients (1247373) is invalid and excluded.
+
+The backend previously disabled the solver's lowest-root residual expansion.
+Enabling it searches the missing orbital/structure curvature directions during
+step construction. This is not an endpoint stability test and adds no outer
+convergence condition. Merely adding an independent starting vector (1247383)
+did not fix the endpoint; that experimental implementation was removed.
+
+| Calculation | Accepted steps | Final total energy (Eh) | Wall time (s) | Peak RSS (MiB) |
+|---|---:|---:|---:|---:|
+| Previous NEO endpoint (historical) | 5 | -2181.617643151932 | — | — |
+| Repaired lowest-root search, 1247396 | 17 | -2181.624464422983 | 127.49 | 492.67 |
+| PySCF reference (historical) | — | -2181.6244647028957 | — | — |
+| Molcas reference (historical) | — | -2181.62446480 | — | — |
+
+The repaired NEO/PySCF difference is 2.7991e-7 Eh, accepted as consistent at the
+present convergence settings. Existing response-solver unit tests passed.
+The price of lowest-root search is substantial; this establishes correctness
+for this case, not a universally efficient search policy.
+
+Job 1247406 tested carrying the lowest-curvature vector instead of the previous
+displacement to the next point. It finished in 8.81 s but stopped at
+-2181.617645472958 Eh, the undesired high-energy branch. This recycling change
+was removed. The retained production change is the validated 1247396 policy.
