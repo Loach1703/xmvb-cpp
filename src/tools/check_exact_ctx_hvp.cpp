@@ -14,6 +14,7 @@
 
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
+#include <Eigen/QR>
 
 #include "input/loading/loader.hpp"
 #include "tools/response_audit.hpp"
@@ -38,6 +39,9 @@ struct Options {
   xmvb::vb::StandardTwoElectronMode two_electron_mode =
       xmvb::vb::StandardTwoElectronMode::Exact;
   bool preconditioned_direction = false;
+  std::string orbital_sector;
+  std::string packed_direction_path;
+  bool audit_oeo_chart = false;
   double step = 1.0e-4;
   double max_relative_error = std::numeric_limits<double>::infinity();
   double response_tolerance = 1.0e-3;
@@ -60,6 +64,9 @@ void print_usage() {
       << " [--eigensolver dense|davidson]"
       << " [--standard-two-electron-mode exact|ri]"
       << " [--direction gradient|preconditioned_gradient]"
+      << " [--orbital-sector inactive-active|inactive-external|active-external]"
+      << " [--audit-oeo-chart 0|1]"
+      << " [--packed-direction-bin path]"
       << " [--stream-pair-products 0|1]"
       << " [--diagonal-samples count]"
       << " [--curvature-steps count]"
@@ -80,6 +87,17 @@ Options parse_arguments(int argc, char** argv) {
     const std::string value = argv[argument + 1];
     if (name == "--orbital-value-table-bin") {
       options.orbital_value_table_bin_path = value;
+    } else if (name == "--packed-direction-bin") {
+      options.packed_direction_path = value;
+    } else if (name == "--orbital-sector") {
+      if (value != "inactive-active" && value != "inactive-external" &&
+          value != "active-external")
+        throw std::invalid_argument("invalid orbital sector");
+      options.orbital_sector = value;
+    } else if (name == "--audit-oeo-chart") {
+      if (value != "0" && value != "1")
+        throw std::invalid_argument("--audit-oeo-chart must be 0 or 1");
+      options.audit_oeo_chart = value == "1";
     } else if (name == "--operator-timing-repeats") {
       options.operator_timing_repeats = std::stoi(value);
     } else if (name == "--compare-exchange-mib") {
@@ -422,9 +440,94 @@ int main(int argc, char** argv) {
         layout.gather_from_full(accepted.sparse_orbital_energy_gradient);
     const Eigen::VectorXd accepted_reduced_gradient =
         chart.project_reduced_gradient(packed_gradient);
+    // Diagnostic only: certify completeness modulo the FULL/OEO gauge, not
+    // merely the total dimension. No global packed-by-reduced matrix is stored.
+    if (options.audit_oeo_chart || !options.orbital_sector.empty()) {
+      if (!chart.uses_active_subspace_gauge() || layout.size() !=
+          input.orbital_preparation_input.n_basis_functions * n_occupied)
+        throw std::invalid_argument("sector audit requires unrestricted FULL OEO");
+      const int n_bf = input.orbital_preparation_input.n_basis_functions;
+      const Eigen::VectorXd raw = layout.pack(input.orbital_preparation_input);
+      Eigen::MatrixXd occupied(n_bf, n_occupied);
+      for (int orbital = 0; orbital < n_occupied; ++orbital)
+        for (int row = 0; row < n_bf; ++row)
+          occupied(row, orbital) = raw[layout.packed_index(orbital, row)];
+      if (options.audit_oeo_chart) {
+        std::vector<Eigen::MatrixXd> tangent(n_occupied,
+            Eigen::MatrixXd::Zero(n_bf, n_bf));
+        std::vector<int> columns(n_occupied, 0);
+        for (int column = 0; column < chart.reduced_size(); ++column) {
+          Eigen::VectorXd unit = Eigen::VectorXd::Zero(chart.reduced_size());
+          unit[column] = 1.0;
+          const Eigen::VectorXd expanded = chart.expand_step(unit);
+          for (int orbital = 0; orbital < n_occupied; ++orbital) {
+            Eigen::VectorXd local(n_bf);
+            for (int row = 0; row < n_bf; ++row)
+              local[row] = expanded[layout.packed_index(orbital, row)];
+            if (!local.isZero(0.0))
+              tangent[orbital].col(columns[orbital]++) = local;
+          }
+        }
+        double gauge_derivative = 0.0;
+        for (int orbital = 0; orbital < n_occupied; ++orbital) {
+          const int gauge_size = orbital < n_inactive ? n_inactive : n_occupied;
+          Eigen::MatrixXd basis(n_bf, gauge_size + columns[orbital]);
+          basis.leftCols(gauge_size) = occupied.leftCols(gauge_size);
+          basis.rightCols(columns[orbital]) =
+              tangent[orbital].leftCols(columns[orbital]);
+          const int rank = basis.colPivHouseholderQr().rank();
+          Eigen::VectorXd local_gradient(n_bf);
+          for (int row = 0; row < n_bf; ++row)
+            local_gradient[row] = packed_gradient[layout.packed_index(orbital, row)];
+          for (int source = 0; source < gauge_size; ++source)
+            gauge_derivative = std::max(gauge_derivative,
+                std::abs(local_gradient.dot(occupied.col(source))) /
+                occupied.col(source).norm());
+          std::cout << "chart_orbital=" << orbital << ",tangent=" << columns[orbital]
+                    << ",gauge=" << gauge_size << ",combined_rank=" << rank << '\n';
+          if (rank != n_bf || columns[orbital] + gauge_size != n_bf)
+            throw std::runtime_error("FULL OEO chart loses a nongauge direction");
+        }
+        std::cout << "gauge_directional_derivative_max=" << gauge_derivative << '\n';
+      }
+    }
     Eigen::VectorXd direction = accepted_reduced_gradient;
+    if (!options.orbital_sector.empty()) {
+      const int n_bf = input.orbital_preparation_input.n_basis_functions;
+      const auto& auxiliary = accepted.orbital_preparation_result.auxiliary_orbital_matrix;
+      const bool active_target = options.orbital_sector == "active-external";
+      const int target_begin = active_target ? n_inactive : 0;
+      const int target_end = active_target ? n_occupied : n_inactive;
+      const int source_begin = options.orbital_sector == "inactive-active"
+          ? n_inactive : n_occupied;
+      Eigen::VectorXd packed = Eigen::VectorXd::Zero(layout.size());
+      for (int orbital = target_begin; orbital < target_end; ++orbital) {
+        Eigen::VectorXd local = Eigen::VectorXd::Zero(n_bf);
+        const int source_end = options.orbital_sector == "inactive-active"
+            ? n_occupied : auxiliary.cols();
+        for (int source = source_begin; source < source_end; ++source)
+          local += std::sin(0.37 * (orbital + 1) * (source + 1)) * auxiliary.col(source);
+        for (int row = 0; row < n_bf; ++row)
+          packed[layout.packed_index(orbital, row)] = local[row];
+      }
+      direction = chart.project_vector(packed).reduced_gradient;
+      std::cout << "orbital_sector=" << options.orbital_sector
+                << ",retained_norm=" << direction.norm() << '\n';
+    }
     if (options.preconditioned_direction) {
       direction = chart.apply_inverse_reduced_block_preconditioner(direction);
+    }
+    if (!options.packed_direction_path.empty()) {
+      std::ifstream stream(options.packed_direction_path, std::ios::binary | std::ios::ate);
+      const auto bytes = static_cast<std::streamoff>(layout.size() * sizeof(double));
+      if (!stream || stream.tellg() != bytes)
+        throw std::invalid_argument("packed direction file has wrong size");
+      stream.seekg(0);
+      Eigen::VectorXd packed(layout.size());
+      stream.read(reinterpret_cast<char*>(packed.data()), bytes);
+      if (!stream || !packed.allFinite())
+        throw std::invalid_argument("invalid packed direction file");
+      direction = chart.project_vector(packed).reduced_gradient;
     }
     if (direction.size() == 0) {
       throw std::runtime_error("nonredundant orbital space is empty");
@@ -1019,6 +1122,21 @@ int main(int argc, char** argv) {
         std::max(1.0, std::abs(energy_directional_curvature));
 
     const double max_abs_difference = infinity_norm(analytic - finite_difference);
+    const Eigen::VectorXd packed_tangent = chart.expand_step(direction);
+    const double raw_derivative = packed_gradient.dot(packed_tangent);
+    const double reduced_derivative = accepted_reduced_gradient.dot(direction);
+    const auto plus_parameters = layout.pack(chart.retract_step(
+        input.orbital_preparation_input, direction, options.step));
+    const auto minus_parameters = layout.pack(chart.retract_step(
+        input.orbital_preparation_input, direction, -options.step));
+    std::cout << "chart_derivative_adjoint_error = "
+              << std::abs(raw_derivative - reduced_derivative) << '\n'
+              << "retraction_tangent_relative_error = "
+              << ((plus_parameters - minus_parameters) / (2.0 * options.step) -
+                  packed_tangent).norm() / std::max(1.0, packed_tangent.norm()) << '\n'
+              << "gradient_energy_fd_absolute_error = "
+              << std::abs((plus_energy - minus_energy) / (2.0 * options.step) -
+                          reduced_derivative) << '\n';
     const double relative_error =
         max_abs_difference / std::max(1.0, infinity_norm(finite_difference));
     const double core_relative_error =
