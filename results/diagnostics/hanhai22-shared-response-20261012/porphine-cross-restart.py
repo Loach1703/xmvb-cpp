@@ -1,4 +1,4 @@
-"""Two-macrostep PySCF restart from the actual CPP triplet wavefunction."""
+"""PySCF restart from the actual CPP triplet wavefunction on Slurm."""
 import json
 import os
 from pathlib import Path
@@ -12,6 +12,8 @@ from pyscf import fci, lib, mcscf, scf
 
 lib.num_threads(int(os.environ["SLURM_CPUS_PER_TASK"]))
 root, mode = Path(sys.argv[1]), sys.argv[2]
+convergence_run = len(sys.argv) > 3 and sys.argv[3] == "converge"
+macro_limit = 1000 if convergence_run else 2
 source = root / "porphine-coupled-audit-1247963"
 prefix = source / "audit_orbital_gradient_"
 mol, saved = scf.chkfile.load_scf(str(root / "porphine-reference.chk"))
@@ -65,7 +67,7 @@ ci /= np.linalg.norm(ci)
 mc = mcscf.CASSCF(mf, 11, (5, 3))
 mc.max_memory = 120000
 mc.conv_tol, mc.conv_tol_grad = 1e-7, 1e-3
-mc.max_cycle_macro = 2
+mc.max_cycle_macro = macro_limit
 mc.fcisolver.conv_tol, mc.fcisolver.max_cycle = 1e-10, 200
 mc.fcisolver.spin = 2
 mc.fix_spin_(ss=2)
@@ -74,32 +76,33 @@ mc.verbose = 5
 
 # Compare physical directional gradients, not another fixed-point energy.
 start = time.monotonic()
-rdms = fci.direct_spin1.make_rdm12(ci, 11, (5, 3))
-print("CROSS_RDM_READY", time.monotonic() - start, flush=True)
-g = mc.get_grad(mo, rdms)
-h = 1e-5
-dm = (occupied_frame(raw + h * raw_tangent) -
-      occupied_frame(raw - h * raw_tangent)) / (2 * h)
-kappa = np.zeros((469, 469))
-kappa[:, :100] = mo.T @ s @ dm
-kappa[:100, 100:] = -kappa[100:, :100].T
-print("CROSS_DIRECTION", json.dumps(dict(
-    ao_overlap_error=ao_error, gram_error=gram_error,
-    orbital_gradient_norm=float(np.linalg.norm(g)),
-    # mc1step stores half the energy gradient; newton_casscf.gen_g_hop
-    # explicitly returns g_orb * 2. Compare the energy derivative, not the
-    # two optimizers' differently scaled internal covectors.
-    mc1step_internal_contraction=float(g @ mc.pack_uniq_var(kappa)),
-    directional_derivative=float(2 * g @ mc.pack_uniq_var(kappa)),
-    occupied_tangent_orthogonality_error=float(np.linalg.norm(
-        kappa[:100, :100] + kappa[:100, :100].T)),
-    spin_square=float(fci.spin_op.spin_square(ci, 11, (5, 3))[0]))), flush=True)
+if not convergence_run:
+    # Preserve the original diagnostic without an extra AO2MO in timed runs.
+    rdms = fci.direct_spin1.make_rdm12(ci, 11, (5, 3))
+    print("CROSS_RDM_READY", time.monotonic() - start, flush=True)
+    g = mc.get_grad(mo, rdms)
+    h = 1e-5
+    dm = (occupied_frame(raw + h * raw_tangent) -
+          occupied_frame(raw - h * raw_tangent)) / (2 * h)
+    kappa = np.zeros((469, 469))
+    kappa[:, :100] = mo.T @ s @ dm
+    kappa[:100, 100:] = -kappa[100:, :100].T
+    print("CROSS_DIRECTION", json.dumps(dict(
+        ao_overlap_error=ao_error, gram_error=gram_error,
+        orbital_gradient_norm=float(np.linalg.norm(g)),
+        # mc1step stores half the energy gradient; newton_casscf.gen_g_hop
+        # explicitly returns g_orb * 2.
+        mc1step_internal_contraction=float(g @ mc.pack_uniq_var(kappa)),
+        directional_derivative=float(2 * g @ mc.pack_uniq_var(kappa)),
+        occupied_tangent_orthogonality_error=float(np.linalg.norm(
+            kappa[:100, :100] + kappa[:100, :100].T)),
+        spin_square=float(fci.spin_op.spin_square(ci, 11, (5, 3))[0]))), flush=True)
 
 if mode == "newton":
     mc = mc.newton()
 elif mode != "default-ah":
     raise ValueError(mode)
-mc.max_cycle_macro = 2
+mc.max_cycle_macro = macro_limit
 mc.kernel(mo, ci)
 report = dict(mode=mode, converged=bool(mc.converged), energy=float(mc.e_tot),
               elapsed_seconds=time.monotonic() - start,
