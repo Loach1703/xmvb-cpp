@@ -13,7 +13,7 @@ of fixed-point energies between programs.
 - Spin/gradient diagnostic `1247926`: both spin checks passed. Endpoint
   conversion failed before the gradient test because the Molden shell header
   omits the optional shell scale. This is a diagnostic parser error, not an
-  optimizer error. The parser was corrected; diagnostic `1247942` is running.
+  optimizer error. The parser was corrected; diagnostic `1247942` completed.
 
 ## Spin-space evidence
 
@@ -69,8 +69,31 @@ incorrect derivative. The spin-generator certificate and the macro rejection
 mechanism must not be used as an explanation for the energy difference without
 additional derivative/carrier evidence.
 
-Diagnostic `1247942` checks the analytic derivative along physical steepest
-descent at the exported triplet endpoint against two centered differences,
+Diagnostic `1247942` checks the analytic derivative along the negative reduced
+gradient, normalized to unit physical norm, at the exported triplet endpoint
+against two centered differences,
 using the same current code and precision. The Molden export reconstructs an
 approximate endpoint, not a bit-exact checkpoint of the failed macrostep.
 The cancelled singlet did not export an endpoint orbital file.
+
+## Completed directional derivative test
+
+| Quantity | Value |
+|---|---:|
+| Analytic directional derivative | -0.0058411511060520883 |
+| Centered difference, h = 0.001 | -0.0058392874962009955 |
+| Absolute error, h = 0.001 | 1.863609851092754e-6 |
+| Centered difference, h = 0.0003 | -0.0058409614211996095 |
+| Absolute error, h = 0.0003 | 1.8968485247881223e-7 |
+| Raw/chart derivative mismatch | 6.0715321659188248e-18 |
+
+The derivative error decreases by about 9.8 times when h decreases by 3.33
+times, consistent with centered-difference truncation convergence. This is
+positive evidence for the relaxed gradient and its chart adjoint **in this
+one direction**. It is not a certification of every orbital direction, the
+coupled HVP, or spin preservation by the transformed carrier.
+
+No optimizer thresholds or production source were modified. Next checks must
+distinguish carrier spin preservation / physical variational space from
+keyframe/coupled-model inconsistency, and record rejected macrostep scalars;
+the current evidence does not establish the cause of the lower energies.
