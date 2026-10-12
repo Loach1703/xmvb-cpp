@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <chrono>
 #include <stdexcept>
 
 #include <Eigen/Cholesky>
@@ -11,6 +12,7 @@
 
 #include "core/openmp.hpp"
 #include "vbscf/core/contracts/input.hpp"
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
 #include "vbscf/integrals/active/two_electron/response/types.hpp"
@@ -476,6 +478,9 @@ Eigen::MatrixXd build_analytic_rotation_hessian_diagonal(
 AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
     const VbScfInput& input,
     const AcceptedPointContext& accepted) {
+  const bool trace = diagnostics::neo_event_trace_enabled();
+  const auto start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   const auto& orbital_input = input.orbital_preparation_input;
   const auto& prepared = accepted.prepared_active_space;
   const auto& orbitals = prepared.orbital_result;
@@ -655,6 +660,8 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
           .localized_representative_selector
           .inactive_inverse_transpose_right_transform.transpose();
   result.active_inverse_transform = inverse_active_transform;
+  if (trace) diagnostics::neo_trace("ciah_diagonal_cost", "seconds=%.17g",
+      std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
   return result;
 }
 

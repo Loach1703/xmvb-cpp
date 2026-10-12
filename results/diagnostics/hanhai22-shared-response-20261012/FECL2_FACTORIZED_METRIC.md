@@ -93,6 +93,28 @@ measure factor admission, certified norm costs and RSS at 32,670 / 50,820
 structure dimensions. Final energies and full convergence efficiency still
 require subsequent demonstrated direction/model improvements.
 
+Both tasks have now terminated at the intended four-macro diagnostic cap
+(exit 2, not converged):
+
+| Spin | Macros / HVP | Energy / Eh | GNU wall / s | GNU RSS / GiB | Structure norm / s | HVP expansion scope / s |
+|---|---:|---:|---:|---:|---:|---:|
+| Singlet | 4 / 36 | -2244.717977952240 | 424.92 | 38.621 | 2.139 | 19.257 |
+| Triplet | 4 / 42 | -2244.769462512970 | 621.89 | 38.630 | 2.100 | 26.289 |
+
+All nonzero structure metric solves need at most one CG iteration, with
+maximum certified relative residual 2.14e-15 / 2.67e-14 respectively.
+Factor storage is 982,080 / 3,067,680 bytes, shared at the accepted point.
+These expansion scopes are far below total wall time, so attributing the
+remaining iron runtime primarily to these coupled HVP expansions would be
+incorrect without further stage evidence.
+
+Archived four-step job 1248959 gives singlet 4/50, 529.15 s,
+-2244.7182260015 Eh and triplet 4/41, 610.02 s,
+-2244.7615530749 Eh. Several numerical-policy revisions separate these
+runs, and nodes differ. They are historical trajectory comparisons, not an
+isolated timing test of metric factorization. Four-step energies cannot
+establish endpoint agreement with converged PySCF results.
+
 Raw traces and GNU-time records remain in
 `fecl2-ritz-cost-1249408/native/` and `coarse-regression-1249412/`.
 `summarize_ritz_cost.py RUN_DIRECTORY` extracts the scopes/action counts.

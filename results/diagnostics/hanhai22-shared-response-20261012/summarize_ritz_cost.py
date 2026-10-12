@@ -22,6 +22,8 @@ norms = [v for _, v in events.get("ciah_structure_norm", [])]
 ritz = [v for _, v in events.get("ciah_ritz_cost", [])]
 expansions = [v for _, v in events.get("ciah_expansion_cost", [])]
 preconditions = [v for _, v in events.get("ciah_precondition_cost", [])]
+forward = [v for _, v in events.get("ciah_forward_cost", [])]
+diagonals = [v for _, v in events.get("ciah_diagonal_cost", [])]
 rows = list(csv.DictReader((run / "neo.tsv").open(), delimiter="\t"))
 summary = {
     "macros": len(rows),
@@ -35,6 +37,12 @@ summary = {
         (float(v["relative_residual"]) for v in norms), default=0),
     "ritz_calls": len(ritz),
     "precondition_seconds": sum(float(v["seconds"]) for v in preconditions),
+    "diagonal_builds": len(diagonals),
+    "diagonal_build_seconds": sum(float(v["seconds"]) for v in diagonals),
+    "forward_evaluations": len(forward),
+    "forward_seconds": {key: sum(float(v[key]) for v in forward) for key in
+                        ("orbital", "ao_effective", "active_one", "active_two",
+                         "structure_setup", "ci_solve")},
     "expansion_seconds": {key: sum(float(v[key]) for v in expansions) for key in
                           ("orthogonalize_seconds", "metric_seconds", "hvp_seconds")},
     "max_relative_galerkin_residual": max(

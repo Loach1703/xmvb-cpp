@@ -22,6 +22,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/backward.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 namespace xmvb::vb {
 
@@ -609,6 +610,15 @@ void initialize_active_space_gradient_result(
       forward_context.structure_matrix_wall_time_seconds;
   result->eigensolver_wall_time_seconds =
       forward_context.eigensolver_wall_time_seconds;
+  diagnostics::neo_trace("ciah_forward_cost",
+      "orbital=%.17g,ao_effective=%.17g,active_one=%.17g,active_two=%.17g,"
+      "structure_setup=%.17g,ci_solve=%.17g",
+      result->orbital_preparation_wall_time_seconds,
+      result->ao_effective_one_electron_wall_time_seconds,
+      result->active_one_electron_wall_time_seconds,
+      result->active_two_electron_wall_time_seconds,
+      result->structure_matrix_wall_time_seconds,
+      result->eigensolver_wall_time_seconds);
 
   result->orbital_preparation_result = prepared_active_space.orbital_result;
   result->ao_effective_one_electron_result =
