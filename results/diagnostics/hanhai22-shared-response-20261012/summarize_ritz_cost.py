@@ -6,12 +6,18 @@ import sys
 
 run = pathlib.Path(sys.argv[1])
 events = {}
+ritz_blocks = {}
+last_norm = None
 for line in (run / "run.err").read_text().splitlines():
     if not line.startswith("NEO_DIAG,"):
         continue
     _, macro, _, event, payload = line.split(",", 4)
     values = dict(item.split("=", 1) for item in payload.split(",") if "=" in item)
     events.setdefault(event, []).append((int(macro), values))
+    if event == "ciah_coupled_norm":
+        last_norm = (int(macro), values)
+    elif event == "ciah_ritz_cost" and last_norm and last_norm[0] == int(macro):
+        ritz_blocks.setdefault(int(macro), []).append(last_norm[1])
 norms = [v for _, v in events.get("ciah_structure_norm", [])]
 ritz = [v for _, v in events.get("ciah_ritz_cost", [])]
 expansions = [v for _, v in events.get("ciah_expansion_cost", [])]
@@ -62,6 +68,7 @@ for macro, end in events.get("ciah_micro_end", [])[-8:]:
         "clipped": sum(float(v["step_scale"]) < 1 for v in micro),
         "last_residual": float(micro[-1]["residual"]) if micro else None,
         "last_ah_eigenvalue": float(micro[-1]["omega"]) if micro else None,
+        "last_ritz_norm_blocks": ritz_blocks.get(macro, [None])[-1],
         "keyframes": len(keyframes),
         "minimum_new_direction_fraction": min(
             (float(v["remaining_fraction"]) for v in additions), default=None),

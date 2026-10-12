@@ -73,6 +73,10 @@ void check_images_and_residual(
   require(std::abs(result.residual_norm -
                    dual_norm(metric, result.residual)) <= 2.0e-12,
           "CIAH residual norm is not the physical dual norm");
+  const double expected_norm = dual_norm(metric, gradient + hessian * result.step);
+  require(std::abs(result.model_gradient_norm - expected_norm) <=
+              2.0e-11 * std::max(1.0, expected_norm),
+          "CIAH reused residual does not give the complete model gradient norm");
 }
 
 void check_full_space_root(

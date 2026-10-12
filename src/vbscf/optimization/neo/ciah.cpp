@@ -229,6 +229,17 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   const auto norm_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   result.residual_norm = problem_.dual_norm(result.residual);
+  // g + Hp = r/alpha + omega Gp. Its complete dual norm needs no second
+  // inverse: ||r/alpha||_G^-1^2 + 2 omega r^T p/alpha + omega^2 p^T Gp.
+  // Retain the cross term rather than assuming exact Galerkin orthogonality.
+  const double residual_length = result.residual_norm / alpha;
+  const double squared_model_norm = residual_length * residual_length +
+      2.0 * result.eigenvalue * result.residual.dot(result.step) / alpha +
+      result.eigenvalue * result.eigenvalue * result.step.dot(result.metric_step);
+  if (!(squared_model_norm >= 0.0) || !std::isfinite(squared_model_norm)) {
+    throw std::runtime_error("CIAH model gradient norm is invalid");
+  }
+  result.model_gradient_norm = std::sqrt(squared_model_norm);
   if (trace) diagnostics::neo_trace("ciah_ritz_cost",
       "basis=%d,projection_seconds=%.17g,spectrum_image_seconds=%.17g,norm_seconds=%.17g,gradient_euclidean=%.17g,residual_euclidean=%.17g,galerkin_residual=%.17g",
       basis_size(), std::chrono::duration<double>(spectrum_start - projection_start).count(),

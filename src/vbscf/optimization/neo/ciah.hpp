@@ -79,6 +79,10 @@ struct CiahResult {
   /** alpha * (gradient + H * step - eigenvalue * G * step). */
   Eigen::VectorXd residual;
   double residual_norm = 0.0;
+  /** @brief Full dual norm of gradient + H * step, reusing the AH residual norm.
+   * Valid for the unscaled Ritz step; clipping requires a fresh norm.
+   */
+  double model_gradient_norm = 0.0;
   bool converged = false;
   int basis_size = 0;
   /** Hessian actions made by this call; zero or one. */

@@ -246,3 +246,118 @@ No new iron-porphine long run was launched: the required FeCl2 improvement
 has not been demonstrated. Raw logs, hashes, build flags and GNU times are
 retained in the numbered result directories. `summarize_ritz_cost.py`
 reproduces the scalar accounting without manually transcribing iterations.
+
+## Auxiliary shift experiment and exact norm reuse
+
+1249250 tested replacing the auxiliary identity shift in the full-OEO
+analytic-diagonal inverse by the physical flag-metric shift. In orthonormal
+frame components, core--active motion has physical weight two, while
+core--external and active--external motion have weight one. A bounded dense
+unit test verified the shifted model inverse against the independently
+applied physical metric. All five unit executables passed.
+
+This is a change to an approximate preconditioner, not a correction to the
+complete AH equation: Hessian actions, the generalized Ritz metric and
+physical residual norms already use the declared physical metric. An
+auxiliary identity-shifted preconditioner is a legitimate approximation.
+The more literal shift was inferior and was removed, together with its
+experimental tests; no switch was retained.
+
+| Run | Macros | HVP | Energy / Eh | GNU wall / s | GNU RSS / MiB |
+|---|---:|---:|---:|---:|---:|
+| Archived phase-correct 1249221 | 14 | 281 | -2181.624464869146 | 9.93 | 510.0 |
+| Physical flag shift 1249250, rejected | 17 | 305 | -2181.624464865874 | 11.47 | 489.9 |
+
+The new performance change uses an exact identity rather than replacing a
+norm or loosening an inverse tolerance. For a generalized AH candidate,
+
+$$
+r=\alpha(g+Hp-\omega Gp),\qquad
+g_+=g+Hp=\frac{r}{\alpha}+\omega Gp.
+$$
+
+Here $\alpha$ is the signed reference coefficient, $\omega$ the AH Ritz
+eigenvalue, $G$ the complete coupled physical metric, and $p$ the unscaled
+candidate. Therefore
+
+$$
+\|g_+\|_{G^{-1}}^2=
+\frac{\|r\|_{G^{-1}}^2}{\alpha^2}
++\frac{2\omega}{\alpha}r^Tp
++\omega^2 p^TGp.
+$$
+
+The residual norm and $Gp$ are already available. The cross term is retained
+instead of assuming exact Galerkin orthogonality. This removes one repeated
+complete metric inverse per unscaled accepted microstep, with scalar/vector
+arithmetic only and no extra matrix storage. A clipped candidate is a
+different affine gradient and continues to require its own complete norm.
+The independently solved dense metric in the CIAH unit tests checks the
+identity for anisotropic metrics, indefinite curvature and refreshed RHSs.
+
+This optimization does not claim to remove the complementary-space residual
+or reduce the HVP count. PySCF retains its gradient-dependent microstep
+budget and cached Davidson images; see
+[update_orb_ci](https://pyscf.org/_modules/pyscf/mcscf/newton_casscf.html)
+and [davidson_cc](https://pyscf.org/_modules/pyscf/soscf/ciah.html).
+The extra inverse is specific to our nonorthogonal metric, not a missing
+PySCF eigensolver tolerance.
+
+### Compute-node validation of norm reuse
+
+1249298 passed all five unit executables. The original-guess FeCl2 native
+run converged in 14 macros / 282 HVPs, E=-2181.624464869792 Eh, GNU wall
+9.97 s, RSS 491.6 MiB. Relative to archived 1249221, complete structure
+norm calls decreased from 682 to 506, overlap actions from 31,418 to
+22,791, and scoped inverse time from 1.0167 to 0.7531 s. The maximum true
+relative solve residual remains 1.48971e-8; no precision was relaxed.
+Total time is not lower, so this is demonstrated removal of redundant
+inverse work, not demonstrated overall speedup or reduced HVP count.
+
+The frozen executable regression 1249320 completed all three cases:
+
+| Case | Macros | HVP | Energy / Eh | GNU wall / s | GNU RSS / MiB |
+|---|---:|---:|---:|---:|---:|
+| F2 | 3 | 23 | -198.751155830526 | 0.29 | 17.0 |
+| 241 | 3 | 21 | -230.720590392835 | 2.63 | 815.0 |
+| MnF2 | 10 | 144 | -1348.893353223966 | 5.50 | 547.2 |
+
+Counts and endpoints agree with the retained phase-correct regression.
+No archived executable was rerun.
+
+1249325 adds physical orbital/structure norm accounting without an extra
+inverse or HVP. Five units again passed; FeCl2 converged in 13 / 254,
+E=-2181.624464846043 Eh, GNU wall 9.10 s, RSS 514.8 MiB. Its difference
+from the independent coupled PySCF endpoint is +3.7690e-8 Eh. Do not
+attribute its lower HVP count to logging or to norm reuse: the first norm-
+reuse run had 14 / 282, and no new direction-construction policy was added.
+The diagnostic explicitly sequences the two norm evaluations and records
+their scalar components; this does not change their mathematical definition.
+
+The final AH residual blocks in the instrumented run are:
+
+| Macro | Orbital dual norm | Structure dual norm | Orbital fraction of residual squared |
+|---|---:|---:|---:|
+| 11 | 1.96029e-3 | 2.21482e-4 | 98.74% |
+| 12 | 2.54112e-3 | 1.91620e-4 | 99.43% |
+| 13 | 4.01252e-4 | 4.29475e-5 | 98.87% |
+
+Its maximum relative Galerkin residual is 3.0581e-12. The last two macros
+still stop at the microstep budget, with last predicted dual norms
+approximately equal to the complete AH residual norms. This localizes the
+unresolved residual primarily to the **orbital complement of the AH trial
+space**, not an unsolved structure equation or inaccurate Ritz eigenpair.
+It does not establish whether a particular improved orbital preconditioner
+or nonlinear model update will cure it.
+
+Scoped costs in 1249325 are 0.1185 s for AH projection/checks, 0.0137 s
+for spectrum/image combination, 0.6903 s for all structure norm inverses,
+and 1.9967 s for coupled expansions including sample ingestion. Chart
+construction is separately 1.8983 s; its 0.4240 s positive-block factor
+scope is nested, not additive. These are explicit wall-clock scopes,
+not profiler percentages. Removing unused chart factors would be a cost
+optimization only and requires checking the independent block-LBFGS APIs;
+it cannot explain or remove the complementary residual.
+
+No iron-porphine long run is started on the basis of these modest/variable
+FeCl2 timings. The requested robust reduction in HVPs remains outstanding.

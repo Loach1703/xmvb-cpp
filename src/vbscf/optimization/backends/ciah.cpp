@@ -90,8 +90,11 @@ bool build_ciah_macro_step(
         ns ? structure.diagonal_dual_norm(g.tail(ns)) : 0.0);
   };
   const auto dual_norm = [&](const Eigen::VectorXd& g) {
-    return std::hypot(metric.dual_norm(g.head(no)),
-        ns ? structure.dual_norm(g.tail(ns)) : 0.0);
+    const double orbital_norm = metric.dual_norm(g.head(no));
+    const double structure_norm = ns ? structure.dual_norm(g.tail(ns)) : 0.0;
+    diagnostics::neo_trace("ciah_coupled_norm", "orbital=%.17g,structure=%.17g",
+        orbital_norm, structure_norm);
+    return std::hypot(orbital_norm, structure_norm);
   };
   // Explicitly bounded diagnostic only; never assemble a production metric.
   // FeCl2 has 419 structure coordinates (about 1.34 MiB per matrix).
@@ -324,7 +327,8 @@ bool build_ciah_macro_step(
     last_step = step;
     ++micro_steps;
     ++since_keyframe;
-    const double predicted_norm = dual_norm(predicted_gradient);
+    const double predicted_norm = step_scale == 1.0
+        ? candidate.model_gradient_norm : dual_norm(predicted_gradient);
     diagnostics::neo_trace("ciah_micro",
         "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g",
         candidate.basis_size, micro_steps, candidate.eigenvalue,
