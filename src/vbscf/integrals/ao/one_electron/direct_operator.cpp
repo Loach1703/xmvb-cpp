@@ -353,6 +353,67 @@ std::vector<double> apply_ao_h1e_transpose(
   return result;
 }
 
+void apply_symmetric_ao_h1e_batch(
+    const Eigen::Ref<const Eigen::MatrixXd>& sources,
+    const AoIntegralInput& ao, int n_threads,
+    AoH1eBatchWorkspace* workspace, Eigen::MatrixXd* response) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
+  const std::size_t size = matrix_size(ao);
+  if (workspace == nullptr || response == nullptr || sources.rows() !=
+      static_cast<Eigen::Index>(size))
+    throw std::invalid_argument("invalid symmetric AO response batch");
+  const Eigen::Index width = sources.cols();
+  response->resize(size, width);
+  if (width == 0) return;
+  const std::size_t n_integrals = ao.pair_graph.integral_count();
+  n_threads = bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = openmp_chunk_size(n_integrals, n_threads);
+  workspace->sources = sources;
+  workspace->partial.resize(n_threads);
+  workspace->coulomb.resize(n_threads);
+  const int n_bf = ao.n_basis_functions;
+  diagnostics::WorkerLoopTimes work(n_threads);
+#pragma omp parallel num_threads(n_threads)
+  {
+    int thread = 0, team_size = 1;
+#ifdef _OPENMP
+    thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
+#endif
+    auto& local = workspace->partial[thread];
+    local.setZero(size, width);
+    auto& coulomb = workspace->coulomb[thread];
+    coulomb.resize(width);
+    work.start(thread);
+#pragma omp for schedule(dynamic, 1) nowait
+    for (std::size_t begin = 0; begin < n_integrals; begin += chunk) {
+      if (width == 1)
+        contract_integrals<true, false>(ao, begin, std::min(begin + chunk, n_integrals),
+            workspace->sources.data(), nullptr, local.data(), nullptr);
+      else
+        contract_symmetric_block(ao, begin, std::min(begin + chunk, n_integrals),
+            workspace->sources.data(), local.data(), width, coulomb.data());
+    }
+    work.stop(thread);
+#pragma omp barrier
+#pragma omp for schedule(static) nowait
+    for (int column = 0; column < n_bf; ++column) {
+      for (int row = column; row < n_bf; ++row) {
+        const Eigen::Index index = column * n_bf + row;
+        const Eigen::Index partner = row * n_bf + column;
+        for (Eigen::Index channel = 0; channel < width; ++channel) {
+          double sum = 0.0;
+          for (int worker = 0; worker < team_size; ++worker)
+            sum += workspace->partial[worker](index, channel) +
+                   workspace->partial[worker](partner, channel);
+          (*response)(index, channel) = (*response)(partner, channel) = sum;
+        }
+      }
+    }
+  }
+  work.finish(diagnostics::Phase::AoH1eFused);
+}
+
 void apply_symmetric_ao_h1e_fused_batch(
     const Eigen::Ref<const Eigen::MatrixXd>& sources,
     const Eigen::Ref<const Eigen::MatrixXd>& adjoints,

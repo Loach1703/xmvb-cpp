@@ -24,6 +24,18 @@ struct AoH1eBatchWorkspace {
 };
 
 /**
+ * @brief Applies one physical symmetric response per source in a shared sweep.
+ *
+ * Columns are flattened symmetric AO matrices. Unlike the forward/adjoint
+ * interface, each direction has only one channel and one complete output.
+ * Sources and integral storage remain shared; worker reductions are reused.
+ */
+void apply_symmetric_ao_h1e_batch(
+    const Eigen::Ref<const Eigen::MatrixXd>& sources,
+    const AoIntegralInput& ao, int n_threads,
+    AoH1eBatchWorkspace* workspace, Eigen::MatrixXd* response);
+
+/**
  * @brief Applies two symmetric AO sources with a common two-lane stencil.
  *
  * Both inputs must be symmetric. The first output is the complete physical

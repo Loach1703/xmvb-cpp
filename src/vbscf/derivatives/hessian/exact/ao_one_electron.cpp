@@ -6,35 +6,63 @@
 #include "core/openmp.hpp"
 #include "vbscf/integrals/ao/contracts/input.hpp"
 #include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
+#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 
 namespace xmvb::vb::detail {
 
-void apply_fused_exact_ao_one_electron_response(
-    const Eigen::MatrixXd& density,
-    const Eigen::MatrixXd& gradient,
+void apply_exact_ao_response(
+    const Eigen::Ref<const Eigen::MatrixXd>& density,
+    const Eigen::Ref<const Eigen::MatrixXd>& pullback,
+    const Eigen::Ref<const Eigen::MatrixXd>& weighted_directions,
+    const ExactPackedActiveTwoElectronAdjointCache& cache,
     const AoIntegralInput& ao,
-    AoH1eSymmetricWorkspace* workspace,
-    Eigen::MatrixXd* symmetric_gradient,
-    std::vector<double>* delta_h1e,
-    std::vector<double>* density_gradient) {
+    AoH1eBatchWorkspace* workspace,
+    Eigen::MatrixXd* combined_response,
+    Eigen::MatrixXd* active_projection) {
   const int n_bf = ao.n_basis_functions;
-  if (n_bf <= 0 || density.rows() != n_bf || density.cols() != n_bf ||
-      gradient.rows() != n_bf || gradient.cols() != n_bf ||
-      symmetric_gradient == nullptr || delta_h1e == nullptr ||
-      density_gradient == nullptr) {
-    throw std::invalid_argument("invalid fused AO-H1E response arguments");
+  const int n = cache.n_active_orbitals;
+  if (n_bf <= 0 || density.rows() != n_bf * n_bf ||
+      pullback.rows() != density.rows() || pullback.cols() != density.cols() ||
+      weighted_directions.rows() != n_bf * n ||
+      weighted_directions.cols() != density.cols() ||
+      combined_response == nullptr || active_projection == nullptr)
+    throw std::invalid_argument("invalid exact AO response arguments");
+  const auto& coefficients = *cache.accepted_active_coefficients;
+  active_projection->resize(n_bf * n, density.cols());
+  if (cache.exchange_integrals.size() != 0) {
+    // T=delta D+W C^T, pullback=T+T^T. By linearity,
+    // R=L(delta D)+L(T+T^T)/2=L(2 delta D+(W C^T+C W^T)/2).
+    // Therefore L(delta D) C=R C/2-L(W C^T+C W^T) C/4.
+    // Only R traverses the AO integral graph; the correction uses accepted
+    // half-transformed images in O(n_bf^2*n_active^2) arithmetic.
+    const Eigen::MatrixXd source = density + 0.5 * pullback;
+    apply_symmetric_ao_h1e_batch(source, ao, effective_openmp_thread_count(),
+                               workspace, combined_response);
+    for (Eigen::Index column = 0; column < density.cols(); ++column) {
+      const Eigen::Map<const Eigen::MatrixXd> response(
+          combined_response->col(column).data(), n_bf, n_bf);
+      const Eigen::Map<const Eigen::MatrixXd> weights(
+          weighted_directions.col(column).data(), n_bf, n);
+      Eigen::Map<Eigen::MatrixXd> projection(
+          active_projection->col(column).data(), n_bf, n);
+      projection.noalias() = 0.5 * response * coefficients;
+      projection -= 0.25 * project_exact_active_density_response(cache, weights);
+    }
+  } else {
+    // When the bounded accepted image is not admitted, keep the streamed
+    // integral representation. Consumers still share a single projection.
+    Eigen::MatrixXd forward, adjoint;
+    apply_symmetric_ao_h1e_fused_batch(density, pullback, ao,
+        effective_openmp_thread_count(), workspace, &forward, &adjoint);
+    *combined_response = forward + adjoint;
+    for (Eigen::Index column = 0; column < density.cols(); ++column) {
+      const Eigen::Map<const Eigen::MatrixXd> response(
+          forward.col(column).data(), n_bf, n_bf);
+      Eigen::Map<Eigen::MatrixXd> projection(
+          active_projection->col(column).data(), n_bf, n);
+      projection.noalias() = response * coefficients;
+    }
   }
-
-  symmetric_gradient->resizeLike(gradient);
-  *symmetric_gradient = gradient + gradient.transpose();
-  apply_symmetric_ao_h1e_fused(
-      density.data(),
-      symmetric_gradient->data(),
-      ao,
-      effective_openmp_thread_count(),
-      workspace,
-      delta_h1e,
-      density_gradient);
 }
 
 }  // namespace xmvb::vb::detail

@@ -154,6 +154,52 @@ Eigen::MatrixXd contract_exchange_direction(
 
 namespace xmvb::vb {
 
+Eigen::MatrixXd project_exact_active_density_response(
+    const ExactPackedActiveTwoElectronAdjointCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& weighted_direction) {
+  const Eigen::Index n_bf = cache.n_basis_functions;
+  const Eigen::Index n = cache.n_active_orbitals;
+  if (weighted_direction.rows() != n_bf || weighted_direction.cols() != n ||
+      cache.accepted_pair_products == nullptr ||
+      cache.exchange_integrals.rows() != n_bf * (n_bf + 1) / 2 ||
+      cache.exchange_integrals.cols() != n * n)
+    throw std::invalid_argument("active density projection dimensions mismatch");
+  const ExactCtxPairMatrix weights = weighted_direction;
+  ExactCtxPairMatrix result = ExactCtxPairMatrix::Zero(n_bf, n);
+  const int threads = std::min<int>(effective_openmp_thread_count(), n_bf);
+  // Output rows have exclusive owners. Integral images and weights are shared;
+  // each worker needs only one active-pair block, never an AO-sized array.
+#pragma omp parallel num_threads(threads)
+  {
+    ExactCtxPairMatrix pair_block(n, n);
+#pragma omp for schedule(static)
+    for (Eigen::Index mu = 0; mu < n_bf; ++mu) {
+      for (Eigen::Index nu = 0; nu < n_bf; ++nu) {
+        const auto pair = detail::ao_pair_index(mu, nu);
+        const Eigen::Map<const ExactCtxPairMatrix> exchange(
+            cache.exchange_integrals.row(pair).data(), n, n);
+        const auto products = cache.accepted_pair_products->row(pair);
+        for (Eigen::Index p = 0; p < products.size(); ++p) {
+          const int a = cache.active_pair_first_indices[p];
+          const int b = cache.active_pair_second_indices[p];
+          pair_block(a, b) = products[p];
+          pair_block(b, a) = products[p];
+        }
+        // E(mu,nu)_(a,b)=(mu a|nu b). Reversed AO orientation
+        // transposes its active indices. J(A)C=2 E W,
+        // K(A)C=(mu nu|a b)W + E^T W, A=W C^T+C W^T.
+        pair_block *= -1.0;
+        if (mu >= nu)
+          pair_block += 4.0 * exchange.transpose() - exchange;
+        else
+          pair_block += 4.0 * exchange - exchange.transpose();
+        result.row(mu).noalias() += weights.row(nu) * pair_block;
+      }
+    }
+  }
+  return result;
+}
+
 std::vector<double> backpropagate_exact_active_h1e_gradient(
     const std::vector<double>& active_gradient,
     const ExactPackedActiveTwoElectronAdjointCache& cache) {

@@ -88,8 +88,8 @@ private:
   Eigen::VectorXd apply_reduced_impl(
       const Eigen::VectorXd& reduced_direction,
       HvpComponents components,
-      const Eigen::VectorXd* precomputed_delta_ao_effective_h1e,
-      const Eigen::VectorXd* precomputed_inactive_density_gradient,
+      const Eigen::VectorXd* precomputed_ao_response,
+      const Eigen::MatrixXd* precomputed_active_projection,
       const Eigen::VectorXd* precomputed_delta_packed_active_two_electron,
       const Eigen::MatrixXd* precomputed_ri_active_pair_factor_direction,
       const ExactCtxPairMatrix* precomputed_directional_pair_products,
@@ -152,9 +152,7 @@ private:
       accepted_ao_effective_one_electron_transpose_times_active_auxiliary_orbitals_;
   Eigen::MatrixXd accepted_sso_gradient_symmetric_;
   Eigen::MatrixXd accepted_hho_gradient_symmetric_;
-  Eigen::MatrixXd accepted_active_auxiliary_orbitals_times_hho_gradient_symmetric_;
   mutable Eigen::MatrixXd ao_h1e_symmetrized_gradient_workspace_;
-  mutable AoH1eSymmetricWorkspace ao_h1e_fused_workspace_;
   mutable AoH1eBatchWorkspace ao_h1e_batch_workspace_;
   mutable AoEffectiveOneElectronRiFusedWorkspace ri_ao_h1e_fused_workspace_;
   mutable Eigen::MatrixXd ri_ao_h1e_forward_workspace_;
@@ -162,7 +160,6 @@ private:
   mutable AoEffectiveOneElectronRiStrategy ri_ao_h1e_strategy_ =
       AoEffectiveOneElectronRiStrategy::Uncalibrated;
   Eigen::MatrixXd zero_core_hamiltonian_;
-  mutable std::vector<double> ao_h1e_delta_h1e_workspace_;
   mutable std::vector<double> ao_h1e_inactive_density_gradient_workspace_;
   ExactPackedActiveTwoElectronAdjointCache accepted_exact_two_electron_cache_;
   std::optional<RiActiveTwoElectronResponseCache>

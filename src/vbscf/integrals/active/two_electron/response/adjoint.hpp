@@ -11,6 +11,19 @@
 namespace xmvb::vb {
 
 /**
+ * @brief Projects L(W C^T + C W^T) onto accepted active orbitals.
+ *
+ * L(D)=2 J(D)-K(D), matching the physical AO builder. Uses the shared
+ * accepted Coulomb/exchange images;
+ * no AO integral sweep or complete AO response is generated. W is the
+ * AO-by-active weighted orbital direction. Requires the admitted exchange
+ * image and resident pair products. Storage is O(n_bf*n_active).
+ */
+Eigen::MatrixXd project_exact_active_density_response(
+    const ExactPackedActiveTwoElectronAdjointCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& weighted_direction);
+
+/**
  * @brief Pulls an active H1e adjoint back to the symmetric inactive density.
  *
  * Reuses accepted Coulomb and exchange integral images. The returned AO

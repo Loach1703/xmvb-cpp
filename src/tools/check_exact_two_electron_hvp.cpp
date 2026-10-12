@@ -16,6 +16,8 @@
 #include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 #include "vbscf/integrals/active/two_electron/response/directional.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
+#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
+#include "vbscf/derivatives/hessian/exact/ao_one_electron_internal.hpp"
 
 namespace {
 
@@ -234,6 +236,45 @@ int main(int argc, char** argv) {
       std::cout << "active_h1e_adjoint_reference_error = " << error << '\n';
       if (error > 1.0e-11 * std::max(1.0, max_abs_value(physical_reference)))
         throw std::runtime_error("active H1e adjoint disagrees with AO-ERI transpose");
+
+      // Independent unique-ERI reference, including pure density, pure active
+      // motion, mixed sources, and nonsymmetric weighted orbital directions.
+      Eigen::MatrixXd density_columns(n_bf * n_bf, 3);
+      Eigen::MatrixXd pullback_columns(n_bf * n_bf, 3);
+      Eigen::MatrixXd weights_columns(n_bf * n_active_orbitals, 3);
+      for (int column = 0; column < 3; ++column) {
+        Eigen::MatrixXd density(n_bf, n_bf), weights(n_bf, n_active_orbitals);
+        for (int i = 0; i < n_bf; ++i) {
+          for (int j = 0; j < n_bf; ++j)
+            density(i, j) = column == 1 ? 0.0 :
+                std::sin(0.13 * (i + j + 1)) / n_bf;
+          for (int a = 0; a < n_active_orbitals; ++a)
+            weights(i, a) = column == 0 ? 0.0 :
+                std::cos(0.19 * (i + 1) + 0.27 * (a + 1)) / n_bf;
+        }
+        const Eigen::MatrixXd motion = weights * coefficients.transpose();
+        const Eigen::MatrixXd pullback = 2.0 * density + motion + motion.transpose();
+        density_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(density.data(), density.size());
+        pullback_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(pullback.data(), pullback.size());
+        weights_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(weights.data(), weights.size());
+      }
+      xmvb::vb::AoH1eBatchWorkspace response_workspace;
+      Eigen::MatrixXd combined, projection, reference_combined, reference_projection;
+      xmvb::vb::detail::apply_exact_ao_response(density_columns, pullback_columns,
+          weights_columns, accepted_cache, input.ao_integral_input,
+          &response_workspace, &combined, &projection);
+      auto saved_exchange = std::move(accepted_cache.exchange_integrals);
+      xmvb::vb::detail::apply_exact_ao_response(density_columns, pullback_columns,
+          weights_columns, accepted_cache, input.ao_integral_input,
+          &response_workspace, &reference_combined, &reference_projection);
+      accepted_cache.exchange_integrals = std::move(saved_exchange);
+      const double response_error = max_abs_difference(combined, reference_combined);
+      const double projection_error = max_abs_difference(projection, reference_projection);
+      std::cout << "combined_ao_response_error = " << response_error
+                << "\nshared_active_projection_error = " << projection_error << '\n';
+      if (response_error > 1e-11 * std::max(1.0, max_abs_value(reference_combined)) ||
+          projection_error > 1e-11 * std::max(1.0, max_abs_value(reference_projection)))
+        throw std::runtime_error("shared AO response disagrees with unique-ERI reference");
     }
     const auto measure_hvp = [&](const char* label) {
       xmvb::vb::ExactPackedActiveTwoElectronApplyWorkspace workspace;

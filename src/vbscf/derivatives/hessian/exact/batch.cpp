@@ -200,6 +200,8 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
   const Eigen::Index n_directions = reduced_directions.cols();
   Eigen::MatrixXd inactive_density_columns(ao_matrix_size, n_directions);
   Eigen::MatrixXd symmetrized_pullback_columns(ao_matrix_size, n_directions);
+  Eigen::MatrixXd weighted_active_columns(
+      n_basis_functions * n_active_orbitals, n_directions);
   std::vector<PrecomputedDirection> precomputed_directions;
   precomputed_directions.reserve(n_directions);
   std::vector<Eigen::MatrixXd> dense_active_directions;
@@ -212,9 +214,12 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
     dense_active_directions.push_back(
         directional_result.delta_active_auxiliary_orbitals);
     Eigen::MatrixXd pullback_source = directional_result.delta_inactive_density;
-    pullback_source.noalias() +=
-        (directional_result.delta_active_auxiliary_orbitals *
-         accepted_hho_gradient_symmetric_) *
+    const Eigen::MatrixXd weighted_active =
+        directional_result.delta_active_auxiliary_orbitals *
+        accepted_hho_gradient_symmetric_;
+    weighted_active_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(
+        weighted_active.data(), weighted_active.size());
+    pullback_source.noalias() += weighted_active *
         accepted_active_auxiliary_orbitals_.transpose();
     inactive_density_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(
         directional_result.delta_inactive_density.data(), ao_matrix_size);
@@ -227,12 +232,11 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
   }
 
   const auto batch_h1e_start_time = std::chrono::steady_clock::now();
-  Eigen::MatrixXd delta_h1e_columns;
-  Eigen::MatrixXd inactive_density_gradient_columns;
+  Eigen::MatrixXd combined_ao_columns;
+  Eigen::MatrixXd active_projection_columns;
   if (accepted_ri_factorization_ != nullptr) {
-    delta_h1e_columns.resize(ao_matrix_size, n_directions);
-    inactive_density_gradient_columns.resize(
-        ao_matrix_size, n_directions);
+    combined_ao_columns.resize(ao_matrix_size, n_directions);
+    active_projection_columns.resize(n_basis_functions * n_active_orbitals, n_directions);
     for (Eigen::Index column = 0; column < n_directions; ++column) {
       const Eigen::Map<const Eigen::MatrixXd> source(
           inactive_density_columns.col(column).data(),
@@ -244,24 +248,27 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
           source, adjoint, *accepted_ri_factorization_,
           &ri_ao_h1e_fused_workspace_, &ri_ao_h1e_strategy_,
           &ri_ao_h1e_forward_workspace_, &ri_ao_h1e_adjoint_workspace_);
-      delta_h1e_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(
-          ri_ao_h1e_forward_workspace_.data(), ao_matrix_size);
       std::vector<double> encoded_adjoint;
       detail::encode_symmetric_ao_gradient(
           ri_ao_h1e_adjoint_workspace_, &encoded_adjoint);
-      inactive_density_gradient_columns.col(column) =
+      combined_ao_columns.col(column) =
           Eigen::Map<const Eigen::VectorXd>(
-              encoded_adjoint.data(), ao_matrix_size);
+              encoded_adjoint.data(), ao_matrix_size) +
+          Eigen::Map<const Eigen::VectorXd>(ri_ao_h1e_forward_workspace_.data(), ao_matrix_size);
+      Eigen::Map<Eigen::MatrixXd> projection(
+          active_projection_columns.col(column).data(), n_basis_functions, n_active_orbitals);
+      projection.noalias() = ri_ao_h1e_forward_workspace_ * accepted_active_auxiliary_orbitals_;
     }
   } else {
-    apply_symmetric_ao_h1e_fused_batch(
+    detail::apply_exact_ao_response(
         inactive_density_columns,
         symmetrized_pullback_columns,
+        weighted_active_columns,
+        accepted_exact_two_electron_cache_,
         current_input_->ao_integral_input,
-        effective_openmp_thread_count(),
         &ao_h1e_batch_workspace_,
-        &delta_h1e_columns,
-        &inactive_density_gradient_columns);
+        &combined_ao_columns,
+        &active_projection_columns);
   }
   const double batch_h1e_seconds =
       detail::exact_hvp_elapsed_seconds(batch_h1e_start_time);
@@ -342,12 +349,8 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
     for (Eigen::Index column = 0; column < n_directions; ++column) {
       PrecomputedOuterResponse& outer =
           precomputed_directions[column].outer_response.emplace();
-      const Eigen::Map<const Eigen::MatrixXd> delta_h1e(
-          delta_h1e_columns.col(column).data(),
-          n_basis_functions,
-          n_basis_functions);
-      const Eigen::MatrixXd delta_h1e_times_active =
-          delta_h1e * accepted_active_auxiliary_orbitals_;
+      const Eigen::Map<const Eigen::MatrixXd> delta_h1e_times_active(
+          active_projection_columns.col(column).data(), n_basis_functions, n_active_orbitals);
 
       const auto integral_start = std::chrono::steady_clock::now();
       Eigen::VectorXd delta_packed_two_electron;
@@ -539,9 +542,9 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
   for (Eigen::Index column = 0;
        column < reduced_directions.cols();
        ++column) {
-    const Eigen::VectorXd delta_h1e = delta_h1e_columns.col(column);
-    const Eigen::VectorXd inactive_density_gradient =
-        inactive_density_gradient_columns.col(column);
+    const Eigen::VectorXd combined_ao = combined_ao_columns.col(column);
+    const Eigen::MatrixXd active_projection = Eigen::Map<const Eigen::MatrixXd>(
+        active_projection_columns.col(column).data(), n_basis_functions, n_active_orbitals);
     Eigen::VectorXd delta_packed_active_two_electron;
     if (compute_outer_response) {
       if (accepted_ri_two_electron_cache_.has_value() &&
@@ -572,8 +575,8 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
     const Eigen::VectorXd response = apply_reduced_impl(
         reduced_directions.col(column),
         components,
-        &delta_h1e,
-        &inactive_density_gradient,
+        &combined_ao,
+        &active_projection,
         (components.local_active_response || components.structure_response) &&
                 packed_outer_two_electron_required
             ? &delta_packed_active_two_electron
