@@ -112,6 +112,7 @@ bool CiahWorkspace::append(Eigen::VectorXd direction) {
   const auto hessian_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   Eigen::VectorXd hessian_image = problem_.apply_hessian(direction);
+  if (options_.observe_images) options_.observe_images(direction,metric_image);
   if (trace) diagnostics::neo_trace("ciah_expansion_cost",
       "basis=%d,remaining_fraction=%.17g,orthogonalize_seconds=%.17g,metric_seconds=%.17g,hvp_seconds=%.17g",
       basis_size()+1, norm/initial_norm,

@@ -16,6 +16,7 @@
 #include "vbscf/optimization/driver/result.hpp"
 #include "vbscf/optimization/globalization/line_search.hpp"
 #include "vbscf/optimization/neo/ciah.hpp"
+#include "vbscf/optimization/preconditioners/coarse.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 
 namespace xmvb::vb::optimizer_detail {
@@ -62,6 +63,15 @@ bool build_ciah_macro_step(
   const Eigen::Index no = chart.reduced_size();
   const Eigen::Index ns = use_structure_response ? structure.tangent_size() : 0;
   const Eigen::Index dimension = no + ns;
+  CiahOptions ciah_options;
+  double energy_scale = 0.0;
+  for (const double state_energy : context->selected_state_energies)
+    energy_scale = std::max(energy_scale, std::abs(state_energy));
+  ciah_options.operator_relative_accuracy =
+      context->structure_solve_accuracy.response_backward_error_tolerance(energy_scale);
+  CoarsePreconditioner coarse(dimension,ns ? 2*ciah_options.max_cycle : 0,
+      ciah_options.lindep,ciah_options.operator_relative_accuracy);
+  Eigen::VectorXd orbital_image(ns ? dimension : 0), structure_image(ns ? dimension : 0);
   record->model_dimension = static_cast<int>(dimension);
   record->source_gradient_norm = gradient.norm();
   record->source_physical_gradient_norm = metric.dual_norm(gradient);
@@ -127,6 +137,10 @@ bool build_ciah_macro_step(
           orbital.scaled_structure_forcing);
       image.head(no) = orbital.orbital_hessian + adjoint;
       image.tail(ns) = forcing + ci.hessian_coordinates;
+      orbital_image.head(no) = orbital.orbital_hessian;
+      orbital_image.tail(ns) = forcing;
+      structure_image.head(no) = adjoint;
+      structure_image.tail(ns) = ci.hessian_coordinates;
       if (diagnostics::neo_event_trace_enabled()) {
         const double orbital_energy = x.head(no).dot(orbital.orbital_hessian);
         const double structure_energy = x.tail(ns).dot(ci.hessian_coordinates);
@@ -148,7 +162,7 @@ bool build_ciah_macro_step(
     if (ns) image.tail(ns) = structure.apply_metric_coordinates(x.tail(ns));
     return image;
   };
-  const auto precondition = [&](const Eigen::VectorXd& g, double eigenvalue) {
+  const auto diagonal_precondition = [&](const Eigen::VectorXd& g, double eigenvalue) {
     Eigen::VectorXd direction(dimension);
     if (options.orbital_preconditioner == OrbitalPreconditioner::Identity) {
       direction.head(no) = g.head(no);
@@ -165,16 +179,26 @@ bool build_ciah_macro_step(
         g.tail(ns), eigenvalue - 1.0e-8);
     return direction;
   };
+  const auto precondition = [&](const Eigen::VectorXd& g, double eigenvalue) {
+    return coarse.apply(g,eigenvalue,[&](const Eigen::VectorXd& v) {
+      return diagonal_precondition(v,eigenvalue);
+    });
+  };
+  if (ns) ciah_options.observe_images = [&](const Eigen::VectorXd& x,const Eigen::VectorXd& gx) {
+    Eigen::VectorXd v = Eigen::VectorXd::Zero(dimension), g = v;
+    v.head(no) = x.head(no);
+    g.head(no) = gx.head(no);
+    coarse.observe(v,orbital_image,g);
+    v.head(no).setZero();
+    g.head(no).setZero();
+    v.tail(ns) = x.tail(ns);
+    g.tail(ns) = gx.tail(ns);
+    coarse.observe(v,structure_image,g);
+  };
   Eigen::VectorXd initial_gradient = Eigen::VectorXd::Zero(dimension);
   initial_gradient.head(no) = gradient;
   NeoProblem problem(initial_gradient, action, metric_action, dual_norm);
-  CiahOptions ciah_options;
   ciah_options.residual_preconditioner = precondition;
-  double energy_scale = 0.0;
-  for (const double state_energy : context->selected_state_energies)
-    energy_scale = std::max(energy_scale, std::abs(state_energy));
-  ciah_options.operator_relative_accuracy =
-      context->structure_solve_accuracy.response_backward_error_tolerance(energy_scale);
   Eigen::VectorXd seed = initial_gradient;
   if (orbital_guess_packed.size() == static_cast<Eigen::Index>(layout.size())) {
     seed.head(no) = chart.project_vector(orbital_guess_packed).reduced_gradient;

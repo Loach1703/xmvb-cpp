@@ -61,6 +61,8 @@ struct CiahOptions {
   int max_cycle = 30;
   /** Declared relative error of the Hessian action for symmetry checks. */
   double operator_relative_accuracy = 0.0;
+  /** @brief Observe a direction after its HVP, reusing the computed metric image. */
+  std::function<void(const Eigen::VectorXd&,const Eigen::VectorXd&)> observe_images;
   /** Optional eigenvalue-shifted residual preconditioner. */
   std::function<Eigen::VectorXd(const Eigen::VectorXd&, double)>
       residual_preconditioner;

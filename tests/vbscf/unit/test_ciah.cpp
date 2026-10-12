@@ -7,8 +7,10 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
+#include <Eigen/LU>
 
 #include "vbscf/optimization/neo/ciah.hpp"
+#include "vbscf/optimization/preconditioners/coarse.hpp"
 
 namespace {
 
@@ -117,7 +119,14 @@ void check_anisotropic_spd() {
   const Eigen::Vector3d gradient(0.3, -1.2, 0.7);
   int actions = 0;
   const NeoProblem problem = dense_problem(hessian, metric, gradient, &actions);
-  CiahWorkspace workspace(problem, Eigen::VectorXd::Ones(3));
+  CiahOptions options;
+  int observed = 0;
+  options.observe_images = [&](const Eigen::VectorXd& v,const Eigen::VectorXd& gv) {
+    ++observed;
+    require_close(gv,metric*v,2.0e-12,"CIAH observer did not reuse the metric image");
+    require(actions == observed,"CIAH observer is not attached to the matching HVP");
+  };
+  CiahWorkspace workspace(problem, Eigen::VectorXd::Ones(3),options);
   CiahResult result;
   do {
     result = workspace.next(gradient);
@@ -311,6 +320,48 @@ void check_converged_root_reuse() {
       "converged AH root expanded an obsolete residual");
 }
 
+/** @brief Verify symmetry, exact coarse inverse and shifted signed models. */
+void check_coarse_balancing_inverse() {
+  for (const double first : {2.0,-2.0}) {
+    Eigen::MatrixXd h = Eigen::MatrixXd::Zero(5,5);
+    h.diagonal() << first,3,5,4,6;
+    h(0,3)=h(3,0)=0.7;
+    h(1,4)=h(4,1)=0.5;
+    h(2,3)=h(3,2)=0.2;
+    h(2,0)=h(0,2)=0.1;
+    Eigen::MatrixXd g = Eigen::VectorXd::LinSpaced(5,1,2).asDiagonal();
+    g(0,1)=g(1,0)=0.1;
+    xmvb::vb::CoarsePreconditioner coarse(5,4,1.0e-14);
+    Eigen::MatrixXd v(5,4);
+    v.col(0)=Eigen::VectorXd::Unit(5,0);
+    v.col(1)=Eigen::VectorXd::Unit(5,1);
+    v.col(2)=Eigen::VectorXd::Unit(5,3);
+    v.col(3)=Eigen::VectorXd::Unit(5,4);
+    coarse.observe(v.col(0),h*v.col(0),g*v.col(0));
+    coarse.observe(v.col(0),h*v.col(0),g*v.col(0));
+    require(coarse.size() == 1,"coarse dependent sample was admitted");
+    const Eigen::VectorXd mixed=v.col(0)+v.col(1);
+    coarse.observe(mixed,h*mixed,g*mixed);
+    for (int i=2;i<4;++i) coarse.observe(v.col(i),h*v.col(i),g*v.col(i));
+    const Eigen::MatrixXd base=Eigen::VectorXd::LinSpaced(5,0.2,0.8).asDiagonal();
+    for (const double omega : {0.0,-0.2}) {
+      const Eigen::MatrixXd l=h-omega*g;
+      const Eigen::MatrixXd e=v.transpose()*l*v;
+      const Eigen::MatrixXd coarse_inverse=v*e.inverse()*v.transpose();
+      const Eigen::MatrixXd left=Eigen::MatrixXd::Identity(5,5)-coarse_inverse*l;
+      const Eigen::MatrixXd expected=coarse_inverse+left*base*left.transpose();
+      Eigen::MatrixXd actual(5,5);
+      int calls=0;
+      for (int i=0;i<5;++i) actual.col(i)=coarse.apply(Eigen::VectorXd::Unit(5,i),omega,
+          [&](const Eigen::VectorXd& r) -> Eigen::VectorXd { ++calls;return base*r; });
+      require(calls == 5,"coarse inverse repeated the base preconditioner");
+      require((actual-expected).norm()<2.0e-12,"coarse inverse differs from dense reference");
+      require((actual-actual.transpose()).norm()<2.0e-12,"coarse inverse lost symmetry");
+      require((actual*l*v-v).norm()<2.0e-12,"coarse sampled inverse is not exact");
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -322,6 +373,7 @@ int main() {
     check_accumulated_microstep_images();
     check_keyframe_energy_model();
     check_converged_root_reuse();
+    check_coarse_balancing_inverse();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
