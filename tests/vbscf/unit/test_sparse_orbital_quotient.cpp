@@ -18,6 +18,7 @@
 #include "vbscf/orbitals/charts/physical_metric.hpp"
 #include "vbscf/core/contracts/orbital_type.hpp"
 #include "vbscf/optimization/preconditioners/transported_lbfgs.hpp"
+#include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 #include "vbscf/optimization/trust_region/truncated_newton.hpp"
 #include "vbscf/diagnostics/orbitals/chart_audit.hpp"
@@ -681,6 +682,89 @@ void check_curvature_spectral_regularization() {
   }
 }
 
+/** @brief Compare analytic pullback with the independent nested sum. */
+void check_analytic_block_pullback(
+    const OrbitalPreparationInput& input, bool complete_active_space) {
+  const SparseParameterLayout layout(input);
+  const Eigen::MatrixXd orbitals = dense(input);
+  const int n_bf = input.n_basis_functions;
+  const int n_active = input.n_active_orbitals;
+  const int n_core = input.n_orbitals - n_active;
+  AnalyticOrbitalDiagonal model;
+  const Eigen::LLT<Eigen::MatrixXd> metric(input.ao_overlap_matrix);
+  model.mo_coefficients = metric.matrixU().solve(Eigen::MatrixXd::Identity(n_bf,n_bf));
+  model.rotation_diagonal.resize(n_bf,n_bf);
+  for (int p = 0; p < n_bf; ++p)
+    for (int q = 0; q <= p; ++q)
+      model.rotation_diagonal(p,q) = model.rotation_diagonal(q,p) =
+          ((p+q)%3 == 0 ? -1.0 : 1.0) * (0.8+0.13*p+0.07*q);
+  model.inactive_inverse_transform = Eigen::MatrixXd::Identity(n_core,n_core);
+  model.active_inverse_transform = Eigen::MatrixXd::Identity(n_active,n_active);
+  if (n_core > 1) model.inactive_inverse_transform(0,1) = 0.23;
+  if (n_active > 1) model.active_inverse_transform(0,1) = -0.31;
+  const OrbitalChart chart(input,layout,orbitals,orbitals,
+                          nullptr,false,complete_active_space,&model);
+  const int size = chart.reduced_size();
+  std::vector<Eigen::VectorXd> lifts;
+  for (int j = 0; j < size; ++j)
+    lifts.push_back(chart.expand_retract_input_tangent(
+        input,Eigen::VectorXd::Unit(size,j)));
+  Eigen::MatrixXd signed_reference = Eigen::MatrixXd::Zero(size,size);
+  const Eigen::VectorXd probe = Eigen::VectorXd::LinSpaced(size,-0.4,0.7);
+  double maximum_rotation = 0.0;
+  for (int target = 0; target < input.n_orbitals; ++target) {
+    Eigen::MatrixXd raw = Eigen::MatrixXd::Zero(n_bf,size);
+    for (int row = 0; row < stored_sparse_orbital_coefficient_count(input,target); ++row) {
+      const int slot = target*n_bf+row;
+      const int ao = input.orbital_basis_index_table[slot]-1;
+      for (int j = 0; j < size; ++j) raw(ao,j) = lifts[j][slot];
+    }
+    const double norm = std::sqrt(orbitals.col(target).dot(
+        input.ao_overlap_matrix*orbitals.col(target)));
+    const Eigen::VectorXd normalized = orbitals.col(target)/norm;
+    Eigen::MatrixXd physical = raw/norm;
+    physical.noalias() -= normalized *
+        (normalized.transpose()*input.ao_overlap_matrix*raw/norm);
+    if (target >= n_core && n_core > 0) {
+      const auto core = model.mo_coefficients.leftCols(n_core);
+      physical.noalias() -= core*(core.transpose()*input.ao_overlap_matrix*physical);
+    }
+    const Eigen::VectorXd source = target < n_core
+        ? Eigen::VectorXd(model.inactive_inverse_transform.row(target).transpose())
+        : Eigen::VectorXd(model.active_inverse_transform.row(target-n_core).transpose());
+    const int source_offset = target < n_core ? 0 : n_core;
+    for (int p = n_core; p < n_bf; ++p) {
+      const Eigen::VectorXd component =
+          physical.transpose()*input.ao_overlap_matrix*model.mo_coefficients.col(p);
+      for (int q = 0; q < source.size(); ++q) {
+        signed_reference.noalias() += model.rotation_diagonal(p,source_offset+q)*
+            source[q]*source[q]*(component*component.transpose());
+        maximum_rotation = std::max(maximum_rotation,
+            std::abs(source[q]*component.dot(probe)));
+      }
+    }
+  }
+  const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(signed_reference);
+  require(spectrum.eigenvalues().cwiseAbs().minCoeff() > 1.0e-6,
+          "analytic pullback fixture has an unintended null direction");
+  const Eigen::MatrixXd positive = spectrum.eigenvectors()*
+      spectrum.eigenvalues().cwiseAbs().asDiagonal()*spectrum.eigenvectors().transpose();
+  require((chart.apply_reduced_curvature(probe)-positive*probe).norm() < 1.0e-10,
+          "fused analytic curvature differs from nested contraction");
+  require((chart.apply_inverse_reduced_block_preconditioner(probe)-
+           positive.ldlt().solve(probe)).norm() < 1.0e-10,
+          "fused analytic positive inverse differs from reference");
+  const double shift = spectrum.eigenvalues().minCoeff()-1.0;
+  require((chart.apply_inverse_augmented_hessian_diagonal(probe,shift)-
+           (signed_reference-shift*Eigen::MatrixXd::Identity(size,size)).ldlt().solve(probe)).norm()
+              < 1.0e-10,
+          "shared eigensystem changed signed AH inverse");
+  require((chart.augmented_hessian_diagonal()-signed_reference.diagonal()).norm() < 1.0e-10,
+          "fused analytic pullback changed signed diagonal");
+  require(std::abs(chart.maximum_rotation_component(probe)-maximum_rotation) < 1.0e-10,
+          "fused projection changed maximum rotation component");
+}
+
 void check_occupation_curvature() {
   Eigen::MatrixXd c = Eigen::MatrixXd::Zero(3, 1);
   c(0, 0) = 1.0;
@@ -1301,6 +1385,9 @@ int main() {
     check_metric_inverse_certificates(full);
     auto oeo = full;
     oeo.orbital_type = kOrbitalTypeOeo;
+    check_analytic_block_pullback(partial,false);
+    check_analytic_block_pullback(frozen,false);
+    check_analytic_block_pullback(oeo,true);
     check_preconditioner_geometry(partial);
     check_preconditioner_geometry(full);
     check_preconditioner_geometry(oeo, true);

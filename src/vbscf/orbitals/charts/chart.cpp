@@ -120,6 +120,8 @@ Eigen::VectorXd normalize_curvature_diagonal(const Eigen::VectorXd& diag) {
 struct PositiveCurvatureBlock {
   Eigen::MatrixXd matrix;
   Eigen::MatrixXd inverse;
+  Eigen::VectorXd signed_eigenvalues;
+  Eigen::MatrixXd eigenvectors;
 };
 
 PositiveCurvatureBlock build_positive_curvature_block(
@@ -165,6 +167,8 @@ PositiveCurvatureBlock build_positive_curvature_block(
   result.inverse = eigenvectors *
       safe_eigenvalues.cwiseInverse().asDiagonal() *
       eigenvectors.transpose();
+  result.signed_eigenvalues = std::move(eigenvalues);
+  result.eigenvectors = std::move(eigenvectors);
   return result;
 }
 
@@ -781,31 +785,20 @@ OrbitalChart::OrbitalChart(
         Eigen::MatrixXd physical_direction = raw_direction / norm;
         physical_direction.noalias() -= normalized * norm_direction;
 
-        Eigen::MatrixXd block_curvature = Eigen::MatrixXd::Zero(
-            proj.local_reduced_size, proj.local_reduced_size);
         const auto& mo = hessian_diagonal->mo_coefficients;
         const auto& diagonal = hessian_diagonal->rotation_diagonal;
+        const int n_external = input.n_basis_functions - n_inactive;
+        Eigen::VectorXd rotation_weights;
         if (target < n_inactive) {
           const auto& inverse = hessian_diagonal->inactive_inverse_transform;
           if (inverse.rows() != n_inactive || inverse.cols() != n_inactive) {
             throw std::invalid_argument(
                 "inactive analytic Hessian transform shape mismatch");
           }
-          const int n_external = input.n_basis_functions - n_inactive;
-          proj.ah_rotation_components.resize(
-              n_external, proj.local_reduced_size);
           proj.ah_source_weights = inverse.row(target).transpose();
-          for (int p = n_inactive; p < input.n_basis_functions; ++p) {
-            const Eigen::VectorXd component =
-                physical_direction.transpose() * ao_overlap * mo.col(p);
-            proj.ah_rotation_components.row(p - n_inactive) =
-                component.transpose();
-            for (int core = 0; core < n_inactive; ++core) {
-              block_curvature.noalias() +=
-                  diagonal(p, core) * inverse(target, core) *
-                  inverse(target, core) * (component * component.transpose());
-            }
-          }
+          rotation_weights = diagonal.block(
+              n_inactive, 0, n_external, n_inactive) *
+              proj.ah_source_weights.array().square().matrix();
         } else {
           const auto& inverse = hessian_diagonal->active_inverse_transform;
           if (local_active < 0 || local_active >= input.n_active_orbitals ||
@@ -819,46 +812,30 @@ OrbitalChart::OrbitalChart(
             physical_direction.noalias() -=
                 core * (core.transpose() * ao_overlap * physical_direction);
           }
-          const int n_external = input.n_basis_functions - n_inactive;
-          proj.ah_rotation_components.resize(
-              n_external, proj.local_reduced_size);
           proj.ah_source_weights = inverse.row(local_active).transpose();
           // Complete OEO removes active--active rotations from U_p, whereas
           // strict-sparse HAO retains the support-admissible ones.  Starting
           // at the active boundary therefore gives both orbital types the
           // same analytic model without silently assigning zero curvature to
           // physical HAO internal-active directions.
-          for (int p = n_inactive; p < input.n_basis_functions; ++p) {
-            const Eigen::VectorXd component =
-                physical_direction.transpose() * ao_overlap * mo.col(p);
-            proj.ah_rotation_components.row(p - n_inactive) =
-                component.transpose();
-            for (int active = 0; active < input.n_active_orbitals; ++active) {
-              block_curvature.noalias() +=
-                  diagonal(p, n_inactive + active) *
-                  inverse(local_active, active) *
-                  inverse(local_active, active) *
-                  (component * component.transpose());
-            }
-          }
+          rotation_weights = diagonal.block(
+              n_inactive, n_inactive, n_external, input.n_active_orbitals) *
+              proj.ah_source_weights.array().square().matrix();
         }
-        const Eigen::MatrixXd signed_block =
-            0.5 * (block_curvature + block_curvature.transpose());
-        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> signed_solver(
-            signed_block);
-        if (signed_solver.info() != Eigen::Success ||
-            !signed_solver.eigenvalues().allFinite() ||
-            !signed_solver.eigenvectors().allFinite()) {
-          throw std::runtime_error(
-              "failed to factor signed orbital Hessian block");
-        }
-        proj.ah_block_eigenvalues = signed_solver.eigenvalues();
-        proj.ah_block_eigenvectors = signed_solver.eigenvectors();
+        // Sum source weights before constructing each tangent outer product.
+        // All external components share one AO-metric projection and GEMM.
+        proj.ah_rotation_components.noalias() =
+            mo.rightCols(n_external).transpose() * ao_overlap * physical_direction;
+        const auto& components = proj.ah_rotation_components;
+        const Eigen::MatrixXd block_curvature =
+            components.transpose() * rotation_weights.asDiagonal() * components;
         const Eigen::VectorXd curvature = block_curvature.diagonal();
         proj.hessian_diagonal = curvature;
         proj.curvature_diagonal = normalize_curvature_diagonal(curvature);
         PositiveCurvatureBlock positive_block =
             build_positive_curvature_block(block_curvature);
+        proj.ah_block_eigenvalues = std::move(positive_block.signed_eigenvalues);
+        proj.ah_block_eigenvectors = std::move(positive_block.eigenvectors);
         proj.curvature_block = std::move(positive_block.matrix);
         proj.inverse_curvature_block = std::move(positive_block.inverse);
         has_reduced_curvature_diagonal_ = true;
