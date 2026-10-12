@@ -172,6 +172,8 @@ bool build_ciah_macro_step(
   // update_orb_ci; the microstep/keyframe tests use that inner tolerance.
   const double micro_gradient_tolerance = 0.3 * options.gradient_tolerance;
   int micro_steps = 0, since_keyframe = 0;
+  bool audit_next_keyframe_step = false;
+  bool audited_keyframe_step = false;
   const char* micro_stop = "unset";
   CiahResult candidate;
   while (true) {
@@ -191,6 +193,33 @@ bool build_ciah_macro_step(
     if (step_scale < 1.0) {
       step *= step_scale;
       image *= step_scale;
+    }
+    if (audit_next_keyframe_step) {
+      // Check the actual resumed direction at a nonzero keyframe, in the
+      // same immutable origin chart used by both the gradient and H images.
+      // This opt-in audit neither changes the candidate nor adds any HVP.
+      const double length = std::sqrt(std::max(0.0, step.dot(metric_action(step))));
+      if (length > 0.0) {
+        const Eigen::VectorXd direction = step / length;
+        const Eigen::VectorXd origin_image = image / length;
+        const double derivative = predicted_gradient.dot(direction);
+        for (const double delta : {1.0e-3, 3.0e-4}) {
+          const Keyframe plus = evaluate_keyframe(displacement + delta * direction);
+          const Keyframe minus = evaluate_keyframe(displacement - delta * direction);
+          const double finite = (plus.energy - minus.energy) / (2.0 * delta);
+          const Eigen::VectorXd local_image =
+              (plus.gradient - minus.gradient) / (2.0 * delta);
+          diagnostics::neo_trace("ciah_keyframe_direction_audit",
+              "basis=%d,delta=%.17g,analytic=%.17g,finite=%.17g,derivative_error=%.17g,local_curvature=%.17g,origin_curvature=%.17g,curvature_change=%.17g,orbital_derivative=%.17g,structure_derivative=%.17g",
+              candidate.basis_size, delta, derivative, finite,
+              std::abs(derivative - finite), dual_norm(local_image),
+              dual_norm(origin_image), dual_norm(local_image - origin_image),
+              predicted_gradient.head(no).dot(direction.head(no)),
+              ns ? predicted_gradient.tail(ns).dot(direction.tail(ns)) : 0.0);
+        }
+      }
+      audit_next_keyframe_step = false;
+      audited_keyframe_step = true;
     }
     const Eigen::VectorXd previous_gradient = predicted_gradient;
     const Eigen::VectorXd previous_step = last_step;
@@ -250,6 +279,9 @@ bool build_ciah_macro_step(
                 0.5 * displacement.dot(hessian_displacement));
         keyframe_norm = actual_norm;
         since_keyframe = 0;
+        audit_next_keyframe_step = !audited_keyframe_step &&
+            diagnostics::neo_event_trace_enabled() &&
+            diagnostics::neo_candidate_audit_enabled();
       } else {
         displacement -= step;
         hessian_displacement -= image;
