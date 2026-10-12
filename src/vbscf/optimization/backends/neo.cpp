@@ -522,8 +522,13 @@ bool build_accepted_neo_keyframe(
           trial_norm, predicted_norm, static_cast<int>(reliable));
       if (!reliable) {
         ++record->rejected_trial_count;
+        // A rejected gradient keyframe must not discard an energy-model
+        // contraction already requested by rho. Never expand a rejected step.
+        *trust_radius = std::min(trial_radius, globalization.next_radius);
+        diagnostics::neo_trace("keyframe_retry", "radius=%.17g,next_radius=%.17g",
+            trial_radius, *trust_radius);
         allow_early_trial = false;
-        continue;  // Refine the retained model at the SAME radius.
+        continue;  // Reuse the retained model at the non-expanded retry radius.
       }
     }
 

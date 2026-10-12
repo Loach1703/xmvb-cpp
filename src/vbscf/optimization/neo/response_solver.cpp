@@ -372,7 +372,7 @@ bool ResponseNeoWorkspace::append_orbital(
   double retained_fraction = 0.0;
   const bool independent = orthonormalize(
       &direction, orbital_basis_,
-      diagnostics::neo_trace_enabled() ? &retained_fraction : nullptr);
+      diagnostics::neo_event_trace_enabled() ? &retained_fraction : nullptr);
   diagnostics::neo_trace("basis", "source=%s,independent=%d,retained=%.17g,size=%ld",
       diagnostics::neo_trace_context.source, static_cast<int>(independent),
       retained_fraction, static_cast<long>(orbital_basis_.cols()));

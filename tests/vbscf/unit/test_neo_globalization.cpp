@@ -64,6 +64,14 @@ void check_poor_model_agreement_retries_smaller() {
                 "poor model agreement did not quarter the radius");
 }
 
+/** @brief Energy acceptance does not imply that the current radius is reliable. */
+void check_accepted_trial_can_request_contraction() {
+  const auto result = evaluate(0.15, 1.0, true, 0.25);
+  require(result.accepted, "decreasing trial above the acceptance ratio was rejected");
+  require_close(result.next_radius, 0.0625,
+                "accepted low-agreement trial lost its contraction request");
+}
+
 void check_nonpositive_actual_reduction_is_rejected() {
   const auto result = evaluate(-0.2, 1.0);
   require(!result.accepted, "energy-increasing trial was accepted");
@@ -169,6 +177,7 @@ int main() {
   check_interior_step_does_not_expand_radius();
   check_moderate_model_agreement_keeps_radius();
   check_poor_model_agreement_retries_smaller();
+  check_accepted_trial_can_request_contraction();
   check_nonpositive_actual_reduction_is_rejected();
   check_nonpositive_prediction_is_rejected();
   check_minimum_radius_is_respected();
