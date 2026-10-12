@@ -470,6 +470,37 @@ void check_projected_dual_norm() {
   require(actions == 1,"CIAH projected norm evaluated an extra Hessian image");
 }
 
+void check_sampled_schur_spectrum() {
+  Eigen::Matrix4d h=Eigen::Vector4d(4.0,3.0,2.0,5.0).asDiagonal();
+  h(0,2)=h(2,0)=1.0;
+  h(1,3)=h(3,1)=0.5;
+  const Eigen::Matrix4d g=Eigen::Vector4d(2.0,3.0,1.5,0.5).asDiagonal();
+  for (bool positive : {true,false}) {
+    if (!positive) h(3,3)=-5.0;
+    xmvb::vb::CoarsePreconditioner coarse(4,4,1.0e-14);
+    for (int j=0;j<4;++j) {
+      const Eigen::Vector4d v=Eigen::Vector4d::Unit(j);
+      coarse.observe(v,h*v,g*v);
+    }
+    const auto result=coarse.schur_spectrum(2);
+    require(result.orbital_dimension==2 && result.structure_dimension==2,
+        "sampled Schur split has incorrect dimensions");
+    require(result.structure_positive==positive,
+        "sampled Schur diagnostic misclassified structure curvature");
+    if (!positive) continue;
+    require(std::abs(result.orbital_min-1.0)<2.0e-14 &&
+        std::abs(result.orbital_max-2.0)<2.0e-14,
+        "sampled orbital spectrum ignores its physical metric");
+    require(std::abs(result.structure_min-4.0/3.0)<2.0e-14 &&
+        std::abs(result.structure_max-10.0)<2.0e-14,
+        "sampled structure spectrum ignores its physical metric");
+    require(std::abs(result.relaxed_min-2.95/3.0)<2.0e-14 &&
+        std::abs(result.relaxed_max-1.75)<2.0e-14 &&
+        std::abs(result.maximum_fraction_removed-0.125)<2.0e-14,
+        "sampled Schur spectrum differs from independent elimination");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -485,6 +516,7 @@ int main() {
     check_keyframe_checkpoint();
     check_coarse_sample_rank();
     check_projected_dual_norm();
+    check_sampled_schur_spectrum();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

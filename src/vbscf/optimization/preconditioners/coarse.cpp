@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <vector>
 #include <Eigen/LU>
+#include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
 #include <Eigen/SVD>
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
@@ -115,6 +116,76 @@ Eigen::VectorXd CoarsePreconditioner::apply(const Eigen::VectorXd& residual,
   const Eigen::VectorXd fine = inverse(residual-lv*a);
   const Eigen::VectorXd b = solve(lv.transpose()*fine);
   return fine+v*(a-b);
+}
+
+SchurSpectrum CoarsePreconditioner::schur_spectrum(int no) const {
+  if (no <= 0 || no >= basis_.rows())
+    throw std::invalid_argument("invalid sampled Schur orbital dimension");
+  std::vector<int> oi, si;
+  for (int i = 0; i < size_; ++i) {
+    const double o = basis_.col(i).head(no).squaredNorm();
+    const double s = basis_.col(i).tail(basis_.rows()-no).squaredNorm();
+    if (o > 0.0 && s == 0.0) oi.push_back(i);
+    if (s > 0.0 && o == 0.0) si.push_back(i);
+  }
+  SchurSpectrum result;
+  result.orbital_dimension = oi.size();
+  result.structure_dimension = si.size();
+  if (oi.empty() || si.empty()) return result;
+  Eigen::MatrixXd a(oi.size(),oi.size()), c(si.size(),si.size());
+  Eigen::MatrixXd b(si.size(),oi.size()), mo(a.rows(),a.cols()), ms(c.rows(),c.cols());
+  for (int i=0;i<a.rows();++i)
+    for (int j=0;j<a.cols();++j) {
+      a(i,j)=basis_.col(oi[i]).dot(images_.col(oi[j]));
+      mo(i,j)=basis_.col(oi[i]).dot(metrics_.col(oi[j]));
+    }
+  for (int i=0;i<c.rows();++i) {
+    for (int j=0;j<c.cols();++j) {
+      c(i,j)=basis_.col(si[i]).dot(images_.col(si[j]));
+      ms(i,j)=basis_.col(si[i]).dot(metrics_.col(si[j]));
+    }
+    for (int j=0;j<a.cols();++j)
+      b(i,j)=0.5*(basis_.col(si[i]).dot(images_.col(oi[j]))+
+          basis_.col(oi[j]).dot(images_.col(si[i])));
+  }
+  a=(0.5*(a+a.transpose())).eval();
+  c=(0.5*(c+c.transpose())).eval();
+  mo=(0.5*(mo+mo.transpose())).eval();
+  ms=(0.5*(ms+ms.transpose())).eval();
+  const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> as(a,mo,Eigen::EigenvaluesOnly);
+  const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> cs(c,ms,Eigen::EigenvaluesOnly);
+  if (as.info()!=Eigen::Success || cs.info()!=Eigen::Success)
+    throw std::runtime_error("sampled Schur diagonal spectrum failed");
+  result.orbital_min=as.eigenvalues()[0];
+  result.orbital_max=as.eigenvalues().tail(1)[0];
+  result.structure_min=cs.eigenvalues()[0];
+  result.structure_max=cs.eigenvalues().tail(1)[0];
+  result.structure_positive=result.structure_min>lindep_*result.structure_max;
+  result.orbital_positive=result.orbital_min>lindep_*result.orbital_max;
+  if (!result.structure_positive) return result;
+  const Eigen::LLT<Eigen::MatrixXd> factor(c);
+  if (factor.info()!=Eigen::Success)
+    throw std::runtime_error("sampled positive structure factorization failed");
+  const Eigen::MatrixXd inverse_b=factor.solve(b);
+  const double bound=256*std::numeric_limits<double>::epsilon()*c.rows()*
+      std::max(1.0,c.norm()*inverse_b.norm()+b.norm());
+  if (!inverse_b.allFinite() || (c*inverse_b-b).norm()>bound)
+    throw std::runtime_error("sampled structure elimination failed its residual certificate");
+  Eigen::MatrixXd removed=b.transpose()*inverse_b;
+  removed=(0.5*(removed+removed.transpose())).eval();
+  const Eigen::MatrixXd relaxed=a-removed;
+  const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> rs(relaxed,mo,Eigen::EigenvaluesOnly);
+  if (rs.info()!=Eigen::Success)
+    throw std::runtime_error("sampled relaxed orbital spectrum failed");
+  result.relaxed_min=rs.eigenvalues()[0];
+  result.relaxed_max=rs.eigenvalues().tail(1)[0];
+  if (result.orbital_positive) {
+    const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> loss(removed,a,Eigen::EigenvaluesOnly);
+    if (loss.info()!=Eigen::Success)
+      throw std::runtime_error("sampled coupling fraction spectrum failed");
+    result.maximum_fraction_removed=loss.eigenvalues().tail(1)[0];
+  }
+  return result;
 }
 
 CoarseSpectrum CoarsePreconditioner::orbital_spectrum(int no,

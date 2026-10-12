@@ -62,6 +62,8 @@ summary = {
              max(float(v["mismatch"]), 1.0e-300))**2,
          "secant_cosine": float(v["secant_cosine"])}
         for macro, v in events.get("ciah_keyframe_secant", [])],
+    "schur_spectra": [dict(macro=macro, **v)
+                      for macro, v in events.get("ciah_schur_spectrum", [])],
     "metric_decision_disagreements": sum(
         v["diagonal_keep"] != v["full_keep"] or
         v["diagonal_trigger"] != v["full_trigger"]

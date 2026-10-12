@@ -481,6 +481,17 @@ bool build_ciah_macro_step(
   }
 
   double final_reduction = energy - energy_model.energy();
+  if (ns && diagnostics::neo_event_trace_enabled()) {
+    const auto schur = coarse.schur_spectrum(static_cast<int>(no));
+    diagnostics::neo_trace("ciah_schur_spectrum",
+        "orbital_dimension=%d,structure_dimension=%d,structure_positive=%d,orbital_positive=%d,"
+        "orbital_min=%.17g,orbital_max=%.17g,structure_min=%.17g,structure_max=%.17g,"
+        "relaxed_min=%.17g,relaxed_max=%.17g,maximum_fraction_removed=%.17g",
+        schur.orbital_dimension,schur.structure_dimension,static_cast<int>(schur.structure_positive),
+        static_cast<int>(schur.orbital_positive),schur.orbital_min,schur.orbital_max,
+        schur.structure_min,schur.structure_max,schur.relaxed_min,schur.relaxed_max,
+        schur.maximum_fraction_removed);
+  }
   if (ns && diagnostics::neo_candidate_audit_enabled()) {
     const auto spectrum = coarse.orbital_spectrum(static_cast<int>(no),
         [&](const Eigen::VectorXd& v) { return diagonal_precondition(v,0.0); });

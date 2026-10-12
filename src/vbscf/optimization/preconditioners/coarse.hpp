@@ -13,6 +13,16 @@ struct CoarseSpectrum {
   double preconditioned_min = 0.0, preconditioned_max = 0.0;
 };
 
+/** @brief Sampled Schur curvature; never used to change the optimizer policy. */
+struct SchurSpectrum {
+  int orbital_dimension = 0, structure_dimension = 0;
+  bool structure_positive = false, orbital_positive = false;
+  double orbital_min = 0.0, orbital_max = 0.0;
+  double structure_min = 0.0, structure_max = 0.0;
+  double relaxed_min = 0.0, relaxed_max = 0.0;
+  double maximum_fraction_removed = 0.0;
+};
+
 /** @brief Symmetric balancing inverse on an exact sampled coupled space.
  * Images and metric images must belong to the same frozen accepted point.
  * No operator evaluation or cross-point history is retained by this class.
@@ -33,6 +43,11 @@ public:
    */
   CoarseSpectrum orbital_spectrum(int orbital_dimension,
       const std::function<Eigen::VectorXd(const Eigen::VectorXd&)>& inverse) const;
+  /** @brief Eliminate cached structure samples without new operator actions.
+   * Spectra use the sampled physical metric; no complete-space certificate
+   * or complete structure-response inverse is inferred from these samples.
+   */
+  SchurSpectrum schur_spectrum(int orbital_dimension) const;
 
 private:
   int size_ = 0;
