@@ -19,8 +19,8 @@ module load gcc/14.1.0
 root="$SLURM_SUBMIT_DIR"
 cases=(F2 241 240 MnF2 FeCl2)
 case="${cases[$SLURM_ARRAY_TASK_ID]}"
-artifact="$root/ciah-positive-$SLURM_ARRAY_JOB_ID/$case/one-electron"
-frozen="$root/ciah-positive-build-$BUILD_JOB_ID"
+artifact="$root/${RUN_LABEL:-ciah-positive}-$SLURM_ARRAY_JOB_ID/$case/one-electron"
+frozen="$root/${BUILD_LABEL:-ciah-positive-build}-$BUILD_JOB_ID"
 binary="$frozen/xmvb-cpp.exe"
 mkdir -p "$artifact"
 cp "$root/ciah-preconditioners-1247579/$case/input.xmi" "$artifact/"

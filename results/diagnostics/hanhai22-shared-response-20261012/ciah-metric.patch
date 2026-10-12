@@ -1,0 +1,31 @@
+--- a/src/vbscf/optimization/backends/ciah.cpp
++++ b/src/vbscf/optimization/backends/ciah.cpp
+@@ -14,4 +14,5 @@
+ #include "vbscf/optimization/globalization/line_search.hpp"
+ #include "vbscf/optimization/neo/ciah.hpp"
+ #include "vbscf/optimization/neo/globalization.hpp"
++#include "vbscf/optimization/preconditioners/shifted_metric.hpp"
+ #include "vbscf/optimization/trust_region/retraction.hpp"
+@@ -97,9 +98,18 @@
+       direction.head(no) = g.head(no);
+     } else if (options.orbital_preconditioner == OrbitalPreconditioner::OneElectron) {
+-      // The one-electron model is a positive block preconditioner, not a
+-      // signed approximation to the complete AH operator. Restore its
+-      // unshifted inverse; the complete physical metric stays in metric_action.
+-      direction.head(no) = chart.apply_inverse_reduced_block_preconditioner(g.head(no));
++      // Diagnostic only: isolate the full physical-metric shift. Solve to
++      // the existing solver's machine-precision floor, without tuning a budget.
++      const double shift = std::max(0.0, 1.0e-8 - eigenvalue);
++      if (shift == 0.0) {
++        direction.head(no) = chart.apply_inverse_reduced_block_preconditioner(g.head(no));
++      } else {
++        const auto inverse = chart.shifted_block_inverse(shift);
++        direction.head(no) = apply_shifted_metric_preconditioner(
++            g.head(no), shift, std::numeric_limits<double>::epsilon(),
++            [&chart](const Eigen::VectorXd& x) { return chart.apply_reduced_curvature(x); },
++            [&metric](const Eigen::VectorXd& x) { return metric.apply(x); },
++            inverse);
++      }
+     } else {
+       direction.head(no) = chart.apply_inverse_augmented_hessian_diagonal(
+           g.head(no), eigenvalue - 1.0e-8);

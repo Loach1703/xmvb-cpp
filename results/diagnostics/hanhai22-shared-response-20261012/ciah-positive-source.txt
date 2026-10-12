@@ -1,0 +1,6 @@
+Implementation commit: ab7e3c09
+Base CIAH implementation: a8d60c8c
+Only production change: CIAH explicit one-electron residual callback uses the existing unshifted positive block inverse.
+Unchanged: complete HVP, chart, generalized physical metric, CI preconditioner, CIAH policies and convergence tolerances.
+Local unrelated dirty changes (.gitignore, RI operator and its test) are not transferred.
+Remote build source is the existing execution mirror plus ciah.cpp and test_shifted_metric_preconditioner.cpp from this commit.

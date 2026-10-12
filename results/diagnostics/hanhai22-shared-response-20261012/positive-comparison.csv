@@ -1,0 +1,13 @@
+variant,system,preconditioner,status,converged,steps,recorded_steps,recorded_orbital_hvp,energy_Eh,wall_s,peak_RSS_MiB,exit_code,termination,node
+analytic,F2,hessian-diagonal,finished,True,3,3,24,-198.751155830525,0.31,17.19140625,0,neo_projected_gradient_tolerance,anode04
+analytic,241,hessian-diagonal,finished,True,3,3,26,-230.720590392853,2.67,802.66015625,0,neo_projected_gradient_tolerance,anode19
+analytic,240,hessian-diagonal,finished,True,3,3,40,-343.446302353194,5.49,1563.0703125,0,neo_projected_gradient_tolerance,anode45
+analytic,MnF2,hessian-diagonal,finished,True,11,11,169,-1348.893353223710,5.56,551.84375,0,neo_projected_gradient_tolerance,anode45
+analytic,FeCl2,hessian-diagonal,finished,True,20,20,429,-2181.624464318884,11.91,385.86328125,0,neo_projected_gradient_tolerance,anode60
+positive,F2,one-electron,finished,True,3,3,23,-198.751155830526,0.28,17.171875,0,neo_projected_gradient_tolerance,anode60
+positive,241,one-electron,finished,True,3,3,23,-230.720590392889,2.31,818.6640625,0,neo_projected_gradient_tolerance,anode60
+positive,240,one-electron,finished,True,4,4,37,-343.446302353107,6.53,1530.34765625,0,neo_projected_gradient_tolerance,anode31
+positive,MnF2,one-electron,finished,True,18,18,288,-1348.893353118897,9.19,478.8515625,0,neo_projected_gradient_tolerance,anode07
+positive,FeCl2,one-electron,finished,True,23,23,574,-2181.617644476738,16.73,423.3671875,0,neo_projected_gradient_tolerance,anode07
+positive-metric-shift,MnF2,one-electron,finished,True,21,21,351,-1348.893353221788,11.91,459.3671875,0,neo_projected_gradient_tolerance,anode31
+positive-metric-shift,FeCl2,one-electron,finished,True,17,17,418,-2181.617644026137,13.81,433.9140625,0,neo_projected_gradient_tolerance,anode45

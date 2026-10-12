@@ -46,7 +46,7 @@ def row(system, preconditioner, path):
         "peak_RSS_MiB": float(rss) / 1024 if rss else "",
         "exit_code": exit_code,
         "termination": capture(r"Termination reason\s*:\s*([^\n]+)", output).strip(),
-        "node": read(path.parent / "node.txt").strip(),
+        "node": (read(path / "node.txt") or read(path.parent / "node.txt")).strip(),
     }
 
 
