@@ -30,8 +30,18 @@ norm_costs = [v for _, v in events.get("ciah_norm_cost", [])]
 diagonal_sections = [v for _, v in events.get("ciah_diagonal_sections", [])]
 density_batches = [v for _, v in events.get("ciah_diagonal_density_batch", [])]
 geometry = events.get("ciah_expansion_geometry", [])
+unlearned = {}
+for macro, values in events.get("ciah_unlearned_inverse", []):
+    unlearned.setdefault(macro, []).append(values)
 rows = list(csv.DictReader((run / "neo.tsv").open(), delimiter="\t"))
 summary = {
+    "unlearned_inverse": [
+        {"macro": macro, "tests": len(values),
+         "median_relative_physical_error": statistics.median(
+             float(v["relative_physical_error"]) for v in values),
+         "last_relative_physical_error": float(values[-1]["relative_physical_error"]),
+         "audit_seconds": sum(float(v["seconds"]) for v in values)}
+        for macro, values in sorted(unlearned.items())],
     "macros": len(rows),
     "hvp": sum(int(row["orbital_hvp_actions"]) for row in rows),
     "structure_norm_calls": len(norms),

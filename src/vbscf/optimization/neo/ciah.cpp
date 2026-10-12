@@ -117,6 +117,27 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
   const auto hessian_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   Eigen::VectorXd hessian_image = problem_.apply_hessian(direction);
+  if (diagnostics::neo_trace_enabled() && residual) {
+    // Audit BEFORE observe_images learns this direction. Afterwards coarse
+    // exactness would make the inverse test tautological on its new samples.
+    // This is diagnostic-only: reuse Lq, add one inverse/metric action, never
+    // use the error to change a candidate, tolerance, or stopping decision.
+    const auto audit_start = std::chrono::steady_clock::now();
+    const Eigen::VectorXd shifted_image = hessian_image - shift * metric_image;
+    const Eigen::VectorXd error = precondition(shifted_image, shift) - direction;
+    Eigen::VectorXd complement = error;
+    for (int pass = 0; pass < 2; ++pass)
+      for (const auto& vector : basis_)
+        complement.noalias() -= vector.dot(complement) * vector;
+    const Eigen::VectorXd error_metric = problem_.apply_metric(error);
+    const double squared = error.dot(error_metric);
+    const double q_squared = direction.dot(metric_image);
+    diagnostics::neo_trace("ciah_unlearned_inverse",
+        "basis=%d,shift=%.17g,relative_physical_error=%.17g,error_euclidean=%.17g,complement_euclidean=%.17g,curvature=%.17g,seconds=%.17g",
+        basis_size()+1,shift,std::sqrt(std::max(0.0,squared)/q_squared),
+        error.norm(),complement.norm(),direction.dot(shifted_image),
+        std::chrono::duration<double>(std::chrono::steady_clock::now()-audit_start).count());
+  }
   if (options_.observe_images) options_.observe_images(direction,metric_image);
   if (trace && residual && residual_norm > 0.0) {
     // Reuse the certified dual norm and the admitted direction's exact images.
