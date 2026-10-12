@@ -123,6 +123,29 @@ void check_zero_shift_uses_block_inverse() {
       "zero-shift block inverse is incorrect");
 }
 
+/** @brief A shifted model must use the physical metric, not an identity shift. */
+void check_physical_metric_shift() {
+  Eigen::Matrix3d model;
+  model << 2.0, 0.2, 0.0, 0.2, 3.0, 0.1, 0.0, 0.1, 4.0;
+  Eigen::Matrix3d metric;
+  metric << 4.0, 0.7, 0.1, 0.7, 1.0, 0.2, 0.1, 0.2, 0.5;
+  const Eigen::Vector3d rhs(1.0, -2.0, 0.5);
+  constexpr double shift = 0.8;
+  const Eigen::Matrix3d shifted = model + shift * metric;
+  const Eigen::Matrix3d identity_shift = model + shift * Eigen::Matrix3d::Identity();
+  const Eigen::Matrix3d block_inverse =
+      identity_shift.ldlt().solve(Eigen::Matrix3d::Identity());
+  const Eigen::Vector3d result = xmvb::vb::apply_shifted_metric_preconditioner(
+      rhs, shift, 1.0e-20,
+      [model](const Eigen::VectorXd& x) { return (model * x).eval(); },
+      [metric](const Eigen::VectorXd& x) { return (metric * x).eval(); },
+      [block_inverse](const Eigen::VectorXd& x) { return (block_inverse * x).eval(); });
+  require((result - shifted.ldlt().solve(rhs)).norm() < 1.0e-10,
+          "shifted model did not invert the complete physical metric term");
+  require((result - block_inverse * rhs).norm() > 1.0e-2,
+          "fixture does not distinguish physical and identity metric shifts");
+}
+
 }  // namespace
 
 int main() {
@@ -130,6 +153,7 @@ int main() {
     check_scaled_inner_budget();
     check_coordinate_rescaling_preserves_direction();
     check_zero_shift_uses_block_inverse();
+    check_physical_metric_shift();
     std::cout << "shifted-metric preconditioner tests passed\n";
     return 0;
   } catch (const std::exception& error) {

@@ -94,10 +94,17 @@ bool build_ciah_macro_step(
   };
   const auto precondition = [&](const Eigen::VectorXd& g, double eigenvalue) {
     Eigen::VectorXd direction(dimension);
-    direction.head(no) = options.orbital_preconditioner == OrbitalPreconditioner::Identity
-        ? Eigen::VectorXd(g.head(no))
-        : chart.apply_inverse_augmented_hessian_diagonal(
-              g.head(no), eigenvalue - 1.0e-8);
+    if (options.orbital_preconditioner == OrbitalPreconditioner::Identity) {
+      direction.head(no) = g.head(no);
+    } else if (options.orbital_preconditioner == OrbitalPreconditioner::OneElectron) {
+      // The one-electron model is a positive block preconditioner, not a
+      // signed approximation to the complete AH operator. Restore its
+      // unshifted inverse; the complete physical metric stays in metric_action.
+      direction.head(no) = chart.apply_inverse_reduced_block_preconditioner(g.head(no));
+    } else {
+      direction.head(no) = chart.apply_inverse_augmented_hessian_diagonal(
+          g.head(no), eigenvalue - 1.0e-8);
+    }
     if (ns) direction.tail(ns) = structure.apply_inverse_augmented_hessian_diagonal(
         g.tail(ns), eigenvalue - 1.0e-8);
     return direction;
