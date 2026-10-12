@@ -75,3 +75,57 @@ approximation, not the unmodified exact accepted-point Hessian.
 
 Raw evidence: fecl2-ritz-cost-1249453/native/run.err, neo.tsv, output.out,
 resource.time and hashes.txt. summarize_ritz_cost.py extracts all keyframes.
+
+## Implemented rank-two experiment and ablation: rejected
+
+The proposed update was implemented and tested, with the same update applied
+to cached AH images and to the coarse-preconditioner images. Future coupled
+images included both orbital and structure parts of the correction. A
+keyframe invalidated the old pending residual and eigenvalue comparison, so
+the next AH solve reprojected in the retained space before expanding it.
+
+Independent tests checked symmetry, the exact secant equation for an
+orthogonal mismatch/displacement (where SR1 is undefined), agreement of
+split and full images, cached AH images against a dense updated operator,
+and exact coarse inverse action on updated samples. Five unit executables
+passed. No convergence threshold, component bound, microstep budget,
+physical HVP, retraction or true-energy acceptance condition changed.
+
+| FeCl2 experiment | Job | Macro / HVP | AH Ritz solves | Energy / Eh | Wall / s | RSS / MiB |
+|---|---:|---:|---:|---:|---:|---:|
+| Archived retained diagnostic | 1249453 | 14 / 281 | 281 | -2181.624464869070 | 9.94 | 494.0 |
+| Rank-two update with reproject | 1249463 | 14 / 261 | 283 | -2181.624464860028 | 9.67 | 524.1 |
+| Reproject only, unchanged curvature | 1249468 | 15 / 272 | 295 | -2181.624464861139 | 11.02 | 556.8 |
+
+All three native FeCl2 observations ran on anode31 at 32 bound cores. The
+retained run was reused, not rerun. The trial endpoints agree with the
+PySCF coupled-Newton reference within about 2.4e-8 Eh. Nevertheless, the
+rank-two variant did not reduce outer steps or resolve the micro-budget
+tail. Its 20 fewer HVPs coexist with 22 retained-space Ritz evaluations
+that needed no additional HVP; action-count differences must not be
+interpreted as a 20-direction improvement in model convergence. The
+reprojection-only ablation is worse. Single-run wall differences do not
+establish a small statistical speedup, and no allocation capture establishes
+the cause of the RSS differences.
+
+Frozen rank-two binary regression, array 1249464:
+
+| Case | Retained macro/HVP | Trial macro/HVP | Trial energy / Eh | GNU wall / s | RSS / MiB |
+|---|---:|---:|---:|---:|---:|
+| F2 | 3 / 23 | 3 / 23 | -198.751155830526 | 0.33 | 17.2 |
+| 241 | 3 / 21 | 3 / 19 | -230.720590392726 | 2.75 | 801.9 |
+| MnF2 | 10 / 144 | 10 / 135 | -1348.893353224001 | 4.94 | 553.1 |
+
+All converge with unchanged macro counts and energy differences below
+1.2e-10 Eh from the retained references. These are separate-node small
+regressions, not matched performance claims.
+
+Conclusion: local symmetric secant correction is algebraically consistent,
+but this implementation does not demonstrate a material improvement of the
+requested convergence efficiency. Its production class, cache-update APIs,
+test cases and reprojection-only ablation were removed locally and from
+the cluster source mirror. No switch, fallback or cross-point history was
+retained. The mirror main executable was restored from frozen 1249453;
+restoration did not execute an old benchmark. The original projection
+diagnostic and its independent unit test remain. No iron long run was
+submitted on the basis of this trial.
