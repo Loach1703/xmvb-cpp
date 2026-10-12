@@ -3,8 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include <Eigen/Core>
+#include "vbscf/structures/assembly/connection.hpp"
 
 namespace xmvb::vb {
 
@@ -65,6 +67,7 @@ struct ResponseSpectrumSummary {
 struct OrbitalCouplingAction {
   Eigen::VectorXd orbital_hessian;
   Eigen::MatrixXd scaled_structure_forcing;
+  std::optional<StructureConnectionDirection> connection;
 };
 
 /** @brief Batched orbital block and one structure-forcing matrix per direction. */

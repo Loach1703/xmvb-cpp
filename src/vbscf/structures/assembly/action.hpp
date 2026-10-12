@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <Eigen/Core>
@@ -9,6 +10,7 @@
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
+#include "vbscf/structures/assembly/connection.hpp"
 #include "vbscf/structures/expansion/types.hpp"
 
 namespace xmvb::vb {
@@ -49,6 +51,9 @@ struct StructureAdjointState {
 struct StructureIntegralDirection {
   Eigen::MatrixXd coefficient_direction;
   Eigen::MatrixXd sigma_direction;
+  /** Full-trace diagnostic request; never changes the physical action. */
+  bool capture_connection = false;
+  std::optional<StructureConnectionDirection> connection;
 };
 
 struct StructureActionStorage {

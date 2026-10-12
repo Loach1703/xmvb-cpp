@@ -1319,13 +1319,62 @@ StructureActionResult StructureAction::apply_integral_direction(
   delta_spin_overlaps += delta_spin_vectors;
   Eigen::MatrixXd delta_spin_hamiltonians =
       direct_ci_->sigma.apply(delta_spin_vectors);
-  delta_spin_hamiltonians += sigma_direction.apply(spin_vectors);
+  // Diagnostics are shared per action, bounded independently of thread count.
+  const bool capture_connection = direct_ci_direction != nullptr &&
+      direct_ci_direction->capture_connection &&
+      4.0 * sizeof(double) * block_width *
+          (static_cast<double>(n_unique_alpha_) * n_unique_beta_ + n_structures_ + 1) <=
+          16.0 * 1024 * 1024;
+  Eigen::MatrixXd representation, integral, connection;
+  Eigen::VectorXd connection_norm;
+  if (capture_connection) {
+    representation = delta_spin_hamiltonians;
+    connection = delta_spin_vectors;
+    connection_norm.resize(block_width);
+    for (int block = 0; block < block_width; ++block) {
+      const auto y = spin_vectors.middleCols(block * n_unique_beta_, n_unique_beta_);
+      const auto dy = delta_spin_vectors.middleCols(block * n_unique_beta_, n_unique_beta_);
+      const double projection = (y.array() * dy.array()).sum();
+      connection_norm[block] = dy.squaredNorm() -
+          projection * projection / y.squaredNorm();
+    }
+  }
+  {
+    Eigen::MatrixXd integral_image = sigma_direction.apply(spin_vectors);
+    delta_spin_hamiltonians += integral_image;
+    if (capture_connection) integral = std::move(integral_image);
+  }
   if (direct_ci_direction != nullptr) {
     direct_ci_direction->coefficient_direction = delta_spin_vectors;
     direct_ci_direction->sigma_direction = delta_spin_hamiltonians;
   }
-  delta_spin_hamiltonians += direct_ci_->sigma.apply_one_body_generator(
-      spin_hamiltonians, transposed_relative_direction);
+  {
+    Eigen::MatrixXd left_image = direct_ci_->sigma.apply_one_body_generator(
+        spin_hamiltonians, transposed_relative_direction);
+    delta_spin_hamiltonians += left_image;
+    if (capture_connection) {
+      representation += left_image;
+      for (int block = 0; block < block_width; ++block)
+        representation.middleCols(block * n_unique_beta_, n_unique_beta_) -=
+            state.energies[block] * delta_spin_overlaps.middleCols(
+                block * n_unique_beta_, n_unique_beta_);
+    }
+  }
+  if (capture_connection) {
+    const auto project = [&](Eigen::MatrixXd values) {
+      for (int block = 0; block < block_width; ++block) {
+        Eigen::MatrixXd local = values.middleCols(
+            block * n_unique_beta_, n_unique_beta_);
+        direct_ci_->beta_transform().apply_adjoint_right(&local);
+        values.middleCols(block * n_unique_beta_, n_unique_beta_) = local;
+      }
+      direct_ci_->alpha_transform.apply_adjoint_left(&values);
+      return contract_spin_product_block(values);
+    };
+    direct_ci_direction->connection = StructureConnectionDirection{
+        project(std::move(representation)), project(std::move(integral)),
+        project(std::move(connection)), std::move(connection_norm)};
+  }
   for (int block = 0; block < block_width; ++block) {
     Eigen::MatrixXd delta_hamiltonian_block =
         delta_spin_hamiltonians.middleCols(

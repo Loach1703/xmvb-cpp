@@ -654,6 +654,22 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           gauge_coupling = &*local_gauge_coupling;
           coupling_output->scaled_structure_forcing =
               gauge_coupling->horizontal_forcing.scaled_coefficients;
+          if (local_direct_ci_direction.has_value() &&
+              local_direct_ci_direction->connection.has_value()) {
+            auto diagnostic = std::move(*local_direct_ci_direction->connection);
+            // Include normalization/gauge terms even for a nonzero Ritz residual.
+            diagnostic.representation_forcing +=
+                coupling.horizontal_forcing - coupling.forcing;
+            for (Eigen::Index state = 0; state < diagnostic.overlap.cols(); ++state) {
+              const double scale = std::sqrt(2.0 *
+                  accepted_point_context_->normalized_state_weights[state]);
+              diagnostic.representation_forcing.col(state) *= scale;
+              diagnostic.integral_forcing.col(state) *= scale;
+              diagnostic.overlap.col(state) *= scale;
+              diagnostic.squared_norm[state] *= scale * scale;
+            }
+            coupling_output->connection = std::move(diagnostic);
+          }
         } else {
           const auto eigensystem_start_time =
               std::chrono::steady_clock::now();

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <Eigen/Cholesky>
+#include "core/metric_solve.hpp"
 
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
@@ -147,6 +148,35 @@ bool build_ciah_macro_step(
           ci.coefficient_response, ci.adjoint_multipliers);
       const Eigen::VectorXd forcing = structure.project_coordinates(
           orbital.scaled_structure_forcing);
+      if (orbital.connection.has_value()) {
+        const auto& connection = *orbital.connection;
+        const Eigen::VectorXd representation = structure.project_coordinates(
+            connection.representation_forcing);
+        const Eigen::VectorXd integral = structure.project_coordinates(
+            connection.integral_forcing);
+        const Eigen::VectorXd rhs = structure.project_coordinates(connection.overlap);
+        xmvb::core::MetricSolveStats connection_stats;
+        const Eigen::VectorXd gamma = xmvb::core::solve_metric(rhs,
+            [&](const Eigen::VectorXd& v) { return structure.apply_metric_coordinates(v); },
+            [&](const Eigen::VectorXd& v) { return structure.apply_inverse_metric_diagonal(v); },
+            &connection_stats);
+        const Eigen::VectorXd kinematic = structure.apply_hessian_coordinates(gamma);
+        const double representation_norm = structure.dual_norm(representation);
+        const double integral_norm = structure.dual_norm(integral);
+        const double forcing_norm = structure.dual_norm(forcing);
+        diagnostics::neo_trace("ciah_connection",
+            "representation=%.17g,integral=%.17g,total=%.17g,cross=%.17g,"
+            "reconstruction=%.17g,closure_squared=%.17g,carrier_squared=%.17g,"
+            "kinematic_error=%.17g,metric_actions=%d,metric_residual=%.17g",
+            representation_norm, integral_norm, forcing_norm,
+            0.5 * (forcing_norm * forcing_norm -
+                representation_norm * representation_norm - integral_norm * integral_norm),
+            (forcing - representation - integral).norm(),
+            connection.squared_norm.sum() - rhs.dot(gamma),
+            connection.squared_norm.sum(),
+            structure.dual_norm(representation - kinematic),
+            connection_stats.actions, connection_stats.relative_residual);
+      }
       image.head(no) = orbital.orbital_hessian + adjoint;
       image.tail(ns) = forcing + ci.hessian_coordinates;
       orbital_image.head(no) = orbital.orbital_hessian;

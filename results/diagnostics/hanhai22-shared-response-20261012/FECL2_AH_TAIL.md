@@ -1,5 +1,34 @@
 # FeCl2 AH tail: measured costs and global sample rank
 
+## Latest bounded check: 1249390 / 1249395
+
+The carrier-connection decomposition is now measured, not assumed; see
+`FECL2_CARRIER_CONNECTION.md`. It reconstructs all 281 forcing vectors with
+maximum coordinate error 2.14e-14. Basis re-representation is sizable but not
+dominant, and the physical integral forcing remains comparable to the total.
+No connection shear, dropped coupling or changed convergence rule was adopted.
+
+Final-source scalar run 1249395 converged in 14 macros / 281 HVP, with energy
+-2181.624464869471 Eh, GNU wall 10.55 s and RSS 512.3 MiB. Its complete structure
+dual norms cost 0.8250 s (505 calls, 22,742 overlap actions). Small AH
+spectrum/image combination cost 0.01712 s over 281 solves; projection/checks
+cost 0.1492 s. The largest relative Galerkin residual was 2.6744e-12. AH
+residual norm work, 0.6718 s, is included in the 0.8250 s all-norm total.
+
+| Macro | Microsteps | Last predicted norm | Last AH residual norm | Orbital fraction of squared full residual |
+|---|---:|---:|---:|---:|
+| 11 | 20 | 1.77353e-3 | 1.77353e-3 | 96.68% |
+| 12 | 21 | 2.53997e-3 | 2.53997e-3 | 99.50% |
+| 13 | 25 | 4.92252e-4 | 4.92252e-4 | 98.50% |
+| 14 | 26 | 1.34826e-4 | 1.34826e-4 | 97.71% |
+
+These macros exit at the unchanged microstep budget, with a full residual still
+above 9e-5. Accurate projected roots do not imply an accurate full-space Newton
+step. The cost and residual evidence point to orbital complementary-space
+expansion/preconditioning, not a need to tighten the tiny AH eigensolve or
+replace the complete norm by a diagonal approximation. No speedup is claimed
+for this diagnostic round; no old executable or iron-porphine long job was run.
+
 ## What the budget exit means
 
 The installed PySCF `mcscf/newton_casscf.py::update_orb_ci` has a

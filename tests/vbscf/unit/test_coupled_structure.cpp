@@ -381,6 +381,68 @@ void check_coupled_neo_coordinates(const StructureFixture& fixture) {
   require(rejected, "coupled NEO accepted an invalid coordinate dimension");
 }
 
+/** Check the forcing split without assuming a stationary carrier root. */
+void check_connection(const StructureFixture& fixture) {
+  require(fixture.action.supports_integral_direction(), "fixture lacks direct CI");
+  Eigen::Matrix2d overlap_direction, one_direction;
+  overlap_direction << 0.03, -0.04, -0.04, 0.02;
+  one_direction << 0.11, 0.02, 0.02, -0.07;
+  const std::vector<double> overlap(overlap_direction.data(), overlap_direction.data()+4);
+  const std::vector<double> one(one_direction.data(), one_direction.data()+4);
+  std::vector<double> two(xmvb::vb::packed_active_two_electron_integral_count(2), 0.0);
+  for (const bool stationary : {true, false}) {
+    Eigen::VectorXd coefficients = fixture.eigenvectors.col(0);
+    if (!stationary) coefficients += 0.4 * fixture.eigenvectors.col(1);
+    coefficients /= std::sqrt(coefficients.dot(fixture.overlap * coefficients));
+    const double energy = coefficients.dot(fixture.hamiltonian * coefficients);
+    xmvb::vb::SelectedStateDeterminantMatrices selected;
+    selected.n_structures = 4;
+    selected.n_unique_alpha = selected.n_unique_beta = 2;
+    selected.normalized_state_weights = {1.0};
+    selected.states.resize(1);
+    selected.states[0].normalized_state_weight = 1.0;
+    selected.states[0].coefficient_matrix.resize(2, 2);
+    for (int a = 0; a < 2; ++a)
+      for (int b = 0; b < 2; ++b)
+        selected.states[0].coefficient_matrix(a,b) = coefficients[2*a+b];
+    const auto state = fixture.action.prepare_active_adjoint(selected, {energy});
+    xmvb::vb::StructureIntegralDirection captured, plain;
+    captured.capture_connection = true;
+    const auto images = fixture.action.apply_integral_direction(state, overlap, one, two, &captured);
+    const auto reference = fixture.action.apply_integral_direction(state, overlap, one, two, &plain);
+    require(captured.connection.has_value() && !plain.connection.has_value(),
+        "connection diagnostic capture contract failed");
+    require((images.hamiltonian-reference.hamiltonian).norm() < 1e-14 &&
+        (images.overlap-reference.overlap).norm() < 1e-14,
+        "connection capture changed the action");
+    require((images.hamiltonian-energy*images.overlap-
+        captured.connection->representation_forcing-captured.connection->integral_forcing).norm() < 1e-12,
+        "connection forcing decomposition lost a carrier residual term");
+    require(captured.connection->squared_norm[0] >= -1e-14,
+        "connection tangent squared norm is invalid");
+    if (stationary) {
+      const auto accepted = accepted_point(fixture, 1, {1.0});
+      xmvb::vb::StructureTangentOperator tangent(accepted, fixture.action);
+      const double scale = std::sqrt(2.0);
+      const Eigen::VectorXd rhs = tangent.project_coordinates(
+          scale * captured.connection->overlap);
+      Eigen::MatrixXd metric(tangent.tangent_size(), tangent.tangent_size());
+      for (int j = 0; j < metric.cols(); ++j)
+        metric.col(j) = tangent.apply_metric_coordinates(
+            Eigen::VectorXd::Unit(metric.cols(), j));
+      const Eigen::VectorXd gamma = metric.llt().solve(rhs);
+      require(std::abs(2.0 * captured.connection->squared_norm[0] - rhs.dot(gamma)) < 1e-12,
+          "complete carrier connection has a spurious closure defect");
+      require((tangent.project_coordinates(scale * captured.connection->representation_forcing) -
+          tangent.apply_hessian_coordinates(gamma)).norm() < 1e-12,
+          "complete stationary carrier connection is not C gamma");
+    } else {
+      require(state.residuals[0].norm() > 1e-3,
+          "nonstationary connection test accidentally has zero carrier residual");
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -390,6 +452,7 @@ int main() {
     check_equal_weight_multistate(fixture);
     check_unequal_weights_rejected(fixture);
     check_coupled_neo_coordinates(fixture);
+    check_connection(fixture);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
