@@ -106,6 +106,29 @@ coupled-Newton reference -2181.624464883733 Eh. No accuracy condition changed.
 This is a kernel-cost improvement, not a claim that the FeCl2 tail is cured.
 
 Final numerical source is frozen in build 1249601. Regression array 1249602
-(F2/241/MnF2) and bounded four-step iron array 1249603 use that binary and
-have been submitted in parallel. Their results are pending scheduler/output
-verification; they are not convergence claims. No old-version tasks are run.
+completed normally using this binary:
+
+| System | Macros | HVPs | Energy / Eh | GNU wall / s | GNU peak RSS / MiB |
+|---|---:|---:|---:|---:|---:|
+| F2 | 3 | 23 | -198.751155830526 | 0.35 | 17.61 |
+| 241 | 3 | 21 | -230.720590392829 | 2.02 | 861.08 |
+| MnF2 | 10 | 137 | -1348.893353223756 | 4.79 | 508.86 |
+
+Their counts and energies agree with archived 1249553; nodes differ for
+241/MnF2, so this is not a matched speedup measurement.
+
+Bounded four-step iron array 1249603 uses the same binary on anode04.
+Singlet completed its deliberate four-step limit (application exit 2):
+51 HVPs, 454.26 s, 38.62 GiB GNU RSS. Five diagonal builds take 247.35 s,
+versus archived 1249554's 214.20 s on anode07. Expansion HVPs take 25.05 s
+versus 27.14 s. The direction count is unchanged, but there is no demonstrated
+total speedup: the large-AO density batch is slower in these observations.
+Triplet also completed its four-step limit: 55 HVPs,
+-2244.759926316372 Eh, 622.98 s, 38.63 GiB GNU RSS; five diagonal builds
+take 268.41 s versus archived 225.59 s, and expansion HVPs take 29.82 s
+versus 29.44 s. Singlet fourth-step energy is -2244.719894096763 Eh.
+Neither task certifies convergence. Different-node timings cannot isolate
+kernel causality, but clearly do not establish an iron speedup.
+Both use 112 sources, width 2 and 32 workers, with planned workspace
+65,270,304 bytes. Investigate SIMD/scatter/team resource selection before
+claiming that batching helps the iron basis. No old-version tasks are run.

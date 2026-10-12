@@ -39,17 +39,20 @@ double dual_norm(
 
 NeoProblem dense_problem(
     const Eigen::MatrixXd& hessian, const Eigen::MatrixXd& metric,
-    const Eigen::VectorXd& gradient, int* actions = nullptr) {
+    const Eigen::VectorXd& gradient, int* actions = nullptr,
+    int* metrics = nullptr, int* norms = nullptr) {
   return NeoProblem(
       gradient,
       [hessian, actions](const Eigen::VectorXd& vector) {
         if (actions) ++*actions;
         return Eigen::VectorXd(hessian * vector);
       },
-      [metric](const Eigen::VectorXd& vector) {
+      [metric, metrics](const Eigen::VectorXd& vector) {
+        if (metrics) ++*metrics;
         return Eigen::VectorXd(metric * vector);
       },
-      [metric](const Eigen::VectorXd& covector) {
+      [metric, norms](const Eigen::VectorXd& covector) {
+        if (norms) ++*norms;
         return dual_norm(metric, covector);
       });
 }
@@ -206,6 +209,7 @@ void check_gradient_refresh_and_preconditioner() {
   const Eigen::Vector2d new_gradient(0.2, 1.0);
   int actions = 0;
   int preconditioner_calls = 0;
+  int metric_calls = 0, norm_calls = 0;
   double last_eigenvalue = 0.0;
   CiahOptions options;
   options.residual_preconditioner =
@@ -215,7 +219,7 @@ void check_gradient_refresh_and_preconditioner() {
         return Eigen::VectorXd(residual);
       };
   const NeoProblem problem = dense_problem(
-      hessian, metric, old_gradient, &actions);
+      hessian, metric, old_gradient, &actions, &metric_calls, &norm_calls);
   CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 0), options);
   const CiahResult first = workspace.next(old_gradient);
   require(first.residual_norm < 1.0e-12 && actions == 1,
@@ -234,6 +238,8 @@ void check_gradient_refresh_and_preconditioner() {
   require(expanded.new_hvp_actions == 1 && actions == 2 &&
               preconditioner_calls == 1,
           "residual expansion did not use exactly one shifted action");
+  require(metric_calls == 2 && norm_calls == 4,
+          "expansion diagnostics evaluated an extra metric or inverse norm");
   require(std::abs(last_eigenvalue - refreshed.eigenvalue) < 1.0e-12,
           "residual preconditioner received the wrong eigenvalue");
   const CiahResult converged = workspace.next(new_gradient);

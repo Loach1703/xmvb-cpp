@@ -170,7 +170,9 @@ public:
 private:
   Eigen::VectorXd precondition(
       const Eigen::VectorXd& residual, double eigenvalue) const;
-  bool append(Eigen::VectorXd direction);
+  bool append(Eigen::VectorXd direction,
+      const Eigen::VectorXd* residual = nullptr,
+      double residual_norm = 0.0, double shift = 0.0);
 
   const NeoProblem& problem_;
   CiahOptions options_;
@@ -178,6 +180,8 @@ private:
   std::optional<Eigen::VectorXd> pending_residual_;
   std::optional<double> previous_eigenvalue_;
   double pending_eigenvalue_ = 0.0;
+  /** @brief Cached complete dual norm for scalar expansion diagnostics. */
+  double pending_residual_norm_ = 0.0;
   std::vector<Eigen::VectorXd> basis_;
   std::vector<Eigen::VectorXd> hessian_images_;
   std::vector<Eigen::VectorXd> metric_images_;

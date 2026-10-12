@@ -2,6 +2,7 @@
 import csv
 import json
 import pathlib
+import statistics
 import sys
 
 run = pathlib.Path(sys.argv[1])
@@ -28,6 +29,7 @@ projection_updates = [v for _, v in events.get("ciah_projection_update_cost", []
 norm_costs = [v for _, v in events.get("ciah_norm_cost", [])]
 diagonal_sections = [v for _, v in events.get("ciah_diagonal_sections", [])]
 density_batches = [v for _, v in events.get("ciah_diagonal_density_batch", [])]
+geometry = events.get("ciah_expansion_geometry", [])
 rows = list(csv.DictReader((run / "neo.tsv").open(), delimiter="\t"))
 summary = {
     "macros": len(rows),
@@ -88,6 +90,15 @@ summary = {
         for _, v in events.get("ciah_keyframe_metric_audit", [])),
     "micro_stops": [dict(macro=macro, **v)
                     for macro, v in events.get("ciah_micro_stop", [])],
+    "expansion_geometry": [
+        {"macro": macro, "directions": len(values),
+         "median_absolute_physical_cosine": statistics.median(
+             abs(float(v["physical_cosine"])) for v in values),
+         "minimum_physical_rayleigh": min(float(v["physical_rayleigh"]) for v in values),
+         "maximum_physical_rayleigh": max(float(v["physical_rayleigh"]) for v in values),
+         "last_physical_rayleigh": float(values[-1]["physical_rayleigh"])}
+        for macro in sorted({macro for macro, _ in geometry})
+        for values in [[v for k, v in geometry if k == macro]]],
     "tail": [],
 }
 for macro, end in events.get("ciah_micro_end", [])[-8:]:

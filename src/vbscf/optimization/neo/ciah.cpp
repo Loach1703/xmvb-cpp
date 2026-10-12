@@ -87,7 +87,8 @@ Eigen::VectorXd CiahWorkspace::precondition(
   return direction;
 }
 
-bool CiahWorkspace::append(Eigen::VectorXd direction) {
+bool CiahWorkspace::append(Eigen::VectorXd direction,
+    const Eigen::VectorXd* residual, double residual_norm, double shift) {
   if (direction.size() != problem_.size() || !direction.allFinite()) {
     throw std::invalid_argument("invalid CIAH Davidson direction");
   }
@@ -117,6 +118,18 @@ bool CiahWorkspace::append(Eigen::VectorXd direction) {
       std::chrono::steady_clock::time_point{};
   Eigen::VectorXd hessian_image = problem_.apply_hessian(direction);
   if (options_.observe_images) options_.observe_images(direction,metric_image);
+  if (trace && residual && residual_norm > 0.0) {
+    // Reuse the certified dual norm and the admitted direction's exact images.
+    // This measures enrichment, not convergence or a global condition number.
+    const double metric_squared = direction.dot(metric_image);
+    const double work = residual->dot(direction);
+    const double curvature = direction.dot(hessian_image) - shift * metric_squared;
+    diagnostics::neo_trace("ciah_expansion_geometry",
+        "basis=%d,residual_norm=%.17g,physical_cosine=%.17g,metric_squared=%.17g,shifted_curvature=%.17g,physical_rayleigh=%.17g,remaining_fraction=%.17g",
+        basis_size()+1,residual_norm,
+        work/(residual_norm*std::sqrt(metric_squared)),metric_squared,
+        curvature,curvature/metric_squared,norm/initial_norm);
+  }
   if (trace) diagnostics::neo_trace("ciah_expansion_cost",
       "basis=%d,remaining_fraction=%.17g,orthogonalize_seconds=%.17g,metric_seconds=%.17g,hvp_seconds=%.17g",
       basis_size()+1, norm/initial_norm,
@@ -236,8 +249,10 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
     } else {
       Eigen::VectorXd direction = precondition(
           *pending_residual_, pending_eigenvalue_);
-      if (!append(std::move(direction)) &&
-          !append(*pending_residual_)) {
+      if (!append(std::move(direction), &*pending_residual_,
+                  pending_residual_norm_, pending_eigenvalue_) &&
+          !append(*pending_residual_, &*pending_residual_,
+                  pending_residual_norm_, pending_eigenvalue_)) {
         exhausted_ = true;
       } else {
         result.new_hvp_actions = 1;
@@ -358,6 +373,7 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
       result.residual_norm >= options_.lindep) {
     pending_residual_ = result.residual;
     pending_eigenvalue_ = result.eigenvalue;
+    pending_residual_norm_ = result.residual_norm;
   }
   return result;
 }
