@@ -158,7 +158,7 @@ bool build_ciah_macro_step(
         xmvb::core::MetricSolveStats connection_stats;
         const Eigen::VectorXd gamma = xmvb::core::solve_metric(rhs,
             [&](const Eigen::VectorXd& v) { return structure.apply_metric_coordinates(v); },
-            [&](const Eigen::VectorXd& v) { return structure.apply_inverse_metric_diagonal(v); },
+            [&](const Eigen::VectorXd& v) { return structure.apply_inverse_metric_model(v); },
             &connection_stats);
         const Eigen::VectorXd kinematic = structure.apply_hessian_coordinates(gamma);
         const double representation_norm = structure.dual_norm(representation);

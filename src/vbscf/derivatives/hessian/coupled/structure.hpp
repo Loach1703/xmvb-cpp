@@ -10,6 +10,7 @@ namespace xmvb::vb {
 
 struct AcceptedPointContext;
 class StructureAction;
+class StructureMetricInverse;
 
 /**
  * @brief Horizontal selected-state structure displacement.
@@ -186,6 +187,11 @@ public:
   /** @brief Positive Jacobi Riesz preconditioner, not a dual-norm substitute. */
   Eigen::VectorXd apply_inverse_metric_diagonal(const Eigen::VectorXd& covector) const;
 
+  /** @brief Exact admitted complete-space Riesz preconditioner; selected spaces
+   * use their Jacobi model. Both remain subject to the same true-residual solve.
+   */
+  Eigen::VectorXd apply_inverse_metric_model(const Eigen::VectorXd& covector) const;
+
   /**
    * @brief Applies an SPD Jacobi inverse for @f$C+\lambda M_s@f$.
    *
@@ -216,6 +222,7 @@ private:
 
   std::shared_ptr<const AcceptedPointContext> accepted_point_;
   const StructureAction* action_ = nullptr;
+  const StructureMetricInverse* metric_inverse_ = nullptr;
   Eigen::VectorXd energies_;
   Eigen::VectorXd coordinate_scales_;
   Eigen::VectorXd metric_diagonal_;

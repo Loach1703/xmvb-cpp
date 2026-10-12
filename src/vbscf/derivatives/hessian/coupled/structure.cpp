@@ -13,6 +13,7 @@
 
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "core/metric_solve.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 
@@ -138,6 +139,10 @@ StructureTangentOperator::StructureTangentOperator(
         "selected-state metric images are linearly dependent");
   }
   constraint_qr_.compute(selected_images.overlap);
+  metric_inverse_ = accepted_point_->metric_inverse(action);
+  if (metric_inverse_) diagnostics::neo_trace("ciah_metric_factors",
+      "bytes=%zu,blocks=%zu,max_block=%d", metric_inverse_->factor_bytes(),
+      metric_inverse_->block_count(), metric_inverse_->max_block_size());
 }
 
 int StructureTangentOperator::n_structures() const noexcept {
@@ -448,6 +453,18 @@ double StructureTangentOperator::diagonal_dual_norm(
   return std::sqrt(std::max(0.0, squared_norm));
 }
 
+Eigen::VectorXd StructureTangentOperator::apply_inverse_metric_model(
+    const Eigen::VectorXd& covector) const {
+  if (!metric_inverse_) return apply_inverse_metric_diagonal(covector);
+  const Eigen::MatrixXd rhs = expand(covector).scaled_coefficients;
+  Eigen::MatrixXd image = metric_inverse_->apply(rhs);
+  // Z spans ker[(M C)^T]. The exact horizontal inverse is
+  // Z^T [M^-1 - C (C^T M C)^-1 C^T] Z, not Z^T M^-1 Z.
+  image.noalias() -= selected_ *
+      (selected_metric_inverse_ * (selected_.transpose() * rhs));
+  return project_coordinates(image);
+}
+
 double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector) const {
   if (covector.size() != tangent_size() || !covector.allFinite())
     throw std::invalid_argument("invalid structure metric covector");
@@ -457,7 +474,7 @@ double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector) cons
   core::MetricSolveStats stats;
   const Eigen::VectorXd inverse = xmvb::core::solve_metric(covector,
       [this](const Eigen::VectorXd& x) { return apply_metric_coordinates(x); },
-      [this](const Eigen::VectorXd& x) { return apply_inverse_metric_diagonal(x); },
+      [this](const Eigen::VectorXd& x) { return apply_inverse_metric_model(x); },
       trace ? &stats : nullptr);
   if (trace) diagnostics::neo_trace("ciah_structure_norm",
       "seconds=%.17g,iterations=%d,actions=%d,certifications=%d,relative_residual=%.17g",

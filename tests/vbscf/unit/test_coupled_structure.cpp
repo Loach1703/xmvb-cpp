@@ -20,6 +20,8 @@
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/orthogonal_ci/metric.hpp"
+#include "core/metric_solve.hpp"
 
 namespace {
 
@@ -381,6 +383,44 @@ void check_coupled_neo_coordinates(const StructureFixture& fixture) {
   require(rejected, "coupled NEO accepted an invalid coordinate dimension");
 }
 
+/** Compare the horizontal factorized inverse to an independent dense metric. */
+void check_metric_factorization(const StructureFixture& fixture) {
+  for (const int n_states : {1, 2}) {
+    auto accepted = accepted_point(fixture, n_states,
+        std::vector<double>(n_states, 1.0 / n_states));
+    accepted->complete_active_space = true;
+    accepted->same_spin_pair_cache.alpha_reuse_table.unique_determinants = {{0}, {1}};
+    accepted->same_spin_pair_cache.beta_reuse_table.unique_determinants = {{0}, {1}};
+    const xmvb::vb::StructureTangentOperator structure(accepted, fixture.action);
+    const auto* factors = accepted->metric_inverse(fixture.action);
+    require(factors != nullptr && factors == accepted->metric_inverse(fixture.action),
+        "complete metric factors are not shared at the accepted point");
+    require(factors->factor_bytes() < 4*4*sizeof(double),
+        "horizontal inverse allocated a full structure matrix");
+    Eigen::MatrixXd dense(structure.tangent_size(), structure.tangent_size());
+    for (int j = 0; j < dense.cols(); ++j)
+      dense.col(j) = structure.apply_metric_coordinates(Eigen::VectorXd::Unit(dense.cols(),j));
+    const Eigen::VectorXd rhs = Eigen::VectorXd::LinSpaced(dense.rows(), -0.37, 0.62);
+    const Eigen::VectorXd expected = dense.llt().solve(rhs);
+    const Eigen::VectorXd actual = structure.apply_inverse_metric_model(rhs);
+    require((expected-actual).norm() < 1e-12 && (dense*actual-rhs).norm() < 1e-12,
+        "complete horizontal overlap inverse differs from its dense reference");
+    require(std::abs(structure.dual_norm(rhs)-std::sqrt(rhs.dot(expected))) < 1e-12,
+        "factorized structure norm changed the physical metric");
+    xmvb::core::MetricSolveStats stats;
+    const auto certified = xmvb::core::solve_metric(rhs,
+        [&](const Eigen::VectorXd& x) { return structure.apply_metric_coordinates(x); },
+        [&](const Eigen::VectorXd& x) { return structure.apply_inverse_metric_model(x); }, &stats);
+    require(stats.iterations <= 2 && stats.certifications >= 1 &&
+        stats.relative_residual <= std::sqrt(std::numeric_limits<double>::epsilon()) &&
+        (certified-expected).norm() < 1e-12,
+        "factorized metric inverse lost its true-residual certification");
+  }
+  auto selected = accepted_point(fixture, 1, {1.0});
+  require(selected->metric_inverse(fixture.action) == nullptr,
+      "complete spin carrier incorrectly admitted a noncomplete VB space");
+}
+
 /** Check the forcing split without assuming a stationary carrier root. */
 void check_connection(const StructureFixture& fixture) {
   require(fixture.action.supports_integral_direction(), "fixture lacks direct CI");
@@ -453,6 +493,7 @@ int main() {
     check_unequal_weights_rejected(fixture);
     check_coupled_neo_coordinates(fixture);
     check_connection(fixture);
+    check_metric_factorization(fixture);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

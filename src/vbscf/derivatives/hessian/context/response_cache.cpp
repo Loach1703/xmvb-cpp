@@ -143,18 +143,10 @@ build_accepted_selected_state_generalized_eigen_response_operator(
   // These are storage budgets, not accuracy or molecule-dependent switches.
   // Selected subspaces and equal-weight clusters require their own metric
   // projection; completeness of the spin-product carrier is insufficient.
-  constexpr std::size_t metric_budget = 64ULL * 1024ULL * 1024ULL;
   if (complete_space && !response_operator.use_equal_weight_subspace_response &&
       response_operator.full_eigenvalues == nullptr) {
-    const auto& alpha = accepted_point_context.same_spin_pair_cache
-        .alpha_reuse_table.unique_determinants;
-    const auto& beta = accepted_point_context.same_spin_pair_cache
-        .beta_reuse_table.unique_determinants;
-    if (StructureMetricInverse::fits(*response_operator.structure_action,
-                                    alpha, beta, metric_budget, metric_budget)) {
-      response_operator.metric_inverse.emplace(*response_operator.structure_action,
-          alpha, beta, complete_space, metric_budget, metric_budget);
-    }
+    response_operator.metric_inverse = accepted_point_context.metric_inverse(
+        *response_operator.structure_action);
   }
   accepted_point_context.structure_solve_accuracy.validate();
   const double selected_energy_scale = std::max(
@@ -272,7 +264,7 @@ AcceptedSelectedStateGeneralizedEigenResponseOperator::apply_direction_block(
   const StructureDiagonal& diagonal =
       structure_action->preconditioner_diagonal();
   std::optional<xmvb::core::EigenResponsePreconditioner> metric_preconditioner;
-  if (metric_inverse.has_value()) {
+  if (metric_inverse != nullptr) {
     const double trace = diagonal.overlap.sum();
     if (!(trace > 0.0) || !std::isfinite(trace))
       throw std::runtime_error("structure overlap trace is not positive finite");

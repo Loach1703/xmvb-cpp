@@ -57,7 +57,7 @@ struct AcceptedSelectedStateGeneralizedEigenResponseOperator {
   mutable std::vector<xmvb::core::EigenResponseRecycleSpace>
       response_recycle_spaces;
   /** @brief Budgeted complete-space metric factors shared by all isolated RHS. */
-  std::optional<StructureMetricInverse> metric_inverse;
+  const StructureMetricInverse* metric_inverse = nullptr;
 
   /** @brief Revision of the common accepted-point response spaces. */
   std::uint64_t revision() const noexcept;

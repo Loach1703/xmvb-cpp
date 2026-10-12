@@ -472,6 +472,7 @@ finalize_active_space_second_order_context(
   }
 
   auto context = std::make_shared<AcceptedPointContext>();
+  context->complete_active_space = input.complete_active_space;
   context->structure_solve_accuracy = structure_solve_accuracy;
   // Move the heavy accepted-point payload out of the transient forward context
   // once the relaxed gradient has finished using it. This keeps the future
