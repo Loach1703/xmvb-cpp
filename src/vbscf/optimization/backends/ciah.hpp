@@ -18,6 +18,9 @@ struct CiahMacroStep {
   Eigen::VectorXd parameters;
   Eigen::VectorXd next_orbital_guess_packed;
   Eigen::MatrixXd next_structure_guess;
+  /** @brief Express the recycled CI direction in the relaxed root's phase. */
+  void align_structure_phase(const Eigen::VectorXd& reference,
+      const Eigen::VectorXd& overlap_root);
 };
 
 /** @brief Single-state coupled CIAH in an immutable nonorthogonal chart. */

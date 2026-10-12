@@ -56,9 +56,9 @@ the effectiveness of the new path. The FeCl2 energy differs by +2.1147e-8 Eh
 from the existing PySCF coupled-Newton reference -2181.624464883733 Eh.
 Lower native times/RSS on another node are not claimed as algorithm speedups.
 
-## Pending targeted porphine verification
+## Completed targeted porphine verification
 
-1249066_0/1 are bounded four-macro singlet/triplet diagnostics on Hanhai22.
+1249066_0/1 completed bounded four-macro singlet/triplet diagnostics on Hanhai22.
 They start from the old terminal neighborhoods, reconstructed from the raw
 Molden export by reversing our writer's AO permutation only. No AO rescaling,
 new basis or ECP is introduced. The frozen executable is from 1249059.
@@ -66,11 +66,23 @@ new basis or ECP is introduced. The frozen executable is from 1249059.
 These are **restarts**, not original-guess benchmarks. They do not preserve
 the old workspace seed or its rejected microstep sequence, so crossing the
 old stopping neighborhood alone cannot prove the backtracking path helped.
-Check the `ciah_keyframe_backtrack` event, actual accepted energy, gradient
-and subsequent trajectory. Do not present four restarted steps as the total
-convergence cost or claim success until the jobs and convergence checks finish.
+Neither emitted a `ciah_keyframe_backtrack` event, so neither demonstrates
+that the newly added backtracking path improves the rejected old sequence.
+Both stopped at the requested four-macro limit (exit 2), not convergence.
 
-The original-guess PySCF singlet 1248772_1 remains live (macro 66 at the latest
+| Spin | Restart macros | HVP | Final energy / Eh | GNU wall / s | GNU RSS / KiB |
+|---|---:|---:|---:|---:|---:|
+| Singlet | 4 | 30 | -2244.740215650530 | 503.01 | 40495520 |
+| Triplet | 4 | 33 | -2244.790667321235 | 447.78 | 40510532 |
+
+The singlet physical gradient increased from approximately 0.03107 to
+0.048955, despite descending energies. The triplet physical gradient fell
+from 0.10377 to 0.021533. Its final energy is still 0.167678 mEh above the
+converged original-guess PySCF triplet reference -2244.7908349995173 Eh.
+Do not report these four restarted steps as the original-guess convergence
+cost or as a converged energy match.
+
+The original-guess PySCF singlet 1248772_1 remains live (macro 101 at the latest
 observation). Both old NEO jobs are terminal, not converged; no original-guess
 replacement NEO long run was submitted. Energy equivalence and efficient
 porphine convergence remain outstanding.

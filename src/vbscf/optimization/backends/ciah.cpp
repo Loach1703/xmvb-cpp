@@ -38,6 +38,15 @@ struct Keyframe {
 
 }  // namespace
 
+void CiahMacroStep::align_structure_phase(const Eigen::VectorXd& reference,
+    const Eigen::VectorXd& overlap_root) {
+  if (reference.size() != overlap_root.size() ||
+      next_structure_guess.rows() != reference.size() ||
+      !reference.allFinite() || !overlap_root.allFinite())
+    throw std::invalid_argument("invalid CIAH restart phase operands");
+  if (reference.dot(overlap_root) < 0.0) next_structure_guess *= -1.0;
+}
+
 bool build_ciah_macro_step(
     VbScfObjective* objective,
     const SparseParameterLayout& layout,
@@ -545,6 +554,35 @@ bool build_ciah_macro_step(
   accepted->next_orbital_guess_packed = chart.expand_step(last_step.head(no));
   if (ns) accepted->next_structure_guess =
       structure.coefficient_response_coordinates(last_step.tail(ns));
+  if (ns) {
+    // displacement already includes the accepted line-search scale.
+    const Eigen::VectorXd reference = coefficients(displacement).col(0);
+    const auto& next = *accepted->trial.gradient_result.second_order_context;
+    const auto& scf = accepted->trial.gradient_result.scf_result;
+    const Eigen::Index roots = next.root_eigenvectors.cols();
+    const int root = next.selected_state_indices[0];
+    const double raw_overlap = reference.dot(next.selected_state_eigenvectors.col(0));
+    Eigen::VectorXd overlap_root;
+    if (scf.overlap_eigenvector_matrix.size() ==
+        static_cast<std::size_t>(reference.size()*roots)) {
+      const Eigen::Map<const Eigen::MatrixXd> mc(
+          scf.overlap_eigenvector_matrix.data(),reference.size(),roots);
+      overlap_root = mc.col(root);
+    } else if (scf.structure_matrices.overlap_matrix.size() ==
+        static_cast<std::size_t>(reference.size()*reference.size())) {
+      // Dense reference solves already own M; do not assemble it here.
+      const Eigen::Map<const Eigen::MatrixXd> m(
+          scf.structure_matrices.overlap_matrix.data(),reference.size(),reference.size());
+      overlap_root = m*next.selected_state_eigenvectors.col(0);
+    } else {
+      throw std::logic_error("CIAH restart is missing its relaxed root overlap image");
+    }
+    accepted->align_structure_phase(reference,overlap_root);
+    diagnostics::neo_trace("ciah_seed_phase",
+        "raw_overlap=%.17g,metric_overlap=%.17g,seed_norm=%.17g,phase_reversed=%d",
+        raw_overlap,reference.dot(overlap_root),accepted->next_structure_guess.norm(),
+        static_cast<int>(reference.dot(overlap_root) < 0.0));
+  }
   record->gradient_dot_step = initial_gradient.dot(displacement);
   record->step_dot_hessian_step = displacement.dot(hessian_displacement);
   record->predicted_reduction = accepted_prediction;

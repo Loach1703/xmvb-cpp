@@ -128,6 +128,112 @@ change.
 
 ## Conclusion and remaining work
 
+### Rejected complementary-space inverse experiment
+
+Follow-up 1249133 tested the exact constrained inverse of the same
+approximate shifted operator. For orthonormal trial basis $Q$, inverse
+preconditioner $P$ and residual $r$, the approximate KKT equations are
+
+$$
+P^{-1}t+Q\mu=r,\qquad Q^Tt=0,
+$$
+
+giving
+
+$$
+t=Pr-PQ(Q^TPQ)^{-1}Q^TPr.
+$$
+
+This is generally different from orthogonalizing $Pr$ afterwards. It is a
+search-subspace-restricted correction, not a complete inner Jacobi--Davidson
+solve. The motivation is discussed in Genseberger and Sleijpen,
+[Alternative correction equations in the Jacobi-Davidson method](https://ir.cwi.nl/pub/4645).
+The physical AH operator, nonorthogonal metric, retraction, keyframes and
+all stopping rules remained unchanged. Only the expansion preconditioner
+changed. Each expansion still made one HVP, but applied the existing inverse
+to its RHS and to every cached basis vector.
+
+An independent dense augmented KKT solve verified the new direction. The
+five compute-node unit executables passed. The first batch 1249131 stopped
+at a legacy unit assertion expecting only one preconditioner call; it did
+not run chemistry. The corrected accounting assertion in 1249133 requires
+one HVP and the mathematically necessary inverse calls.
+
+| Run | Macros | HVP | Energy / Eh | GNU wall / s | GNU RSS / MiB |
+|---|---:|---:|---:|---:|---:|
+| Archived 1249116 | 13 | 257 | -2181.624464862153 | 9.45 | 541.3 |
+| Restricted inverse 1249133, rejected | 25 | 362 | -2181.624464701934 | 16.03 | 500.7 |
+
+Preconditioning cost rose from 0.160 to 1.817 s; even removing that added
+cost would not justify the increased macro/HVP counts. The experiment is
+not retained: its implementation and unit-test modifications were deleted
+locally and from the execution mirror, with no switch or fallback. The
+default inverse is unchanged. This result rejects this specific constrained
+expansion as a FeCl2 improvement; it does not rule out all Jacobi--Davidson
+correction solvers or establish a derivative defect.
+
+### Recycled structure direction: missing root phase
+
+The unchanged-model diagnostic 1249162 found that the relaxed CI root was
+opposite in phase to the last coupled coefficients in macros 2--6. The
+complete physical overlap with the reference was approximately -0.98 to
+-1.00, not an ambiguous near-zero overlap. The driver recycled the previous
+raw CI direction without reversing it, while recycling the orbital direction
+unchanged. This does not affect the objective or derivatives, but makes the
+mixed initial direction depend on the eigensolver's arbitrary eigenvector
+phase.
+
+Before projecting the next CI direction into the new tangent chart, it must
+transform with the relaxed root. In a fixed raw coefficient representation,
+
+$$
+C_{\mathrm{new}}=\sigma\widetilde C,\qquad
+\delta C_{\mathrm{new}}=\sigma\delta\widetilde C,\qquad
+B_{\mathrm{new}}=\sigma\widetilde B,
+$$
+
+where $\sigma$ is -1 for negative reference/root overlap and +1 otherwise.
+Consequently $B_{\mathrm{new}}^T\delta C_{\mathrm{new}}$ is phase invariant.
+The driver now orients the recycled response using
+$C_{\mathrm{ref}}^T M_{\mathrm{new}}C_{\mathrm{new}}$. It reads the existing
+Davidson overlap/root image; dense reference solves use their already owned
+overlap matrix. No HVP, integral transformation, dense assembly or metric
+inverse is added. The reference uses the actual accepted displacement,
+which already contains any line-search scaling.
+
+Unit tests verify positive and negative root phases, an unchanged orbital
+direction and covariance of the coupled orbital image. Five unit executables
+passed in 1249185. The matrix-free FeCl2 result was 14 macros / 282 HVPs,
+E=-2181.624464870537 Eh, GNU wall 9.99 s, RSS 520.1 MiB. That is not a speed
+improvement over 13 / 257. The phase fix is a restart-consistency correction,
+not a claimed explanation or solution of slow tail convergence.
+
+The new dense reference path 1249211 also converged: 12 macros / 244 HVPs,
+E=-2181.624464864200 Eh, GNU wall 13.49 s, RSS 533.0 MiB. Its difference from
+the new Davidson result is 6.337e-9 Eh. This is a new-code path regression,
+not a rerun of an old performance baseline.
+
+1249208 tested the phase-corrected binary on F2, 241 and MnF2. All converged:
+3 / 23, 3 / 21 and 10 / 144 macro/HVP counts, respectively. Energies remain
+-198.751155830527, -230.720590392836 and -1348.893353223965 Eh. The MnF2
+HVP count increased from the archived 137, so no universal speedup is claimed.
+This binary's phase reference was subsequently corrected to avoid applying
+the line-search scale twice; 1249221 verifies the final implementation.
+
+Final-source 1249221 passed all five unit executables and converged FeCl2
+in 14 macros / 281 HVPs, E=-2181.624464869146 Eh, GNU wall 9.93 s, RSS
+510.0 MiB. Its difference from the retained independent PySCF coupled-Newton
+reference is +1.4587e-8 Eh. The final-source scaled-line-search regression
+1249224_2 converged MnF2 in 10 macros / 144 HVPs, E=-1348.893353223967 Eh,
+GNU wall 5.84 s, RSS 498.1 MiB. These are correctness/trajectory observations,
+not a claimed speedup; archived baselines were not rerun.
+
+An additional controlled ablation 1249203 omitted only the recycled CI
+increment, while retaining the complete coupled operator and the recycled
+orbital direction. It required 16 macros / 306 HVPs, E=-2181.624464800146 Eh,
+GNU wall 11.08 s, RSS 499.1 MiB. It was rejected and removed; the phase-corrected
+CI direction remains. No orbital-only bootstrap switch was introduced.
+
 This round fixes certification of cached-image sample conditioning, not the
 slow tail contraction. The micro-budget exit remains; increasing budgets,
 relaxing norms, or accepting the ineffective RMS scale is not a solution.

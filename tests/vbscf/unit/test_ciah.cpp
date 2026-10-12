@@ -10,6 +10,7 @@
 #include <Eigen/LU>
 
 #include "vbscf/optimization/neo/ciah.hpp"
+#include "vbscf/optimization/backends/ciah.hpp"
 #include "vbscf/optimization/preconditioners/coarse.hpp"
 
 namespace {
@@ -105,6 +106,35 @@ void check_full_space_root(
           "CIAH selected the wrong generalized AH root");
   require_close(result.step, expected_step, 2.0e-10,
                 "CIAH step differs from dense generalized AH reference");
+}
+
+/** @brief Recycled CI directions transform with a relaxed root's arbitrary phase. */
+void check_restart_phase() {
+  using xmvb::vb::optimizer_detail::CiahMacroStep;
+  const Eigen::Vector3d reference(0.8,0.4,0.1);
+  Eigen::Matrix3d metric;
+  metric << 1.0,0.2,0.1,0.2,2.0,0.3,0.1,0.3,3.0;
+  const Eigen::Vector3d root(0.7,0.5,0.2);
+  const Eigen::Vector3d response(0.1,-0.2,0.05);
+  CiahMacroStep positive,negative;
+  positive.next_structure_guess=response;
+  negative.next_structure_guess=response;
+  positive.next_orbital_guess_packed=reference;
+  negative.next_orbital_guess_packed=reference;
+  positive.align_structure_phase(reference,metric*root);
+  negative.align_structure_phase(reference,-metric*root);
+  require_close(positive.next_structure_guess,response,1.0e-14,
+      "CIAH changed a phase-consistent structure seed");
+  require_close(negative.next_structure_guess,-response,1.0e-14,
+      "CIAH failed to reverse the seed with the relaxed root");
+  require_close(positive.next_orbital_guess_packed,negative.next_orbital_guess_packed,
+      1.0e-14,"CIAH phase alignment changed the orbital direction");
+  // B changes sign with the CI root; the coupled orbital image is invariant.
+  Eigen::Matrix3d coupling;
+  coupling << 2.0,0.3,0.1,0.2,1.0,0.4,0.3,-0.1,0.7;
+  require_close(coupling*positive.next_structure_guess,
+      -coupling*negative.next_structure_guess,1.0e-14,
+      "CIAH restart violates coupled-action phase covariance");
 }
 
 void check_anisotropic_spd() {
@@ -221,6 +251,7 @@ void check_metric_validation() {
   CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 1));
   bool rejected = false;
   try {
+    check_restart_phase();
     workspace.next(gradient);
   } catch (const std::runtime_error&) {
     rejected = true;
