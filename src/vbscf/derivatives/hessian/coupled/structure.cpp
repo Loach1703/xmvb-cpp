@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -13,6 +14,7 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "core/metric_solve.hpp"
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -399,10 +401,10 @@ StructureTangent StructureTangentOperator::apply_metric(
 Eigen::VectorXd StructureTangentOperator::apply_metric_coordinates(
     const Eigen::VectorXd& coordinates) const {
   const StructureTangent horizontal = expand(coordinates);
-  const StructureActionResult images =
-      action_->apply(horizontal.scaled_coefficients);
-  validate_shape(images.overlap);
-  return project_coordinates(images.overlap);
+  const Eigen::MatrixXd overlap =
+      action_->apply_overlap(horizontal.scaled_coefficients);
+  validate_shape(overlap);
+  return project_coordinates(overlap);
 }
 
 double StructureTangentOperator::metric_inner_product(
@@ -449,9 +451,18 @@ double StructureTangentOperator::diagonal_dual_norm(
 double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector) const {
   if (covector.size() != tangent_size() || !covector.allFinite())
     throw std::invalid_argument("invalid structure metric covector");
+  const bool trace = diagnostics::neo_event_trace_enabled();
+  const auto start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
+  core::MetricSolveStats stats;
   const Eigen::VectorXd inverse = xmvb::core::solve_metric(covector,
       [this](const Eigen::VectorXd& x) { return apply_metric_coordinates(x); },
-      [this](const Eigen::VectorXd& x) { return apply_inverse_metric_diagonal(x); });
+      [this](const Eigen::VectorXd& x) { return apply_inverse_metric_diagonal(x); },
+      trace ? &stats : nullptr);
+  if (trace) diagnostics::neo_trace("ciah_structure_norm",
+      "seconds=%.17g,iterations=%d,actions=%d,certifications=%d,relative_residual=%.17g",
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
+      stats.iterations, stats.actions, stats.certifications, stats.relative_residual);
   const double squared = covector.dot(inverse);
   if (!(squared >= 0.0) || !std::isfinite(squared))
     throw std::runtime_error("invalid complete structure dual norm");

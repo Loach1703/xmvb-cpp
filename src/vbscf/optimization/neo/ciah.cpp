@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -10,6 +11,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "vbscf/optimization/neo/symmetry.hpp"
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -138,6 +140,9 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   }
   pending_residual_.reset();
 
+  const bool trace = diagnostics::neo_event_trace_enabled();
+  const auto projection_start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   const Eigen::MatrixXd q = columns(basis_);
   const Eigen::MatrixXd hq = columns(hessian_images_);
   const Eigen::MatrixXd gq = columns(metric_images_);
@@ -172,6 +177,8 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   Eigen::MatrixXd augmented_metric = Eigen::MatrixXd::Identity(m + 1, m + 1);
   augmented_metric.bottomRightCorner(m, m) = projected_metric;
 
+  const auto spectrum_start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(
       augmented_hessian, augmented_metric);
   if (spectrum.info() != Eigen::Success) {
@@ -199,7 +206,15 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   result.residual = alpha *
       (current_gradient + result.hessian_step -
        result.eigenvalue * result.metric_step);
+  const auto norm_start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   result.residual_norm = problem_.dual_norm(result.residual);
+  if (trace) diagnostics::neo_trace("ciah_ritz_cost",
+      "basis=%d,projection_seconds=%.17g,spectrum_image_seconds=%.17g,norm_seconds=%.17g,gradient_euclidean=%.17g,residual_euclidean=%.17g",
+      basis_size(), std::chrono::duration<double>(spectrum_start - projection_start).count(),
+      std::chrono::duration<double>(norm_start - spectrum_start).count(),
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - norm_start).count(),
+      current_gradient.norm(), result.residual.norm());
   result.converged = previous_eigenvalue_ &&
       std::abs(result.eigenvalue - *previous_eigenvalue_) < options_.tolerance &&
       result.residual_norm < std::sqrt(options_.tolerance);

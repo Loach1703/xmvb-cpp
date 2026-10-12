@@ -1104,6 +1104,30 @@ void StructureAction::inverse_adjoint_orbital_transform(Eigen::MatrixXd* spin_pr
         spin_products->middleCols(first, n_unique_beta_));
 }
 
+Eigen::MatrixXd StructureAction::apply_overlap(
+    const Eigen::Ref<const Eigen::MatrixXd>& vectors) const {
+  if (vectors.rows() != n_structures_ || vectors.cols() <= 0 || !vectors.allFinite())
+    throw std::invalid_argument("invalid structure overlap input block");
+  if (!direct_ci_) return apply(vectors).overlap;
+  const int block_width = static_cast<int>(vectors.cols());
+  const int bounded_width = bounded_structure_action_width(
+      block_width, n_unique_alpha_, n_unique_beta_, true);
+  Eigen::MatrixXd result(n_structures_, block_width);
+  for (int first = 0; first < block_width; first += bounded_width) {
+    const int width = std::min(bounded_width, block_width - first);
+    Eigen::MatrixXd carrier = expand_structure_block(vectors.middleCols(first, width));
+    direct_ci_->alpha_transform.apply_left(&carrier);
+    for (int block = 0; block < width; ++block) {
+      auto values = carrier.middleCols(block * n_unique_beta_, n_unique_beta_);
+      direct_ci_->beta_transform().apply_right_block(values);
+      direct_ci_->beta_transform().apply_adjoint_right_block(values);
+    }
+    direct_ci_->alpha_transform.apply_adjoint_left(&carrier);
+    result.middleCols(first, width) = contract_spin_product_block(carrier);
+  }
+  return result;
+}
+
 StructureActionResult StructureAction::apply(
     const Eigen::Ref<const Eigen::MatrixXd>& vectors) const {
   if (vectors.rows() != n_structures_ || vectors.cols() <= 0) {

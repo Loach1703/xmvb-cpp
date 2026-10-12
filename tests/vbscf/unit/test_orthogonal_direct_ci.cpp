@@ -1414,6 +1414,9 @@ void check_sigma_action() {
     require(rejected, "structure metric ignored its factor or workspace byte limit");
   }
   const auto topology_images = topology_action.apply(structure_vectors);
+  require((topology_action.apply_overlap(structure_vectors) -
+      topology_images.overlap).cwiseAbs().maxCoeff() < 2.0e-12,
+      "overlap-only direct-CI action differs from the combined action");
   require(
       (topology_images.hamiltonian -
        reference_three_structure_hamiltonian).cwiseAbs().maxCoeff() < 2.0e-10,
@@ -1470,6 +1473,9 @@ void check_sigma_action() {
       "incomplete fixed-spin carrier incorrectly selected direct CI");
   const auto streamed_images =
       streamed_action.apply_streamed(structure_vectors);
+  require((streamed_action.apply_overlap(structure_vectors) -
+      streamed_images.overlap).cwiseAbs().maxCoeff() < 2.0e-12,
+      "overlap-only pair action differs from the streamed action");
   const Eigen::MatrixXd incomplete_reference_hamiltonian =
       incomplete_expansion.transpose() * incomplete_hamiltonian *
       incomplete_expansion * structure_vectors;

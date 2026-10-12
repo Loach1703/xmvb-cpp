@@ -109,6 +109,13 @@ public:
   StructureActionResult apply(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
 
+  /** @brief Exact overlap image; direct-CI needs only forward/adjoint transforms.
+   * Shares the accepted-point representation and the existing block budget.
+   * Pair-based representations retain their exact combined action.
+   */
+  Eigen::MatrixXd apply_overlap(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
+
   /**
    * @brief Applies H/S with bounded spin-product and pair-tile workspaces.
    *
