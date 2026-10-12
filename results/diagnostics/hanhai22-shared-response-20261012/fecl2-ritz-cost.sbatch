@@ -25,8 +25,8 @@ export LD_LIBRARY_PATH="/home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib:$
 hostname > "$artifact/node.txt"
 lscpu > "$artifact/cpu.txt"
 module list > "$artifact/modules.txt" 2>&1
-cmake --build "$source_dir/build" --target xmvb test_ciah test_coupled_structure test_orthogonal_direct_ci test_sparse_orbital_quotient -j8 > "$artifact/build.log" 2>&1
-for test_name in test_ciah test_coupled_structure test_orthogonal_direct_ci test_sparse_orbital_quotient; do
+cmake --build "$source_dir/build" --target xmvb test_ciah test_coupled_structure test_orthogonal_direct_ci test_sparse_orbital_quotient test_hessian_diagonal -j8 > "$artifact/build.log" 2>&1
+for test_name in test_ciah test_coupled_structure test_orthogonal_direct_ci test_sparse_orbital_quotient test_hessian_diagonal; do
  srun --ntasks=1 --cpus-per-task=32 --cpu-bind=cores "$source_dir/build/src/$test_name" > "$artifact/$test_name.out" 2> "$artifact/$test_name.err"
 done
 cp "$source_dir/build/src/xmvb-cpp.exe" "$artifact/"

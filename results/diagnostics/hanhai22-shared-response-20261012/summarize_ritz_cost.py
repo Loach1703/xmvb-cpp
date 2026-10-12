@@ -14,6 +14,8 @@ for line in (run / "run.err").read_text().splitlines():
     events.setdefault(event, []).append((int(macro), values))
 norms = [v for _, v in events.get("ciah_structure_norm", [])]
 ritz = [v for _, v in events.get("ciah_ritz_cost", [])]
+expansions = [v for _, v in events.get("ciah_expansion_cost", [])]
+preconditions = [v for _, v in events.get("ciah_precondition_cost", [])]
 rows = list(csv.DictReader((run / "neo.tsv").open(), delimiter="\t"))
 summary = {
     "macros": len(rows),
@@ -26,17 +28,33 @@ summary = {
     "max_certified_relative_residual": max(
         (float(v["relative_residual"]) for v in norms), default=0),
     "ritz_calls": len(ritz),
+    "precondition_seconds": sum(float(v["seconds"]) for v in preconditions),
+    "expansion_seconds": {key: sum(float(v[key]) for v in expansions) for key in
+                          ("orthogonalize_seconds", "metric_seconds", "hvp_seconds")},
+    "max_relative_galerkin_residual": max(
+        (float(v["galerkin_residual"]) /
+         max(float(v["residual_euclidean"]), 1.0e-300) for v in ritz), default=0),
     "ritz_seconds": {key: sum(float(v[key]) for v in ritz) for key in
                      ("projection_seconds", "spectrum_image_seconds", "norm_seconds")},
     "tail": [],
 }
 for macro, end in events.get("ciah_micro_end", [])[-8:]:
     micro = [v for k, v in events.get("ciah_micro", []) if k == macro]
+    keyframes = [v for k, v in events.get("ciah_keyframe", []) if k == macro]
+    additions = [v for k, v in events.get("ciah_expansion_cost", []) if k == macro]
     summary["tail"].append({
         "macro": macro, "stop": end["reason"],
         "micro": len(micro), "source": float(end["source"]),
         "minimum_predicted": min(float(v["gradient"]) for v in micro),
         "last_predicted": float(end["predicted"]),
         "clipped": sum(float(v["step_scale"]) < 1 for v in micro),
+        "last_residual": float(micro[-1]["residual"]) if micro else None,
+        "last_ah_eigenvalue": float(micro[-1]["omega"]) if micro else None,
+        "keyframes": len(keyframes),
+        "minimum_new_direction_fraction": min(
+            (float(v["remaining_fraction"]) for v in additions), default=None),
+        "max_keyframe_relative_mismatch": max(
+            (float(v["mismatch"]) / max(float(v["predicted"]), 1.0e-300)
+             for v in keyframes), default=0),
     })
 print(json.dumps(summary, indent=2))

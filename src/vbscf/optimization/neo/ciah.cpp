@@ -66,6 +66,9 @@ CiahWorkspace::CiahWorkspace(
 
 Eigen::VectorXd CiahWorkspace::precondition(
     const Eigen::VectorXd& residual, double eigenvalue) const {
+  const bool trace = diagnostics::neo_event_trace_enabled();
+  const auto start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   Eigen::VectorXd direction = options_.residual_preconditioner
       ? options_.residual_preconditioner(residual, eigenvalue)
       : problem_.has_preconditioner()
@@ -74,6 +77,9 @@ Eigen::VectorXd CiahWorkspace::precondition(
   if (direction.size() != problem_.size() || !direction.allFinite()) {
     throw std::runtime_error("CIAH preconditioner returned an invalid vector");
   }
+  if (trace) diagnostics::neo_trace("ciah_precondition_cost",
+      "basis=%d,seconds=%.17g", basis_size(),
+      std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
   return direction;
 }
 
@@ -83,6 +89,9 @@ bool CiahWorkspace::append(Eigen::VectorXd direction) {
   }
   const double initial_norm = direction.stableNorm();
   if (!(initial_norm > 0.0)) return false;
+  const bool trace = diagnostics::neo_event_trace_enabled();
+  const auto start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   // Euclidean two-pass orthogonalization avoids another Hessian action.
   for (int pass = 0; pass < 2; ++pass) {
     for (const Eigen::VectorXd& vector : basis_) {
@@ -96,9 +105,19 @@ bool CiahWorkspace::append(Eigen::VectorXd direction) {
     return false;
   }
   direction /= norm;
+  const auto metric_start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   // Evaluate each image once, only after the direction has been admitted.
   Eigen::VectorXd metric_image = problem_.apply_metric(direction);
+  const auto hessian_start = trace ? std::chrono::steady_clock::now() :
+      std::chrono::steady_clock::time_point{};
   Eigen::VectorXd hessian_image = problem_.apply_hessian(direction);
+  if (trace) diagnostics::neo_trace("ciah_expansion_cost",
+      "basis=%d,remaining_fraction=%.17g,orthogonalize_seconds=%.17g,metric_seconds=%.17g,hvp_seconds=%.17g",
+      basis_size()+1, norm/initial_norm,
+      std::chrono::duration<double>(metric_start-start).count(),
+      std::chrono::duration<double>(hessian_start-metric_start).count(),
+      std::chrono::duration<double>(std::chrono::steady_clock::now()-hessian_start).count());
   basis_.push_back(std::move(direction));
   metric_images_.push_back(std::move(metric_image));
   hessian_images_.push_back(std::move(hessian_image));
