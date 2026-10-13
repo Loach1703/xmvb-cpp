@@ -52,6 +52,13 @@ for event, fields in {
             key = event.removeprefix("ciah_") + "_" + field
             macro_costs[macro][key] = macro_costs[macro].get(key, 0.0) + float(values[field])
 summary = {
+    "origin_hvp_audits": [
+        {"macro": macro, "delta": float(v["delta"]),
+         "relative_image_error": float(v["error_norm"])/max(float(v["image_norm"]),1.0e-300),
+         "orbital_error": float(v["orbital_error"]),
+         "structure_error": float(v["structure_error"]),
+         "energy_derivative_error": abs(float(v["derivative"])-float(v["finite_derivative"]))}
+        for macro, v in events.get("ciah_origin_hvp_audit", [])],
     "macro_costs": list(macro_costs.values()),
     "unlearned_inverse": [
         {"macro": macro, "tests": len(values),

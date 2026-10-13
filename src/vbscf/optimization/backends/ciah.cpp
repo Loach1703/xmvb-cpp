@@ -313,6 +313,7 @@ bool build_ciah_macro_step(
   int micro_steps = 0, since_keyframe = 0;
   bool audit_next_keyframe_step = false;
   bool audited_keyframe_step = false;
+  bool audited_origin_step = false;
   const char* micro_stop = "unset";
   CiahResult candidate;
   while (true) {
@@ -332,6 +333,33 @@ bool build_ciah_macro_step(
     if (step_scale < 1.0) {
       step *= step_scale;
       image *= step_scale;
+    }
+    if (!audited_origin_step && displacement.isZero() &&
+        diagnostics::neo_trace_enabled() && diagnostics::neo_candidate_audit_enabled()) {
+      // Compare the complete derivative in the immutable origin chart. These
+      // diagnostic evaluations must not count as optimizer keyframe updates.
+      const double length = std::sqrt(std::max(0.0, step.dot(metric_action(step))));
+      if (length > 0.0) {
+        const Eigen::VectorXd direction = step / length;
+        const Eigen::VectorXd exact_image = image / length;
+        const double exact_norm = dual_norm(exact_image);
+        const int previous_keyframes = record->keyframes;
+        for (const double delta : {1.0e-3, 3.0e-4}) {
+          const Keyframe plus = evaluate_keyframe(delta * direction);
+          const Keyframe minus = evaluate_keyframe(-delta * direction);
+          const Eigen::VectorXd finite = (plus.gradient - minus.gradient) / (2.0 * delta);
+          const Eigen::VectorXd error = finite - exact_image;
+          const double derivative = initial_gradient.dot(direction);
+          diagnostics::neo_trace("ciah_origin_hvp_audit",
+              "delta=%.17g,image_norm=%.17g,finite_norm=%.17g,error_norm=%.17g,orbital_error=%.17g,structure_error=%.17g,derivative=%.17g,finite_derivative=%.17g,orbital_direction_norm=%.17g,structure_direction_norm=%.17g",
+              delta, exact_norm, dual_norm(finite), dual_norm(error),
+              metric.dual_norm(error.head(no)),ns ? structure.dual_norm(error.tail(ns)) : 0.0,
+              derivative, (plus.energy - minus.energy) / (2.0 * delta),
+              step.head(no).norm() / length, ns ? step.tail(ns).norm() / length : 0.0);
+        }
+        record->keyframes = previous_keyframes;
+      }
+      audited_origin_step = true;
     }
     if (audit_next_keyframe_step) {
       // Check the actual resumed direction at a nonzero keyframe, in the
