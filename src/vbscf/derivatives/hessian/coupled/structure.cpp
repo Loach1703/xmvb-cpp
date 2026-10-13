@@ -501,14 +501,6 @@ core::MetricImage StructureTangentOperator::metric_image(const Eigen::VectorXd& 
   return result;
 }
 
-bool StructureTangentOperator::dual_norm_below(const Eigen::VectorXd& covector,
-    double threshold, core::MetricSolveWorkspace& workspace) const {
-  if (metric_inverse_) return dual_norm(covector) < threshold;
-  return workspace.norm_below(covector, threshold,
-      [this](const Eigen::VectorXd& x) { return apply_metric_coordinates(x); },
-      [this](const Eigen::VectorXd& x) { return apply_inverse_metric_model(x); });
-}
-
 Eigen::VectorXd
 StructureTangentOperator::apply_inverse_shifted_preconditioner(
     const Eigen::VectorXd& covector,

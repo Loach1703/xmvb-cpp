@@ -9,24 +9,7 @@
 
 #include "vbscf/optimization/neo/problem.hpp"
 
-namespace xmvb::core { struct MetricImage; }
-
 namespace xmvb::vb {
-
-/** @brief Test a keyframe mismatch using full-norm triangle bounds first.
- * Both norms refer to the same physical metric. Only an unresolved comparison
- * evaluates the full difference; no projected-residual estimate is substituted.
- */
-bool ciah_keyframe_matches(double actual_norm, double predicted_norm,
-    double limit, const std::function<bool()>& test_difference);
-
-/** @brief Propagate an inverse image and full defect through a clipped AH step.
- * All arguments belong to the same fixed metric (or one metric block).
- * alpha is signed. The result is a seed; its true residual is checked when used.
- */
-core::MetricImage ciah_inverse_update(const core::MetricImage& gradient,
-    const core::MetricImage& residual, const Eigen::VectorXd& step,
-    double alpha, double omega, double scale);
 
 /** @brief Frozen curvature with an energy/gradient anchor refreshed at keyframes.
  *
@@ -70,7 +53,7 @@ private:
 
 /** Controls one bounded, matrix-free CIAH Davidson workspace. */
 struct CiahOptions {
-  /** Absolute tolerance in the problem's physical dual norm. */
+  /** Eigenvalue tolerance; the complete coordinate residual uses its square root. */
   double tolerance = 1.0e-12;
   /** Relative threshold for dependent directions and projected metric rank. */
   double lindep = 1.0e-14;
@@ -80,10 +63,6 @@ struct CiahOptions {
   double operator_relative_accuracy = 0.0;
   /** @brief Observe a direction after its HVP, reusing the computed metric image. */
   std::function<void(const Eigen::VectorXd&,const Eigen::VectorXd&)> observe_images;
-  /** @brief Progress estimate only; never certifies an AH or keyframe decision. */
-  NeoDualNorm estimate_dual_norm;
-  /** @brief Certify a strict comparison in the complete physical dual metric. */
-  std::function<bool(const Eigen::VectorXd&, double)> norm_below;
   /** Optional eigenvalue-shifted residual preconditioner. */
   std::function<Eigen::VectorXd(const Eigen::VectorXd&, double)>
       residual_preconditioner;
@@ -99,17 +78,9 @@ struct CiahResult {
   Eigen::VectorXd metric_step;
   /** alpha * (gradient + H * step - eigenvalue * G * step). */
   Eigen::VectorXd residual;
-  /** @brief Complete physical norm, valid only after certify_norms(). */
+  /** @brief Euclidean norm of the complete residual, including outside the trial space. */
   double residual_norm = 0.0;
-  /** @brief Whether physical residual/model norms have been evaluated. */
-  bool norms_certified = false;
-  /** @brief Diagnostic estimate, distinct from the physical residual norm. */
-  double residual_estimate = 0.0;
-  /** @brief Known cross/metric terms in ||g+Hp||^2; excludes ||r/alpha||^2. */
-  double model_norm_offset = 0.0;
-  /** @brief Full dual norm of gradient + H * step, reusing the AH residual norm.
-   * Valid for the unscaled Ritz step; clipping requires a fresh norm.
-   */
+  /** @brief Euclidean norm of gradient + H * step, before clipping. */
   double model_gradient_norm = 0.0;
   bool converged = false;
   int basis_size = 0;
@@ -191,9 +162,6 @@ public:
   /** Append the previous residual direction, then return the next AH root. */
   CiahResult next(const Eigen::VectorXd& current_gradient);
 
-  /** @brief Evaluate complete norms once, when a candidate needs a decision. */
-  void certify_norms(CiahResult& result) const;
-
   int basis_size() const noexcept {
     return static_cast<int>(basis_.size());
   }
@@ -211,7 +179,7 @@ private:
   std::optional<Eigen::VectorXd> pending_residual_;
   std::optional<double> previous_eigenvalue_;
   double pending_eigenvalue_ = 0.0;
-  /** @brief Cached complete dual norm for scalar expansion diagnostics. */
+  /** @brief Cached complete coordinate norm for scalar expansion diagnostics. */
   double pending_residual_norm_ = 0.0;
   std::vector<Eigen::VectorXd> basis_;
   std::vector<Eigen::VectorXd> hessian_images_;

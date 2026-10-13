@@ -47,7 +47,7 @@ lscpu > cpu.txt
 module list > modules.txt 2>&1
 env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|SLURM_|XMVB_NEO_)' > execution-env.txt
 printf '%s\n' "$orbital_type" > orbital-type.txt
-printf '%s\n' "$run_label; unchanged CIAH/HVP/coordinate/convergence thresholds" > source.txt
+printf '%s\n' "$run_label; see frozen source.patch; exact HVP and unchanged outer convergence thresholds" > source.txt
 sha256sum "$binary" input.xmi *.gbs > hashes.txt
 printf '%s\n' "$binary input.xmi --optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --exact-exchange-memory-mib 256 --neo-trace neo.tsv" > command.txt
 status=0

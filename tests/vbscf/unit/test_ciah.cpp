@@ -10,7 +10,6 @@
 #include <Eigen/LU>
 
 #include "vbscf/optimization/neo/ciah.hpp"
-#include "core/metric_solve.hpp"
 #include "vbscf/optimization/backends/ciah.hpp"
 #include "vbscf/optimization/preconditioners/coarse.hpp"
 
@@ -75,12 +74,12 @@ void check_images_and_residual(
   require(error <= 2.0e-12 * std::max(1.0, expected.stableNorm()),
           "CIAH returned an inconsistent full-space AH residual");
   require(std::abs(result.residual_norm -
-                   dual_norm(metric, result.residual)) <= 2.0e-12,
-          "CIAH residual norm is not the physical dual norm");
-  const double expected_norm = dual_norm(metric, gradient + hessian * result.step);
+                   result.residual.norm()) <= 2.0e-12,
+          "CIAH residual norm omitted full coordinate components");
+  const double expected_norm = (gradient + hessian * result.step).norm();
   require(std::abs(result.model_gradient_norm - expected_norm) <=
               2.0e-11 * std::max(1.0, expected_norm),
-          "CIAH reused residual does not give the complete model gradient norm");
+          "CIAH model gradient norm differs from the full coordinate norm");
 }
 
 void check_full_space_root(
@@ -239,7 +238,7 @@ void check_gradient_refresh_and_preconditioner() {
   require(expanded.new_hvp_actions == 1 && actions == 2 &&
               preconditioner_calls == 1,
           "residual expansion did not use exactly one shifted action");
-  require(metric_calls == 2 && norm_calls == 4,
+  require(metric_calls == 2 && norm_calls == 0,
           "expansion diagnostics evaluated an extra metric or inverse norm");
   require(std::abs(last_eigenvalue - refreshed.eigenvalue) < 1.0e-12,
           "residual preconditioner received the wrong eigenvalue");
@@ -614,122 +613,31 @@ void check_inverse_spectrum() {
   require(actions==before,"inverse spectrum diagnostic performed a Hessian action");
 }
 
-/** @brief A deliberately wrong progress estimate cannot certify a Ritz residual. */
-void check_deferred_norms() {
+/** @brief Norm control includes the complement without solving the physical metric. */
+void check_coordinate_norms() {
   Eigen::Matrix3d hessian;
   hessian << 1.0, 0.8, 0.3, 0.8, 2.0, 0.4, 0.3, 0.4, 3.0;
-  const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
+  Eigen::Matrix3d metric;
+  metric << 2.0, 0.2, 0.1, 0.2, 1.0, 0.0, 0.1, 0.0, 0.5;
   const Eigen::Vector3d gradient(1.0, 0.0, 0.0);
   int norms = 0;
   const auto problem = dense_problem(hessian, metric, gradient, nullptr, nullptr, &norms);
-  CiahOptions options;
-  options.estimate_dual_norm = [](const Eigen::VectorXd&) { return 0.0; };
-  options.norm_below = [&](const Eigen::VectorXd& r, double threshold) {
-    return dual_norm(metric, r) < threshold;
-  };
-  CiahWorkspace workspace(problem, options);
+  CiahWorkspace workspace(problem);
   auto result = workspace.next(gradient);
-  require(!result.norms_certified && norms == 0 && !result.converged,
-      "a progress-only candidate forced an inverse or falsely converged");
+  require(norms == 0 && !result.converged,
+      "CIAH norm control forced a metric inverse or falsely converged");
   require(workspace.projected_dual_norm(result.residual) < 1e-12 &&
       result.residual.norm() > 0.1,
-      "deferred-norm test does not exercise a residual outside the AH subspace");
-  workspace.certify_norms(result);
-  require(result.norms_certified && norms == 1, "complete residual was not certified");
+      "coordinate-norm test does not exercise a residual outside the AH subspace");
   check_images_and_residual(hessian, metric, gradient, result);
-  workspace.certify_norms(result);
-  require(norms == 1, "the same candidate repeated a norm solve");
   auto next = workspace.next(gradient);
-  require(next.basis_size == 2, "zero progress estimate suppressed a real residual direction");
-}
-
-/** @brief Complete inverse/defect identities, including cancellation and signed roots. */
-void check_inverse_reuse() {
-  using xmvb::core::MetricImage;
-  Eigen::Matrix3d metric;
-  metric << 3., .4, .2, .4, 2., .1, .2, .1, 1.;
-  const Eigen::Vector3d g(1., -2., .5), p(.3, .7, -.2), hp(.8, -.4, 1.);
-  const auto action = [&](const Eigen::VectorXd& v) -> Eigen::VectorXd { return metric*v; };
-  const auto inverse = [&](const Eigen::VectorXd& v) -> Eigen::VectorXd {
-    return v.cwiseQuotient(metric.diagonal());
-  };
-  const auto image = [&](const Eigen::VectorXd& rhs, const Eigen::VectorXd& error) {
-    Eigen::VectorXd x = metric.ldlt().solve(rhs) + error;
-    return MetricImage{x, rhs - metric*x};
-  };
-  for (double alpha : {-.7, .7}) for (double scale : {.2, 1.}) {
-    const double omega = -.3;
-    const Eigen::VectorXd r = alpha*(g + hp - omega*metric*p);
-    const MetricImage gi = image(g, Eigen::Vector3d(1e-8, 0., 0.));
-    const MetricImage ri = image(r, Eigen::Vector3d(0., -2e-8, 0.));
-    const auto combined = xmvb::vb::ciah_inverse_update(gi, ri, p, alpha, omega, scale);
-    const Eigen::VectorXd rhs = g + scale*hp;
-    require_close(combined.residual, rhs - metric*combined.inverse, 2e-15,
-                  "clipped inverse update lost the complete defect");
-    xmvb::core::MetricSolveWorkspace workspace(4);
-    xmvb::core::MetricSolveStats stats;
-    const auto corrected = workspace.image(rhs, action, inverse, &stats, &combined);
-    require((rhs-metric*corrected.inverse).norm() <=
-            std::sqrt(std::numeric_limits<double>::epsilon())*rhs.norm(),
-            "reused image failed the original true-residual test");
-    workspace.image(rhs, action, inverse, &stats);
-    require(stats.cache_hit && stats.actions == 0, "identical RHS repeated a metric action");
-  }
-  // Individually adequate images can be inadequate for a nearly cancelling difference.
-  const Eigen::VectorXd small = 1e-7*p;
-  const auto predicted = image(g, Eigen::Vector3d(1e-9, 0., 0.));
-  const auto actual = image(g+small, Eigen::Vector3d(0., 1e-9, 0.));
-  MetricImage difference{actual.inverse-predicted.inverse, actual.residual-predicted.residual};
-  require(difference.residual.norm() > 1e-8*small.norm(), "cancellation case is ineffective");
-  difference.residual.setZero(); // A stale advertised defect must not hide the true one.
-  xmvb::core::MetricSolveWorkspace workspace(4);
-  xmvb::core::MetricSolveStats stats;
-  const auto corrected = workspace.image(small, action, inverse, &stats, &difference);
-  require(stats.iterations > 0, "cancellation did not refine the inherited inverse");
-  require((small-metric*corrected.inverse).norm() <=
-          std::sqrt(std::numeric_limits<double>::epsilon())*small.norm(),
-          "cancellation refinement used the wrong RHS tolerance");
-  const Eigen::VectorXd other = .6*p;
-  const auto exact = image(other, Eigen::Vector3d::Zero());
-  workspace.image(other, action, inverse, &stats, &exact);
-  require(stats.actions == 1 && stats.iterations == 0,
-          "an exact propagated image unnecessarily entered CG");
-}
-
-void check_keyframe_norm_bounds() {
-  using xmvb::vb::ciah_keyframe_matches;
-  int calls = 0;
-  const auto unused = [&] { ++calls; return false; };
-  require(ciah_keyframe_matches(1., 1., 3., unused) && calls == 0,
-          "triangle-bounded keyframe unnecessarily evaluated the difference");
-  require(!ciah_keyframe_matches(5., 1., 3., unused) && calls == 0,
-          "reverse-triangle rejection unnecessarily evaluated the difference");
-  require(ciah_keyframe_matches(2., 1., 2., [&] { ++calls; return true; }) && calls == 1,
-          "unresolved keyframe bypassed its full residual test");
-  // Check the full physical norm, including components absent from any
-  // orbital/AH projection. A diagonal-only or projected estimate is invalid.
-  Eigen::Matrix3d metric;
-  metric << 2., .2, .1, .2, 1., .1, .1, .1, .05;
-  int skipped = 0;
-  for (int i = 1; i <= 100; ++i) {
-    const Eigen::Vector3d a(std::sin(i), std::cos(i), .01*i);
-    const Eigen::Vector3d b(std::cos(2*i), .1*std::sin(i), .3);
-    const double actual = dual_norm(metric, a), predicted = dual_norm(metric, b);
-    for (double factor : {.1, 1., 3., 10.}) {
-      const double limit = factor*predicted;
-      const bool reference = dual_norm(metric, a-b) < limit;
-      bool evaluated = false;
-      const bool result = ciah_keyframe_matches(actual, predicted, limit, [&] {
-        evaluated = true;
-        return reference;
-      });
-      require(result == reference, "full-metric keyframe bound changed the decision");
-      skipped += !evaluated;
-    }
-  }
-  require(skipped > 0, "keyframe-bound test never avoided a norm evaluation");
-  require(!ciah_keyframe_matches(1., 0., 1., [] { return false; }),
-          "strict keyframe comparison accepted equality");
+  require(next.basis_size == 2, "full residual did not expand the AH space");
+  check_images_and_residual(hessian, metric, gradient, next);
+  const Eigen::Vector3d refreshed = gradient + Eigen::Vector3d(.02, -.03, .01);
+  next = workspace.next(refreshed);
+  check_images_and_residual(hessian, metric, refreshed, next);
+  check_full_space_root(hessian, metric, refreshed, next);
+  require(norms == 0, "Ritz or keyframe RHS update evaluated the physical dual norm");
 }
 
 }  // namespace
@@ -751,9 +659,7 @@ int main() {
     check_sampled_schur_spectrum();
     check_inverse_spectrum();
     check_restart_phase();
-    check_deferred_norms();
-    check_inverse_reuse();
-    check_keyframe_norm_bounds();
+    check_coordinate_norms();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

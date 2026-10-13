@@ -1,5 +1,4 @@
 #include "vbscf/optimization/neo/ciah.hpp"
-#include "core/metric_solve.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -54,8 +53,7 @@ CiahWorkspace::CiahWorkspace(
       !(options_.lindep > 0.0) || !std::isfinite(options_.lindep) ||
       options_.lindep >= 1.0 || options_.max_cycle < 1 ||
       options_.operator_relative_accuracy < 0.0 ||
-      !std::isfinite(options_.operator_relative_accuracy) ||
-      (options_.estimate_dual_norm && !options_.norm_below)) {
+      !std::isfinite(options_.operator_relative_accuracy)) {
     throw std::invalid_argument("invalid CIAH Davidson options");
   }
   if (initial_direction_ &&
@@ -148,9 +146,9 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
     const double work = residual->dot(direction);
     const double curvature = direction.dot(hessian_image) - shift * metric_squared;
     diagnostics::neo_trace("ciah_expansion_geometry",
-        "basis=%d,residual_estimate=%.17g,dual_cosine_estimate=%.17g,metric_squared=%.17g,shifted_curvature=%.17g,physical_rayleigh=%.17g,remaining_fraction_estimate=%.17g",
+        "basis=%d,residual_coordinate_norm=%.17g,coordinate_cosine=%.17g,metric_squared=%.17g,shifted_curvature=%.17g,physical_rayleigh=%.17g,remaining_fraction_estimate=%.17g",
         basis_size()+1,residual_norm,
-        work/(residual_norm*std::sqrt(metric_squared)),metric_squared,
+        work/(residual_norm*direction.norm()),metric_squared,
         curvature,curvature/metric_squared,norm/initial_norm);
   }
   if (trace) diagnostics::neo_trace("ciah_expansion_cost",
@@ -359,17 +357,13 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
        result.eigenvalue * result.metric_step);
   const auto norm_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
-  result.residual_estimate = options_.estimate_dual_norm
-      ? options_.estimate_dual_norm(result.residual) : 0.0;
-  // g + Hp = r/alpha + omega Gp. Its complete dual norm needs no second
-  // inverse: ||r/alpha||_G^-1^2 + 2 omega r^T p/alpha + omega^2 p^T Gp.
-  // Retain the cross term rather than assuming exact Galerkin orthogonality.
-  result.model_norm_offset =
-      2.0 * result.eigenvalue * result.residual.dot(result.step) / alpha +
-      result.eigenvalue * result.eigenvalue * result.step.dot(result.metric_step);
+  // CIAH uses a coordinate norm to control its inexact microiterations, as
+  // PySCF does. The generalized AH metric is still present in the equation.
+  // Evaluate the FULL residual, not just its projection into the trial space.
+  result.residual_norm = result.residual.norm();
+  result.model_gradient_norm = (current_gradient + result.hessian_step).norm();
   const bool eigenvalue_settled = previous_eigenvalue_ &&
       std::abs(result.eigenvalue - *previous_eigenvalue_) < options_.tolerance;
-  if (!options_.estimate_dual_norm || eigenvalue_settled) certify_norms(result);
   if (trace) {
     Eigen::VectorXd projected_residual(m);
     for (Eigen::Index i = 0; i < m; ++i)
@@ -390,47 +384,14 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   // davidson_cc does not append a residual after yielding a converged root.
   // Reproject a changed RHS in the retained space first; that new root can
   // supply a new residual if it is no longer converged.
-  const bool residual_nonzero = !result.converged && !result.exhaustion && (result.norms_certified
-      ? result.residual_norm >= options_.lindep
-      : !options_.norm_below(result.residual, options_.lindep));
+  const bool residual_nonzero = result.residual_norm >= options_.lindep;
   if (!result.converged && !result.exhaustion && residual_nonzero) {
     pending_residual_ = result.residual;
     pending_eigenvalue_ = result.eigenvalue;
-    pending_residual_norm_ = result.norms_certified
-        ? result.residual_norm : result.residual_estimate;
+    pending_residual_norm_ = result.residual_norm;
   }
   return result;
 }
 
-bool ciah_keyframe_matches(double actual_norm, double predicted_norm,
-    double limit, const std::function<bool()>& test_difference) {
-  // Round the sum upward and the reverse-triangle bound downward. Equality
-  // cannot satisfy the strict original comparison.
-  const double upper = std::nextafter(actual_norm + predicted_norm,
-      std::numeric_limits<double>::infinity());
-  if (upper < limit) return true;
-  const double lower = std::nextafter(std::abs(actual_norm - predicted_norm), 0.0);
-  if (lower >= limit) return false;
-  return test_difference();
-}
-
-void CiahWorkspace::certify_norms(CiahResult& result) const {
-  if (result.norms_certified) return;
-  result.residual_norm = problem_.dual_norm(result.residual);
-  const double scaled = result.residual_norm / result.reference_component;
-  const double squared = scaled * scaled + result.model_norm_offset;
-  if (!(squared >= 0.0) || !std::isfinite(squared))
-    throw std::runtime_error("CIAH model gradient norm is invalid");
-  result.model_gradient_norm = std::sqrt(squared);
-  result.norms_certified = true;
-}
-
-core::MetricImage ciah_inverse_update(const core::MetricImage& gradient,
-    const core::MetricImage& residual, const Eigen::VectorXd& step,
-    double alpha, double omega, double scale) {
-  return {
-      (1.0-scale)*gradient.inverse + (scale/alpha)*residual.inverse + (scale*omega)*step,
-      (1.0-scale)*gradient.residual + (scale/alpha)*residual.residual};
-}
 
 }  // namespace xmvb::vb
