@@ -87,17 +87,46 @@ trial energies, next scale, checkpoint restoration, micro stop and macro HVPs.
 No gradient/HVP/metric inverse is added. Scalar tracing records intermediate
 trial/keyframe energies. No rejection policy was modified without evidence.
 
-Porphine diagnostic array 1252369 runs two outer steps per spin from the
-original inputs, with scalar tracing and phase timers, on Hanhai22. It is a
-short attribution prefix, not a convergence run or a reproduction of macro
-24/12 of the older trajectories. No long porphine run was resubmitted.
+Porphine diagnostic array 1252369 completed two outer steps per spin from the
+original inputs, with scalar tracing and phase timers, on Hanhai22. Both stop
+at max_iterations (expected executable exit 2), not macro rejection. This is
+an attribution prefix, not convergence or a reproduction of macro 24/12 of
+the older trajectories. No long porphine run was resubmitted.
+
+spin      steps HVP final energy/Eh       GNU wall/s RSS/GiB
+singlet     2    33 -2244.715765044498      260.18     38.620
+triplet     2    30 -2244.757989931521      258.51     38.632
+
+First-step energies agree with saved older prefixes at printed precision.
+Second-step energies differ by 4.73e-7 / 4.14e-7 Eh. Both HVP counts match
+the saved older two-step prefixes (33/30). This is not a convergence comparison;
+the old full-run wall/RSS cannot be treated as two-step measurements.
+
+New decisive attribution: analytic diagonal construction takes 60.64/59.76 s
+on the two singlet points and 56.98/59.10 s on the triplet points. The density
+channel stage uses 112 channels, batch width 2, 32 workers and 65,270,304 bytes
+under its 64 MiB workspace budget, requiring 56 batches per point. It costs
+about 52-55 s per point; core-pair construction adds about 5 s. The width
+depends on worker-owned packed AO outputs as well as shared sources/responses.
+
+By comparison, total HVP wall is 17.76/15.44 s, joint CIAH image wall
+20.37/17.64 s, and chart construction 1.05/0.88 s across the two points.
+Block factor/eigen counts are zero in both spins. Scopes nest: these times
+must not be added. Initial AO integral construction/input remains part of
+the 260 s end-to-end prefix.
+
+Next priority is therefore the analytic-diagonal density-channel contraction:
+an output-owned/shared panel layout or exact reuse of accepted integral
+intermediates, with an explicit total-memory bound. Merely enlarging the
+64 MiB constant or copying more AO arrays per worker is not the remedy.
+This diagnosis precedes changes to that kernel or Davidson recycling.
 
 Artifacts and reproduction
 --------------------------
 results/diagnostics/hanhai22-shared-response-20261012/
   neo-frame-build-1252355/
   neo-frame-regression-1252359/
-  neo-frame-porphine-1252369/  (remote, diagnostic in progress at writing)
+  neo-frame-porphine-1252369/
 CSV: neo-frame-20261013.csv
 Parser: summarize_neo_frame.py RUNS BASELINE_CSV OUTPUT_CSV
 Slurm scripts: neo-frame-build.sbatch, neo-frame-regression.sbatch,
