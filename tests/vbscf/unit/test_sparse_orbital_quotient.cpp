@@ -844,6 +844,34 @@ void check_analytic_block_pullback(
              conversion*chart.apply_inverse_augmented_hessian_diagonal(white_gradient,shift)).norm()
                 < 2e-8,
             "unwhitened shifted preconditioner changed its physical action");
+  for (const auto coordinates : {OrbitalChart::Coordinates::Whitened,
+                                 OrbitalChart::Coordinates::Unwhitened}) {
+    const auto& reference = coordinates == OrbitalChart::Coordinates::Whitened
+        ? chart : raw_chart;
+    OrbitalChart ah(input,layout,orbitals,orbitals,
+                   nullptr,false,complete_active_space,nullptr,coordinates);
+    ah.set_curvature(input,nullptr,&model,OrbitalChart::CurvatureUse::AugmentedHessian);
+    require((ah.augmented_hessian_diagonal()-reference.augmented_hessian_diagonal()).norm() < 2e-11 &&
+                (ah.expand_step(coordinate_probe)-reference.expand_step(coordinate_probe)).norm() < 2e-13 &&
+                std::abs(ah.maximum_rotation_component(coordinate_probe)-
+                         reference.maximum_rotation_component(coordinate_probe)) < 2e-12,
+            "AH-only preparation changed diagonal, coordinates or step clipping");
+    for (const double shift : {-0.7,0.2})
+      require((ah.apply_inverse_augmented_hessian_diagonal(coordinate_probe,shift)-
+               reference.apply_inverse_augmented_hessian_diagonal(coordinate_probe,shift)).norm() < 2e-11,
+              "AH-only preparation changed the signed preconditioner");
+    if (complete_active_space && input.orbital_type == kOrbitalTypeOeo) {
+      bool refused_positive_action = false;
+      try { ah.apply_reduced_curvature(coordinate_probe); }
+      catch (const std::logic_error&) { refused_positive_action = true; }
+      require(refused_positive_action,
+              "AH-only frame unexpectedly retained positive curvature blocks");
+    } else {
+      require((ah.apply_inverse_reduced_block_preconditioner(coordinate_probe)-
+               reference.apply_inverse_reduced_block_preconditioner(coordinate_probe)).norm() < 2e-10,
+              "constrained AH preparation lost its local spectral block");
+    }
+  }
   const double positive_shift = 0.7;
   require((raw_chart.shifted_block_inverse(positive_shift)(raw_gradient) -
            conversion * chart.shifted_block_inverse(positive_shift)(white_gradient)).norm() < 2e-9,
@@ -1582,6 +1610,7 @@ int main() {
     check_analytic_block_pullback(partial,false);
     check_analytic_block_pullback(frozen,false);
     check_analytic_block_pullback(oeo,true);
+    check_analytic_block_pullback(oeo,false);
     check_preconditioner_geometry(partial);
     check_preconditioner_geometry(full);
     check_preconditioner_geometry(oeo, true);

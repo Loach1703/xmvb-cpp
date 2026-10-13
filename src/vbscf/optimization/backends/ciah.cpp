@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <chrono>
 #include <limits>
 #include <stdexcept>
@@ -588,6 +589,16 @@ bool build_ciah_macro_step(
     }
     scale *= 0.5;
     if (scale * metric.norm(displacement.head(no)) <= options.minimum_step_size) {
+      // Failure evidence from existing quantities only: no gradient, HVP or
+      // metric inverse is added, and the acceptance policy is unchanged.
+      std::fprintf(stderr,
+          "NEO_FAILURE,iteration=%d,reason=ciah_macro_energy_rejected,"
+          "trials=%d,origin_slope=%.17g,origin_curvature=%.17g,"
+          "source_energy=%.17g,last_trial_energy=%.17g,next_scale=%.17g,"
+          "keyframe_backtracked=%d,micro_stop=%s,hvp=%d\n",
+          record->accepted_iteration_index,record->rejected_trial_count,
+          linear,quadratic,energy,accepted->trial.energy,scale,
+          static_cast<int>(keyframe_backtracked),micro_stop,record->orbital_hvp_actions);
       result->termination_reason = "ciah_macro_energy_rejected";
       return false;
     }

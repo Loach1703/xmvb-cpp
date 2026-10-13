@@ -31,6 +31,8 @@ class OrbitalChart {
 public:
   /** @brief NEO uses Unwhitened; existing TN/L-BFGS charts use Whitened. */
   enum class Coordinates { Whitened, Unwhitened };
+  /** @brief Positive blocks for TN/L-BFGS, or signed AH inverse only. */
+  enum class CurvatureUse { PositiveBlock, AugmentedHessian };
   struct StructuralDiagnostics {
     int packed_parameter_size = 0;
     int reduced_size = 0;
@@ -83,7 +85,8 @@ public:
    */
   void set_curvature(const OrbitalPreparationInput& input,
                      const Eigen::MatrixXd* ao_effective_h1e,
-                     const AnalyticOrbitalDiagonal* hessian_diagonal);
+                     const AnalyticOrbitalDiagonal* hessian_diagonal,
+                     CurvatureUse use = CurvatureUse::PositiveBlock);
 
   int reduced_size() const noexcept {
     return reduced_size_;
@@ -263,6 +266,7 @@ private:
       bool recover_tangent_coordinates,
       bool build_packed_projection) const;
 
+  bool supports_rotation_frame(int n_bf) const;
   void build_rotation_inverse(const OrbitalPreparationInput& input,
                               const AnalyticOrbitalDiagonal& model);
   Eigen::VectorXd apply_inverse_rotation_diagonal(

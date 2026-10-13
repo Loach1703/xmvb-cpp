@@ -11,16 +11,21 @@
 
 namespace xmvb::vb {
 
-void OrbitalChart::build_rotation_inverse(
-    const OrbitalPreparationInput& input, const AnalyticOrbitalDiagonal& model) {
+bool OrbitalChart::supports_rotation_frame(int n_bf) const {
+  if (!active_subspace_gauge_) return false;
   // Only the complete, unconstrained full-AO quotient has a bijective frame
   // map. HAO/selected-space charts keep their constrained local model.
   for (const auto& block : block_bases_)
     for (const auto& orbital : block.orbitals) {
-      if (orbital.local_parameter_size != input.n_basis_functions) return;
+      if (orbital.local_parameter_size != n_bf) return false;
       for (int row = 0; row < orbital.local_parameter_size; ++row)
-        if (block.basis_function_indices[orbital.block_rows[row]] != row) return;
+        if (block.basis_function_indices[orbital.block_rows[row]] != row) return false;
     }
+  return true;
+}
+
+void OrbitalChart::build_rotation_inverse(
+    const OrbitalPreparationInput& input, const AnalyticOrbitalDiagonal& model) {
   const int n_core = (input.n_total_electrons - input.n_active_electrons) / 2;
   const int n_occ = n_core + input.n_active_orbitals;
   rotation_core_count_ = n_core;

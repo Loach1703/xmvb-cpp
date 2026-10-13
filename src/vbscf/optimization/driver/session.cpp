@@ -66,7 +66,10 @@ void prepare_orbital_curvature(
           : nullptr;
   chart.set_curvature(
       objective.input().orbital_preparation_input, one_electron,
-      hessian_diagonal ? &*hessian_diagonal : nullptr);
+      hessian_diagonal ? &*hessian_diagonal : nullptr,
+      need_ah_mapping && preconditioner == OrbitalPreconditioner::HessianDiagonal
+          ? OrbitalChart::CurvatureUse::AugmentedHessian
+          : OrbitalChart::CurvatureUse::PositiveBlock);
 }
 
 OrbitalChart build_orbital_chart(

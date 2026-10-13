@@ -705,7 +705,8 @@ OrbitalChart::OrbitalChart(
 void OrbitalChart::set_curvature(
     const OrbitalPreparationInput& input,
     const Eigen::MatrixXd* ao_effective_h1e,
-    const AnalyticOrbitalDiagonal* hessian_diagonal) {
+    const AnalyticOrbitalDiagonal* hessian_diagonal,
+    CurvatureUse use) {
   if (ao_effective_h1e != nullptr &&
       (ao_effective_h1e->rows() != input.n_basis_functions ||
        ao_effective_h1e->cols() != input.n_basis_functions)) {
@@ -719,6 +720,13 @@ void OrbitalChart::set_curvature(
     throw std::invalid_argument("analytic Hessian diagonal shape mismatch");
   }
 
+  const bool rotation_frame = hessian_diagonal &&
+      supports_rotation_frame(input.n_basis_functions);
+  // Full-OEO AH uses the analytic frame inverse, not a local spectral inverse.
+  // Positive blocks remain necessary for TN/L-BFGS, state averaging, and the
+  // explicitly selected one-electron CIAH preconditioner.
+  const bool frame_only = rotation_frame && ao_effective_h1e == nullptr &&
+      use == CurvatureUse::AugmentedHessian;
   const int n_inactive = (input.n_total_electrons - input.n_active_electrons) / 2;
   const Eigen::Map<const Eigen::MatrixXd> ao_overlap(
       input.ao_overlap_matrix.data(), input.n_basis_functions, input.n_basis_functions);
@@ -746,7 +754,7 @@ void OrbitalChart::set_curvature(
       const int stored_count = stored_sparse_orbital_coefficient_count(input, proj.orbital_index);
       // Only materialize the local metric while factoring the preconditioner;
       // full-AO orbitals retain one shared base and two radial vectors each.
-      const Eigen::MatrixXd coordinate_metric = whiten_tangent_
+      const Eigen::MatrixXd coordinate_metric = whiten_tangent_ || frame_only
           ? Eigen::MatrixXd() : (proj.coordinate_base->metric() -
               proj.coordinate_projection * proj.coordinate_projection.transpose()).eval();
       // Pull back the normalized, inactive-projected one-electron surrogate
@@ -822,6 +830,18 @@ void OrbitalChart::set_curvature(
         proj.ah_rotation_components.noalias() =
             mo.rightCols(n_external).transpose() * ao_overlap * physical_direction;
         const auto& components = proj.ah_rotation_components;
+        if (frame_only) {
+          // diag(E^T D E) is a weighted column-square sum; no q-by-q
+          // curvature, eigensystem, positive reconstruction or inverse.
+          proj.hessian_diagonal =
+              (components.array().square().colwise() * rotation_weights.array())
+                  .colwise().sum().transpose().matrix();
+          proj.curvature_diagonal = normalize_curvature_diagonal(proj.hessian_diagonal);
+          proj.curvature_block.resize(0, 0);
+          proj.inverse_curvature_block.resize(0, 0);
+          has_reduced_curvature_diagonal_ = true;
+          continue;
+        }
         const Eigen::MatrixXd block_curvature =
             components.transpose() * rotation_weights.asDiagonal() * components;
         const Eigen::VectorXd curvature = block_curvature.diagonal();
@@ -877,7 +897,7 @@ void OrbitalChart::set_curvature(
 
     }
   }
-  if (hessian_diagonal && active_subspace_gauge_)
+  if (rotation_frame)
     build_rotation_inverse(input, *hessian_diagonal);
 }
 
@@ -1176,11 +1196,8 @@ Eigen::VectorXd OrbitalChart::apply_reduced_curvature(
                 p.local_reduced_size);
         continue;
       }
-      if (p.curvature_diagonal.size() == 0) continue;
-      assert(p.curvature_diagonal.size() == p.local_reduced_size);
-      assert(p.curvature_diagonal.allFinite());
-      out.segment(p.local_reduced_offset, p.local_reduced_size).array() *=
-          p.curvature_diagonal.array();
+      if (p.local_reduced_size > 0)
+        throw std::logic_error("positive curvature action requires positive blocks");
     }
   }
   return out.allFinite() ? out : reduced_vector;
