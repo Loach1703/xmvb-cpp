@@ -43,6 +43,17 @@ public:
     return energy_ + gradient_.dot(step_) + 0.5 * step_.dot(image_);
   }
 
+  /** @brief An exact keyframe contradicts the segment's predicted descent.
+   * Compare both energies to the last true anchor before refreshing it.
+   * This stops extrapolation of an invalid model, not outer convergence.
+   */
+  bool descent_mismatch(double exact_energy) const {
+    return energy() < energy_ && exact_energy >= energy_;
+  }
+
+  /** @brief Last true keyframe energy, without subsequent model increments. */
+  double anchor_energy() const noexcept { return energy_; }
+
   /** @brief Incremental displacement since the last accepted keyframe. */
   const Eigen::VectorXd& displacement() const noexcept { return step_; }
 
@@ -95,6 +106,21 @@ struct CiahResult {
   int new_hvp_actions = 0;
   /** No further subspace expansion is available. */
   bool exhaustion = false;
+};
+
+/** @brief Direction from the lowest origin-gradient AH root in the retained span.
+ *
+ * This is an unscaled direction, not a certified Ritz Newton step. The tail
+ * is not divided by its reference component, which may be zero for a pure
+ * negative-curvature direction. No convergence claim accompanies this ray.
+ */
+struct CiahOriginRay {
+  Eigen::VectorXd step, hessian_step;
+  /** Absolute reference weight of the generalized-normalized eigenvector. */
+  double reference_component = 0.0;
+  double eigenvalue = 0.0;
+  /** Coordinate norm of the full augmented residual before clipping. */
+  double residual_norm = 0.0;
 };
 
 /** @brief Trial-space inverse spectrum, diagnostic only, not a stopping rule. */
@@ -168,6 +194,17 @@ public:
 
   /** Append the previous residual direction, then return the next AH root. */
   CiahResult next(const Eigen::VectorXd& current_gradient);
+
+  /** @brief Re-solve the lowest AH root at an origin gradient using cached data.
+   *
+   * Requires a completed Ritz solve in the retained span. This does not
+   * expand the basis, apply H or G, precondition, or evaluate a physical norm.
+   * Returns no ray if that span contains no nonzero descent or negative-
+   * curvature direction. Intended for one macro rejection recovery attempt,
+   * not as an additional microiteration or convergence criterion.
+   */
+  std::optional<CiahOriginRay> origin_ray(
+      const Eigen::VectorXd& origin_gradient) const;
 
   int basis_size() const noexcept {
     return static_cast<int>(basis_.size());

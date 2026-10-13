@@ -292,6 +292,7 @@ bool build_ciah_macro_step(
   bool audit_next_keyframe_step = false;
   bool audited_keyframe_step = false;
   bool audited_origin_step = false;
+  bool energy_model_stopped = false;
   const char* micro_stop = "unset";
   CiahResult candidate;
   setup_phase.stop();
@@ -447,6 +448,18 @@ bool build_ciah_macro_step(
             mismatch_orbital, std::max(0.0,mismatch_norm*mismatch_norm-mismatch_orbital*mismatch_orbital));
       }
       if (keep_keyframe) {
+        // Gradient agreement alone can miss an energy model that predicts
+        // descent while its exact segment climbs. Do not extrapolate that
+        // frozen curvature further. Keep this actual keyframe displacement
+        // for the normal relaxed-CI macro trial; it may still lower energy.
+        if (energy_model.descent_mismatch(exact.energy)) {
+          energy_model_stopped = true;
+          micro_stop = "keyframe_energy_model";
+          diagnostics::neo_trace("ciah_keyframe_energy_model",
+              "anchor=%.17g,predicted=%.17g,actual=%.17g,stop=1",
+              energy_model.anchor_energy(),energy_model.energy(),exact.energy);
+          break;
+        }
         diagnostics::ScopedPhase refresh_phase(diagnostics::Phase::CiahRefresh);
         predicted_gradient = exact.gradient;
         energy_model.refresh(exact.energy, exact.gradient);
@@ -523,14 +536,6 @@ bool build_ciah_macro_step(
         spectrum.preconditioned_min, spectrum.preconditioned_max);
   }
 
-  accepted->parameters = build_nonredundant_lifted_trial_parameters(
-      orbitals, chart, layout, displacement.head(no));
-  if ((accepted->parameters - layout.pack(orbitals)).norm() <=
-      std::numeric_limits<double>::epsilon() * layout.pack(orbitals).norm() &&
-      !keyframes.available()) {
-    result->termination_reason = "ciah_zero_macro_step";
-    return false;
-  }
   // PySCF commits the coupled keyframe sequence and then reoptimizes CI.
   // It does not veto that sequence with the original frozen trust model.
   // Backtrack along evaluated nonlinear keyframes before scaling an origin
@@ -541,6 +546,50 @@ bool build_ciah_macro_step(
   double last_ritz_norm = candidate.residual_norm;
   double last_eigenvalue = candidate.eigenvalue;
   bool last_converged = candidate.converged, keyframe_backtracked = false;
+  bool origin_restarted = false;
+  // Keyframe corrections can turn the accumulated path into an uphill ray
+  // from the macro origin. Shrinking that ray cannot restore local descent.
+  // Re-solve the ORIGIN augmented model in the already retained AH space;
+  // its lowest root supplies descent or negative curvature without a new HVP.
+  const auto restart_origin = [&]() {
+    if (origin_restarted) return false;
+    const auto ray = workspace.origin_ray(initial_gradient);
+    if (!ray) return false;
+    double largest = chart.maximum_rotation_component(ray->step.head(no));
+    if (ns) largest = std::max(largest,
+        structure.maximum_coefficient_component_coordinates(ray->step.tail(ns)));
+    if (!(largest > 0.0)) return false;
+    // Clip BEFORE dividing by a possibly tiny AH reference component. A
+    // Hessian-only negative-curvature root has alpha=0 and uses the same cap.
+    const double factor = largest > max_component * ray->reference_component
+        ? max_component / largest : 1.0 / ray->reference_component;
+    displacement = factor * ray->step;
+    hessian_displacement = factor * ray->hessian_step;
+    last_step = displacement;
+    linear = initial_gradient.dot(displacement);
+    quadratic = displacement.dot(hessian_displacement);
+    final_reduction = -linear - 0.5 * quadratic;
+    last_ritz_norm = ray->residual_norm;
+    last_eigenvalue = ray->eigenvalue;
+    last_converged = false;
+    scale = 1.0;
+    origin_restarted = true;
+    accepted->parameters = build_nonredundant_lifted_trial_parameters(
+        orbitals, chart, layout, displacement.head(no));
+    diagnostics::neo_trace("ciah_origin_restart",
+        "basis=%d,linear=%.17g,quadratic=%.17g,alpha=%.17g,eigenvalue=%.17g,residual=%.17g,hvp_added=0",
+        workspace.basis_size(),linear,quadratic,ray->reference_component,
+        ray->eigenvalue,ray->residual_norm);
+    return true;
+  };
+  accepted->parameters = build_nonredundant_lifted_trial_parameters(
+      orbitals, chart, layout, displacement.head(no));
+  if ((accepted->parameters - layout.pack(orbitals)).norm() <=
+      std::numeric_limits<double>::epsilon() * layout.pack(orbitals).norm() &&
+      !keyframes.available() && !restart_origin()) {
+    result->termination_reason = "ciah_zero_macro_step";
+    return false;
+  }
   double accepted_prediction = 0.0;
   while (true) {
     diagnostics::ScopedPhase trial_phase(diagnostics::Phase::CiahTrial, true);
@@ -587,8 +636,10 @@ bool build_ciah_macro_step(
           orbitals,chart,layout,displacement.head(no));
       continue;
     }
+    if ((energy_model_stopped || linear >= 0.0) && restart_origin()) continue;
     scale *= 0.5;
     if (scale * metric.norm(displacement.head(no)) <= options.minimum_step_size) {
+      if (restart_origin()) continue;
       // Failure evidence from existing quantities only: no gradient, HVP or
       // metric inverse is added, and the acceptance policy is unchanged.
       std::fprintf(stderr,
@@ -684,9 +735,10 @@ bool build_ciah_macro_step(
   record->kkt_residual_norm = last_ritz_norm;
   record->kkt_residual_target = ciah_options.tolerance;
   record->shift = -last_eigenvalue;
-  // The recorded AH residual belongs to the last microstep, not the complete
-  // nonlinear macro displacement.
-  record->approximate_step = !last_converged || scale < 1.0 || keyframe_backtracked;
+  // This is the last microstep Ritz residual, or the unscaled origin-root
+  // residual after restart. Neither certifies the accepted nonlinear step.
+  record->approximate_step = !last_converged || scale < 1.0 ||
+      keyframe_backtracked || origin_restarted || energy_model_stopped;
   return true;
 }
 

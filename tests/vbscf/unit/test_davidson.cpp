@@ -4,6 +4,8 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -249,6 +251,156 @@ bool run_recycled_case() {
   return passed;
 }
 
+bool run_residual_preconditioner_case() {
+  constexpr int dimension = 160;
+  constexpr int n_roots = 4;
+  const DenseProblem problem = make_nonorthogonal_problem(dimension);
+  const xmvb::core::GeneralizedEigenAction action =
+      [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
+        return xmvb::core::GeneralizedEigenActionResult{
+            problem.hamiltonian * vectors,
+            problem.overlap * vectors};
+      };
+  const xmvb::core::GeneralizedEigensolver solver;
+  const auto reference = solver.solve_dense(
+      flatten(problem.hamiltonian), flatten(problem.overlap), dimension);
+  xmvb::core::DavidsonOptions options{
+      n_roots, 4 * dimension, 128, 1.0, 2.0e-8, 2.0e-8};
+  const auto diagonal = solver.solve_davidson(
+      action, problem.hamiltonian.diagonal(),
+      problem.overlap.diagonal(), options);
+
+  int inverse_calls = 0;
+  int observed_iterations = 0;
+  bool observations_valid = true;
+  double last_energy = 0.0;
+  double last_relative_residual = 0.0;
+  options.residual_preconditioner =
+      [&](const Eigen::VectorXd& residual, double energy) {
+        ++inverse_calls;
+        Eigen::VectorXd inverse_image(residual.size());
+        for (Eigen::Index row = 0; row < residual.size(); ++row) {
+          double denominator =
+              problem.hamiltonian(row, row) -
+              energy * problem.overlap(row, row);
+          const double floor =
+              std::sqrt(std::numeric_limits<double>::epsilon()) *
+              std::max({1.0, std::abs(problem.hamiltonian(row, row)),
+                        std::abs(energy * problem.overlap(row, row))});
+          if (std::abs(denominator) < floor) {
+            denominator = std::copysign(
+                floor, denominator == 0.0 ? 1.0 : denominator);
+          }
+          inverse_image[row] = residual[row] / denominator;
+        }
+        return inverse_image;
+      };
+  options.observe_iteration =
+      [&](int iteration, int active_subspace, double lowest_energy,
+          double largest_relative_residual) {
+        observations_valid = observations_valid &&
+            iteration == ++observed_iterations &&
+            active_subspace >= n_roots &&
+            active_subspace <= options.max_subspace_dimension &&
+            std::isfinite(lowest_energy) &&
+            std::isfinite(largest_relative_residual) &&
+            largest_relative_residual >= 0.0;
+        last_energy = lowest_energy;
+        last_relative_residual = largest_relative_residual;
+      };
+  const auto preconditioned = solver.solve_davidson(
+      action, problem.hamiltonian.diagonal(),
+      problem.overlap.diagonal(), options);
+  const Eigen::Map<const Eigen::MatrixXd> roots(
+      preconditioned.eigenpairs.eigenvector_matrix.data(),
+      dimension, n_roots);
+  double max_explicit_relative_residual = 0.0;
+  double max_reported_residual_error = 0.0;
+  for (int root = 0; root < n_roots; ++root) {
+    const double energy = preconditioned.eigenpairs.eigenvalues[root];
+    const Eigen::VectorXd h_image = problem.hamiltonian * roots.col(root);
+    const Eigen::VectorXd s_image = problem.overlap * roots.col(root);
+    const double relative_residual =
+        (h_image - energy * s_image).norm() /
+        std::max(1.0, h_image.norm() + std::abs(energy) * s_image.norm());
+    max_explicit_relative_residual =
+        std::max(max_explicit_relative_residual, relative_residual);
+    max_reported_residual_error = std::max(
+        max_reported_residual_error,
+        std::abs(relative_residual -
+                 preconditioned.relative_residual_norms[root]));
+  }
+  const double reported_max = *std::max_element(
+      preconditioned.relative_residual_norms.begin(),
+      preconditioned.relative_residual_norms.end());
+  const bool passed =
+      inverse_calls > 0 && observations_valid &&
+      observed_iterations == preconditioned.iterations &&
+      last_energy == preconditioned.eigenpairs.eigenvalues[0] &&
+      last_relative_residual == reported_max &&
+      max_eigenvalue_error(
+          reference.eigenvalues, preconditioned.eigenpairs.eigenvalues,
+          n_roots) <= 1.0e-8 &&
+      max_eigenvalue_error(
+          diagonal.eigenpairs.eigenvalues,
+          preconditioned.eigenpairs.eigenvalues, n_roots) <= 1.0e-10 &&
+      s_orthonormality_error(
+          preconditioned.eigenpairs.eigenvector_matrix,
+          problem.overlap, n_roots) <= 1.0e-10 &&
+      max_explicit_relative_residual <= options.residual_tolerance &&
+      max_reported_residual_error <= 1.0e-12;
+  std::cout << "nonorthogonal callback inverse"
+            << " calls=" << inverse_calls
+            << " observations=" << observed_iterations
+            << " iterations=" << preconditioned.iterations
+            << " residual=" << max_explicit_relative_residual
+            << (passed ? " PASS\n" : " FAIL\n");
+  return passed;
+}
+
+bool run_invalid_residual_preconditioner_cases() {
+  constexpr int dimension = 8;
+  const DenseProblem problem = make_tridiagonal_problem(dimension);
+  const xmvb::core::GeneralizedEigenAction action =
+      [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
+        return xmvb::core::GeneralizedEigenActionResult{
+            problem.hamiltonian * vectors,
+            problem.overlap * vectors};
+      };
+  Eigen::MatrixXd initial = Eigen::MatrixXd::Zero(dimension, 2);
+  initial(0, 0) = 1.0;
+  initial(1, 1) = 1.0;
+  auto options = xmvb::core::make_davidson_options(
+      dimension, 1, 1.0e-7, 1.0e-8, 1.0e-8);
+  const xmvb::core::GeneralizedEigensolver solver;
+  auto rejects = [&](auto inverse) {
+    options.residual_preconditioner = inverse;
+    try {
+      solver.solve_davidson(
+          action, problem.hamiltonian.diagonal(),
+          problem.overlap.diagonal(), initial, options);
+    } catch (const std::runtime_error& error) {
+      return std::string(error.what()).find(
+          "residual preconditioner returned an invalid vector") !=
+          std::string::npos;
+    }
+    return false;
+  };
+  const bool wrong_size = rejects([](const Eigen::VectorXd&, double) {
+    Eigen::VectorXd result = Eigen::VectorXd::Zero(dimension - 1);
+    return result;
+  });
+  const bool nonfinite = rejects([](const Eigen::VectorXd&, double) {
+    Eigen::VectorXd result = Eigen::VectorXd::Zero(dimension);
+    result[0] = std::numeric_limits<double>::quiet_NaN();
+    return result;
+  });
+  const bool passed = wrong_size && nonfinite;
+  std::cout << "invalid callback inverse"
+            << (passed ? " PASS\n" : " FAIL\n");
+  return passed;
+}
+
 bool run_physical_residual_case() {
   constexpr double scale = 1.0e-4;
   const Eigen::Vector3d energies(1.0, 2.0, 4.0);
@@ -468,6 +620,8 @@ int main() {
                2.0e-5) &&
       passed;
   passed = run_recycled_case() && passed;
+  passed = run_residual_preconditioner_case() && passed;
+  passed = run_invalid_residual_preconditioner_cases() && passed;
   passed = run_outer_accuracy_case() && passed;
   passed = run_physical_residual_case() && passed;
   passed = run_bounded_multiroot_restart_case() && passed;

@@ -175,4 +175,12 @@ Eigen::MatrixXd StructureMetricInverse::apply(
   return result;
 }
 
+void StructureMetricInverse::rebind(const StructureAction& action) {
+  if (action.n_structures_ != action_->n_structures_ ||
+      action.n_unique_alpha_ != action_->n_unique_alpha_ ||
+      action.n_unique_beta_ != action_->n_unique_beta_)
+    throw std::invalid_argument("moved structure metric action has different dimensions");
+  action_ = &action;
+}
+
 }  // namespace xmvb::vb

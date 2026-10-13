@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -16,6 +17,7 @@
 namespace {
 
 using xmvb::vb::CiahOptions;
+using xmvb::vb::CiahOriginRay;
 using xmvb::vb::CiahResult;
 using xmvb::vb::CiahWorkspace;
 using xmvb::vb::NeoProblem;
@@ -219,6 +221,134 @@ void check_indefinite_root_selection() {
   check_images_and_residual(hessian, metric, gradient, result);
 }
 
+void check_origin_ray_residual(const CiahOriginRay& ray,
+    const Eigen::MatrixXd& hessian, const Eigen::MatrixXd& metric,
+    const Eigen::VectorXd& gradient) {
+  require_close(ray.hessian_step, hessian * ray.step, 2.0e-12,
+      "origin ray Hessian image does not match the cached action");
+  const Eigen::VectorXd image = hessian * ray.step -
+      ray.eigenvalue * metric * ray.step;
+  const double expected = std::min(
+      (image + ray.reference_component * gradient).stableNorm(),
+      (image - ray.reference_component * gradient).stableNorm());
+  require(std::abs(ray.residual_norm - expected) <
+      2.0e-11 * std::max(1.0, expected),
+      "origin ray full augmented residual is inconsistent");
+}
+
+void check_cached_origin_ray() {
+  const Eigen::MatrixXd metric = Eigen::MatrixXd::Identity(1, 1);
+  for (const double curvature : {2.0, -100.0}) {
+    Eigen::MatrixXd hessian = Eigen::MatrixXd::Constant(1, 1, curvature);
+    const Eigen::VectorXd gradient = Eigen::VectorXd::Constant(
+        1, curvature > 0.0 ? 1.0 : 0.001);
+    int h_calls = 0, g_calls = 0, full_norm_calls = 0;
+    int preconditioner_calls = 0, coordinate_norm_calls = 0;
+    const NeoProblem problem = dense_problem(
+        hessian, metric, gradient, &h_calls, &g_calls, &full_norm_calls);
+    CiahOptions options;
+    options.coordinate_norm = [&](const Eigen::VectorXd& v) {
+      ++coordinate_norm_calls;
+      return v.norm();
+    };
+    options.residual_preconditioner =
+        [&](const Eigen::VectorXd& v, double) {
+          ++preconditioner_calls;
+          return v;
+        };
+    CiahWorkspace workspace(problem, Eigen::VectorXd::Ones(1), options);
+    const CiahResult usual = workspace.next(gradient);
+    const int h_before = h_calls, g_before = g_calls;
+    const int norm_before = full_norm_calls;
+    const int preconditioner_before = preconditioner_calls;
+    const int coordinate_before = coordinate_norm_calls;
+    const auto ray = workspace.origin_ray(gradient);
+    require(ray.has_value(), "cached origin AH has no ray in a one-dimensional span");
+    require(h_calls == h_before && g_calls == g_before &&
+        full_norm_calls == norm_before &&
+        preconditioner_calls == preconditioner_before &&
+        coordinate_norm_calls == coordinate_before + 1,
+        "origin ray reevaluated an operator or physical norm, or missed its coordinate norm");
+    require(gradient.dot(ray->step) < 0.0,
+        "origin AH ray did not orient against its gradient");
+    require(std::abs(ray->eigenvalue -
+        0.5 * (curvature - std::sqrt(curvature * curvature +
+                                     4.0 * gradient.squaredNorm()))) < 1.0e-11,
+        "origin ray did not select the lowest AH eigenvalue");
+    check_origin_ray_residual(*ray, hessian, metric, gradient);
+    if (curvature < 0.0) {
+      require(usual.eigenvalue > 0.0 && ray->eigenvalue < -99.0 &&
+          ray->reference_component < 0.1,
+          "weakly coupled negative mode did not bypass the usual root filter");
+    }
+  }
+
+  Eigen::Matrix2d hessian = Eigen::Matrix2d::Zero();
+  hessian.diagonal() << -100.0, 2.0;
+  const Eigen::Matrix2d two_metric = Eigen::Matrix2d::Identity();
+  const Eigen::Vector2d gradient(0.0, 1.0);
+  int h_calls = 0, g_calls = 0, full_norm_calls = 0;
+  const NeoProblem problem = dense_problem(
+      hessian, two_metric, gradient, &h_calls, &g_calls, &full_norm_calls);
+  CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 0));
+  const CiahResult usual = workspace.next(gradient);
+  require(usual.basis_size == 1 && usual.eigenvalue == 0.0,
+      "zero-reference fixture unexpectedly captured the full gradient");
+  const auto ray = workspace.origin_ray(gradient);
+  require(ray && ray->reference_component < 1.0e-14 &&
+      gradient.dot(ray->step) == 0.0 &&
+      ray->step.dot(ray->hessian_step) < 0.0,
+      "zero-reference negative-curvature tail was discarded");
+  check_origin_ray_residual(*ray, hessian, two_metric, gradient);
+  require(workspace.projected_dual_norm(gradient) == 0.0 &&
+      gradient.norm() > 0.0 && h_calls == 1 && g_calls == 1 &&
+      full_norm_calls == 0,
+      "zero-reference ray falsely captured the gradient or repeated an action");
+
+  const Eigen::Matrix2d positive_hessian =
+      Eigen::Vector2d(2.0, 3.0).asDiagonal();
+  const Eigen::Matrix2d positive_metric =
+      Eigen::Vector2d(2.0, 1.0).asDiagonal();
+  const Eigen::Vector2d oblique_gradient(1.0, 1.0);
+  const NeoProblem oblique_problem = dense_problem(
+      positive_hessian, positive_metric, oblique_gradient);
+  CiahWorkspace oblique(oblique_problem, Eigen::VectorXd::Unit(2, 0));
+  oblique.next(oblique_gradient);
+  const auto oblique_ray = oblique.origin_ray(oblique_gradient);
+  require(oblique_ray && oblique_ray->residual_norm > 0.5,
+      "origin-ray fixture did not retain a full-space residual");
+  check_origin_ray_residual(*oblique_ray, positive_hessian,
+      positive_metric, oblique_gradient);
+}
+
+void check_origin_ray_macro_energy() {
+  const Eigen::MatrixXd hessian = Eigen::MatrixXd::Constant(1, 1, -20.0 / 3.0);
+  const Eigen::MatrixXd metric = Eigen::MatrixXd::Identity(1, 1);
+  const Eigen::VectorXd gradient = Eigen::VectorXd::Ones(1);
+  const NeoProblem problem = dense_problem(hessian, metric, gradient);
+  CiahWorkspace workspace(problem, gradient);
+  workspace.next(gradient);
+  const auto ray = workspace.origin_ray(gradient);
+  require(ray.has_value(), "origin AH ray missing in macro energy fixture");
+  const double max_component = ray->step.cwiseAbs().maxCoeff();
+  const double alpha_scale = ray->reference_component > 0.0
+      ? 1.0 / ray->reference_component
+      : std::numeric_limits<double>::infinity();
+  const double factor = std::min(alpha_scale, 0.03 / max_component);
+  const double clipped = factor * ray->step[0];
+  require(clipped < 0.0 && std::abs(clipped) <= 0.03 + 1.0e-15,
+      "origin ray clipping did not give a bounded descending trial");
+  const auto energy = [](double x) {
+    return x - (10.0 / 3.0) * x * x - 900.0 * x * x * x;
+  };
+  for (int j = 0; j < 6; ++j) {
+    const double fraction = std::ldexp(1.0, -j);
+    require(energy(0.03 * fraction) > 0.0 &&
+        energy(clipped * fraction) < 0.0,
+        "origin ray did not repair the uphill cumulative macro ray");
+  }
+}
+
 void check_gradient_refresh_and_preconditioner() {
   Eigen::Matrix2d hessian;
   hessian << 3.0, 0.0,
@@ -402,6 +532,10 @@ void check_keyframe_energy_model() {
   require(std::abs(model.energy() -
       (-10.0 + g0.dot(first) + 0.5 * first.dot(h * first))) < 1e-13,
       "CIAH origin energy model is inconsistent");
+  require(model.anchor_energy() == -10.0 &&
+      model.descent_mismatch(-9.99) && model.descent_mismatch(-10.0) &&
+      !model.descent_mismatch(-10.08),
+      "CIAH failed to distinguish true descent from an energy-sign mismatch");
   const Eigen::Vector2d gkf(0.4, -0.1);
   model.refresh(-10.08, gkf);
   require(model.displacement().norm() == 0.0,
@@ -415,9 +549,14 @@ void check_keyframe_energy_model() {
   require(std::abs(model.energy() -
       (-10.08 + gkf.dot(second) + 0.5 * second.dot(h * second))) < 1e-13,
       "CIAH model includes displacement preceding the keyframe");
+  require(model.anchor_energy() == -10.08 &&
+      model.descent_mismatch(-10.075),
+      "CIAH compared a keyframe segment with the obsolete macro energy");
   model.remove(second, h * second);
   require(std::abs(model.energy() + 10.08) < 1e-13,
       "CIAH rejected microstep was not removed from the energy model");
+  require(!model.descent_mismatch(-10.07),
+      "CIAH invented a descent prediction for an empty keyframe segment");
 }
 
 /** @brief A converged AH root must not create another old-residual action. */
@@ -665,6 +804,8 @@ int main() {
   try {
     check_anisotropic_spd();
     check_indefinite_root_selection();
+    check_cached_origin_ray();
+    check_origin_ray_macro_energy();
     check_gradient_refresh_and_preconditioner();
     check_incremental_projection();
     check_metric_validation();

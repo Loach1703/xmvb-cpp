@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -1491,6 +1492,42 @@ void check_sigma_action() {
   require(full_metric.factor_bytes() < static_cast<std::size_t>(product_dimension) * product_dimension * sizeof(double) &&
               full_metric.max_block_size() == 6 && full_metric.block_count() == 19,
           "spin metric lost its occupation-block representation");
+  // Independent explicit pullback of the carrier diagonal, including BOTH
+  // Riesz maps. A single F^T D^-1 F is not a structure-coordinate inverse.
+  const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(product_dimension,product_dimension);
+  const Eigen::MatrixXd carriers = full_action.orthogonalize_structure_block(identity);
+  Eigen::MatrixXd f(product_dimension,product_dimension);
+  for (int column=0;column<product_dimension;++column)
+    for (int a=0;a<static_cast<int>(alpha.size());++a)
+      for (int b=0;b<static_cast<int>(beta.size());++b)
+        f(a*beta.size()+b,column)=carriers(a,column*beta.size()+b);
+  const Eigen::MatrixXd inverse_m = full_overlap.partialPivLu().solve(identity);
+  const double root_energy = diagonal.minCoeff()-1.0;
+  Eigen::VectorXd inverse_d(product_dimension);
+  for (int a=0;a<static_cast<int>(alpha.size());++a)
+    for (int b=0;b<static_cast<int>(beta.size());++b)
+      inverse_d[a*beta.size()+b]=1.0/(diagonal(a,b)-root_energy);
+  const Eigen::MatrixXd reference_p =
+      inverse_m*f.transpose()*inverse_d.asDiagonal()*f*inverse_m;
+  const Eigen::MatrixXd riesz = full_metric.apply(metric_rhs.leftCols(1));
+  const Eigen::MatrixXd carrier_image = full_action.apply_inverse_carrier_diagonal(
+      riesz,Eigen::VectorXd::Constant(1,root_energy),0.0);
+  const Eigen::MatrixXd correction = full_metric.apply(carrier_image);
+  const Eigen::MatrixXd expected_correction = reference_p*metric_rhs.leftCols(1);
+  require((correction-expected_correction).norm()<
+              1e-10*std::max(1.0,expected_correction.norm()),
+          "carrier Davidson inverse differs from the dense metric pullback");
+  auto original_action = std::make_unique<xmvb::vb::StructureAction>(
+      full_terms,product_dimension,topology,packed_overlap,
+      one_electron,two_electron,n_orbitals,&full_diagonal);
+  xmvb::vb::StructureMetricInverse moved_metric(
+      *original_action,topology.alpha_reuse_table.unique_determinants,
+      topology.beta_reuse_table.unique_determinants,true,65536,one_column_bytes);
+  xmvb::vb::StructureAction moved_action(std::move(*original_action));
+  moved_metric.rebind(moved_action);
+  original_action.reset();
+  require((moved_metric.apply(metric_rhs)-metric_solution).norm()<1e-11,
+          "moving a forward action invalidated its reusable metric factors");
   for (bool factor_limit : {true, false}) {
     require(!xmvb::vb::StructureMetricInverse::fits(
         full_action, topology.alpha_reuse_table.unique_determinants,

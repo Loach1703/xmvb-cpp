@@ -30,6 +30,12 @@ public:
 
   /** @brief Applies the overlap inverse, chunking RHS by the workspace budget. */
   Eigen::MatrixXd apply(const Eigen::Ref<const Eigen::MatrixXd>& rhs) const;
+
+  /** @brief Reuse the factors after their same-topology action has been moved.
+   * No factor or integral data are copied. The new action must outlive this
+   * inverse and retain the original spin-string/structure indexing.
+   */
+  void rebind(const StructureAction& action);
   std::size_t factor_bytes() const noexcept { return factor_bytes_; }
   std::size_t block_count() const noexcept { return blocks_.size(); }
   int max_block_size() const noexcept { return max_block_size_; }

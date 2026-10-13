@@ -542,12 +542,32 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
         if (physical_residual <= options.stationarity_tolerance) continue;
       }
       converged = false;
-      corrections.col(n_corrections) = precondition_residual(
-          hamiltonian_diagonal,
-          overlap_diagonal,
-          eigenvalue,
-          residual);
+      if (options.residual_preconditioner) {
+        Eigen::VectorXd correction =
+            options.residual_preconditioner(residual, eigenvalue);
+        if (correction.size() != dimension || !correction.allFinite()) {
+          throw std::runtime_error(
+              "Davidson residual preconditioner returned an invalid vector");
+        }
+        corrections.col(n_corrections) = -correction;
+      } else {
+        corrections.col(n_corrections) = precondition_residual(
+            hamiltonian_diagonal,
+            overlap_diagonal,
+            eigenvalue,
+            residual);
+      }
       ++n_corrections;
+    }
+
+    if (options.observe_iteration) {
+      options.observe_iteration(
+          iteration,
+          active_dimension,
+          projected_eigenvalues[0],
+          *std::max_element(
+              result.relative_residual_norms.begin(),
+              result.relative_residual_norms.end()));
     }
 
     if (converged) {

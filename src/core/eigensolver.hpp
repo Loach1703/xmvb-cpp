@@ -61,6 +61,20 @@ struct DavidsonOptions {
    * constructing or inverting a dense overlap matrix.
    */
   std::function<double(const Eigen::VectorXd&, double)> physical_residual_norm = {};
+  /** @brief Optional inverse action on an algebraic residual covector.
+   * Given `(H - E S)c` and the Ritz energy E, return the positive inverse
+   * image in coefficient coordinates. The solver negates that image to form
+   * a Davidson correction. When unset, the diagonal `(H_ii - E S_ii)`
+   * preconditioner is used.
+   */
+  std::function<Eigen::VectorXd(const Eigen::VectorXd&, double)>
+      residual_preconditioner = {};
+  /** @brief Optional per-iteration observation after all root residuals are
+   * evaluated, including the final converged iteration. The arguments are
+   * iteration number, active subspace size, lowest Ritz energy, and largest
+   * algebraic relative residual among the requested roots.
+   */
+  std::function<void(int, int, double, double)> observe_iteration = {};
 };
 
 /**

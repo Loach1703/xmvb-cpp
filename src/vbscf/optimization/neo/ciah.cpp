@@ -263,6 +263,73 @@ CiahInverseSpectrum CiahWorkspace::inverse_spectrum(double shift,
   return result;
 }
 
+std::optional<CiahOriginRay> CiahWorkspace::origin_ray(
+    const Eigen::VectorXd& origin_gradient) const {
+  if (origin_gradient.size() != problem_.size() ||
+      !origin_gradient.allFinite()) {
+    throw std::invalid_argument("invalid CIAH origin gradient");
+  }
+  const Eigen::Index m = basis_size();
+  if (!m) return std::nullopt;
+  if (projected_metric_.rows() != m || projected_metric_.cols() != m) {
+    throw std::logic_error("CIAH origin ray requires a completed Ritz solve");
+  }
+
+  // next() has certified the two cached projections and the metric rank.
+  const Eigen::MatrixXd raw_hessian = hessian_projection_.topLeftCorner(m, m);
+  const Eigen::MatrixXd projected_hessian =
+      0.5 * (raw_hessian + raw_hessian.transpose());
+  Eigen::VectorXd projected_gradient(m);
+  for (Eigen::Index i = 0; i < m; ++i)
+    projected_gradient[i] = basis_[i].dot(origin_gradient);
+  Eigen::MatrixXd augmented_hessian = Eigen::MatrixXd::Zero(m + 1, m + 1);
+  augmented_hessian.block(0, 1, 1, m) = projected_gradient.transpose();
+  augmented_hessian.block(1, 0, m, 1) = projected_gradient;
+  augmented_hessian.bottomRightCorner(m, m) = projected_hessian;
+  Eigen::MatrixXd augmented_metric = Eigen::MatrixXd::Identity(m + 1, m + 1);
+  augmented_metric.bottomRightCorner(m, m) = projected_metric_;
+  const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(
+      augmented_hessian, augmented_metric);
+  if (spectrum.info() != Eigen::Success ||
+      !spectrum.eigenvalues().allFinite() ||
+      !spectrum.eigenvectors().allFinite()) {
+    throw std::runtime_error("CIAH origin augmented eigensolver failed");
+  }
+
+  const Eigen::VectorXd coefficients = spectrum.eigenvectors().col(0).tail(m);
+  CiahOriginRay ray;
+  ray.eigenvalue = spectrum.eigenvalues()[0];
+  ray.reference_component = std::abs(spectrum.eigenvectors()(0, 0));
+  ray.step = Eigen::VectorXd::Zero(problem_.size());
+  ray.hessian_step = ray.step;
+  Eigen::VectorXd metric_step = ray.step;
+  for (Eigen::Index i = 0; i < m; ++i) {
+    ray.step.noalias() += coefficients[i] * basis_[i];
+    ray.hessian_step.noalias() += coefficients[i] * hessian_images_[i];
+    metric_step.noalias() += coefficients[i] * metric_images_[i];
+  }
+  const Eigen::VectorXd residual =
+      spectrum.eigenvectors()(0, 0) * origin_gradient + ray.hessian_step -
+      ray.eigenvalue * metric_step;
+  if (!ray.step.allFinite() || !ray.hessian_step.allFinite() ||
+      !residual.allFinite())
+    throw std::runtime_error("CIAH origin ray is invalid");
+  ray.residual_norm = options_.coordinate_norm
+      ? options_.coordinate_norm(residual)
+      : residual.stableNorm();
+  if (!(ray.residual_norm >= 0.0) || !std::isfinite(ray.residual_norm))
+    throw std::runtime_error("CIAH origin ray is invalid");
+  if (!(ray.step.stableNorm() > 0.0)) return std::nullopt;
+  if (origin_gradient.dot(ray.step) > 0.0) {
+    ray.step = -ray.step;
+    ray.hessian_step = -ray.hessian_step;
+  }
+  // A zero-slope tail is useful only if it exposes negative curvature.
+  if (!(origin_gradient.dot(ray.step) < 0.0 ||
+        ray.step.dot(ray.hessian_step) < 0.0)) return std::nullopt;
+  return ray;
+}
+
 CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   diagnostics::ScopedPhase next_phase(diagnostics::Phase::CiahNext);
   if (current_gradient.size() != problem_.size() ||
