@@ -10,6 +10,7 @@
 #include <Eigen/LU>
 
 #include "vbscf/optimization/neo/ciah.hpp"
+#include "core/metric_solve.hpp"
 #include "vbscf/optimization/backends/ciah.hpp"
 #include "vbscf/optimization/preconditioners/coarse.hpp"
 
@@ -64,7 +65,7 @@ void check_images_and_residual(
                 "CIAH returned an inconsistent Hessian image");
   require_close(result.metric_step, metric * result.step, 2.0e-12,
                 "CIAH returned an inconsistent metric image");
-  const Eigen::VectorXd expected = result.reference_weight *
+  const Eigen::VectorXd expected = result.reference_component *
       (gradient + hessian * result.step -
        result.eigenvalue * metric * result.step);
   // The eigenvector phase is free, so the stored residual may have either sign.
@@ -642,6 +643,59 @@ void check_deferred_norms() {
   require(next.basis_size == 2, "zero progress estimate suppressed a real residual direction");
 }
 
+/** @brief Complete inverse/defect identities, including cancellation and signed roots. */
+void check_inverse_reuse() {
+  using xmvb::core::MetricImage;
+  Eigen::Matrix3d metric;
+  metric << 3., .4, .2, .4, 2., .1, .2, .1, 1.;
+  const Eigen::Vector3d g(1., -2., .5), p(.3, .7, -.2), hp(.8, -.4, 1.);
+  const auto action = [&](const Eigen::VectorXd& v) -> Eigen::VectorXd { return metric*v; };
+  const auto inverse = [&](const Eigen::VectorXd& v) -> Eigen::VectorXd {
+    return v.cwiseQuotient(metric.diagonal());
+  };
+  const auto image = [&](const Eigen::VectorXd& rhs, const Eigen::VectorXd& error) {
+    Eigen::VectorXd x = metric.ldlt().solve(rhs) + error;
+    return MetricImage{x, rhs - metric*x};
+  };
+  for (double alpha : {-.7, .7}) for (double scale : {.2, 1.}) {
+    const double omega = -.3;
+    const Eigen::VectorXd r = alpha*(g + hp - omega*metric*p);
+    const MetricImage gi = image(g, Eigen::Vector3d(1e-8, 0., 0.));
+    const MetricImage ri = image(r, Eigen::Vector3d(0., -2e-8, 0.));
+    const auto combined = xmvb::vb::ciah_inverse_update(gi, ri, p, alpha, omega, scale);
+    const Eigen::VectorXd rhs = g + scale*hp;
+    require_close(combined.residual, rhs - metric*combined.inverse, 2e-15,
+                  "clipped inverse update lost the complete defect");
+    xmvb::core::MetricSolveWorkspace workspace(4);
+    xmvb::core::MetricSolveStats stats;
+    const auto corrected = workspace.image(rhs, action, inverse, &stats, &combined);
+    require((rhs-metric*corrected.inverse).norm() <=
+            std::sqrt(std::numeric_limits<double>::epsilon())*rhs.norm(),
+            "reused image failed the original true-residual test");
+    workspace.image(rhs, action, inverse, &stats);
+    require(stats.cache_hit && stats.actions == 0, "identical RHS repeated a metric action");
+  }
+  // Individually adequate images can be inadequate for a nearly cancelling difference.
+  const Eigen::VectorXd small = 1e-7*p;
+  const auto predicted = image(g, Eigen::Vector3d(1e-9, 0., 0.));
+  const auto actual = image(g+small, Eigen::Vector3d(0., 1e-9, 0.));
+  MetricImage difference{actual.inverse-predicted.inverse, actual.residual-predicted.residual};
+  require(difference.residual.norm() > 1e-8*small.norm(), "cancellation case is ineffective");
+  difference.residual.setZero(); // A stale advertised defect must not hide the true one.
+  xmvb::core::MetricSolveWorkspace workspace(4);
+  xmvb::core::MetricSolveStats stats;
+  const auto corrected = workspace.image(small, action, inverse, &stats, &difference);
+  require(stats.iterations > 0, "cancellation did not refine the inherited inverse");
+  require((small-metric*corrected.inverse).norm() <=
+          std::sqrt(std::numeric_limits<double>::epsilon())*small.norm(),
+          "cancellation refinement used the wrong RHS tolerance");
+  const Eigen::VectorXd other = .6*p;
+  const auto exact = image(other, Eigen::Vector3d::Zero());
+  workspace.image(other, action, inverse, &stats, &exact);
+  require(stats.actions == 1 && stats.iterations == 0,
+          "an exact propagated image unnecessarily entered CG");
+}
+
 }  // namespace
 
 int main() {
@@ -662,6 +716,7 @@ int main() {
     check_inverse_spectrum();
     check_restart_phase();
     check_deferred_norms();
+    check_inverse_reuse();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

@@ -311,6 +311,8 @@ bool build_ciah_macro_step(
   Eigen::VectorXd displacement = Eigen::VectorXd::Zero(dimension);
   Eigen::VectorXd hessian_displacement = displacement;
   Eigen::VectorXd predicted_gradient = initial_gradient;
+  core::MetricImage predicted_inverse{
+      Eigen::VectorXd::Zero(ns), Eigen::VectorXd::Zero(ns)};
   CiahEnergyModel energy_model(energy, initial_gradient);
   CiahKeyframes keyframes(energy);
   Eigen::VectorXd last_step = displacement;
@@ -339,6 +341,12 @@ bool build_ciah_macro_step(
         (candidate.basis_size >= ah_start_cycle &&
          candidate.residual_norm < ah_start_tolerance);
     if (!ready) continue;
+
+    // certify_norms has just measured this complete residual. Retrieve the
+    // retained structure image by RHS, independent of any diagnostic calls.
+    const core::MetricImage residual_inverse = ns
+        ? structure.metric_image(candidate.residual.tail(ns), &structure_metric)
+        : predicted_inverse;
 
     Eigen::VectorXd step = candidate.step;
     Eigen::VectorXd image = candidate.hessian_step;
@@ -405,6 +413,7 @@ bool build_ciah_macro_step(
       audited_keyframe_step = true;
     }
     const Eigen::VectorXd previous_gradient = predicted_gradient;
+    const core::MetricImage previous_inverse = predicted_inverse;
     const Eigen::VectorXd previous_step = last_step;
     displacement += step;
     hessian_displacement += image;
@@ -413,18 +422,26 @@ bool build_ciah_macro_step(
     last_step = step;
     ++micro_steps;
     ++since_keyframe;
-    const double predicted_norm = step_scale == 1.0
-        ? candidate.model_gradient_norm : dual_norm(predicted_gradient);
+    if (ns) predicted_inverse = ciah_inverse_update(previous_inverse, residual_inverse,
+        candidate.step.tail(ns), candidate.reference_component, candidate.eigenvalue, step_scale);
+    double predicted_norm = candidate.model_gradient_norm;
+    if (step_scale != 1.0) {
+      if (ns) predicted_inverse = structure.metric_image(
+          predicted_gradient.tail(ns), &structure_metric, &predicted_inverse);
+      predicted_norm = std::hypot(metric.dual_norm(predicted_gradient.head(no)),
+          ns ? predicted_inverse.norm(predicted_gradient.tail(ns)) : 0.0);
+    }
     diagnostics::neo_trace("ciah_micro",
         "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g",
         candidate.basis_size, micro_steps, candidate.eigenvalue,
-        candidate.reference_weight, candidate.residual_norm, predicted_norm,
+        candidate.reference_component, candidate.residual_norm, predicted_norm,
         step_scale, largest, candidate.residual.head(no).norm(), candidate.residual.tail(ns).norm());
     if (micro_steps > 3 && predicted_norm > gradient_trust * keyframe_norm) {
       displacement -= step;
       hessian_displacement -= image;
       energy_model.remove(step, image);
       predicted_gradient = previous_gradient;
+      predicted_inverse = previous_inverse;
       last_step = previous_step;
       ++record->rejected_trial_count;
       micro_stop = "gradient_growth";
@@ -453,9 +470,24 @@ bool build_ciah_macro_step(
         keyframe_interval - std::log(length + 1.0e-7));
     if (since_keyframe >= interval || predicted_norm < keyframe_norm / gradient_trust) {
       const Keyframe exact = evaluate_keyframe(displacement);
-      const double actual_norm = dual_norm(exact.gradient);
+      const core::MetricImage actual_inverse = ns
+          ? structure.metric_image(exact.gradient.tail(ns), &structure_metric)
+          : predicted_inverse;
+      const double actual_norm = std::hypot(metric.dual_norm(exact.gradient.head(no)),
+          ns ? actual_inverse.norm(exact.gradient.tail(ns)) : 0.0);
       const Eigen::VectorXd correction = exact.gradient - predicted_gradient;
-      const bool mismatch_small = norm_below(correction, gradient_trust * predicted_norm);
+      double mismatch_squared = std::pow(metric.dual_norm(correction.head(no)), 2);
+      const double mismatch_limit = gradient_trust * predicted_norm;
+      // An orbital lower bound may already settle rejection. Otherwise verify
+      // the difference of the retained complete inverse images, not a new RHS solve.
+      if (ns && mismatch_squared < mismatch_limit*mismatch_limit) {
+        const core::MetricImage seed{actual_inverse.inverse - predicted_inverse.inverse,
+                                    actual_inverse.residual - predicted_inverse.residual};
+        const auto mismatch_inverse = structure.metric_image(
+            correction.tail(ns), &structure_metric, &seed);
+        mismatch_squared += std::pow(mismatch_inverse.norm(correction.tail(ns)), 2);
+      }
+      const bool mismatch_small = mismatch_squared < mismatch_limit*mismatch_limit;
       const double mismatch_estimate = diagonal_norm(correction);
       if (diagnostics::neo_event_trace_enabled()) {
         const double captured = workspace.projected_dual_norm(correction);
@@ -507,6 +539,7 @@ bool build_ciah_macro_step(
       }
       if (keep_keyframe) {
         predicted_gradient = exact.gradient;
+        predicted_inverse = actual_inverse;
         energy_model.refresh(exact.energy, exact.gradient);
         diagnostics::neo_trace("ciah_model_refresh",
             "energy=%.17g,source_energy=%.17g,anchored_prediction=%.17g,origin_prediction=%.17g",
@@ -525,6 +558,7 @@ bool build_ciah_macro_step(
         hessian_displacement -= image;
         energy_model.remove(step, image);
         predicted_gradient = previous_gradient;
+        predicted_inverse = previous_inverse;
         last_step = previous_step;
         ++record->rejected_trial_count;
         micro_stop = "keyframe_mismatch";

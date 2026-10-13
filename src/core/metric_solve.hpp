@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -16,6 +17,20 @@ struct MetricSolveStats {
   int actions = 0;
   int certifications = 0;
   double relative_residual = 0.0;
+  bool cache_hit = false;
+};
+
+/** @brief Inverse image and its full linear defect, rhs - G * inverse. */
+struct MetricImage {
+  Eigen::VectorXd inverse;
+  Eigen::VectorXd residual;
+
+  double norm(const Eigen::VectorXd& rhs) const {
+    const double squared = rhs.dot(inverse);
+    if (!(squared >= 0.0) || !std::isfinite(squared))
+      throw std::runtime_error("invalid metric dual norm");
+    return std::sqrt(squared);
+  }
 };
 
 /** @brief Matrix-free SPD Riesz solve with a certified true residual.
@@ -181,9 +196,11 @@ public:
 
   template<class Action, class Inverse>
   Eigen::VectorXd solve(const Eigen::VectorXd& rhs, const Action& action,
-                       const Inverse& inverse, MetricSolveStats* stats = nullptr) {
+                       const Inverse& inverse, MetricSolveStats* stats = nullptr,
+                       const Eigen::VectorXd* seed = nullptr,
+                       Eigen::VectorXd* metric_image = nullptr) {
     Eigen::VectorXd initial = Eigen::VectorXd::Zero(rhs.size());
-    for (const auto& q : basis_) {
+    if (!seed) for (const auto& q : basis_) {
       if (q.size() != rhs.size()) throw std::invalid_argument("metric space size changed");
       initial.noalias() += q.dot(rhs) * q;
     }
@@ -199,14 +216,45 @@ public:
       return z;
     };
     Eigen::VectorXd solution = solve_metric(rhs, action, balanced_inverse, stats,
-        basis_.empty() ? nullptr : &initial, &image);
+        seed ? seed : basis_.empty() ? nullptr : &initial, &image);
     observe(solution, image);
+    if (metric_image) *metric_image = std::move(image);
     return solution;
+  }
+
+  /** @brief Retain the last complete inverse image; refine a supplied combination.
+   * A repeated RHS uses its already certified image. A new combined RHS uses
+   * one true metric action before any CG iterations. The absolute target is
+   * always based on this RHS, including when its ingredients nearly cancel.
+   */
+  template<class Action, class Inverse>
+  MetricImage image(const Eigen::VectorXd& rhs, const Action& action,
+                    const Inverse& inverse, MetricSolveStats* stats = nullptr,
+                    const MetricImage* seed = nullptr, bool recycle = true) {
+    if (last_rhs_.size() == rhs.size() && last_image_.inverse.size() == rhs.size() &&
+        (last_rhs_.array() == rhs.array()).all()) {
+      if (stats) {
+        *stats = {};
+        stats->cache_hit = true;
+        stats->relative_residual = rhs.isZero() ? 0.0 : last_image_.residual.norm()/rhs.norm();
+      }
+      return last_image_;
+    }
+    Eigen::VectorXd applied;
+    const Eigen::VectorXd* initial = seed ? &seed->inverse : nullptr;
+    Eigen::VectorXd x = recycle
+        ? solve(rhs, action, inverse, stats, initial, &applied)
+        : solve_metric(rhs, action, inverse, stats, initial, &applied);
+    last_rhs_ = rhs;
+    last_image_ = {std::move(x), rhs - applied};
+    return last_image_;
   }
 
 private:
   int capacity_;
   std::vector<Eigen::VectorXd> basis_, images_;
+  Eigen::VectorXd last_rhs_;
+  MetricImage last_image_;
 };
 
 }  // namespace xmvb::core

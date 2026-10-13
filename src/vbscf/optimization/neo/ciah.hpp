@@ -9,7 +9,17 @@
 
 #include "vbscf/optimization/neo/problem.hpp"
 
+namespace xmvb::core { struct MetricImage; }
+
 namespace xmvb::vb {
+
+/** @brief Propagate an inverse image and full defect through a clipped AH step.
+ * All arguments belong to the same fixed metric (or one metric block).
+ * alpha is signed. The result is a seed; its true residual is checked when used.
+ */
+core::MetricImage ciah_inverse_update(const core::MetricImage& gradient,
+    const core::MetricImage& residual, const Eigen::VectorXd& step,
+    double alpha, double omega, double scale);
 
 /** @brief Frozen curvature with an energy/gradient anchor refreshed at keyframes.
  *
@@ -75,8 +85,8 @@ struct CiahOptions {
 /** A Ritz candidate, including its exact matrix-free augmented residual. */
 struct CiahResult {
   double eigenvalue = 0.0;
-  /** Absolute reference component of the generalized-normalized Ritz vector. */
-  double reference_weight = 0.0;
+  /** Signed reference component of the generalized-normalized Ritz vector. */
+  double reference_component = 0.0;
   Eigen::VectorXd step;
   Eigen::VectorXd hessian_step;
   Eigen::VectorXd metric_step;

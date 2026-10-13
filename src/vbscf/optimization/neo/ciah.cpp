@@ -1,4 +1,5 @@
 #include "vbscf/optimization/neo/ciah.hpp"
+#include "core/metric_solve.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -344,7 +345,7 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   const Eigen::VectorXd coefficients =
       spectrum.eigenvectors().col(selected).tail(m) / alpha;
   result.eigenvalue = spectrum.eigenvalues()[selected];
-  result.reference_weight = std::abs(alpha);
+  result.reference_component = alpha;
   result.step = Eigen::VectorXd::Zero(problem_.size());
   result.hessian_step = result.step;
   result.metric_step = result.step;
@@ -404,12 +405,20 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
 void CiahWorkspace::certify_norms(CiahResult& result) const {
   if (result.norms_certified) return;
   result.residual_norm = problem_.dual_norm(result.residual);
-  const double scaled = result.residual_norm / result.reference_weight;
+  const double scaled = result.residual_norm / result.reference_component;
   const double squared = scaled * scaled + result.model_norm_offset;
   if (!(squared >= 0.0) || !std::isfinite(squared))
     throw std::runtime_error("CIAH model gradient norm is invalid");
   result.model_gradient_norm = std::sqrt(squared);
   result.norms_certified = true;
+}
+
+core::MetricImage ciah_inverse_update(const core::MetricImage& gradient,
+    const core::MetricImage& residual, const Eigen::VectorXd& step,
+    double alpha, double omega, double scale) {
+  return {
+      (1.0-scale)*gradient.inverse + (scale/alpha)*residual.inverse + (scale*omega)*step,
+      (1.0-scale)*gradient.residual + (scale/alpha)*residual.residual};
 }
 
 }  // namespace xmvb::vb

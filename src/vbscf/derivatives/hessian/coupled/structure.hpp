@@ -6,7 +6,7 @@
 #include <Eigen/Core>
 #include <Eigen/QR>
 
-namespace xmvb::core { class MetricSolveWorkspace; }
+namespace xmvb::core { class MetricSolveWorkspace; struct MetricImage; }
 
 namespace xmvb::vb {
 
@@ -186,6 +186,11 @@ public:
    */
   double dual_norm(const Eigen::VectorXd& covector,
       core::MetricSolveWorkspace* workspace = nullptr) const;
+
+  /** @brief Complete structure Riesz image, optionally refining a propagated image. */
+  core::MetricImage metric_image(const Eigen::VectorXd& covector,
+      core::MetricSolveWorkspace* workspace = nullptr,
+      const core::MetricImage* initial = nullptr) const;
 
   /** @brief Certified threshold comparison; a lower bound only permits rejection. */
   bool dual_norm_below(const Eigen::VectorXd& covector, double threshold,

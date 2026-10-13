@@ -467,6 +467,11 @@ Eigen::VectorXd StructureTangentOperator::apply_inverse_metric_model(
 
 double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector,
     core::MetricSolveWorkspace* workspace) const {
+  return metric_image(covector, workspace).norm(covector);
+}
+
+core::MetricImage StructureTangentOperator::metric_image(const Eigen::VectorXd& covector,
+    core::MetricSolveWorkspace* workspace, const core::MetricImage* initial) const {
   if (covector.size() != tangent_size() || !covector.allFinite())
     throw std::invalid_argument("invalid structure metric covector");
   const bool trace = diagnostics::neo_event_trace_enabled();
@@ -477,17 +482,23 @@ double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector,
   const auto precondition = [this](const Eigen::VectorXd& x) { return apply_inverse_metric_model(x); };
   // A complete-space inverse already solves in one CG step; recycle only the
   // selected-space solves that otherwise repeat long Krylov traversals.
-  const Eigen::VectorXd inverse = workspace && !metric_inverse_
-      ? workspace->solve(covector, action, precondition, trace ? &stats : nullptr)
-      : xmvb::core::solve_metric(covector, action, precondition, trace ? &stats : nullptr);
+  core::MetricImage result;
+  if (workspace) {
+    result = workspace->image(covector, action, precondition, trace ? &stats : nullptr,
+        initial, !metric_inverse_);
+  } else {
+    Eigen::VectorXd image;
+    result.inverse = core::solve_metric(covector, action, precondition,
+        trace ? &stats : nullptr, initial ? &initial->inverse : nullptr, &image);
+    result.residual = covector - image;
+  }
   if (trace) diagnostics::neo_trace("ciah_structure_norm",
-      "seconds=%.17g,iterations=%d,actions=%d,certifications=%d,relative_residual=%.17g",
+      "seconds=%.17g,iterations=%d,actions=%d,certifications=%d,relative_residual=%.17g,cache_hit=%d,seeded=%d,propagated_residual=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
-      stats.iterations, stats.actions, stats.certifications, stats.relative_residual);
-  const double squared = covector.dot(inverse);
-  if (!(squared >= 0.0) || !std::isfinite(squared))
-    throw std::runtime_error("invalid complete structure dual norm");
-  return std::sqrt(squared);
+      stats.iterations, stats.actions, stats.certifications, stats.relative_residual,
+      static_cast<int>(stats.cache_hit), static_cast<int>(initial != nullptr),
+      initial ? initial->residual.norm() : 0.0);
+  return result;
 }
 
 bool StructureTangentOperator::dual_norm_below(const Eigen::VectorXd& covector,
