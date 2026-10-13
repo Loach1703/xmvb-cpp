@@ -6,6 +6,8 @@
 #include <Eigen/Core>
 #include <Eigen/QR>
 
+namespace xmvb::core { class MetricSolveWorkspace; }
+
 namespace xmvb::vb {
 
 struct AcceptedPointContext;
@@ -182,7 +184,8 @@ public:
    * The matrix-free Riesz solve certifies its true residual at sqrt(machine
    * epsilon), matching the orbital metric's numerical accuracy contract.
    */
-  double dual_norm(const Eigen::VectorXd& covector) const;
+  double dual_norm(const Eigen::VectorXd& covector,
+      core::MetricSolveWorkspace* workspace = nullptr) const;
 
   /** @brief Positive Jacobi Riesz preconditioner, not a dual-norm substitute. */
   Eigen::VectorXd apply_inverse_metric_diagonal(const Eigen::VectorXd& covector) const;

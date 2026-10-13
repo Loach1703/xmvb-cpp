@@ -75,6 +75,9 @@ bool build_ciah_macro_step(
   const Eigen::Index ns = use_structure_response ? structure.tangent_size() : 0;
   const Eigen::Index dimension = no + ns;
   CiahOptions ciah_options;
+  // Each admitted AH direction supplies Gq for free; its residual supplies an
+  // inverse image. Bound reuse by those two families, not by structure count.
+  core::MetricSolveWorkspace structure_metric(std::min<int>(ns, 2*ciah_options.max_cycle));
   double energy_scale = 0.0;
   for (const double state_energy : context->selected_state_energies)
     energy_scale = std::max(energy_scale, std::abs(state_energy));
@@ -98,7 +101,7 @@ bool build_ciah_macro_step(
     const double orbital_norm = metric.dual_norm(g.head(no));
     const auto structure_start = trace ? std::chrono::steady_clock::now() :
         std::chrono::steady_clock::time_point{};
-    const double structure_norm = ns ? structure.dual_norm(g.tail(ns)) : 0.0;
+    const double structure_norm = ns ? structure.dual_norm(g.tail(ns), &structure_metric) : 0.0;
     const auto end = trace ? std::chrono::steady_clock::now() :
         std::chrono::steady_clock::time_point{};
     diagnostics::neo_trace("ciah_coupled_norm", "orbital=%.17g,structure=%.17g",
@@ -239,6 +242,7 @@ bool build_ciah_macro_step(
     });
   };
   if (ns) ciah_options.observe_images = [&](const Eigen::VectorXd& x,const Eigen::VectorXd& gx) {
+    structure_metric.observe(x.tail(ns),gx.tail(ns));
     Eigen::VectorXd v = Eigen::VectorXd::Zero(dimension), g = v;
     v.head(no) = x.head(no);
     g.head(no) = gx.head(no);

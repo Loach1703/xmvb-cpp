@@ -465,17 +465,21 @@ Eigen::VectorXd StructureTangentOperator::apply_inverse_metric_model(
   return project_coordinates(image);
 }
 
-double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector) const {
+double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector,
+    core::MetricSolveWorkspace* workspace) const {
   if (covector.size() != tangent_size() || !covector.allFinite())
     throw std::invalid_argument("invalid structure metric covector");
   const bool trace = diagnostics::neo_event_trace_enabled();
   const auto start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   core::MetricSolveStats stats;
-  const Eigen::VectorXd inverse = xmvb::core::solve_metric(covector,
-      [this](const Eigen::VectorXd& x) { return apply_metric_coordinates(x); },
-      [this](const Eigen::VectorXd& x) { return apply_inverse_metric_model(x); },
-      trace ? &stats : nullptr);
+  const auto action = [this](const Eigen::VectorXd& x) { return apply_metric_coordinates(x); };
+  const auto precondition = [this](const Eigen::VectorXd& x) { return apply_inverse_metric_model(x); };
+  // A complete-space inverse already solves in one CG step; recycle only the
+  // selected-space solves that otherwise repeat long Krylov traversals.
+  const Eigen::VectorXd inverse = workspace && !metric_inverse_
+      ? workspace->solve(covector, action, precondition, trace ? &stats : nullptr)
+      : xmvb::core::solve_metric(covector, action, precondition, trace ? &stats : nullptr);
   if (trace) diagnostics::neo_trace("ciah_structure_norm",
       "seconds=%.17g,iterations=%d,actions=%d,certifications=%d,relative_residual=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),

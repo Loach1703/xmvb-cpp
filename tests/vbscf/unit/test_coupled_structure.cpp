@@ -30,6 +30,52 @@ void require(bool condition, const std::string& message) {
   if (!condition) throw std::runtime_error(message);
 }
 
+/** @brief Repeated Riesz maps reuse inverse images, not an approximate norm. */
+void check_metric_recycling() {
+  constexpr int n = 24;
+  Eigen::MatrixXd transform = Eigen::MatrixXd::Identity(n, n);
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < i; ++j) transform(i,j) = 0.03 * std::sin(i + 2*j);
+  const Eigen::VectorXd spectrum = Eigen::VectorXd::LinSpaced(n, 0.0, 4.0)
+      .array().unaryExpr([](double x) { return std::pow(10.0, x); });
+  const Eigen::MatrixXd metric = transform * spectrum.asDiagonal() * transform.transpose();
+  const auto action = [&](const Eigen::VectorXd& x) { return (metric * x).eval(); };
+  const auto inverse = [&](const Eigen::VectorXd& x) {
+    return (x.array() / metric.diagonal().array()).matrix().eval();
+  };
+  xmvb::core::MetricSolveWorkspace workspace(3);
+  const Eigen::VectorXd a = Eigen::VectorXd::LinSpaced(n, -0.37, 0.62);
+  const Eigen::VectorXd b = Eigen::VectorXd::LinSpaced(n, 0.29, -0.43);
+  xmvb::core::MetricSolveStats stats;
+  const auto xa = workspace.solve(a, action, inverse, &stats);
+  const auto xb = workspace.solve(b, action, inverse, &stats);
+  const Eigen::VectorXd rhs = 0.4 * a - 0.7 * b;
+  const auto x = workspace.solve(rhs, action, inverse, &stats);
+  require((metric*x-rhs).norm() <= std::sqrt(std::numeric_limits<double>::epsilon()) * rhs.norm(),
+      "recycled Riesz solve changed its true-residual accuracy");
+  require(stats.iterations == 0 && stats.actions == 1 && stats.certifications == 1,
+      "a known inverse span launched another metric CG solve");
+  require((x - (0.4*xa - 0.7*xb)).norm() < 1e-10,
+      "recycled metric map is not linear on solved covectors");
+  for (int j = 0; j < 6; ++j) {
+    const Eigen::VectorXd probe = Eigen::VectorXd::Unit(n,j);
+    const auto y = workspace.solve(probe, action, inverse, &stats);
+    require((metric*y-probe).norm() <= std::sqrt(std::numeric_limits<double>::epsilon()),
+        "new RHS lost the recycled metric solve certificate");
+    require(workspace.size() <= 3, "metric reuse space exceeded its memory bound");
+  }
+  const auto zero = workspace.solve(Eigen::VectorXd::Zero(n), action, inverse, &stats);
+  require(zero.isZero() && stats.actions == 0, "zero covector requires no metric action");
+  xmvb::core::MetricSolveWorkspace observed(2);
+  const Eigen::VectorXd direction = Eigen::VectorXd::LinSpaced(n,-0.42,0.73);
+  observed.observe(direction, action(direction));
+  const auto known = observed.solve(action(direction), action, inverse, &stats);
+  require(stats.iterations == 0 && stats.actions == 1 &&
+      (metric*known-action(direction)).norm() <=
+          std::sqrt(std::numeric_limits<double>::epsilon()) * action(direction).norm(),
+      "an existing AH metric image relaunched CG");
+}
+
 struct StructureFixture {
   xmvb::vb::StructureAction action;
   Eigen::MatrixXd hamiltonian;
@@ -300,6 +346,7 @@ void check_unequal_weights_rejected(const StructureFixture& fixture) {
   const auto accepted = accepted_point(fixture, 2, {0.6, 0.4});
   bool rejected = false;
   try {
+    check_metric_recycling();
     (void)xmvb::vb::StructureTangentOperator(accepted, fixture.action);
   } catch (const std::invalid_argument&) {
     rejected = true;
