@@ -58,6 +58,7 @@ set(XMVB_VBSCF_AO_INTEGRAL_SOURCES
   vbscf/integrals/ao/one_electron/backpropagator.cpp
   vbscf/integrals/ao/one_electron/builder.cpp
   vbscf/integrals/ao/one_electron/direct_operator.cpp
+  vbscf/integrals/ao/one_electron/rows.cpp
   vbscf/integrals/ao/one_electron/ri_operator.cpp
   vbscf/integrals/ao/libcint/validation.cpp
   vbscf/integrals/ao/ri/cache.cpp
@@ -141,6 +142,7 @@ set(XMVB_VBSCF_OPTIMIZATION_SOURCES
   vbscf/optimization/neo/solver.cpp
   vbscf/optimization/preconditioners/block_inverse_bfgs.cpp
   vbscf/optimization/preconditioners/hessian_diagonal.cpp
+  vbscf/optimization/preconditioners/density.cpp
   vbscf/optimization/preconditioners/coarse.cpp
   vbscf/optimization/preconditioners/shifted_metric.cpp
   vbscf/optimization/preconditioners/transported_lbfgs.cpp

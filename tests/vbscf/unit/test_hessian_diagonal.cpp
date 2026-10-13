@@ -170,8 +170,17 @@ void check_contracted_density_span() {
         }
   input.ao_integral_input.pair_graph =
       xmvb::vb::build_ao_pair_graph(left,right,values,n);
+  Eigen::MatrixXd frame = Eigen::MatrixXd::Identity(n,n);
+  for (int p = 1; p < n; ++p) {
+    Eigen::MatrixXd rotation = Eigen::MatrixXd::Identity(n,n);
+    const double angle = 0.11 * p;
+    rotation(0,0) = rotation(p,p) = std::cos(angle);
+    rotation(0,p) = -std::sin(angle);
+    rotation(p,0) = std::sin(angle);
+    frame = (frame * rotation).eval();
+  }
   // Independent four-index reference, including diagonal/repeated AO indices.
-  for (int width : {1,2,3,8}) {
+  for (int width : {1,2,3,8,16}) {
     Eigen::MatrixXd sources(n*n,width);
     for (int channel=0;channel<width;++channel)
       for (int mu=0;mu<n;++mu)
@@ -183,6 +192,13 @@ void check_contracted_density_span() {
       workspace.sources=sources;
       xmvb::vb::apply_symmetric_ao_h1e_channels(input.ao_integral_input,
           threads,&workspace,&result);
+      xmvb::vb::AoH1eBatchWorkspace::Channels row_sources(n*n,width);
+      for (int row = 0; row < n*n; ++row)
+        for (int channel = 0; channel < width; ++channel)
+          row_sources(row,channel) = sources(row,channel);
+      xmvb::vb::AoH1eBatchWorkspace::Channels row_result;
+      xmvb::vb::apply_symmetric_ao_h1e_rows(input.ao_integral_input,
+          threads,row_sources,&row_result);
       for (int channel=0;channel<width;++channel)
         for (int mu=0;mu<n;++mu)
           for (int nu=0;nu<n;++nu) {
@@ -192,7 +208,44 @@ void check_contracted_density_span() {
                 expected+=(2.0*eri(g,mu,nu,k,l,n)-eri(g,mu,k,nu,l,n))*sources(k+l*n,channel);
             if (std::abs(result(mu+nu*n,channel)-expected)>5.0e-12)
               throw std::runtime_error("packed symmetric density batch changed the AO operator");
+            if (std::abs(row_result(mu+nu*n,channel)-expected)>5.0e-12)
+              throw std::runtime_error("row-owned symmetric density batch changed the AO operator");
           }
+      if ((row_result-result).cwiseAbs().maxCoeff()>5.0e-12)
+        throw std::runtime_error("row-owned and packed AO contractions disagree");
+      for (int n_core_sources : {0,width/2,width}) {
+        xmvb::vb::AoDensityDiagonalWorkspace diagonal_workspace;
+        Eigen::MatrixXd exchange_diagonal, coulomb_diagonal;
+        xmvb::vb::apply_ao_density_diagonals(input.ao_integral_input,
+            row_sources,frame,n_core_sources,threads,3,&diagonal_workspace,
+            &exchange_diagonal,&coulomb_diagonal);
+        if (exchange_diagonal.rows()!=n || exchange_diagonal.cols()!=width ||
+            coulomb_diagonal.rows()!=n || coulomb_diagonal.cols()!=n_core_sources)
+          throw std::runtime_error("projected density diagonal dimensions changed");
+        for (int channel=0;channel<width;++channel)
+          for (int orbital=0;orbital<n;++orbital) {
+            double expected_k=0.0, expected_j=0.0;
+            for (int mu=0;mu<n;++mu)
+              for (int nu=0;nu<n;++nu) {
+                double k_mu_nu=0.0, j_mu_nu=0.0;
+                for (int k=0;k<n;++k)
+                  for (int l=0;l<n;++l) {
+                    const double density=sources(k+l*n,channel);
+                    k_mu_nu += eri(g,mu,k,nu,l,n)*density;
+                    if (channel<n_core_sources)
+                      j_mu_nu += eri(g,mu,nu,k,l,n)*density;
+                  }
+                expected_k += frame(mu,orbital)*k_mu_nu*frame(nu,orbital);
+                if (channel<n_core_sources)
+                  expected_j += frame(mu,orbital)*j_mu_nu*frame(nu,orbital);
+              }
+            if (std::abs(exchange_diagonal(orbital,channel)-expected_k)>5.0e-12)
+              throw std::runtime_error("projected positive exchange diagonal disagrees with four-index reference");
+            if (channel<n_core_sources &&
+                std::abs(coulomb_diagonal(orbital,channel)-expected_j)>5.0e-12)
+              throw std::runtime_error("projected Coulomb diagonal disagrees with four-index reference");
+          }
+      }
       for (const auto& partial : workspace.partial)
         if (partial.rows()!=n*(n+1)/2)
           throw std::runtime_error("symmetric density batch retained a full worker matrix");
@@ -202,6 +255,24 @@ void check_contracted_density_span() {
       if ((full-result).cwiseAbs().maxCoeff()>5.0e-12)
         throw std::runtime_error("full and packed AO channel contractions disagree");
     }
+  }
+  // An empty CSR graph is the sparse zero-integral limit of the same paths.
+  auto zero_ao = input.ao_integral_input;
+  zero_ao.pair_graph = xmvb::vb::build_ao_pair_graph({}, {}, {}, n);
+  xmvb::vb::AoH1eBatchWorkspace::Channels zero_sources(n*n,2);
+  zero_sources.setOnes();
+  for (int threads : {1,4}) {
+    xmvb::vb::AoH1eBatchWorkspace::Channels zero_response;
+    xmvb::vb::apply_symmetric_ao_h1e_rows(
+        zero_ao,threads,zero_sources,&zero_response);
+    if (zero_response.cwiseAbs().maxCoeff()!=0.0)
+      throw std::runtime_error("empty CSR graph produced a nonzero AO response");
+    xmvb::vb::AoDensityDiagonalWorkspace zero_workspace;
+    Eigen::MatrixXd zero_k, zero_j;
+    xmvb::vb::apply_ao_density_diagonals(zero_ao,zero_sources,frame,1,
+        threads,3,&zero_workspace,&zero_k,&zero_j);
+    if (zero_k.cwiseAbs().maxCoeff()!=0.0 || zero_j.cwiseAbs().maxCoeff()!=0.0)
+      throw std::runtime_error("empty CSR graph produced nonzero projected diagonals");
   }
   auto ri = std::make_shared<xmvb::vb::RiAoFactorization>();
   ri->n_basis_functions = n;

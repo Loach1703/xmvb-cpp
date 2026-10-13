@@ -23,6 +23,40 @@ struct AoH1eBatchWorkspace {
   std::vector<Eigen::VectorXd> coulomb;
 };
 
+/** @brief Shared exchange image and small row/projection workspaces.
+ * Worker matrices have only n_bf times a channel/panel width entries, never
+ * n_bf squared entries. Integral storage and density sources are borrowed.
+ */
+struct AoDensityDiagonalWorkspace {
+  using Channels = AoH1eBatchWorkspace::Channels;
+  Channels exchange;
+  Eigen::MatrixXd image;
+  std::vector<Channels> coulomb_rows, coulomb_images, coulomb_partial;
+  std::vector<Eigen::MatrixXd> projection_panels;
+};
+
+/** @brief Exact symmetric 2J-K with exclusive AO output-row ownership.
+ * Uses raw directed CSR integrals. Source/output AO indices are flattened
+ * column-major, with contiguous density channels. No worker AO image or
+ * atomic scatter is allocated. Requires the CSR storage representation.
+ */
+void apply_symmetric_ao_h1e_rows(
+    const AoIntegralInput& ao, int n_threads,
+    const Eigen::Ref<const AoH1eBatchWorkspace::Channels>& sources,
+    AoH1eBatchWorkspace::Channels* response);
+
+/** @brief Project exact K for all sources and J for the leading core sources.
+ * Coulomb rows are projected while resident, rather than retaining an AO
+ * Coulomb image or a core AO-pair transformation. Output columns are densities
+ * and rows are orbitals of the supplied AO-coefficient frame.
+ */
+void apply_ao_density_diagonals(
+    const AoIntegralInput& ao,
+    const Eigen::Ref<const AoH1eBatchWorkspace::Channels>& sources,
+    const Eigen::MatrixXd& frame, int n_core_sources, int n_threads,
+    int projection_width, AoDensityDiagonalWorkspace* workspace,
+    Eigen::MatrixXd* exchange_diagonal, Eigen::MatrixXd* coulomb_diagonal);
+
 /**
  * @brief Applies one physical symmetric response per source in a shared sweep.
  *
