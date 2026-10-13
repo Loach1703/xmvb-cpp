@@ -18,6 +18,7 @@
 #include "vbscf/orbitals/charts/partition.hpp"
 #include "vbscf/orbitals/charts/physical_metric.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
+#include "vbscf/orbitals/charts/whitening.hpp"
 #include "vbscf/optimization/preconditioners/one_electron.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
 #include "vbscf/core/contracts/orbital_type.hpp"
@@ -370,83 +371,6 @@ Eigen::MatrixXd build_stable_inactive_span_basis(
   return basis;
 }
 
-Eigen::MatrixXd whiten_normalized_orbital_quotient_basis(
-    const Eigen::Ref<const Eigen::MatrixXd>& quotient_basis,
-    const Eigen::Ref<const Eigen::VectorXd>& raw_coefficients,
-    const Eigen::Ref<const Eigen::MatrixXd>& overlap,
-    bool use_product_sphere_representative) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartWhitening);
-  if (quotient_basis.rows() != raw_coefficients.size() ||
-      overlap.rows() != raw_coefficients.size() ||
-      overlap.cols() != raw_coefficients.size()) {
-    throw std::invalid_argument(
-        "normalized-orbital quotient metric dimensions are inconsistent");
-  }
-  if (quotient_basis.cols() == 0) return quotient_basis;
-
-  const Eigen::VectorXd overlap_times_raw = overlap * raw_coefficients;
-  const double squared_norm = raw_coefficients.dot(overlap_times_raw);
-  if (!(squared_norm > 0.0) || !std::isfinite(squared_norm)) {
-    throw std::runtime_error(
-        "normalized-orbital quotient metric has nonpositive orbital norm");
-  }
-  const double norm = std::sqrt(squared_norm);
-  const Eigen::VectorXd normalized = raw_coefficients / norm;
-  const Eigen::VectorXd overlap_times_normalized = overlap * normalized;
-  // Apply the normalization derivative as a rank-one correction. Its full
-  // AO matrix is unnecessary: J U = (U - c (c^T S U)) / ||x||_S.
-  const Eigen::RowVectorXd radial_components =
-      overlap_times_normalized.transpose() * quotient_basis;
-  Eigen::MatrixXd physical_tangents = quotient_basis;
-  physical_tangents.noalias() -= normalized * radial_components;
-  physical_tangents /= norm;
-  Eigen::MatrixXd metric =
-      physical_tangents.transpose() * overlap * physical_tangents;
-  metric = (0.5 * (metric + metric.transpose())).eval();
-  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigensolver(metric);
-  if (eigensolver.info() != Eigen::Success ||
-      !eigensolver.eigenvalues().allFinite() ||
-      !eigensolver.eigenvectors().allFinite()) {
-    throw std::runtime_error(
-        "failed to factor normalized-orbital quotient metric");
-  }
-  const double spectral_scale = eigensolver.eigenvalues().maxCoeff();
-  const double positivity_floor =
-      64.0 * std::numeric_limits<double>::epsilon() *
-      static_cast<double>(std::max(metric.rows(), metric.cols())) *
-      spectral_scale;
-  if (!(spectral_scale > 0.0) ||
-      eigensolver.eigenvalues().minCoeff() <= positivity_floor) {
-    throw std::runtime_error(
-        "normalized-orbital quotient metric is rank deficient");
-  }
-  const Eigen::MatrixXd inverse_square_root =
-      eigensolver.eigenvectors() *
-      eigensolver.eigenvalues().cwiseSqrt().cwiseInverse().asDiagonal() *
-      eigensolver.eigenvectors().transpose();
-  Eigen::MatrixXd whitened;
-  if (use_product_sphere_representative) {
-    // Use the unique raw-coefficient representative whose normalization
-    // derivative is the whitened physical tangent and whose S-radial
-    // component vanishes. Multiplication by `norm` maps the unit-sphere
-    // tangent back to the scale of the stored representative. This changes
-    // only the scaling gauge, so a finite additive update followed by
-    // normalization is the polar retraction on the orbital ray.
-    whitened = norm * physical_tangents * inverse_square_root;
-  } else {
-    // A full-AO complete active space has a coupled GL gauge and therefore a
-    // Grassmann-type quotient rather than a product of independent orbital
-    // rays. Preserve its coupled horizontal representative; imposing a
-    // separate sphere section on each column introduces second-order
-    // active--active gauge drift.
-    whitened = quotient_basis * inverse_square_root;
-  }
-  require_finite_matrix(
-      whitened,
-      "normalized-orbital whitened quotient basis");
-  return whitened;
-}
-
 // FNV-1a-style hash mixing block/orbital/reduced-size into a running signature.
 // Used to detect tangent-space rank changes across SCF iterations so the
 // optimizer can invalidate cached Hessians or restart CG when the reduced
@@ -522,6 +446,8 @@ OrbitalChart::OrbitalChart(
   // not share these complements.
   std::optional<Eigen::MatrixXd> full_inactive_quotient;
   std::optional<Eigen::MatrixXd> full_active_quotient;
+  std::optional<Eigen::MatrixXd> full_inactive_metric;
+  std::optional<Eigen::MatrixXd> full_active_metric;
 
   int block_index = 0;
   for (const auto& block : blocks) {
@@ -608,16 +534,21 @@ OrbitalChart::OrbitalChart(
           (m.orbital_index < n_inactive || use_active_subspace_gauge);
       Eigen::MatrixXd local_quotient;
       const Eigen::MatrixXd* quotient;
+      const Eigen::MatrixXd* quotient_metric = nullptr;
       if (shared_gauge) {
         auto& shared = m.orbital_index < n_inactive
             ? full_inactive_quotient : full_active_quotient;
+        auto& shared_metric = m.orbital_index < n_inactive
+            ? full_inactive_metric : full_active_metric;
         if (!shared) {
           shared.emplace(build_exact_local_sparse_quotient_basis(
               input, m.orbital_index, n_inactive,
               stable_inactive_span_basis, phys_orbital_matrix, ao_overlap,
               local_basis_indices, use_active_subspace_gauge));
+          shared_metric.emplace(shared->transpose() * ao_overlap * *shared);
         }
         quotient = &*shared;
+        quotient_metric = &*shared_metric;
       } else {
         local_quotient = build_exact_local_sparse_quotient_basis(
             input, m.orbital_index, n_inactive,
@@ -669,13 +600,15 @@ OrbitalChart::OrbitalChart(
           stored_coefficients.tail(stored_count - local_size).isZero(0.0);
       const bool use_product_sphere_representative =
           !use_active_subspace_gauge && scaling_gauge_is_admissible;
-      const Eigen::MatrixXd whitened_stored_basis =
-          whiten_normalized_orbital_quotient_basis(
+      WhitenedTangent tangent =
+          whiten_orbital_tangent(
               stored_quotient_basis,
               stored_coefficients,
               stored_overlap,
-              use_product_sphere_representative);
-      proj.tangent_basis = whitened_stored_basis.topRows(local_size);
+              use_product_sphere_representative,
+              quotient_metric);
+      proj.tangent_basis = tangent.basis.topRows(local_size);
+      proj.inverse_raw_tangent_gram = std::move(tangent.inverse_gram);
       proj.uses_product_sphere_representative =
           use_product_sphere_representative;
       if (proj.uses_product_sphere_representative) {
@@ -700,25 +633,6 @@ OrbitalChart::OrbitalChart(
           }
         }
       }
-      diagnostics::ScopedPhase gram_phase(diagnostics::Phase::ChartGram);
-      const Eigen::MatrixXd raw_tangent_gram =
-          proj.tangent_basis.transpose() * proj.tangent_basis;
-      Eigen::LDLT<Eigen::MatrixXd> raw_gram_ldlt(raw_tangent_gram);
-      if (raw_gram_ldlt.info() != Eigen::Success ||
-          !raw_gram_ldlt.isPositive()) {
-        throw std::runtime_error(
-            "failed to factor raw quotient-coordinate Gram matrix");
-      }
-      proj.inverse_raw_tangent_gram = raw_gram_ldlt.solve(
-          Eigen::MatrixXd::Identity(
-              proj.tangent_basis.cols(),
-              proj.tangent_basis.cols()));
-      if (raw_gram_ldlt.info() != Eigen::Success ||
-          !proj.inverse_raw_tangent_gram.allFinite()) {
-        throw std::runtime_error(
-            "failed to invert raw quotient-coordinate Gram matrix");
-      }
-      gram_phase.stop();
       if (collect_structural_diagnostics) {
         proj.gauge_intersection_dimension =
             proj.local_gauge_rank +

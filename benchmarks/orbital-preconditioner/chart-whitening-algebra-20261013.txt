@@ -1,0 +1,106 @@
+Orbital chart whitening: exact removal of redundant factorizations
+
+Definitions
+-----------
+Q is the Euclidean-orthonormal, support-admissible quotient basis: Q^T Q=I.
+S is the AO overlap restricted to the stored coefficient entries. Let
+n=sqrt(b^T S b), c=b/n, r=Q^T S c, and J=(I-c c^T S)/n.
+The normalized tangent metric is
+
+  G=(JQ)^T S (JQ) = (K-r r^T)/n^2,   K=Q^T S Q.
+
+The distinction between Euclidean and S orthogonality is essential. Q^T c=0
+does not imply r=0. Thus G generally differs between orbitals sharing Q.
+The unique symmetric whitening R=G^(-1/2) is retained, as are the existing
+horizontal representative, physical metric, rank floor, and stopping criteria.
+
+Raw Gram inverse without another factorization
+---------------------------------------------
+For the coupled horizontal representative W=QR,
+
+  (W^T W)^(-1)=G.
+
+For the product-sphere representative W=(Q-c r^T)R, put a=Q^T c,
+mu=c^T c, Z=[a,r], and D=[[0,-1],[-1,mu]]. Then
+
+  (Q-c r^T)^T(Q-c r^T)=I+Z D Z^T,
+  D^(-1)=[[-mu,-1],[-1,0]],
+  (W^T W)^(-1)=G-Y(D^(-1)+Z^T Z)^(-1)Y^T,
+  Y=G^(1/2)Z.
+
+Y uses the whitening eigensystem already available. Only the 2x2 matrix
+requires an additional solve. Keeping both columns of Z accounts for the
+finite residual in Q^T c, rather than dropping that term by assumption.
+The formulas assume Q^T Q=I to the accuracy of the SVD/QR quotient basis.
+Dense-reference tests check whitening, raw left-inverse residuals, and the
+normalized physical metric for nonorthogonal S, different raw scales, and
+both sphere and coupled representatives. Existing tests include frozen
+coefficient tails, unequal supports and ill-conditioned occupied gauges.
+
+Cost and storage
+----------------
+Let d be the local reduced dimension. The removed raw Gram construction and
+LDLT inverse cost O(n_bf*d^2+d^3) per orbital. Recovery is now O(d^2), including
+the rank-two update. No full-rank inverse factorization is retained as fallback.
+
+For full-AO orbitals sharing one quotient gauge, K is computed once per
+accepted-point gauge group (inactive and complete-space active). The old
+O(N_orb*(n_bf^2*d+n_bf*d^2)) metric assembly becomes one such contraction
+per group plus O(n_bf^2+n_bf*d+d^2) per orbital for the exact radial update.
+Restricted supports retain their own K; no OEO gauge is imposed on HAO or
+incomplete selected active spaces.
+
+The symmetric whitening itself still has cubic reduced-space work. LAPACK
+dsyevd replaces Eigen's eigensolver implementation without changing its
+mathematical convention or positivity floor. This is a constant-factor
+improvement, not a claim that the entire chart now has quadratic complexity.
+
+Shared K matrices are point-local and read-only. No accepted integral graph
+or AO matrix is replicated per worker. This change adds no new OpenMP team;
+the remaining independent orbital factorizations are a candidate for bounded
+task parallelism, with shared Q/S and limited temporary workspaces.
+
+Evidence
+--------
+Hanhai22 Slurm build 1251761 passed test_sparse_orbital_quotient (including
+the new independent dense reference), test_ciah, test_keyframe,
+test_coupled_structure and test_hessian_diagonal.
+Frozen executable SHA256:
+bce17ffcb65d1deb7c400b2b0a0fabc17bbd99f0d55fdc1e37deac2f9c2cfbcb
+
+Two-step diagnostics: 1251763_0 FeCl2 OEO; 1251763_1 MnF2 HAO.
+They use exact libcint, def2-TZVP, NEO/CIAH, Davidson, analytic Hessian
+diagonal, gradient 1e-3 and energy 1e-7 Eh; same 256 MiB exchange budget.
+Thread variants run sequentially within each allocated shared node.
+
+FeCl2 stage walls at 32 threads, using saved previous measurements:
+  chart                 0.445534 -> 0.192779 s (2.31x)
+  whitening             0.360780 -> 0.179212 s (2.01x)
+  raw Gram processing   0.072123 -> 0.002804 s (25.72x)
+All short runs complete two outer steps: FeCl2 40 HVP, MnF2 20 HVP.
+
+Full 32-thread regression job 1251773:
+  FeCl2: 12 steps, 256 HVP, -2181.624464870235 Eh, GNU time 7.39 s,
+         peak process RSS 486.54 MiB.
+  MnF2: 13 steps, 189 HVP, -1348.893353223861 Eh,
+        GNU time 4.43 s, peak process RSS 495.76 MiB.
+
+Saved current-mainline comparison (joint-response-1251180, not rerun):
+  FeCl2: 12 steps, 253 HVP, -2181.624464866804 Eh, 7.408786 s,
+         peak process RSS 478.121 MiB.
+  MnF2: 13 steps, 189 HVP, -1348.893353223862 Eh, 4.751040 s,
+        peak process RSS 528.461 MiB.
+The earlier pre-joint-response FeCl2 baseline was 6.700096 s. The new
+full FeCl2 run does not establish an end-to-end speedup over that baseline.
+Nodes, load and timing sources differ; short stage improvements are stronger
+evidence than small full-run wall/RSS differences. Existing versions were
+not rerun. FeCl2 has three additional HVP actions, so no action-count or
+iteration-count improvement is claimed.
+
+Sources
+-------
+src/vbscf/orbitals/charts/whitening.{hpp,cpp}
+src/vbscf/orbitals/charts/chart.cpp
+tests/vbscf/unit/test_sparse_orbital_quotient.cpp
+results/diagnostics/hanhai22-shared-response-20261012/chart-algebra-capture-1251763/
+results/diagnostics/hanhai22-shared-response-20261012/chart-algebra-capture-1251773/
