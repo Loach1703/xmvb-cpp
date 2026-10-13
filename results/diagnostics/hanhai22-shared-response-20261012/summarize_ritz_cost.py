@@ -34,7 +34,25 @@ unlearned = {}
 for macro, values in events.get("ciah_unlearned_inverse", []):
     unlearned.setdefault(macro, []).append(values)
 rows = list(csv.DictReader((run / "neo.tsv").open(), delimiter="\t"))
+macro_costs = {int(row["iteration"]): {
+    "macro": int(row["iteration"]), "hvp": int(row["orbital_hvp_actions"])}
+    for row in rows}
+# Native scopes can nest: report separately, never sum them into a wall total.
+for event, fields in {
+    "ciah_ritz_cost": ("projection_seconds", "spectrum_image_seconds", "norm_seconds"),
+    "ciah_norm_cost": ("orbital_seconds", "structure_seconds"),
+    "ciah_expansion_cost": ("hvp_seconds",),
+    "ciah_diagonal_cost": ("seconds",),
+    "ciah_precondition_cost": ("seconds",),
+}.items():
+    for macro, values in events.get(event, []):
+        if macro not in macro_costs:
+            continue  # A failed, unaccepted macro is not an accepted CSV row.
+        for field in fields:
+            key = event.removeprefix("ciah_") + "_" + field
+            macro_costs[macro][key] = macro_costs[macro].get(key, 0.0) + float(values[field])
 summary = {
+    "macro_costs": list(macro_costs.values()),
     "unlearned_inverse": [
         {"macro": macro, "tests": len(values),
          "median_relative_physical_error": statistics.median(
