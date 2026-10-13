@@ -1,0 +1,7 @@
+case,variant,threads,steps,hvp,energy_Eh,wall_seconds,peak_RSS_MiB,node,termination,run_path
+FeCl2,shared_whitening,32,12,257,-2181.624464870796,6.07,478.0078125,anode46,neo_projected_gradient_tolerance,/home/txia/project/xmvb-cpp/results/diagnostics/hanhai22-shared-response-20261012/shared-whitening-capture-1251850/FeCl2/FeCl2-32-native
+MnF2,shared_whitening,32,13,189,-1348.893353223862,4.15,531.02734375,anode39,neo_projected_gradient_tolerance,/home/txia/project/xmvb-cpp/results/diagnostics/hanhai22-shared-response-20261012/shared-whitening-capture-1251850/MnF2/MnF2-32-native
+FeCl2,raw_dense_metric,32,12,252,-2181.624464866390,5.74,529.0703125,anode63,neo_projected_gradient_tolerance,/home/txia/project/xmvb-cpp/results/diagnostics/hanhai22-shared-response-20261012/raw-chart-capture-1251915/FeCl2/FeCl2-32-native
+MnF2,raw_dense_metric,32,13,189,-1348.893353223860,4.49,559.30078125,anode46,neo_projected_gradient_tolerance,/home/txia/project/xmvb-cpp/results/diagnostics/hanhai22-shared-response-20261012/raw-chart-capture-1251915/MnF2/MnF2-32-native
+FeCl2,raw_shared_metric,32,12,249,-2181.624464863746,5.73,487.06640625,anode28,neo_projected_gradient_tolerance,/home/txia/project/xmvb-cpp/results/diagnostics/hanhai22-shared-response-20261012/raw-chart-capture-1251979/FeCl2/FeCl2-32-native
+MnF2,raw_shared_metric,32,13,189,-1348.893353223858,4.12,498.65625,anode28,neo_projected_gradient_tolerance,/home/txia/project/xmvb-cpp/results/diagnostics/hanhai22-shared-response-20261012/raw-chart-capture-1251979/MnF2/MnF2-32-native

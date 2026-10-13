@@ -1,0 +1,123 @@
+Unwhitened orbital quotient: necessity and matched-accuracy control
+=================================================================
+
+Scope
+-----
+Production reference: 4adddd27, shared tangent whitening.
+Same original inputs, exact libcint ERIs, def2-TZVP, Davidson, NEO/CIAH,
+analytic diagonal, gradient 1e-3 and energy change 1e-7 Eh, 32 OpenMP threads.
+All compilation, unit execution and molecular calculations ran in Hanhai22
+Slurm compute jobs. Existing whitened measurements were reused, not rerun.
+Native timings include input preparation; RSS is GNU-time process peak in MiB.
+These are single runs on different nodes; small timing differences are not
+established speedups. Native runs retain the same TSV diagnostics as references.
+
+Mathematics
+-----------
+Q is the same support-admissible Euclidean quotient basis in both versions.
+For b, n=sqrt(b^T S b), c=b/n, r=Q^T S c and K=Q^T S Q, retain
+  W0=n Q                        (coupled horizontal representative), or
+  W0=n(Q-c r^T)                 (admissible sphere representative).
+Normalization has Jacobian J=(I-c c^T S)/n. The local coordinate metric is
+  G0=(J W0)^T S (J W0)=K-r r^T.
+Whitening replaces W0 by W0 T, with T^T G0 T=I. T is invertible: it removes
+no further degree of freedom. Vectors, covectors, Hessian/metric actions and
+preconditioner inverses transform contravariantly/covariantly as appropriate.
+Let a=K^-1 r and delta=1-r^T a. Then
+  G0^-1=K^-1+a a^T/delta.
+The progress norm sqrt(g^T G0^-1 g) equals the old whitened Euclidean norm.
+This is a local AO metric, not another complete wavefunction metric solve.
+
+The raw representative is never AO-metric whitened. Full-AO core/active
+sectors share their K/K^-1 factors. Per orbital retain only radial vectors
+and delta, rather than duplicating dense G0/G0^-1 matrices. Constrained
+supports keep their own admissible quotient. No large per-thread arrays or
+worker-local integral copies were added.
+
+The local signed preconditioner uses the generalized spectrum (P,G0), so
+its shifted action is (P-omega G0)^-1, not (P-omega I)^-1. Full-AO analytic
+frame inverses retain their existing source mixing and covariant pullbacks.
+Physical generalized AH metric, nonlinear orbital retraction, exact HVP,
+keyframe policy and all tolerances remain unchanged.
+
+Outer stopping
+--------------
+The infinity norm is coordinate-component dependent. The diagnostic therefore
+keeps the EXACT established reference-chart infinity test, computing a
+geometry-only whitened chart only when the cheap lower bound
+  ||g_white||_infinity >= ||g_white||_2/sqrt(d)
+cannot already rule out convergence. It does not reevaluate energy/gradient
+or introduce a stricter stopping condition. Complete OEO retains its existing
+physical-dual-norm test as well. Thus this trial removes explicit whitening
+from the optimization representation, not every final reference operation.
+Printed raw projected norms are not the reference infinity norm used to stop.
+
+Tests
+-----
+Build 1251913 passed five unit executables, including comparisons of horizontal
+lifts, dimensions, raw left inverses, covector pullbacks, physical metric
+congruences, coordinate Riesz maps, step clipping and shifted analytic
+preconditioners for HAO, complete OEO and frozen supports.
+Build 1251970 repeated the five tests successfully after sharing raw metrics.
+First build 1251907 failed to compile a duplicated unit-test variable name;
+the name was corrected before the successful tests or any native comparison.
+
+Audit 1251957 corrected the diagnostic gradient-direction construction:
+gradient components are covectors, not unwhitened trial vectors. Use G0^-1 g
+and its local AO norm; this reproduces the existing whitened physical direction.
+FeCl2, h=1e-4: orbital/structure coupled HVP relative errors
+  6.62e-9 / 1.06e-8; directional curvature error 5.98e-9;
+  gradient/energy directional error 4.11e-8 Eh.
+MnF2 has a larger wavefunction-metric length for an AO-unit direction. Its
+central differences show the expected quadratic truncation scaling:
+  h=1e-4: orbital 1.46e-6, structure 3.59e-6, curvature 2.19e-6;
+  h=3e-5: orbital 1.31e-7, structure 3.23e-7, curvature 1.98e-7;
+  h=1e-5: orbital 1.46e-8, structure 3.60e-8, curvature 2.20e-8.
+The last two checks are job 1251965. Finite-difference steps varied only for
+derivative validation; no optimizer or response tolerance was changed.
+
+Native results
+--------------
+case   representation       steps HVP energy/Eh            wall/s RSS/MiB node
+FeCl2 shared whitening       12   257 -2181.624464870796      6.07 478.008 anode46
+FeCl2 raw, dense metrics     12   252 -2181.624464866390      5.74 529.070 anode63
+FeCl2 raw, shared metrics    12   249 -2181.624464863746      5.73 487.066 anode28
+MnF2  shared whitening       13   189 -1348.893353223862      4.15 531.027 anode39
+MnF2  raw, dense metrics     13   189 -1348.893353223860      4.49 559.301 anode46
+MnF2  raw, shared metrics    13   189 -1348.893353223858      4.12 498.656 anode28
+
+Conclusion
+----------
+The unwhitened formulation preserves energy and iteration count. No convergence
+advantage of explicit whitening is demonstrated by these two controls. Removing
+the coordinate inverse square root is mathematically justified; it is not a
+second removal of the orbital scale gauge. Retaining whitening cannot be
+justified solely by these small timing fluctuations.
+
+Removing whitening does not remove all cubic work: shared metric factorization
+and local preconditioner construction remain. In particular, constrained
+generalized preconditioner factorizations can cost more than standard ones.
+Whether further savings dominate on large systems is unmeasured. The current
+whitened reference already shares only two full-AO spectral factors, not one
+per orbital. Potential savings are their inverse-square-root construction and
+the associated basis products, not a claimed elimination of all chart costs.
+
+This experiment is retained as an isolated patch rather than a production
+fallback or a new user-facing parameter. Production default is not changed by
+this control study. To reproduce, apply the main diagnostic patch to 4adddd27,
+build/run units with the default whitened chart, then apply the separate raw
+default patch and rebuild the executable/audit tool. Do not compare infinity
+norms in different coordinate bases without the reference stopping conversion.
+
+Artifacts
+---------
+results/diagnostics/hanhai22-shared-response-20261012/
+  raw-chart-build-1251913/          first complete diagnostic build
+  raw-chart-capture-1251915/        initial native full regressions
+  raw-chart-capture-1251916/        two-step phase/scaling diagnostics
+  raw-chart-audit-1251957/          AO-normalized derivative diagnostics
+  raw-chart-fd-scaling-1251965/     MnF2 central-difference scaling
+  raw-chart-build-1251970/          shared raw-metric build
+  raw-chart-capture-1251979/        final native full regressions
+  summarize_raw_chart.py          automated CSV extraction
+Reference: shared-whitening-capture-1251850/ and shared-whitening-build-1251843/.
