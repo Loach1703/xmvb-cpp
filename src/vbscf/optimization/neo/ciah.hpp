@@ -56,6 +56,10 @@ struct CiahOptions {
   /** @brief Joint H/G action when both images share physical intermediates. */
   std::function<std::pair<Eigen::VectorXd, Eigen::VectorXd>(const Eigen::VectorXd&)>
       apply_images;
+  /** @brief Local coordinate dual norm; does not solve the physical metric. */
+  std::function<double(const Eigen::VectorXd&)> coordinate_norm;
+  /** @brief Convert a residual covector to a trial vector if no enrichment remains. */
+  std::function<Eigen::VectorXd(const Eigen::VectorXd&)> residual_direction;
   /** Eigenvalue tolerance; the complete coordinate residual uses its square root. */
   double tolerance = 1.0e-12;
   /** Relative threshold for dependent directions and projected metric rank. */
@@ -81,9 +85,9 @@ struct CiahResult {
   Eigen::VectorXd metric_step;
   /** alpha * (gradient + H * step - eigenvalue * G * step). */
   Eigen::VectorXd residual;
-  /** @brief Euclidean norm of the complete residual, including outside the trial space. */
+  /** @brief Coordinate dual norm of the full residual, including outside the trial space. */
   double residual_norm = 0.0;
-  /** @brief Euclidean norm of gradient + H * step, before clipping. */
+  /** @brief Coordinate dual norm of gradient + H * step, before clipping. */
   double model_gradient_norm = 0.0;
   bool converged = false;
   int basis_size = 0;

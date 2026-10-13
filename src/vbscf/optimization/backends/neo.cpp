@@ -123,7 +123,7 @@ double trial_physical_gradient_norm(
       orbitals, parameter_view,
       preparation.auxiliary_orbital_matrix.leftCols(n_inactive + orbitals.n_active_orbitals),
       preparation.physical_orbital_frame.normalized_orbital_matrix,
-      nullptr, false, complete_active_space);
+      nullptr, false, complete_active_space, nullptr, OrbitalChart::Coordinates::Unwhitened);
   const NonredundantRetractionMetric metric(chart, parameter_view, orbitals);
   return metric.dual_norm(chart.project_gradient(trial.gradient).reduced_gradient);
 }
@@ -146,7 +146,7 @@ bool build_accepted_neo_keyframe(
       objective->input().orbital_preparation_input;
   NonredundantRetractionMetric orbital_metric(
       chart, parameter_view, accepted_orbitals);
-  record->source_gradient_norm = reduced_gradient.stableNorm();
+  record->source_gradient_norm = chart.coordinate_dual_norm(reduced_gradient);
   const double physical_gradient_norm = orbital_metric.dual_norm(reduced_gradient);
   record->source_physical_gradient_norm = physical_gradient_norm;
   ExactHvpOperator orbital_hessian(
@@ -475,7 +475,7 @@ bool build_accepted_neo_keyframe(
     neo_options.relative_residual_tolerance = neo_forcing_term(
         physical_gradient_norm, chart.reduced_size());
     if (allow_early_trial) {
-      const double coordinate_gradient = reduced_gradient.stableNorm();
+      const double coordinate_gradient = chart.coordinate_dual_norm(reduced_gradient);
       const double coordinate_budget =
           neo_forcing_term(coordinate_gradient, chart.reduced_size()) *
           coordinate_gradient;
@@ -623,11 +623,10 @@ BackendRunResult run_neo_backend(
       resolve_neo_preconditioner(*objective, options.orbital_preconditioner);
   const bool use_ciah =
       objective->second_order_context()->selected_state_indices.size() == 1;
-  OrbitalChart chart = build_orbital_geometry(*objective, parameter_view);
+  OrbitalChart chart = build_orbital_geometry(
+      *objective, parameter_view, OrbitalChart::Coordinates::Unwhitened);
   auto projected = chart.project_gradient(gradient);
-  double final_gradient_inf =
-      gradient_infinity_norm(projected.reduced_gradient);
-  double final_gradient_l2 = projected.reduced_gradient.norm();
+  double final_gradient_l2 = chart.coordinate_dual_norm(projected.reduced_gradient);
   Eigen::VectorXd orbital_guess_packed;
   Eigen::MatrixXd structure_guess;
   double recycle_gradient_target =
@@ -637,12 +636,10 @@ BackendRunResult run_neo_backend(
   while (run_result.n_iterations < options.max_iterations) {
     if (chart.reduced_size() == 0) {
       result->termination_reason = "neo_nonredundant_space_empty";
-      final_gradient_inf = 0.0;
       final_gradient_l2 = 0.0;
       break;
     }
-    final_gradient_inf = gradient_infinity_norm(projected.reduced_gradient);
-    final_gradient_l2 = projected.reduced_gradient.norm();
+    final_gradient_l2 = chart.coordinate_dual_norm(projected.reduced_gradient);
     if (run_result.n_iterations == 0 &&
         orbital_gradient_converged(*objective, parameter_view, chart,
             projected.reduced_gradient, options.gradient_tolerance)) {
@@ -692,11 +689,10 @@ BackendRunResult run_neo_backend(
     // progress output; grouping such points obscures the actual work.
     // Preconditioning changes only curvature surrogates, not the quotient
     // maps. Use one chart for stationarity, reporting, and the next solve.
-    OrbitalChart next_geometry = build_orbital_geometry(*objective, parameter_view);
+    OrbitalChart next_geometry = build_orbital_geometry(
+        *objective, parameter_view, OrbitalChart::Coordinates::Unwhitened);
     auto next_projected = next_geometry.project_gradient(gradient);
-    final_gradient_inf =
-        gradient_infinity_norm(next_projected.reduced_gradient);
-    final_gradient_l2 = next_projected.reduced_gradient.norm();
+    final_gradient_l2 = next_geometry.coordinate_dual_norm(next_projected.reduced_gradient);
     if (options.neo_iteration_callback) {
       const NonredundantRetractionMetric next_metric(
           next_geometry, parameter_view,
@@ -708,8 +704,9 @@ BackendRunResult run_neo_backend(
     // exact-gradient keyframe sequence. All accepted points are still
     // counted and reported independently.
     if (objective->second_order_context()->selected_state_indices.size() != 1 &&
-        (final_gradient_inf < options.gradient_tolerance ||
-         final_gradient_l2 <= recycle_gradient_target)) {
+        (final_gradient_l2 <= recycle_gradient_target ||
+         (final_gradient_l2 < options.gradient_tolerance * std::sqrt(next_geometry.reduced_size()) &&
+          next_geometry.reference_gradient_inf_norm(next_projected.reduced_gradient) < options.gradient_tolerance))) {
       orbital_guess_packed.resize(0);
       recycle_gradient_target =
           neo_forcing_term(final_gradient_l2, next_geometry.reduced_size()) *
@@ -743,11 +740,13 @@ BackendRunResult run_neo_backend(
         options,
         result,
         nullptr,
-        &projected.reduced_gradient);
+        &projected.reduced_gradient,
+        &chart);
     if (result->converged) break;
   }
 
-  result->final_projected_gradient_inf_norm = final_gradient_inf;
+  result->final_projected_gradient_inf_norm =
+      chart.reference_gradient_inf_norm(projected.reduced_gradient);
   result->final_projected_gradient_l2_norm = final_gradient_l2;
   run_result.final_gradient_l2_norm = final_gradient_l2;
   run_result.final_projected_gradient_ready = true;

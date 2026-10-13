@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <array>
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
@@ -14,6 +15,7 @@ namespace xmvb::vb {
 
 struct AnalyticOrbitalDiagonal;
 class OrbitalPhysicalMetric;
+class RawTangentMetric;
 
 /**
  * @brief Accepted-point quotient chart for VBSCF orbital optimization.
@@ -27,6 +29,8 @@ class OrbitalPhysicalMetric;
  */
 class OrbitalChart {
 public:
+  /** @brief NEO uses Unwhitened; existing TN/L-BFGS charts use Whitened. */
+  enum class Coordinates { Whitened, Unwhitened };
   struct StructuralDiagnostics {
     int packed_parameter_size = 0;
     int reduced_size = 0;
@@ -57,7 +61,21 @@ public:
       const Eigen::MatrixXd* ao_effective_h1e = nullptr,
       bool collect_structural_diagnostics = false,
       bool complete_active_space = false,
-      const AnalyticOrbitalDiagonal* hessian_diagonal = nullptr);
+      const AnalyticOrbitalDiagonal* hessian_diagonal = nullptr,
+      Coordinates coordinates = Coordinates::Whitened);
+
+  bool uses_explicit_whitening() const noexcept { return whiten_tangent_; }
+
+  /** @brief Cheap dual norm in the normalized-orbital AO tangent metric.
+   * This is the old Euclidean progress norm in different coordinates, not
+   * an inverse of the coupled wavefunction/structure metric.
+   */
+  double coordinate_dual_norm(const Eigen::VectorXd& covector) const;
+  Eigen::VectorXd inverse_coordinate_metric(const Eigen::VectorXd& covector) const;
+  /** @brief Established gradient infinity norm without building a whitened chart.
+   * Converts covectors only; used by outer stopping and terminal reporting.
+   */
+  double reference_gradient_inf_norm(const Eigen::VectorXd& covector) const;
 
   /** @brief Attach curvature to a geometry-only chart at the same orbital point.
    * Does not rebuild tangent bases, gauge complements, or metric factors.
@@ -129,12 +147,12 @@ public:
   Eigen::VectorXd apply_inverse_reduced_block_preconditioner(
       const Eigen::VectorXd& reduced_vector) const;
 
-  /** @brief Applies the local block inverse of @f$P+\lambda I@f$. */
+  /** @brief Applies the local block inverse of @f$P+\lambda G@f$ (G=I if whitened). */
   Eigen::VectorXd apply_inverse_reduced_shifted_block_preconditioner(
       const Eigen::VectorXd& reduced_vector,
       double shift) const;
 
-  /** @brief Factors @f$P+\lambda I@f$ once for repeated Krylov actions. */
+  /** @brief Factors @f$P+\lambda G@f$ once for repeated Krylov actions. */
   std::function<Eigen::VectorXd(const Eigen::VectorXd&)>
   shifted_block_inverse(double shift) const;
 
@@ -188,24 +206,25 @@ private:
     std::vector<int> flat_indices;
     std::vector<int> packed_indices;
     std::vector<int> block_rows;
-    // Euclidean complement of the support-admissible global gauge for this
-    // target orbital, subsequently whitened in the normalized-orbital AO
-    // metric. Its columns therefore parameterize scale-invariant physical
-    // tangent lengths rather than raw coefficient lengths.
+    // Horizontal representative of the support-admissible quotient. NEO
+    // leaves its AO coordinate metric explicit; TN/L-BFGS normalize it.
     Eigen::MatrixXd tangent_basis;
     // Left-inverse metric needed to recover reduced vector coordinates from
     // packed raw-coefficient tangents. Gradients use the transpose pullback
     // and must not use this inverse.
     Eigen::MatrixXd inverse_raw_tangent_gram;
+    // Only unwhitened charts store these local AO tangent metrics.
+    std::shared_ptr<const RawTangentMetric> coordinate_base;
+    Eigen::VectorXd coordinate_projection, inverse_coordinate_projection;
+    double coordinate_radial_gap = 1.0;
     // Positive diagonal/block approximations of the complete normalized,
     // inactive-projected one-electron curvature in the additive quotient chart.
     Eigen::VectorXd curvature_diagonal;
     // Signed analytic Hessian diagonal for CIAH Davidson.  This must not be
     // replaced by the positive regularization used by SPD preconditioners.
     Eigen::VectorXd hessian_diagonal;
-    // Spectral factorization of the signed pullback J^T D J.  Shifting in the
-    // whitened quotient metric changes only its eigenvalues, so each AH
-    // preconditioner application is quadratic rather than cubic.
+    // Generalized spectral factorization of the signed pullback (J^T D J,G).
+    // Shift P-omega*G through its eigenvalues, without refactoring each RHS.
     Eigen::VectorXd ah_block_eigenvalues;
     Eigen::MatrixXd ah_block_eigenvectors;
     Eigen::MatrixXd ah_rotation_components;
@@ -252,6 +271,7 @@ private:
 
   std::vector<BlockBasis> block_bases_;
   bool active_subspace_gauge_ = false;
+  bool whiten_tangent_ = true;
   int packed_parameter_size_ = 0;
   int reduced_size_ = 0;
   std::uint64_t rank_signature_ = 1469598103934665603ull;

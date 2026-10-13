@@ -204,10 +204,13 @@ struct VbScfAcceptedIterationSnapshot {
   /** Whether nonredundant projected-gradient norms are available. */
   bool has_projected_gradient = false;
 
-  /** Infinity norm of the gradient in the nonredundant orbital chart. */
+  /** @brief Progress infinity norm in the current chart.
+   * NEO reports unwhitened components here; stopping/terminal infinity norms
+   * use the established reference coordinates, without whitening step bases.
+   */
   double projected_gradient_inf_norm = 0.0;
 
-  /** Euclidean norm of the gradient in the nonredundant orbital chart. */
+  /** @brief Dual norm in the local AO coordinate metric (Euclidean if whitened). */
   double projected_gradient_l2_norm = 0.0;
 
   /**
@@ -286,7 +289,7 @@ struct VbScfOptimizerResult {
   double final_gradient_l2_norm = 0.0;
 
   /**
-   * @brief Final projected gradient Euclidean norm in the nonredundant reduced space.
+   * @brief Final projected gradient norm in the local AO coordinate metric.
    */
   double final_projected_gradient_l2_norm = 0.0;
 

@@ -17,7 +17,8 @@ namespace optimizer_detail {
 
 /** @brief Build only the quotient geometry needed for gradient/convergence. */
 OrbitalChart build_orbital_geometry(
-    const VbScfObjective& objective, const SparseParameterLayout& parameter_view);
+    const VbScfObjective& objective, const SparseParameterLayout& parameter_view,
+    OrbitalChart::Coordinates coordinates = OrbitalChart::Coordinates::Whitened);
 
 /** @brief Attach the next-step model without reconstructing the chart. */
 void prepare_orbital_curvature(
@@ -53,7 +54,8 @@ void record_accepted_iteration_snapshot(
     const VbScfOptimizerOptions& options,
     VbScfOptimizerResult* result,
     const TnhvpIterationRecord* tnhvp = nullptr,
-    const Eigen::VectorXd* reduced_gradient = nullptr);
+    const Eigen::VectorXd* reduced_gradient = nullptr,
+    const OrbitalChart* chart = nullptr);
 
 }  // namespace optimizer_detail
 

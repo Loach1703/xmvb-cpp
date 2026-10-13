@@ -87,13 +87,15 @@ bool build_ciah_macro_step(
       ciah_options.lindep,ciah_options.operator_relative_accuracy);
   Eigen::VectorXd orbital_image(ns ? dimension : 0), structure_image(ns ? dimension : 0);
   record->model_dimension = static_cast<int>(dimension);
-  record->source_gradient_norm = gradient.norm();
+  record->source_gradient_norm = chart.coordinate_dual_norm(gradient);
   record->source_physical_gradient_norm = gradient_norm;
 
   // Internal CIAH control is in the full coordinate vector, not a projected
-  // estimate. No metric inverse is needed to measure progress or keyframe
-  // agreement. The physical metric remains in the generalized AH equation.
-  const auto coordinate_norm = [](const Eigen::VectorXd& g) { return g.norm(); };
+  // estimate. Only the cheap local AO inverse is used for coordinate units;
+  // there is no complete physical-metric solve for progress/keyframes.
+  const auto coordinate_norm = [&](const Eigen::VectorXd& g) {
+    return std::hypot(chart.coordinate_dual_norm(g.head(no)), ns ? g.tail(ns).norm() : 0.0);
+  };
   const auto action = [&](const Eigen::VectorXd& x, Eigen::VectorXd* metric_image) {
     Eigen::VectorXd image(dimension);
     if (metric_image) {
@@ -176,7 +178,7 @@ bool build_ciah_macro_step(
   const auto diagonal_precondition = [&](const Eigen::VectorXd& g, double eigenvalue) {
     Eigen::VectorXd direction(dimension);
     if (options.orbital_preconditioner == OrbitalPreconditioner::Identity) {
-      direction.head(no) = g.head(no);
+      direction.head(no) = chart.inverse_coordinate_metric(g.head(no));
     } else if (options.orbital_preconditioner == OrbitalPreconditioner::OneElectron) {
       // The one-electron model is a positive block preconditioner, not a
       // signed approximation to the complete AH operator. Restore its
@@ -223,7 +225,14 @@ bool build_ciah_macro_step(
     return std::make_pair(std::move(hessian_image), std::move(metric_image));
   };
   ciah_options.residual_preconditioner = precondition;
+  ciah_options.coordinate_norm = coordinate_norm;
+  ciah_options.residual_direction = [&](const Eigen::VectorXd& g) {
+    Eigen::VectorXd v = g;
+    v.head(no) = chart.inverse_coordinate_metric(g.head(no));
+    return v;
+  };
   Eigen::VectorXd seed = initial_gradient;
+  seed.head(no) = chart.inverse_coordinate_metric(initial_gradient.head(no));
   if (orbital_guess_packed.size() == static_cast<Eigen::Index>(layout.size())) {
     seed.head(no) = chart.project_vector(orbital_guess_packed).reduced_gradient;
   }
@@ -274,7 +283,7 @@ bool build_ciah_macro_step(
   CiahKeyframes keyframes(energy);
   Eigen::VectorXd last_step = displacement;
   // The initial structure gradient is zero at the relaxed accepted point.
-  double keyframe_norm = initial_gradient.norm();
+  double keyframe_norm = coordinate_norm(initial_gradient);
   // newton_casscf.kernel passes 0.3 * its outer gradient tolerance to
   // update_orb_ci; the microstep/keyframe tests use that inner tolerance.
   const double micro_gradient_tolerance = 0.3 * options.gradient_tolerance;
@@ -366,7 +375,7 @@ bool build_ciah_macro_step(
     last_step = step;
     ++micro_steps;
     ++since_keyframe;
-    const double predicted_norm = predicted_gradient.norm();
+    const double predicted_norm = coordinate_norm(predicted_gradient);
     diagnostics::neo_trace("ciah_micro",
         "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g",
         candidate.basis_size, micro_steps, candidate.eigenvalue,
@@ -405,9 +414,9 @@ bool build_ciah_macro_step(
         keyframe_interval - std::log(length + 1.0e-7));
     if (since_keyframe >= interval || predicted_norm < keyframe_norm / gradient_trust) {
       const Keyframe exact = evaluate_keyframe(displacement);
-      const double actual_norm = exact.gradient.norm();
+      const double actual_norm = coordinate_norm(exact.gradient);
       const Eigen::VectorXd correction = exact.gradient - predicted_gradient;
-      const double mismatch_norm = correction.norm();
+      const double mismatch_norm = coordinate_norm(correction);
       const bool small_gradient = actual_norm < gradient_trust * micro_gradient_tolerance;
       const bool mismatch_small = mismatch_norm < gradient_trust * predicted_norm;
       if (diagnostics::neo_event_trace_enabled()) {
@@ -427,9 +436,9 @@ bool build_ciah_macro_step(
           actual_norm, predicted_norm, mismatch_norm, static_cast<int>(mismatch_small),
           exact.energy, static_cast<int>(keep_keyframe));
       if (diagnostics::neo_event_trace_enabled()) {
-        const double actual_orbital = exact.gradient.head(no).norm();
-        const double predicted_orbital = predicted_gradient.head(no).norm();
-        const double mismatch_orbital = correction.head(no).norm();
+        const double actual_orbital = chart.coordinate_dual_norm(exact.gradient.head(no));
+        const double predicted_orbital = chart.coordinate_dual_norm(predicted_gradient.head(no));
+        const double mismatch_orbital = chart.coordinate_dual_norm(correction.head(no));
         diagnostics::neo_trace("ciah_keyframe_blocks",
             "actual_orbital=%.17g,actual_structure_squared=%.17g,predicted_orbital=%.17g,predicted_structure_squared=%.17g,mismatch_orbital=%.17g,mismatch_structure_squared=%.17g",
             actual_orbital, std::max(0.0,actual_norm*actual_norm-actual_orbital*actual_orbital),

@@ -23,6 +23,9 @@ execute_process(
 if (NOT run_status EQUAL 0)
   message(FATAL_ERROR "matched-seed F2 NEO run failed: ${run_error}")
 endif()
+if (NOT report MATCHES "Orbital coordinates[ ]+:[ ]+unwhitened quotient")
+  message(FATAL_ERROR "NEO must use the unwhitened quotient by default")
+endif()
 # The report counts every accepted exact-gradient keyframe.  The fifth point is
 # the independent energy confirmation after projected-gradient convergence;
 # older grouped-macro reporting hid that point inside the preceding macro.

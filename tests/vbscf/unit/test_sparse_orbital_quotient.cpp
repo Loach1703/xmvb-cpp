@@ -16,6 +16,7 @@
 
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/whitening.hpp"
+#include "vbscf/orbitals/charts/raw.hpp"
 #include "vbscf/orbitals/charts/physical_metric.hpp"
 #include "vbscf/core/contracts/orbital_type.hpp"
 #include "vbscf/optimization/preconditioners/transported_lbfgs.hpp"
@@ -52,6 +53,7 @@ void check_whitened_tangent_inverse() {
     const Eigen::MatrixXd s = mixing.transpose() * mixing +
         conditioning * Eigen::MatrixXd::Identity(n, n);
     const TangentWhitening whitening(q, s);
+    const RawTangentMetric raw_metric(q, s);
     for (const double scale : {0.2, 1.0, 7.0}) {
       const Eigen::VectorXd coefficients = scale * raw;
       const double norm = std::sqrt(coefficients.dot(s * coefficients));
@@ -66,6 +68,30 @@ void check_whitened_tangent_inverse() {
           spectrum.eigenvectors().transpose();
       for (const bool sphere : {false, true}) {
         const WhitenedTangent result = whitening.apply(coefficients, s, sphere);
+        const RawTangent raw_result = raw_metric.apply(q, coefficients, s, sphere);
+        const Eigen::MatrixXd conversion =
+            raw_result.inverse_gram * raw_result.basis.transpose() * result.basis;
+        const Eigen::MatrixXd raw_coordinate_metric = q.transpose()*s*q -
+            raw_result.projection*raw_result.projection.transpose();
+        const Eigen::MatrixXd raw_coordinate_inverse = raw_metric.inverse() +
+            raw_result.inverse_projection*raw_result.inverse_projection.transpose()/raw_result.radial_gap;
+        require((raw_result.basis * conversion - result.basis).norm() <
+                    2e-9 * result.basis.norm(),
+                "unwhitened chart changed the horizontal representative");
+        require((conversion.transpose() * raw_coordinate_metric * conversion -
+                 Eigen::MatrixXd::Identity(d,d)).norm() < 2e-8,
+                "raw coordinate metric is inconsistent with whitening");
+        require((raw_coordinate_metric * raw_coordinate_inverse -
+                 Eigen::MatrixXd::Identity(d,d)).norm() < 2e-8,
+                "raw coordinate inverse failed its residual");
+        const Eigen::MatrixXd raw_gram = raw_result.basis.transpose() * raw_result.basis;
+        require((raw_gram * raw_result.inverse_gram -
+                 Eigen::MatrixXd::Identity(d,d)).norm() < 2e-8,
+                "unwhitened representative has an incorrect left inverse");
+        const Eigen::VectorXd raw_covector = Eigen::VectorXd::LinSpaced(d,-.4,.7);
+        require((raw_metric.reference_covector(raw_covector,raw_result.projection) -
+                 conversion.transpose()*raw_covector).norm() < 2e-8,
+                "implicit reference covector differs from an explicitly whitened chart");
         const Eigen::MatrixXd expected = sphere
             ? (norm * physical * inverse_root).eval() : (q * inverse_root).eval();
         const Eigen::MatrixXd rotation = expected.colPivHouseholderQr().solve(result.basis);
@@ -779,8 +805,62 @@ void check_analytic_block_pullback(
   if (n_core > 1) model.inactive_inverse_transform(0,1) = 0.23;
   if (n_active > 1) model.active_inverse_transform(0,1) = -0.31;
   const OrbitalChart chart(input,layout,orbitals,orbitals,
-                          nullptr,false,complete_active_space,&model);
+                          nullptr,false,complete_active_space,&model,OrbitalChart::Coordinates::Whitened);
+  const OrbitalChart raw_chart(input,layout,orbitals,orbitals,
+                              nullptr,false,complete_active_space,&model,OrbitalChart::Coordinates::Unwhitened);
   const int size = chart.reduced_size();
+  require(raw_chart.reduced_size() == size &&
+              raw_chart.rank_signature() == chart.rank_signature(),
+          "unwhitened quotient removed different physical directions");
+  Eigen::MatrixXd conversion(size,size);
+  for (int j=0;j<size;++j)
+    conversion.col(j) = raw_chart.project_vector(
+        chart.expand_step(Eigen::VectorXd::Unit(size,j))).reduced_gradient;
+  const Eigen::VectorXd packed = Eigen::VectorXd::LinSpaced(layout.size(),-.4,.7);
+  const Eigen::VectorXd raw_gradient = raw_chart.project_reduced_gradient(packed);
+  const Eigen::VectorXd white_gradient = chart.project_reduced_gradient(packed);
+  require((conversion.transpose()*raw_gradient-white_gradient).norm() < 2e-11,
+          "unwhitened gradient violates covector pullback");
+  require(std::abs(raw_chart.coordinate_dual_norm(raw_gradient)-white_gradient.norm()) < 2e-10,
+          "unwhitened progress norm changed its physical units");
+  require(std::abs(raw_chart.reference_gradient_inf_norm(raw_gradient)-
+                   white_gradient.cwiseAbs().maxCoeff()) < 2e-10,
+          "reference-only covector conversion changed the stopping criterion");
+  require((raw_chart.inverse_coordinate_metric(raw_gradient)-
+           conversion*white_gradient).norm() < 2e-9,
+          "unwhitened residual seed is not the coordinate Riesz vector");
+  const NonredundantRetractionMetric raw_physical(raw_chart,layout,input);
+  const NonredundantRetractionMetric white_physical(chart,layout,input);
+  const Eigen::VectorXd coordinate_probe = Eigen::VectorXd::LinSpaced(size,-.2,.4);
+  require((conversion.transpose()*raw_physical.apply(conversion*coordinate_probe)-
+           white_physical.apply(coordinate_probe)).norm() < 2e-9,
+          "unwhitened physical metric violates congruence");
+  require((raw_chart.expand_step(conversion*coordinate_probe)-chart.expand_step(coordinate_probe)).norm() < 2e-10 &&
+              std::abs(raw_chart.maximum_rotation_component(conversion*coordinate_probe)-
+                       chart.maximum_rotation_component(coordinate_probe)) < 2e-10,
+          "unwhitened orbital update or clipping changed");
+  for (const double shift : {-0.7,0.2})
+    require((raw_chart.apply_inverse_augmented_hessian_diagonal(raw_gradient,shift)-
+             conversion*chart.apply_inverse_augmented_hessian_diagonal(white_gradient,shift)).norm()
+                < 2e-8,
+            "unwhitened shifted preconditioner changed its physical action");
+  const double positive_shift = 0.7;
+  require((raw_chart.shifted_block_inverse(positive_shift)(raw_gradient) -
+           conversion * chart.shifted_block_inverse(positive_shift)(white_gradient)).norm() < 2e-9,
+          "unwhitened positive shifted preconditioner omitted its coordinate metric");
+  const Eigen::MatrixXd one_electron =
+      Eigen::VectorXd::LinSpaced(n_bf,-2.0,3.0).asDiagonal();
+  const OrbitalChart raw_one(input,layout,orbitals,orbitals,
+      &one_electron,false,complete_active_space,nullptr,OrbitalChart::Coordinates::Unwhitened);
+  const OrbitalChart white_one(input,layout,orbitals,orbitals,
+      &one_electron,false,complete_active_space,nullptr,OrbitalChart::Coordinates::Whitened);
+  const Eigen::VectorXd white_one_step = white_one.apply_inverse_reduced_block_preconditioner(white_gradient);
+  require((raw_one.apply_inverse_reduced_block_preconditioner(raw_gradient) -
+           conversion*white_one_step).norm() < 2e-8*std::max(1.0,white_one_step.norm()),
+          "one-electron inverse changed under unwhitened coordinates");
+  require((raw_one.shifted_block_inverse(positive_shift)(raw_gradient) -
+           conversion*white_one.shifted_block_inverse(positive_shift)(white_gradient)).norm() < 2e-8,
+          "shifted one-electron inverse omitted its AO coordinate metric");
   OrbitalChart deferred(input,layout,orbitals,orbitals,
                         nullptr,false,complete_active_space);
   const Eigen::VectorXd geometry_probe = Eigen::VectorXd::LinSpaced(size,-0.3,0.6);

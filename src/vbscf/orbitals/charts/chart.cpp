@@ -19,6 +19,7 @@
 #include "vbscf/orbitals/charts/physical_metric.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/orbitals/charts/whitening.hpp"
+#include "vbscf/orbitals/charts/raw.hpp"
 #include "vbscf/optimization/preconditioners/one_electron.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
 #include "vbscf/core/contracts/orbital_type.hpp"
@@ -126,7 +127,8 @@ struct PositiveCurvatureBlock {
 };
 
 PositiveCurvatureBlock build_positive_curvature_block(
-    const Eigen::MatrixXd& curvature_block) {
+    const Eigen::MatrixXd& curvature_block,
+    const Eigen::MatrixXd* coordinate_metric = nullptr) {
   diagnostics::ScopedPhase block_phase(diagnostics::Phase::BlockFactor);
   if (curvature_block.rows() == 0) {
     return {Eigen::MatrixXd::Zero(0, 0), Eigen::MatrixXd::Zero(0, 0)};
@@ -142,9 +144,13 @@ PositiveCurvatureBlock build_positive_curvature_block(
   Eigen::VectorXd eigenvalues(curvature_block.rows());
   diagnostics::ScopedPhase eigen_phase(diagnostics::Phase::BlockEigen);
   const lapack_int dimension = static_cast<lapack_int>(eigenvalues.size());
-  const lapack_int info = LAPACKE_dsyevd(
-      LAPACK_COL_MAJOR, 'V', 'L', dimension,
-      eigenvectors.data(), dimension, eigenvalues.data());
+  Eigen::MatrixXd metric;
+  if (coordinate_metric) metric = *coordinate_metric;
+  const lapack_int info = coordinate_metric
+      ? LAPACKE_dsygvd(LAPACK_COL_MAJOR, 1, 'V', 'L', dimension,
+          eigenvectors.data(), dimension, metric.data(), dimension, eigenvalues.data())
+      : LAPACKE_dsyevd(LAPACK_COL_MAJOR, 'V', 'L', dimension,
+          eigenvectors.data(), dimension, eigenvalues.data());
   eigen_phase.stop();
   if (info != 0 || !eigenvalues.allFinite() || !eigenvectors.allFinite()) {
     throw std::runtime_error(
@@ -163,8 +169,10 @@ PositiveCurvatureBlock build_positive_curvature_block(
     safe_eigenvalues[i] = std::max(safe_eigenvalues[i], spectral_floor);
   }
   PositiveCurvatureBlock result;
-  result.matrix = eigenvectors *
-      safe_eigenvalues.asDiagonal() * eigenvectors.transpose();
+  const Eigen::MatrixXd covectors = coordinate_metric
+      ? (*coordinate_metric * eigenvectors).eval() : eigenvectors;
+  result.matrix = covectors *
+      safe_eigenvalues.asDiagonal() * covectors.transpose();
   result.inverse = eigenvectors *
       safe_eigenvalues.cwiseInverse().asDiagonal() *
       eigenvectors.transpose();
@@ -404,8 +412,10 @@ OrbitalChart::OrbitalChart(
     const Eigen::MatrixXd* ao_effective_h1e,
     bool collect_structural_diagnostics,
     bool complete_active_space,
-    const AnalyticOrbitalDiagonal* hessian_diagonal)
-    : packed_parameter_size_(parameter_view.size()) {
+    const AnalyticOrbitalDiagonal* hessian_diagonal,
+    Coordinates coordinates)
+    : whiten_tangent_(coordinates == Coordinates::Whitened),
+      packed_parameter_size_(parameter_view.size()) {
   diagnostics::ScopedPhase chart_phase(diagnostics::Phase::Chart);
   const int n_inactive =
       (input.n_total_electrons - input.n_active_electrons) / 2;
@@ -448,6 +458,7 @@ OrbitalChart::OrbitalChart(
   std::optional<Eigen::MatrixXd> full_active_quotient;
   std::optional<TangentWhitening> full_inactive_whitening;
   std::optional<TangentWhitening> full_active_whitening;
+  std::shared_ptr<const RawTangentMetric> full_inactive_metric, full_active_metric;
 
   int block_index = 0;
   for (const auto& block : blocks) {
@@ -535,6 +546,7 @@ OrbitalChart::OrbitalChart(
       Eigen::MatrixXd local_quotient;
       const Eigen::MatrixXd* quotient;
       const TangentWhitening* whitening = nullptr;
+      std::shared_ptr<const RawTangentMetric> raw_metric;
       if (shared_gauge) {
         auto& shared = m.orbital_index < n_inactive
             ? full_inactive_quotient : full_active_quotient;
@@ -545,10 +557,17 @@ OrbitalChart::OrbitalChart(
               input, m.orbital_index, n_inactive,
               stable_inactive_span_basis, phys_orbital_matrix, ao_overlap,
               local_basis_indices, use_active_subspace_gauge));
-          shared_whitening.emplace(*shared, ao_overlap);
+          if (whiten_tangent_) shared_whitening.emplace(*shared, ao_overlap);
+          else {
+            auto& shared_metric = m.orbital_index < n_inactive
+                ? full_inactive_metric : full_active_metric;
+            shared_metric = std::make_shared<RawTangentMetric>(*shared, ao_overlap);
+          }
         }
         quotient = &*shared;
-        whitening = &*shared_whitening;
+        if (whiten_tangent_) whitening = &*shared_whitening;
+        else raw_metric = (m.orbital_index < n_inactive
+            ? full_inactive_metric : full_active_metric);
       } else {
         local_quotient = build_exact_local_sparse_quotient_basis(
             input, m.orbital_index, n_inactive,
@@ -600,15 +619,29 @@ OrbitalChart::OrbitalChart(
           stored_coefficients.tail(stored_count - local_size).isZero(0.0);
       const bool use_product_sphere_representative =
           !use_active_subspace_gauge && scaling_gauge_is_admissible;
-      std::optional<TangentWhitening> local_whitening;
-      if (!whitening) {
-        local_whitening.emplace(stored_quotient_basis, stored_overlap);
-        whitening = &*local_whitening;
+      if (whiten_tangent_) {
+        std::optional<TangentWhitening> local_whitening;
+        if (!whitening) {
+          local_whitening.emplace(stored_quotient_basis, stored_overlap);
+          whitening = &*local_whitening;
+        }
+        WhitenedTangent tangent = whitening->apply(
+            stored_coefficients, stored_overlap, use_product_sphere_representative);
+        proj.tangent_basis = tangent.basis.topRows(local_size);
+        proj.inverse_raw_tangent_gram = std::move(tangent.inverse_gram);
+      } else {
+        if (!raw_metric) {
+          raw_metric = std::make_shared<RawTangentMetric>(stored_quotient_basis, stored_overlap);
+        }
+        RawTangent tangent = raw_metric->apply(stored_quotient_basis,
+            stored_coefficients, stored_overlap, use_product_sphere_representative);
+        proj.tangent_basis = tangent.basis.topRows(local_size);
+        proj.inverse_raw_tangent_gram = std::move(tangent.inverse_gram);
+        proj.coordinate_base = std::move(raw_metric);
+        proj.coordinate_projection = std::move(tangent.projection);
+        proj.inverse_coordinate_projection = std::move(tangent.inverse_projection);
+        proj.coordinate_radial_gap = tangent.radial_gap;
       }
-      WhitenedTangent tangent = whitening->apply(
-          stored_coefficients, stored_overlap, use_product_sphere_representative);
-      proj.tangent_basis = tangent.basis.topRows(local_size);
-      proj.inverse_raw_tangent_gram = std::move(tangent.inverse_gram);
       proj.uses_product_sphere_representative =
           use_product_sphere_representative;
       if (proj.uses_product_sphere_representative) {
@@ -711,6 +744,11 @@ void OrbitalChart::set_curvature(
       if (proj.local_reduced_size == 0) continue;
       const Eigen::Index local_size = proj.tangent_basis.rows();
       const int stored_count = stored_sparse_orbital_coefficient_count(input, proj.orbital_index);
+      // Only materialize the local metric while factoring the preconditioner;
+      // full-AO orbitals retain one shared base and two radial vectors each.
+      const Eigen::MatrixXd coordinate_metric = whiten_tangent_
+          ? Eigen::MatrixXd() : (proj.coordinate_base->metric() -
+              proj.coordinate_projection * proj.coordinate_projection.transpose()).eval();
       // Pull back the normalized, inactive-projected one-electron surrogate
       // into the same additive sparse chart as the exact HVP. Other inactive
       // orbitals remain fixed for an inactive target; all are removed for an
@@ -790,7 +828,8 @@ void OrbitalChart::set_curvature(
         proj.hessian_diagonal = curvature;
         proj.curvature_diagonal = normalize_curvature_diagonal(curvature);
         PositiveCurvatureBlock positive_block =
-            build_positive_curvature_block(block_curvature);
+            build_positive_curvature_block(block_curvature,
+                whiten_tangent_ ? nullptr : &coordinate_metric);
         proj.ah_block_eigenvalues = std::move(positive_block.signed_eigenvalues);
         proj.ah_block_eigenvectors = std::move(positive_block.eigenvectors);
         proj.curvature_block = std::move(positive_block.matrix);
@@ -822,7 +861,8 @@ void OrbitalChart::set_curvature(
         // negative curvature in the exact HVP model is left untouched.
         proj.curvature_diagonal = normalize_curvature_diagonal(curv);
         PositiveCurvatureBlock positive_block =
-            build_positive_curvature_block(block_curv);
+            build_positive_curvature_block(block_curv,
+                whiten_tangent_ ? nullptr : &coordinate_metric);
         if (hessian_diagonal != nullptr) {
           // Keep the physical step map, but honor the explicitly selected
           // one-electron model for signed AH residual preconditioning.
@@ -1088,7 +1128,9 @@ OrbitalChart::shifted_block_inverse(double shift) const {
             !matrix.allFinite()) {
           throw std::runtime_error("invalid shifted orbital curvature block");
         }
-        matrix.diagonal().array() += shift;
+        if (whiten_tangent_) matrix.diagonal().array() += shift;
+        else matrix.noalias() += shift * (orbital.coordinate_base->metric() -
+            orbital.coordinate_projection * orbital.coordinate_projection.transpose());
         Eigen::LDLT<Eigen::MatrixXd> factor(matrix);
         if (factor.info() != Eigen::Success || !factor.isPositive()) {
           throw std::runtime_error(
@@ -1319,6 +1361,48 @@ Eigen::VectorXd OrbitalChart::expand_step(
   }
   require_finite_vector(packed, "orbital-chart packed expansion");
   return packed;
+}
+
+Eigen::VectorXd OrbitalChart::inverse_coordinate_metric(
+    const Eigen::VectorXd& covector) const {
+  require_finite_vector_size(covector, reduced_size_, "coordinate metric covector");
+  if (whiten_tangent_) return covector;
+  Eigen::VectorXd result(covector.size());
+  for (const auto& block : block_bases_)
+    for (const auto& orbital : block.orbitals) {
+      const int start = orbital.local_reduced_offset, size = orbital.local_reduced_size;
+      if (size) {
+        const auto local = covector.segment(start, size);
+        result.segment(start, size).noalias() = orbital.coordinate_base->inverse() * local;
+        result.segment(start, size).noalias() += orbital.inverse_coordinate_projection *
+            (orbital.inverse_coordinate_projection.dot(local) / orbital.coordinate_radial_gap);
+      }
+    }
+  return result;
+}
+
+double OrbitalChart::coordinate_dual_norm(const Eigen::VectorXd& covector) const {
+  if (whiten_tangent_) return covector.norm();
+  const double squared = covector.dot(inverse_coordinate_metric(covector));
+  if (!(squared >= 0.0) || !std::isfinite(squared))
+    throw std::runtime_error("invalid coordinate dual norm");
+  return std::sqrt(squared);
+}
+
+double OrbitalChart::reference_gradient_inf_norm(const Eigen::VectorXd& covector) const {
+  require_finite_vector_size(covector, reduced_size_, "reference gradient covector");
+  if (!covector.size()) return 0.0;
+  if (whiten_tangent_) return covector.cwiseAbs().maxCoeff();
+  double maximum = 0.0;
+  for (const auto& block : block_bases_)
+    for (const auto& orbital : block.orbitals) {
+      if (!orbital.local_reduced_size) continue;
+      const Eigen::VectorXd reference = orbital.coordinate_base->reference_covector(
+          covector.segment(orbital.local_reduced_offset, orbital.local_reduced_size),
+          orbital.coordinate_projection);
+      maximum = std::max(maximum, reference.cwiseAbs().maxCoeff());
+    }
+  return maximum;
 }
 
 Eigen::VectorXd OrbitalChart::expand_gradient(

@@ -291,7 +291,9 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
           *pending_residual_, pending_eigenvalue_);
       if (!append(std::move(direction), &*pending_residual_,
                   pending_residual_norm_, pending_eigenvalue_) &&
-          !append(*pending_residual_, &*pending_residual_,
+          !append(options_.residual_direction
+                      ? options_.residual_direction(*pending_residual_) : *pending_residual_,
+                  &*pending_residual_,
                   pending_residual_norm_, pending_eigenvalue_)) {
         exhausted_ = true;
       } else {
@@ -384,8 +386,11 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   // CIAH uses a coordinate norm to control its inexact microiterations, as
   // PySCF does. The generalized AH metric is still present in the equation.
   // Evaluate the FULL residual, not just its projection into the trial space.
-  result.residual_norm = result.residual.norm();
-  result.model_gradient_norm = (current_gradient + result.hessian_step).norm();
+  const auto norm = [&](const Eigen::VectorXd& covector) {
+    return options_.coordinate_norm ? options_.coordinate_norm(covector) : covector.norm();
+  };
+  result.residual_norm = norm(result.residual);
+  result.model_gradient_norm = norm(current_gradient + result.hessian_step);
   const bool eigenvalue_settled = previous_eigenvalue_ &&
       std::abs(result.eigenvalue - *previous_eigenvalue_) < options_.tolerance;
   if (trace) {

@@ -440,7 +440,8 @@ int main(int argc, char** argv) {
             : &accepted.ao_effective_one_electron_result.ao_effective_h1e,
         false,
         input.complete_active_space,
-        analytic_diagonal ? &*analytic_diagonal : nullptr);
+        analytic_diagonal ? &*analytic_diagonal : nullptr,
+        xmvb::vb::OrbitalChart::Coordinates::Unwhitened);
     const Eigen::VectorXd packed_gradient =
         layout.gather_from_full(accepted.sparse_orbital_energy_gradient);
     const Eigen::VectorXd accepted_reduced_gradient =
@@ -537,11 +538,19 @@ int main(int argc, char** argv) {
     if (direction.size() == 0) {
       throw std::runtime_error("nonredundant orbital space is empty");
     }
-    if (direction.norm() <= std::sqrt(std::numeric_limits<double>::epsilon())) {
+    const bool gradient_direction = !options.preconditioned_direction &&
+        options.orbital_sector.empty() && options.packed_direction_path.empty();
+    // A gradient is a covector. Use its AO-tangent Riesz vector and norm so
+    // coordinate rescaling does not change the finite-difference experiment.
+    const double direction_norm = gradient_direction
+        ? chart.coordinate_dual_norm(accepted_reduced_gradient) : direction.norm();
+    if (gradient_direction)
+      direction = chart.inverse_coordinate_metric(accepted_reduced_gradient);
+    if (direction_norm <= std::sqrt(std::numeric_limits<double>::epsilon())) {
       direction.setZero();
       direction[0] = 1.0;
     } else {
-      direction.normalize();
+      direction /= direction_norm;
     }
 
     if (options.stream_pair_products) {

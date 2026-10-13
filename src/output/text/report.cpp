@@ -371,6 +371,10 @@ void print_summary(
     print_log_field("Molden output", molden_output_path->string());
   }
   print_log_field("Gradient metric", gradient_tolerance_metric_name(options.backend));
+  if (options.backend == vb::VbScfOptimizerBackend::Neo) {
+    print_log_field("Orbital coordinates", "unwhitened quotient");
+    print_log_field("Projected infinity norm", "reference coordinates for stopping/final report");
+  }
   const bool certifies_physical_gradient = input.complete_active_space &&
       input.orbital_preparation_input.orbital_type == vb::kOrbitalTypeOeo &&
       (options.backend == vb::VbScfOptimizerBackend::BlockLbfgs ||

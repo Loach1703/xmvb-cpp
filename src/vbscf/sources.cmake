@@ -47,6 +47,7 @@ set(XMVB_VBSCF_ORBITAL_SOURCES
   vbscf/orbitals/charts/support_adapter.cpp
   vbscf/orbitals/charts/chart.cpp
   vbscf/orbitals/charts/whitening.cpp
+  vbscf/orbitals/charts/raw.cpp
   vbscf/orbitals/charts/rotation.cpp
   vbscf/orbitals/charts/layout.cpp
   vbscf/orbitals/charts/physical_metric.cpp
