@@ -1,5 +1,6 @@
 #include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/diagnostics/performance/phases.hpp"
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 #include <stdexcept>
 #include <utility>
@@ -171,6 +172,7 @@ VbScfCoupledKeyframeEvaluation
 VbScfObjective::evaluate_coupled_keyframe(
     const Eigen::VectorXd& parameter_vector,
     const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const {
+  const auto start = std::chrono::steady_clock::now();
   OrbitalPreparationInput trial_orbitals = input_.orbital_preparation_input;
   layout_.unpack(parameter_vector, &trial_orbitals);
   ScopedTrialOrbitals trial_scope(&input_, std::move(trial_orbitals));
@@ -188,6 +190,13 @@ VbScfObjective::evaluate_coupled_keyframe(
       std::move(fixed.normalized_coefficients);
   result.structure_residuals = std::move(fixed.structure_residuals);
   result.energy = fixed.gradient.scf_result.total_energy;
+  diagnostics::neo_trace("ciah_keyframe_cost",
+      "seconds=%.17g,active=%.17g,two_electron_backward=%.17g,ao_backward=%.17g,orbital_backward=%.17g",
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
+      fixed.gradient.active_space_gradient_wall_time_seconds,
+      fixed.gradient.active_space_two_electron_backpropagation_wall_time_seconds,
+      fixed.gradient.ao_effective_one_electron_backpropagation_wall_time_seconds,
+      fixed.gradient.orbital_backpropagation_wall_time_seconds);
   return result;
 }
 

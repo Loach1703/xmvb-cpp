@@ -1,0 +1,5 @@
+Base master 4aedc3c5; optimizer policy and kernels retained from 6bcc5bb4.
+Only fixed-state keyframe preparation, action normalization, associated unit
+tests, and scalar stage timers changed. No tolerance or keyframe policy change.
+Unrelated dirty RI changes and .gitignore were not transferred or included.
+The execution mirror already contains the production baseline.

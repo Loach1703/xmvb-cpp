@@ -11,6 +11,7 @@ set(_xmvb_vbscf_unit_targets
   test_accepted_pair_tile
   test_block_inverse_bfgs
   test_hessian_diagonal
+  test_keyframe
   test_cofactor_differential
   test_coupled_structure
   test_ciah
@@ -57,6 +58,7 @@ if (BUILD_TESTING)
   add_test(NAME accepted_pair_tile COMMAND test_accepted_pair_tile)
   add_test(NAME block_inverse_bfgs COMMAND test_block_inverse_bfgs)
   add_test(NAME hessian_diagonal COMMAND test_hessian_diagonal)
+  add_test(NAME keyframe COMMAND test_keyframe)
   set_tests_properties(block_inverse_bfgs PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME orbital_block_partition COMMAND test_orbital_block_partition)

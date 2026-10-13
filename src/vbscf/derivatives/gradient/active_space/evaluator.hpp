@@ -59,7 +59,8 @@ private:
  * overlap metric, matching CIAH's independent state normalization.
  * `structure_residuals` stores
  * @f$(H-E_sS)c_s@f$ for the normalized columns.  No structure eigensystem is
- * solved; this is the exact coupled keyframe evaluation required by CIAH/NEO.
+ * solved. Only `gradient.scf_result.total_energy` is populated in the SCF
+ * result: fixed-state derivatives do not construct eigensolver output.
  */
 struct ActiveSpaceFixedStructureGradient {
   ActiveSpaceGradientResult gradient;

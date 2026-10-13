@@ -493,7 +493,8 @@ StructureAction::StructureAction(
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
     const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_active_orbitals,
-    const StructureDiagonal* precomputed_preconditioner)
+    const StructureDiagonal* precomputed_preconditioner,
+    StructureActionMode mode)
     : n_determinants_(
           static_cast<int>(determinant_to_structure_terms.size())),
       n_structures_(n_structures),
@@ -542,7 +543,7 @@ StructureAction::StructureAction(
     throw std::invalid_argument(
         "structure action requires accepted-pair providers");
   }
-  if (!same_spin_pair_cache.enabled() &&
+  if (mode == StructureActionMode::Davidson && !same_spin_pair_cache.enabled() &&
       precomputed_preconditioner == nullptr) {
     throw std::invalid_argument(
         "topology-only structure action requires a diagonal preconditioner");
@@ -699,6 +700,8 @@ StructureAction::StructureAction(
     const int structure = spin_terms_[term_index].structure;
     structure_term_indices_[next_structure_term[structure]++] = term_index;
   }
+
+  if (mode == StructureActionMode::ActionOnly) return;
 
   if (precomputed_preconditioner != nullptr) {
     if (precomputed_preconditioner->hamiltonian.size() != n_structures_ ||

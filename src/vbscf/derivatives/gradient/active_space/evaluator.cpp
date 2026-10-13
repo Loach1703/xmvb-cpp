@@ -587,11 +587,9 @@ void populate_scf_result(
   }
 }
 
-void initialize_active_space_gradient_result(
+/** @brief Prepare derivative storage without constructing eigensolver results. */
+void initialize_active_space_derivatives(
     const VbScfInput& input,
-    const std::vector<int>& selected_state_indices,
-    const std::vector<double>& normalized_weights,
-    double nuclear_repulsion_energy,
     const ActiveSpaceGradientForwardContext& forward_context,
     ActiveSpaceGradientResult* result) {
   const auto& timings = forward_context.timed_active_space_context.timings;
@@ -639,7 +637,16 @@ void initialize_active_space_gradient_result(
       packed_active_two_electron_integral_count(
           input.orbital_preparation_input.n_active_orbitals),
       0.0);
+}
 
+void initialize_active_space_gradient_result(
+    const VbScfInput& input,
+    const std::vector<int>& selected_state_indices,
+    const std::vector<double>& normalized_weights,
+    double nuclear_repulsion_energy,
+    const ActiveSpaceGradientForwardContext& forward_context,
+    ActiveSpaceGradientResult* result) {
+  initialize_active_space_derivatives(input, forward_context, result);
   populate_scf_result(
       input,
       selected_state_indices,
@@ -994,19 +1001,8 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       input.orbital_preparation_input.n_active_orbitals);
 
   const auto structure_start_time = std::chrono::steady_clock::now();
-  std::optional<StructureDiagonal> jacobi_diagonal;
-  if (!context.same_spin_pair_cache.enabled()) {
-    jacobi_diagonal = structure_builder_.build_davidson_jacobi_preconditioner(
-        input.structure_data.alpha_det,
-        input.structure_data.beta_det,
-        input.structure_data.determinant_to_structure_terms,
-        prepared.orbital_result.active_orbital_overlap_matrix,
-        prepared.active_space_one_electron_result.h1e_act,
-        input.orbital_preparation_input.n_active_orbitals,
-        prepared.active_space_two_electron_result,
-        input.structure_data.n_structures,
-        context.same_spin_pair_cache);
-  }
+  // Prescribed coefficients need H/S actions and adjoints, not a Davidson
+  // diagonal, root solve, or a synthesized eigensystem for result packaging.
   context.structure_action.emplace(
       input.structure_data.determinant_to_structure_terms,
       input.structure_data.n_structures,
@@ -1015,16 +1011,12 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       prepared.active_space_one_electron_result.h1e_act,
       prepared.active_space_two_electron_result,
       input.orbital_preparation_input.n_active_orbitals,
-      jacobi_diagonal ? &*jacobi_diagonal : nullptr);
+      nullptr,
+      StructureActionMode::ActionOnly);
   context.structure_matrix_wall_time_seconds = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - structure_start_time).count();
-  const StructureDiagonal& diagonal =
-      context.structure_action->preconditioner_diagonal();
-  context.structure_overlap_diagonal = diagonal.overlap;
-  context.structure_overlap_diagonal_exact =
-      context.same_spin_pair_cache.enabled();
-  context.average_structure_overlap = diagonal.overlap.mean();
 
+  const auto action_start_time = std::chrono::steady_clock::now();
   StructureActionResult images =
       context.structure_action->apply(structure_coefficients);
   context.selected_state_eigenvectors = structure_coefficients;
@@ -1037,40 +1029,26 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       throw std::runtime_error(
           "fixed structure keyframe has a singular overlap norm");
     }
-    context.selected_state_eigenvectors.col(state) /=
-        std::sqrt(norm_squared);
+    const double norm = std::sqrt(norm_squared);
+    context.selected_state_eigenvectors.col(state) /= norm;
+    // Linearity: normalizing a coefficient column only scales its two images.
+    images.hamiltonian.col(state) /= norm;
+    images.overlap.col(state) /= norm;
   }
-  images = context.structure_action->apply(
-      context.selected_state_eigenvectors);
-  const Eigen::MatrixXd projected_hamiltonian =
-      context.selected_state_eigenvectors.transpose() * images.hamiltonian;
   context.selected_state_energies.resize(n_states);
+  double electronic_energy = 0.0;
   for (int state = 0; state < n_states; ++state) {
     context.selected_state_energies[static_cast<std::size_t>(state)] =
-        projected_hamiltonian(state, state);
+        context.selected_state_eigenvectors.col(state).dot(images.hamiltonian.col(state));
+    electronic_energy += normalized_weights[state] * context.selected_state_energies[state];
   }
-
-  const int n_roots = required_root_count(selected_state_indices);
-  context.eigen_result.eigenvalues.assign(n_roots, 0.0);
-  Eigen::MatrixXd roots = Eigen::MatrixXd::Zero(
-      input.structure_data.n_structures, n_roots);
-  for (int state = 0; state < n_states; ++state) {
-    const int root = selected_state_indices[static_cast<std::size_t>(state)];
-    context.eigen_result.eigenvalues[static_cast<std::size_t>(root)] =
-        context.selected_state_energies[static_cast<std::size_t>(state)];
-    roots.col(root) = context.selected_state_eigenvectors.col(state);
-  }
-  context.eigen_result.eigenvector_matrix.assign(
-      roots.data(), roots.data() + roots.size());
+  const double action_seconds = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - action_start_time).count();
 
   ActiveSpaceFixedStructureGradient fixed;
-  initialize_active_space_gradient_result(
-      input,
-      selected_state_indices,
-      normalized_weights,
-      nuclear_repulsion_energy,
-      context,
-      &fixed.gradient);
+  initialize_active_space_derivatives(input, context, &fixed.gradient);
+  fixed.gradient.scf_result.total_energy = electronic_energy +
+      prepared.one_electron_reference_energy + nuclear_repulsion_energy;
   accumulate_active_space_gradient(
       input,
       selected_state_indices,
@@ -1079,6 +1057,11 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       &fixed.gradient);
   fixed.gradient.total_wall_time_seconds = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - total_start_time).count();
+  if (diagnostics::neo_event_trace_enabled()) diagnostics::neo_trace("ciah_keyframe_active_cost",
+      "seconds=%.17g,setup=%.17g,action=%.17g,adjoint=%.17g,actions=1,diagonal_bytes=%zu",
+      fixed.gradient.total_wall_time_seconds, context.structure_matrix_wall_time_seconds,
+      action_seconds, fixed.gradient.adjoint_wall_time_seconds,
+      context.structure_action->storage().diagonal_bytes);
   fixed.normalized_coefficients = context.selected_state_eigenvectors;
   fixed.structure_residuals = std::move(images.hamiltonian);
   fixed.structure_residuals.noalias() -=

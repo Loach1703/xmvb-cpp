@@ -1,0 +1,245 @@
+{
+  "run": "results/diagnostics/hanhai22-shared-response-20261012/keyframe-lean-audit-1250649/QOCGUM-audit",
+  "macros": 4,
+  "hvp": 52,
+  "keyframes": 17,
+  "keyframe_calls_timed": 13,
+  "keyframe_seconds": 1.147203598,
+  "keyframe_active_seconds": {
+    "seconds": 0.9757499199999998,
+    "setup": 0.042707417000000004,
+    "action": 0.037837622999999994,
+    "adjoint": 0.13624482200000002
+  },
+  "keyframe_hs_actions": 13,
+  "keyframe_max_diagonal_bytes": 0,
+  "keyframe_decisions": [
+    {
+      "macro": 1,
+      "attempt": 0,
+      "actual": "0.73186965490316236",
+      "predicted": "0.65212121202658269",
+      "mismatch": "0.53029382320181628",
+      "mismatch_small": "1",
+      "energy": "-480.03886236120718",
+      "accepted": "1"
+    },
+    {
+      "macro": 1,
+      "attempt": 0,
+      "actual": "0.74814216949683676",
+      "predicted": "0.18280426213402437",
+      "mismatch": "0.72718600199041217",
+      "mismatch_small": "0",
+      "energy": "-480.02953290543746",
+      "accepted": "0"
+    },
+    {
+      "macro": 2,
+      "attempt": 0,
+      "actual": "0.30672614568630019",
+      "predicted": "0.19387117071992613",
+      "mismatch": "0.25059661385292292",
+      "mismatch_small": "1",
+      "energy": "-480.08788952058001",
+      "accepted": "1"
+    },
+    {
+      "macro": 2,
+      "attempt": 0,
+      "actual": "0.24833147527500823",
+      "predicted": "0.068642015382659724",
+      "mismatch": "0.24059649993857357",
+      "mismatch_small": "0",
+      "energy": "-480.08660164596802",
+      "accepted": "0"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.077569294253380411",
+      "predicted": "0.045711175675225382",
+      "mismatch": "0.064529209133742854",
+      "mismatch_small": "1",
+      "energy": "-480.09429129165289",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.043536383688930695",
+      "predicted": "0.025328971460910954",
+      "mismatch": "0.035634744403396916",
+      "mismatch_small": "1",
+      "energy": "-480.09460352156816",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.021664166603499051",
+      "predicted": "0.013504262925038396",
+      "mismatch": "0.017680336804621149",
+      "mismatch_small": "1",
+      "energy": "-480.09472623926104",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.011266482724915641",
+      "predicted": "0.0069070104845981514",
+      "mismatch": "0.0092595542570420488",
+      "mismatch_small": "1",
+      "energy": "-480.09475467216623",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.0059766215665213833",
+      "predicted": "0.003481824832429595",
+      "mismatch": "0.0049293562971353764",
+      "mismatch_small": "1",
+      "energy": "-480.094763516331",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.0032250988773027734",
+      "predicted": "0.0019334794797781227",
+      "mismatch": "0.002633781583179326",
+      "mismatch_small": "1",
+      "energy": "-480.09476575437645",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.0016416021114752065",
+      "predicted": "0.00082642625831933414",
+      "mismatch": "0.0014189123339561993",
+      "mismatch_small": "1",
+      "energy": "-480.09476641253809",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.00089781345311201505",
+      "predicted": "0.00048241757107697934",
+      "mismatch": "0.00076340959312796346",
+      "mismatch_small": "1",
+      "energy": "-480.09476659968254",
+      "accepted": "1"
+    },
+    {
+      "macro": 4,
+      "attempt": 0,
+      "actual": "9.0331142630344248e-05",
+      "predicted": "9.0328001771938383e-05",
+      "mismatch": "1.5671172464329025e-07",
+      "mismatch_small": "1",
+      "energy": "-480.09476668175262",
+      "accepted": "1"
+    }
+  ],
+  "micro_ends": [
+    {
+      "macro": 1,
+      "attempt": 0,
+      "reason": "keyframe_mismatch",
+      "source_coordinate_norm": "3.6909302931933778",
+      "predicted_coordinate_norm": "0.34218876108084278",
+      "frozen_model_coordinate_norm": "0.63885731151043679",
+      "keyframe_correction_norm": "0.53029382320181628",
+      "last_ritz": "0.18379609933592511"
+    },
+    {
+      "macro": 2,
+      "attempt": 0,
+      "reason": "keyframe_mismatch",
+      "source_coordinate_norm": "0.70022951048758963",
+      "predicted_coordinate_norm": "0.14587254651008136",
+      "frozen_model_coordinate_norm": "0.28599053636808786",
+      "keyframe_correction_norm": "0.25059661385292292",
+      "last_ritz": "0.068693480612298061"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "reason": "micro_budget",
+      "source_coordinate_norm": "0.23363687567310454",
+      "predicted_coordinate_norm": "0.00026309366437610767",
+      "frozen_model_coordinate_norm": "0.040374869677833165",
+      "keyframe_correction_norm": "0.040377944740254558",
+      "last_ritz": "0.00026309366470392341"
+    },
+    {
+      "macro": 4,
+      "attempt": 0,
+      "reason": "micro_gradient",
+      "source_coordinate_norm": "0.00039799029993458875",
+      "predicted_coordinate_norm": "5.2414278992947251e-05",
+      "frozen_model_coordinate_norm": "5.2409468518735858e-05",
+      "keyframe_correction_norm": "1.5671172464330234e-07",
+      "last_ritz": "5.2414278996562828e-05"
+    }
+  ],
+  "macro_trials": [
+    {
+      "macro": 1,
+      "attempt": 0,
+      "scale": "1",
+      "linear": "-1.0522359219745452",
+      "quadratic": "1.0287899525218107",
+      "current_energy": "-479.55046394844192",
+      "trial_energy": "-480.03867857027035",
+      "predicted": "0.53784094571363983",
+      "actual": "0.48821462182843334",
+      "rho": "0.90773048374113785",
+      "accepted": "1"
+    },
+    {
+      "macro": 2,
+      "attempt": 0,
+      "scale": "1",
+      "linear": "-0.10138128751543909",
+      "quadratic": "0.075231336478058616",
+      "current_energy": "-480.03867857027035",
+      "trial_energy": "-480.08714739832146",
+      "predicted": "0.06376561927640978",
+      "actual": "0.048468828051113633",
+      "rho": "0.76010910897002415",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "scale": "1",
+      "linear": "-0.013615968960086763",
+      "quadratic": "0.01199330518953045",
+      "current_energy": "-480.08714739832146",
+      "trial_energy": "-480.09476666132991",
+      "predicted": "0.0076193163653215379",
+      "actual": "0.0076192630084506163",
+      "rho": "0.9999929971577024",
+      "accepted": "1"
+    },
+    {
+      "macro": 4,
+      "attempt": 0,
+      "scale": "1",
+      "linear": "-4.0979023872611294e-08",
+      "quadratic": "4.0990313651211929e-08",
+      "current_energy": "-480.09476666132991",
+      "trial_energy": "-480.09476668185721",
+      "predicted": "2.048386704700533e-08",
+      "actual": "2.052729541901499e-08",
+      "rho": "1.0021201256535206",
+      "accepted": "1"
+    }
+  ],
+  "limits": "Observed corrections do not establish the outcome of skipping a keyframe. Scalar-audit wall time is not the native benchmark time."
+}

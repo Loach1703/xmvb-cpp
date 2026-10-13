@@ -17,6 +17,9 @@ namespace xmvb::vb {
 
 class StructureMetricInverse;
 
+/** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
+enum class StructureActionMode { Davidson, ActionOnly };
+
 /**
  * @brief Result of applying the structure Hamiltonian and overlap to a vector block.
  *
@@ -97,7 +100,8 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
       const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_active_orbitals,
-      const StructureDiagonal* precomputed_preconditioner = nullptr);
+      const StructureDiagonal* precomputed_preconditioner = nullptr,
+      StructureActionMode mode = StructureActionMode::Davidson);
 
   ~StructureAction();
   StructureAction(StructureAction&&) noexcept;
@@ -271,7 +275,7 @@ public:
       int beta_begin,
       Eigen::MatrixXd* structure_images) const;
 
-  /** @brief Returns the H/S diagonal model used only for preconditioning. */
+  /** @brief H/S preconditioning model; empty for an ActionOnly instance. */
   const StructureDiagonal& preconditioner_diagonal() const noexcept;
 
   int n_determinants() const noexcept;

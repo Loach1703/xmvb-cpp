@@ -1422,6 +1422,28 @@ void check_sigma_action() {
     require(rejected, "structure metric ignored its factor or workspace byte limit");
   }
   const auto topology_images = topology_action.apply(structure_vectors);
+  const xmvb::vb::StructureAction action_only(
+      determinant_to_structure_terms, n_test_structures, topology,
+      packed_overlap, one_electron, two_electron, n_orbitals, nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const auto bare_images = action_only.apply(structure_vectors);
+  require(action_only.storage().diagonal_bytes == 0 &&
+              action_only.preconditioner_diagonal().overlap.size() == 0 &&
+              (bare_images.hamiltonian - topology_images.hamiltonian).norm() < 2e-10 &&
+              (bare_images.overlap - topology_images.overlap).norm() < 2e-10,
+          "action-only direct CI built a diagonal or changed H/S");
+  Eigen::MatrixXd normalized = structure_vectors;
+  auto scaled = bare_images;
+  for (int col = 0; col < normalized.cols(); ++col) {
+    const double norm = std::sqrt(normalized.col(col).dot(scaled.overlap.col(col)));
+    normalized.col(col) /= norm;
+    scaled.hamiltonian.col(col) /= norm;
+    scaled.overlap.col(col) /= norm;
+  }
+  const auto normalized_images = action_only.apply(normalized);
+  require((scaled.hamiltonian - normalized_images.hamiltonian).norm() < 2e-10 &&
+              (scaled.overlap - normalized_images.overlap).norm() < 2e-10,
+          "column normalization requires a second H/S action");
   require((topology_action.apply_overlap(structure_vectors) -
       topology_images.overlap).cwiseAbs().maxCoeff() < 2.0e-12,
       "overlap-only direct-CI action differs from the combined action");
@@ -1481,6 +1503,15 @@ void check_sigma_action() {
       "incomplete fixed-spin carrier incorrectly selected direct CI");
   const auto streamed_images =
       streamed_action.apply_streamed(structure_vectors);
+  const xmvb::vb::StructureAction pair_action_only(
+      incomplete_terms, n_test_structures, incomplete_topology,
+      packed_overlap, one_electron, two_electron, n_orbitals, nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const auto bare_pair_images = pair_action_only.apply(structure_vectors);
+  require(pair_action_only.storage().diagonal_bytes == 0 &&
+              (bare_pair_images.hamiltonian - streamed_images.hamiltonian).norm() < 2e-10 &&
+              (bare_pair_images.overlap - streamed_images.overlap).norm() < 2e-10,
+          "action-only incomplete carrier built a diagonal or changed H/S");
   require((streamed_action.apply_overlap(structure_vectors) -
       streamed_images.overlap).cwiseAbs().maxCoeff() < 2.0e-12,
       "overlap-only pair action differs from the streamed action");
