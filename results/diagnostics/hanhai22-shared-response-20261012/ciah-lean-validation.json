@@ -1,0 +1,23 @@
+{
+  "parent": "dceaafe2",
+  "build_job": 1250436,
+  "suite_job": 1250437,
+  "cluster": "Hanhai22",
+  "threads": 32,
+  "integrals": "exact libcint",
+  "unit_tests_passed": ["ciah", "coupled_structure", "orthogonal_direct_ci", "sparse_orbital_quotient", "hessian_diagonal"],
+  "changes": [
+    "Defer trial gradient completion until the macro energy test accepts the retained forward evaluation.",
+    "Pass the already computed accepted-point physical gradient norm into CIAH and reuse it for the initial keyframe.",
+    "Do not evaluate the diagnostic-only keyframe mismatch norm when tracing is disabled."
+  ],
+  "unchanged": ["HVP", "coordinates", "preconditioner", "negative-curvature handling", "keyframe and energy acceptance tests", "convergence tolerances"],
+  "completed_snapshot": [
+    {"case": "241", "steps": 3, "hvp": 21, "energy_Eh": -230.720590392829, "wall_s": 2.295320, "rss_MiB": 801.40625},
+    {"case": "MnF2", "steps": 10, "hvp": 137, "energy_Eh": -1348.893353223757, "wall_s": 5.035638, "rss_MiB": 560.75390625},
+    {"case": "FeCl2", "steps": 12, "hvp": 249, "energy_Eh": -2181.624464869052, "wall_s": 8.115204, "rss_MiB": 493.91796875}
+  ],
+  "pending_at_snapshot": ["QOCGUM", "CERRAS", "LOFLEA"],
+  "interpretation": "Completed cases preserve step and HVP counts and energies within 2.4e-9 Eh of retained saved runs. No measured speedup so far; wall times are higher on these non-matched-node runs. No claim of outperforming historical baseline. Expensive inner norm decisions and eager endpoint preconditioner construction remain unchanged.",
+  "comparison_command": "python3 compare_lean.py ciah-lean-1250437"
+}

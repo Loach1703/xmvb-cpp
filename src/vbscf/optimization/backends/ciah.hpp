@@ -33,6 +33,7 @@ bool build_ciah_macro_step(
     ExactHvpOperator& hessian,
     const StructureTangentOperator& structure,
     const Eigen::VectorXd& gradient,
+    double gradient_norm,
     const Eigen::VectorXd& orbital_guess_packed,
     const Eigen::MatrixXd& structure_guess,
     bool use_structure_response,

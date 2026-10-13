@@ -170,7 +170,7 @@ bool build_accepted_neo_keyframe(
     CiahMacroStep macro;
     if (!build_ciah_macro_step(objective, parameter_view, options, chart,
             orbital_metric, orbital_hessian, structure_hessian,
-            reduced_gradient, orbital_guess_packed, structure_guess, use_structure_response,
+            reduced_gradient, physical_gradient_norm, orbital_guess_packed, structure_guess, use_structure_response,
             energy, trust_radius, record, result, &macro)) return false;
     accepted->trial = std::move(macro.trial);
     accepted->parameters = std::move(macro.parameters);

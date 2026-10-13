@@ -58,6 +58,7 @@ bool build_ciah_macro_step(
     ExactHvpOperator& hessian,
     const StructureTangentOperator& structure,
     const Eigen::VectorXd& gradient,
+    double gradient_norm,
     const Eigen::VectorXd& orbital_guess_packed,
     const Eigen::MatrixXd& structure_guess,
     bool use_structure_response,
@@ -88,7 +89,7 @@ bool build_ciah_macro_step(
   Eigen::VectorXd orbital_image(ns ? dimension : 0), structure_image(ns ? dimension : 0);
   record->model_dimension = static_cast<int>(dimension);
   record->source_gradient_norm = gradient.norm();
-  record->source_physical_gradient_norm = metric.dual_norm(gradient);
+  record->source_physical_gradient_norm = gradient_norm;
 
   const auto diagonal_norm = [&](const Eigen::VectorXd& g) {
     return std::hypot(metric.dual_norm(g.head(no)),
@@ -316,7 +317,8 @@ bool build_ciah_macro_step(
   CiahEnergyModel energy_model(energy, initial_gradient);
   CiahKeyframes keyframes(energy);
   Eigen::VectorXd last_step = displacement;
-  double keyframe_norm = dual_norm(initial_gradient);
+  // The initial structure gradient is zero at the relaxed accepted point.
+  double keyframe_norm = gradient_norm;
   double diagonal_keyframe_norm = audit_structure_metric
       ? diagonal_norm(initial_gradient) : 0.0;
   double audit_keyframe_norm = audit_structure_metric
@@ -488,7 +490,8 @@ bool build_ciah_macro_step(
         mismatch_squared += std::pow(mismatch_inverse.norm(correction.tail(ns)), 2);
       }
       const bool mismatch_small = mismatch_squared < mismatch_limit*mismatch_limit;
-      const double mismatch_estimate = diagonal_norm(correction);
+      const bool trace = diagnostics::neo_event_trace_enabled();
+      const double mismatch_estimate = trace ? diagonal_norm(correction) : 0.0;
       if (diagnostics::neo_event_trace_enabled()) {
         const double captured = workspace.projected_dual_norm(correction);
         const double secant = correction.dot(keyframe_step);
@@ -637,7 +640,7 @@ bool build_ciah_macro_step(
   bool last_converged = candidate.converged, keyframe_backtracked = false;
   double accepted_prediction = 0.0;
   while (true) {
-    accepted->trial = objective->evaluate_trial_with_structure_guess(
+    accepted->trial = objective->evaluate_trial_energy_with_structure_guess(
         accepted->parameters, coefficients(scale * displacement));
     // Keyframe refreshes both the gradient and the energy anchor. Testing the
     // full microstep sequence against g0*p + p*H0*p/2 discards that update.
@@ -688,6 +691,9 @@ bool build_ciah_macro_step(
     accepted->parameters = build_nonredundant_lifted_trial_parameters(
         orbitals, chart, layout, scale * displacement.head(no));
   }
+  // Only the accepted point needs gradient backpropagation and its context.
+  // Complete the retained forward evaluation, rather than rebuilding it.
+  objective->complete_trial(&accepted->trial);
   displacement *= scale;
   hessian_displacement *= scale;
   last_step *= scale;

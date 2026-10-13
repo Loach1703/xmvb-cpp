@@ -134,8 +134,8 @@ class VbScfObjective {
       const Eigen::VectorXd& parameter_vector,
       const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const;
 
-  /** @brief Solves the trial structure problem from a coupled CIAH estimate. */
-  TrialEvaluation evaluate_trial_with_structure_guess(
+  /** @brief Relax CI from the supplied guess without orbital gradient backpropagation. */
+  TrialEvaluation evaluate_trial_energy_with_structure_guess(
       const Eigen::VectorXd& parameter_vector,
       const Eigen::Ref<const Eigen::MatrixXd>& selected_structure_coefficients) const;
 

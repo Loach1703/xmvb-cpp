@@ -192,7 +192,7 @@ VbScfObjective::evaluate_coupled_keyframe(
 }
 
 VbScfObjective::TrialEvaluation
-VbScfObjective::evaluate_trial_with_structure_guess(
+VbScfObjective::evaluate_trial_energy_with_structure_guess(
     const Eigen::VectorXd& parameter_vector,
     const Eigen::Ref<const Eigen::MatrixXd>& selected_structure_coefficients) const {
   if (gradient_result_.second_order_context == nullptr) {
@@ -217,11 +217,8 @@ VbScfObjective::evaluate_trial_with_structure_guess(
     initial_eigenvectors.col(root) =
         selected_structure_coefficients.col(static_cast<Eigen::Index>(state));
   }
-  TrialEvaluation evaluation =
-      evaluate_trial_energy_with_initial_eigenvectors(
-          parameter_vector, true, initial_eigenvectors);
-  complete_trial(&evaluation);
-  return evaluation;
+  return evaluate_trial_energy_with_initial_eigenvectors(
+      parameter_vector, true, initial_eigenvectors);
 }
 
 void VbScfObjective::complete_trial(TrialEvaluation* evaluation) const {
