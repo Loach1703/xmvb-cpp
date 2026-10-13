@@ -402,6 +402,18 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   return result;
 }
 
+bool ciah_keyframe_matches(double actual_norm, double predicted_norm,
+    double limit, const std::function<bool()>& test_difference) {
+  // Round the sum upward and the reverse-triangle bound downward. Equality
+  // cannot satisfy the strict original comparison.
+  const double upper = std::nextafter(actual_norm + predicted_norm,
+      std::numeric_limits<double>::infinity());
+  if (upper < limit) return true;
+  const double lower = std::nextafter(std::abs(actual_norm - predicted_norm), 0.0);
+  if (lower >= limit) return false;
+  return test_difference();
+}
+
 void CiahWorkspace::certify_norms(CiahResult& result) const {
   if (result.norms_certified) return;
   result.residual_norm = problem_.dual_norm(result.residual);

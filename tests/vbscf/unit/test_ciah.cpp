@@ -696,6 +696,42 @@ void check_inverse_reuse() {
           "an exact propagated image unnecessarily entered CG");
 }
 
+void check_keyframe_norm_bounds() {
+  using xmvb::vb::ciah_keyframe_matches;
+  int calls = 0;
+  const auto unused = [&] { ++calls; return false; };
+  require(ciah_keyframe_matches(1., 1., 3., unused) && calls == 0,
+          "triangle-bounded keyframe unnecessarily evaluated the difference");
+  require(!ciah_keyframe_matches(5., 1., 3., unused) && calls == 0,
+          "reverse-triangle rejection unnecessarily evaluated the difference");
+  require(ciah_keyframe_matches(2., 1., 2., [&] { ++calls; return true; }) && calls == 1,
+          "unresolved keyframe bypassed its full residual test");
+  // Check the full physical norm, including components absent from any
+  // orbital/AH projection. A diagonal-only or projected estimate is invalid.
+  Eigen::Matrix3d metric;
+  metric << 2., .2, .1, .2, 1., .1, .1, .1, .05;
+  int skipped = 0;
+  for (int i = 1; i <= 100; ++i) {
+    const Eigen::Vector3d a(std::sin(i), std::cos(i), .01*i);
+    const Eigen::Vector3d b(std::cos(2*i), .1*std::sin(i), .3);
+    const double actual = dual_norm(metric, a), predicted = dual_norm(metric, b);
+    for (double factor : {.1, 1., 3., 10.}) {
+      const double limit = factor*predicted;
+      const bool reference = dual_norm(metric, a-b) < limit;
+      bool evaluated = false;
+      const bool result = ciah_keyframe_matches(actual, predicted, limit, [&] {
+        evaluated = true;
+        return reference;
+      });
+      require(result == reference, "full-metric keyframe bound changed the decision");
+      skipped += !evaluated;
+    }
+  }
+  require(skipped > 0, "keyframe-bound test never avoided a norm evaluation");
+  require(!ciah_keyframe_matches(1., 0., 1., [] { return false; }),
+          "strict keyframe comparison accepted equality");
+}
+
 }  // namespace
 
 int main() {
@@ -717,6 +753,7 @@ int main() {
     check_restart_phase();
     check_deferred_norms();
     check_inverse_reuse();
+    check_keyframe_norm_bounds();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

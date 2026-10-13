@@ -13,6 +13,13 @@ namespace xmvb::core { struct MetricImage; }
 
 namespace xmvb::vb {
 
+/** @brief Test a keyframe mismatch using full-norm triangle bounds first.
+ * Both norms refer to the same physical metric. Only an unresolved comparison
+ * evaluates the full difference; no projected-residual estimate is substituted.
+ */
+bool ciah_keyframe_matches(double actual_norm, double predicted_norm,
+    double limit, const std::function<bool()>& test_difference);
+
 /** @brief Propagate an inverse image and full defect through a clipped AH step.
  * All arguments belong to the same fixed metric (or one metric block).
  * alpha is signed. The result is a seed; its true residual is checked when used.

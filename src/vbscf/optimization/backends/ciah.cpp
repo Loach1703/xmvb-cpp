@@ -478,18 +478,24 @@ bool build_ciah_macro_step(
       const double actual_norm = std::hypot(metric.dual_norm(exact.gradient.head(no)),
           ns ? actual_inverse.norm(exact.gradient.tail(ns)) : 0.0);
       const Eigen::VectorXd correction = exact.gradient - predicted_gradient;
-      double mismatch_squared = std::pow(metric.dual_norm(correction.head(no)), 2);
       const double mismatch_limit = gradient_trust * predicted_norm;
-      // An orbital lower bound may already settle rejection. Otherwise verify
-      // the difference of the retained complete inverse images, not a new RHS solve.
-      if (ns && mismatch_squared < mismatch_limit*mismatch_limit) {
-        const core::MetricImage seed{actual_inverse.inverse - predicted_inverse.inverse,
-                                    actual_inverse.residual - predicted_inverse.residual};
-        const auto mismatch_inverse = structure.metric_image(
-            correction.tail(ns), &structure_metric, &seed);
-        mismatch_squared += std::pow(mismatch_inverse.norm(correction.tail(ns)), 2);
-      }
-      const bool mismatch_small = mismatch_squared < mismatch_limit*mismatch_limit;
+      const bool small_gradient = actual_norm < gradient_trust * micro_gradient_tolerance;
+      bool evaluated_difference = false;
+      // Small true gradient already satisfies the original OR condition.
+      // Otherwise use complete-norm bounds before forming an inverse of the
+      // difference, which can be much harder to solve after cancellation.
+      const bool mismatch_small = !small_gradient && ciah_keyframe_matches(
+          actual_norm, predicted_norm, mismatch_limit, [&] {
+        evaluated_difference = true;
+        double squared = std::pow(metric.dual_norm(correction.head(no)), 2);
+        if (ns && squared < mismatch_limit*mismatch_limit) {
+          const core::MetricImage seed{actual_inverse.inverse - predicted_inverse.inverse,
+                                      actual_inverse.residual - predicted_inverse.residual};
+          const auto inverse = structure.metric_image(correction.tail(ns), &structure_metric, &seed);
+          squared += std::pow(inverse.norm(correction.tail(ns)), 2);
+        }
+        return squared < mismatch_limit*mismatch_limit;
+      });
       const bool trace = diagnostics::neo_event_trace_enabled();
       const double mismatch_estimate = trace ? diagonal_norm(correction) : 0.0;
       if (diagnostics::neo_event_trace_enabled()) {
@@ -499,8 +505,7 @@ bool build_ciah_macro_step(
             "mismatch_estimate=%.17g,captured=%.17g,displacement_norm=%.17g,secant=%.17g,mismatch_small=%d",
             mismatch_estimate, captured, length, secant, static_cast<int>(mismatch_small));
       }
-      const bool keep_keyframe = mismatch_small ||
-          actual_norm < gradient_trust * micro_gradient_tolerance;
+      const bool keep_keyframe = small_gradient || mismatch_small;
       // Model agreement controls further microsteps, not true-energy descent.
       // Keep an evaluated lower-energy candidate even when its model is stale;
       // normal macro acceptance still reoptimizes CI and checks real energy.
@@ -526,8 +531,9 @@ bool build_ciah_macro_step(
         if (keep_keyframe) audit_keyframe_norm = full_actual;
       }
       diagnostics::neo_trace("ciah_keyframe",
-          "actual=%.17g,predicted=%.17g,mismatch_estimate=%.17g,mismatch_small=%d,energy=%.17g,accepted=%d",
-          actual_norm, predicted_norm, mismatch_estimate, static_cast<int>(mismatch_small), exact.energy,
+          "actual=%.17g,predicted=%.17g,mismatch_estimate=%.17g,mismatch_small=%d,difference_evaluated=%d,energy=%.17g,accepted=%d",
+          actual_norm, predicted_norm, mismatch_estimate, small_gradient ? -1 : static_cast<int>(mismatch_small),
+          static_cast<int>(evaluated_difference), exact.energy,
           static_cast<int>(keep_keyframe));
       if (diagnostics::neo_event_trace_enabled()) {
         const double actual_orbital = metric.dual_norm(exact.gradient.head(no));
