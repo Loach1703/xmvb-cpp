@@ -181,6 +181,7 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
     const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap,
     const std::vector<int>& local_basis_indices,
     bool use_active_subspace_gauge) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartQuotient);
   const int local_size = static_cast<int>(local_basis_indices.size());
   const bool is_active = orbital_index >= n_inactive;
   const int n_active = static_cast<int>(input.n_active_orbitals);
@@ -339,6 +340,7 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
 Eigen::MatrixXd build_stable_inactive_span_basis(
     const Eigen::Ref<const Eigen::MatrixXd>& inactive_orbitals,
     const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartSpan);
   if (inactive_orbitals.cols() == 0) return inactive_orbitals;
   const Eigen::MatrixXd metric =
       inactive_orbitals.transpose() * ao_overlap * inactive_orbitals;
@@ -373,6 +375,7 @@ Eigen::MatrixXd whiten_normalized_orbital_quotient_basis(
     const Eigen::Ref<const Eigen::VectorXd>& raw_coefficients,
     const Eigen::Ref<const Eigen::MatrixXd>& overlap,
     bool use_product_sphere_representative) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartWhitening);
   if (quotient_basis.rows() != raw_coefficients.size() ||
       overlap.rows() != raw_coefficients.size() ||
       overlap.cols() != raw_coefficients.size()) {
@@ -697,6 +700,7 @@ OrbitalChart::OrbitalChart(
           }
         }
       }
+      diagnostics::ScopedPhase gram_phase(diagnostics::Phase::ChartGram);
       const Eigen::MatrixXd raw_tangent_gram =
           proj.tangent_basis.transpose() * proj.tangent_basis;
       Eigen::LDLT<Eigen::MatrixXd> raw_gram_ldlt(raw_tangent_gram);
@@ -714,6 +718,7 @@ OrbitalChart::OrbitalChart(
         throw std::runtime_error(
             "failed to invert raw quotient-coordinate Gram matrix");
       }
+      gram_phase.stop();
       if (collect_structural_diagnostics) {
         proj.gauge_intersection_dimension =
             proj.local_gauge_rank +
@@ -744,8 +749,10 @@ OrbitalChart::OrbitalChart(
     block_bases_.push_back(std::move(bb));
     ++block_index;
   }
-  if (ao_effective_h1e || hessian_diagonal)
+  if (ao_effective_h1e || hessian_diagonal) {
+    diagnostics::ScopedPhase curvature_phase(diagnostics::Phase::ChartCurvature);
     set_curvature(input, ao_effective_h1e, hessian_diagonal);
+  }
 }
 
 void OrbitalChart::set_curvature(

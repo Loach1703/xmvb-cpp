@@ -24,7 +24,11 @@ enum class Phase {
   NeoProjectionFactor, NeoProjectionResidual, TrustSecular,
   NeoMetricFactor, NeoStructureFactor, NeoSpectrum,
   ChartConstraintSvd, ChartGaugeSvd, ExchangeBuild, ExchangeAction,
-  NeoBoundarySpectrum, NeoIndefiniteSpectrum, NeoCurvatureSpectrum, Count
+  NeoBoundarySpectrum, NeoIndefiniteSpectrum, NeoCurvatureSpectrum,
+  CiahMacro, CiahNext, CiahImages, CiahKeyframe, CiahRefresh,
+  CiahTrial, CiahCompletion, CiahSetup, CiahStructure, CiahConnection,
+  CiahObserve, ChartSpan, ChartQuotient, ChartWhitening,
+  ChartGram, ChartCurvature, Count
 };
 
 /** @brief Opt-in wall/process-CPU totals. Nested scopes are not additive.
@@ -40,8 +44,8 @@ class PhaseTotals {
     for (auto& value : matrix_min_cols) value.store(std::numeric_limits<unsigned long long>::max());
   }
 
-  ~PhaseTotals() {
-    if (!enabled) return;
+  /** @brief Stable stage labels shared by totals and bounded live events. */
+  static const char* name(Phase phase) {
     constexpr const char* names[] = {
         "chart", "projection", "curvature", "block_factor", "block_eigen",
         "trial_forward", "trial_gradient", "armijo_accepted", "armijo_rejected",
@@ -57,16 +61,25 @@ class PhaseTotals {
         "neo_projection_factor", "neo_projection_residual", "trust_secular",
         "neo_metric_factor", "neo_structure_factor", "neo_spectrum",
         "chart_constraint_svd", "chart_gauge_svd", "exchange_build", "exchange_action",
-        "neo_boundary_spectrum", "neo_indefinite_spectrum", "neo_curvature_spectrum"};
+        "neo_boundary_spectrum", "neo_indefinite_spectrum", "neo_curvature_spectrum",
+        "ciah_macro", "ciah_next", "ciah_images", "ciah_keyframe", "ciah_refresh",
+        "ciah_trial", "ciah_completion", "ciah_setup", "ciah_structure", "ciah_connection",
+        "ciah_observe", "chart_span", "chart_quotient", "chart_whitening",
+        "chart_gram", "chart_curvature"};
     static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Phase::Count));
+    return names[static_cast<std::size_t>(phase)];
+  }
+
+  ~PhaseTotals() {
+    if (!enabled) return;
     std::fprintf(stderr, "XMVB_PHASE,stage,calls,wall_seconds\n");
     for (std::size_t i = 0; i < calls.size(); ++i)
-      std::fprintf(stderr, "XMVB_PHASE,%s,%llu,%.9f\n", names[i],
+      std::fprintf(stderr, "XMVB_PHASE,%s,%llu,%.9f\n", name(static_cast<Phase>(i)),
                    calls[i].load(std::memory_order_relaxed),
                    nanoseconds[i].load(std::memory_order_relaxed) * 1e-9);
     std::fprintf(stderr, "XMVB_CPU,stage,cpu_seconds\n");
     for (std::size_t i = 0; i < calls.size(); ++i)
-      std::fprintf(stderr, "XMVB_CPU,%s,%.9f\n", names[i],
+      std::fprintf(stderr, "XMVB_CPU,%s,%.9f\n", name(static_cast<Phase>(i)),
                    cpu_ticks[i].load(std::memory_order_relaxed) /
                        static_cast<double>(CLOCKS_PER_SEC));
     std::fprintf(stderr, "XMVB_WORKSPACE,projector_peak_payload_bytes,%llu\n",
@@ -74,7 +87,7 @@ class PhaseTotals {
     std::fprintf(stderr, "XMVB_MATRIX,stage,calls,min_rows,max_rows,min_cols,max_cols\n");
     for (std::size_t i = 0; i < calls.size(); ++i) {
       if (matrix_calls[i].load(std::memory_order_relaxed) == 0) continue;
-      std::fprintf(stderr, "XMVB_MATRIX,%s,%llu,%llu,%llu,%llu,%llu\n", names[i],
+      std::fprintf(stderr, "XMVB_MATRIX,%s,%llu,%llu,%llu,%llu,%llu\n", name(static_cast<Phase>(i)),
           matrix_calls[i].load(std::memory_order_relaxed),
           matrix_min_rows[i].load(std::memory_order_relaxed),
           matrix_max_rows[i].load(std::memory_order_relaxed),
@@ -84,7 +97,7 @@ class PhaseTotals {
     std::fprintf(stderr, "XMVB_BALANCE,stage,calls,min_loop_seconds,max_loop_seconds,sum_loop_seconds,capacity_seconds,start_skew_seconds,critical_seconds\n");
     for (std::size_t i = 0; i < calls.size(); ++i) {
       if (worker_calls[i].load(std::memory_order_relaxed) == 0) continue;
-      std::fprintf(stderr, "XMVB_BALANCE,%s,%llu,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f\n", names[i],
+      std::fprintf(stderr, "XMVB_BALANCE,%s,%llu,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f\n", name(static_cast<Phase>(i)),
                    worker_calls[i].load(std::memory_order_relaxed),
                    worker_min[i].load(std::memory_order_relaxed) * 1e-9,
                    worker_max[i].load(std::memory_order_relaxed) * 1e-9,
@@ -157,8 +170,11 @@ inline void record_projector_bytes(unsigned long long bytes) {
 /** @brief Times a scope only when XMVB_PHASE_TIMING=1. */
 class ScopedPhase {
  public:
-  explicit ScopedPhase(Phase phase) : phase_(phase), enabled_(phase_totals().enabled) {
+  explicit ScopedPhase(Phase phase, bool live_event = false)
+      : phase_(phase), enabled_(phase_totals().enabled), live_event_(live_event) {
     if (enabled_) {
+      if (live_event_)
+        std::fprintf(stderr, "XMVB_PHASE_EVENT,%s,begin\n", PhaseTotals::name(phase_));
       start_ = std::chrono::steady_clock::now();
       cpu_start_ = std::clock();
     }
@@ -177,6 +193,9 @@ class ScopedPhase {
     totals.nanoseconds[i].fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count(),
         std::memory_order_relaxed);
+    if (live_event_)
+      std::fprintf(stderr, "XMVB_PHASE_EVENT,%s,end,%.9f\n",
+                   PhaseTotals::name(phase_), std::chrono::duration<double>(duration).count());
     if (cpu_start_ != static_cast<std::clock_t>(-1) && cpu_end >= cpu_start_)
       totals.cpu_ticks[i].fetch_add(cpu_end - cpu_start_, std::memory_order_relaxed);
     enabled_ = false;
@@ -185,6 +204,7 @@ class ScopedPhase {
  private:
   Phase phase_;
   bool enabled_;
+  bool live_event_;
   std::chrono::steady_clock::time_point start_;
   std::clock_t cpu_start_{};
 };
