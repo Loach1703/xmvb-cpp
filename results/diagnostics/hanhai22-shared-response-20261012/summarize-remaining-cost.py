@@ -25,7 +25,7 @@ SCOPES = {
     "keyframe": ("ciah_keyframe_cost", ("seconds",)),
 }
 
-writer = csv.writer(sys.stdout)
+writer = csv.writer(sys.stdout, lineterminator="\n")
 writer.writerow(("run", "scope", "calls", "wall_seconds"))
 for name, relative in RUNS.items():
     events = {}
