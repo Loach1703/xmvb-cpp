@@ -43,8 +43,10 @@ The repair preserves the energy candidate, not the stale model.
 - Final parallel array: 1250047, 15 native systems and one separate QOCGUM
   scalar capture. Native times, not scalar-capture times, establish performance.
 
-At this checkpoint, 13/15 final native systems have converged; CERRAS and
-LOFLEA are still running. The previously failing F2-OEO now converges in
+All 15 final native systems have now converged. CERRAS completed in
+179.871131 s (5 macros / 41 HVPs, -397.093435003823 Eh, 1961.97 MiB RSS);
+LOFLEA completed in 448.997780 s (4 macros / 34 HVPs,
+-399.106646007264 Eh, 2817.65 MiB RSS). The previously failing F2-OEO converges in
 4 macros / 15 HVPs, to -198.689800055623 Eh, in 0.223930 s with 18.296875 MiB
 GNU-time peak RSS. This confirms the energy-candidate repair without a
 threshold change. Its prior saved converged endpoint differs by 6.6e-11 Eh.
@@ -59,11 +61,13 @@ Selected final native results (application end-to-end time; one run each):
 | QOCGUM | 6.329732 | 33.577303 | 33.170255 | 3 / 37 | -480.094766681464 | 2011.32 |
 | 67970 | 3.165093 | 11.067634 | 10.366835 | 4 / 38 | -442.247231417072 | 1956.89 |
 | 10698 | 12.352040 | 15.573286 | 13.759796 | 4 / 46 | -422.611824623576 | 4982.71 |
+| CERRAS | 28.305941 | 218.633093 | 179.871131 | 5 / 41 | -397.093435003823 | 1961.97 |
+| LOFLEA | 57.214518 | 559.903089 | 448.997780 | 4 / 34 | -399.106646007264 | 2817.65 |
 
 * Historical FeCl2 is not the same final-energy endpoint. Differences between
 native nodes and clusters remain; these measurements do not establish a
 universal improvement. Final MnF2 and YAMSAI are slower than the immediately
-preceding saved runs. All rows, including unfinished systems, are retained in
+preceding saved runs. All completed final rows are retained in
 `norm-decisions-final-1250047/historical-comparison.csv`.
 
 The preliminary CSV deliberately retains the failed F2-OEO and pending LOFLEA
@@ -88,6 +92,21 @@ GNU-time RSS, input/binary hashes, node information, and action traces are
 retained in each run directory.
 
 ## Remaining limit
+
+Re-derivation (local manuscript note):
+`article/ciah_norm_rederivation.md`. The next concrete optimization is to retain
+complete Riesz images and propagate them through clipped gradients and keyframe
+differences. At a fixed macro metric these are linear combinations, not
+independent inverse problems. Their full residual defects must be propagated
+as well; a small difference RHS may require refinement under the original
+linear-residual criterion. No production implementation of this follow-up was
+made during the derivation review.
+
+Terminology correction: certifying a small Euclidean linear-system residual
+does not give a condition-independent error certificate for the physical dual
+norm. A known preimage in the orthogonal spin-product carrier supplies a separate
+upper bound without estimating the global minimum metric eigenvalue; for an
+arbitrary selected structure space this bound need not be exact or tight.
 
 Large-residual rejection can be cheap, but proving a small residual still
 requires the complete solve unless a reliable full-space upper bound is
