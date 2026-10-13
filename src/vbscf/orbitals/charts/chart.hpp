@@ -59,6 +59,14 @@ public:
       bool complete_active_space = false,
       const AnalyticOrbitalDiagonal* hessian_diagonal = nullptr);
 
+  /** @brief Attach curvature to a geometry-only chart at the same orbital point.
+   * Does not rebuild tangent bases, gauge complements, or metric factors.
+   * Call once before solving for a step; convergence checks need only geometry.
+   */
+  void set_curvature(const OrbitalPreparationInput& input,
+                     const Eigen::MatrixXd* ao_effective_h1e,
+                     const AnalyticOrbitalDiagonal* hessian_diagonal);
+
   int reduced_size() const noexcept {
     return reduced_size_;
   }

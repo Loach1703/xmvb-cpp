@@ -712,6 +712,20 @@ void check_analytic_block_pullback(
   const OrbitalChart chart(input,layout,orbitals,orbitals,
                           nullptr,false,complete_active_space,&model);
   const int size = chart.reduced_size();
+  OrbitalChart deferred(input,layout,orbitals,orbitals,
+                        nullptr,false,complete_active_space);
+  const Eigen::VectorXd geometry_probe = Eigen::VectorXd::LinSpaced(size,-0.3,0.6);
+  const Eigen::VectorXd geometry_lift = deferred.expand_step(geometry_probe);
+  deferred.set_curvature(input, nullptr, &model);
+  require((deferred.expand_step(geometry_probe) - geometry_lift).norm() < 1.0e-14 &&
+              deferred.rank_signature() == chart.rank_signature(),
+          "deferred curvature changed quotient geometry");
+  require((deferred.augmented_hessian_diagonal() - chart.augmented_hessian_diagonal()).norm() < 1.0e-13 &&
+              (deferred.apply_inverse_augmented_hessian_diagonal(geometry_probe, -0.7) -
+               chart.apply_inverse_augmented_hessian_diagonal(geometry_probe, -0.7)).norm() < 1.0e-12 &&
+              std::abs(deferred.maximum_rotation_component(geometry_probe) -
+                       chart.maximum_rotation_component(geometry_probe)) < 1.0e-13,
+          "deferred analytic curvature or AH step mapping differs");
   std::vector<Eigen::VectorXd> lifts;
   for (int j = 0; j < size; ++j)
     lifts.push_back(chart.expand_retract_input_tangent(
@@ -801,6 +815,8 @@ void check_occupation_curvature() {
     const SparseParameterLayout view(input);
     const OrbitalChart space(input, view, c, c, &f);
     const OrbitalChart geometry(input, view, c, c);
+    OrbitalChart deferred(input, view, c, c);
+    deferred.set_curvature(input, &f, nullptr);
     require(geometry.rank_signature() == space.rank_signature() &&
                 geometry.reduced_size() == space.reduced_size(),
             "geometry-only chart changed the orbital quotient");
@@ -818,6 +834,9 @@ void check_occupation_curvature() {
               "geometry-only chart changed the gradient pullback");
       action.col(j) = space.apply_reduced_curvature(unit);
       inverse.col(j) = space.apply_inverse_reduced_block_preconditioner(unit);
+      require((deferred.apply_inverse_reduced_block_preconditioner(unit) -
+               inverse.col(j)).norm() < 1.0e-13,
+              "deferred one-electron preconditioner differs");
       shifted_inverse.col(j) =
           space.apply_inverse_reduced_shifted_block_preconditioner(unit, 0.4);
       require((cached_shifted_inverse(unit) - shifted_inverse.col(j)).norm() <

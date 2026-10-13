@@ -623,8 +623,7 @@ BackendRunResult run_neo_backend(
       resolve_neo_preconditioner(*objective, options.orbital_preconditioner);
   const bool use_ciah =
       objective->second_order_context()->selected_state_indices.size() == 1;
-  OrbitalChart chart = build_orbital_chart(
-      *objective, parameter_view, preconditioner, use_ciah);
+  OrbitalChart chart = build_orbital_geometry(*objective, parameter_view);
   auto projected = chart.project_gradient(gradient);
   double final_gradient_inf =
       gradient_infinity_norm(projected.reduced_gradient);
@@ -651,6 +650,8 @@ BackendRunResult run_neo_backend(
       result->termination_reason = "neo_initial_tolerance";
       break;
     }
+    // A terminal point needs geometry and a true gradient, not another model.
+    prepare_orbital_curvature(*objective, chart, preconditioner, use_ciah);
 
     NeoIterationRecord iteration_record;
     iteration_record.accepted_iteration_index = run_result.n_iterations + 1;
@@ -691,8 +692,7 @@ BackendRunResult run_neo_backend(
     // progress output; grouping such points obscures the actual work.
     // Preconditioning changes only curvature surrogates, not the quotient
     // maps. Use one chart for stationarity, reporting, and the next solve.
-    OrbitalChart next_geometry = build_orbital_chart(
-        *objective, parameter_view, preconditioner, use_ciah);
+    OrbitalChart next_geometry = build_orbital_geometry(*objective, parameter_view);
     auto next_projected = next_geometry.project_gradient(gradient);
     final_gradient_inf =
         gradient_infinity_norm(next_projected.reduced_gradient);

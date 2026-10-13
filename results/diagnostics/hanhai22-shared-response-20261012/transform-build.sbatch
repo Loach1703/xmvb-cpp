@@ -26,11 +26,11 @@ lscpu > "$artifact/cpu.txt"
 module list > "$artifact/modules.txt" 2>&1
 cp "$SLURM_SUBMIT_DIR/transform-source.patch" "$artifact/source.patch"
 cp "$SLURM_SUBMIT_DIR/transform-source.txt" "$artifact/source.txt"
-cmake --build "$source_dir/build" --target xmvb test_keyframe test_ciah test_coupled_structure test_orthogonal_direct_ci test_sparse_orbital_quotient test_hessian_diagonal -j8 > "$artifact/build.log" 2>&1
+cmake --build "$source_dir/build" --target xmvb test_davidson test_keyframe test_ciah test_coupled_structure test_orthogonal_direct_ci test_sparse_orbital_quotient test_hessian_diagonal -j8 > "$artifact/build.log" 2>&1
 for threads in 1 32; do
  OMP_NUM_THREADS=$threads srun --ntasks=1 --cpus-per-task=32 --cpu-bind=cores "$source_dir/build/src/test_orthogonal_direct_ci" > "$artifact/exterior-$threads.out" 2> "$artifact/exterior-$threads.err"
 done
-for test_name in test_keyframe test_ciah test_coupled_structure test_sparse_orbital_quotient test_hessian_diagonal; do
+for test_name in test_davidson test_keyframe test_ciah test_coupled_structure test_sparse_orbital_quotient test_hessian_diagonal; do
  srun --ntasks=1 --cpus-per-task=32 --cpu-bind=cores "$source_dir/build/src/$test_name" > "$artifact/$test_name.out" 2> "$artifact/$test_name.err"
 done
 cp "$source_dir/build/src/xmvb-cpp.exe" "$artifact/"

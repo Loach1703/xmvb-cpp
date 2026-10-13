@@ -15,6 +15,15 @@ struct TnhvpIterationRecord;
 
 namespace optimizer_detail {
 
+/** @brief Build only the quotient geometry needed for gradient/convergence. */
+OrbitalChart build_orbital_geometry(
+    const VbScfObjective& objective, const SparseParameterLayout& parameter_view);
+
+/** @brief Attach the next-step model without reconstructing the chart. */
+void prepare_orbital_curvature(
+    const VbScfObjective& objective, OrbitalChart& chart,
+    OrbitalPreconditioner preconditioner, bool need_ah_mapping);
+
 OrbitalChart build_orbital_chart(
     const VbScfObjective& objective,
     const SparseParameterLayout& parameter_view,

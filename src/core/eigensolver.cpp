@@ -558,6 +558,7 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
           root_vectors.data(),
           root_vectors.data() + root_vectors.size());
       result.overlap_eigenvectors = overlap_root_vectors;
+      result.hamiltonian_eigenvectors = hamiltonian_root_vectors;
       return result;
     }
     previous_eigenvalues =

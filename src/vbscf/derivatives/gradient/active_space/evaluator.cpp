@@ -38,6 +38,7 @@ struct ActiveSpaceGradientForwardContext {
   Eigen::VectorXd structure_overlap_diagonal;
   bool structure_overlap_diagonal_exact = false;
   Eigen::MatrixXd overlap_eigenvectors;
+  Eigen::MatrixXd hamiltonian_eigenvectors;
   std::optional<DavidsonDiagnostics> davidson_diagnostics;
   Eigen::MatrixXd selected_state_eigenvectors;
   std::vector<double> selected_state_energies;
@@ -214,6 +215,8 @@ void retain_davidson_result(
   context->eigen_result = std::move(davidson.eigenpairs);
   context->overlap_eigenvectors =
       std::move(davidson.overlap_eigenvectors);
+  context->hamiltonian_eigenvectors =
+      std::move(davidson.hamiltonian_eigenvectors);
 }
 
 void select_structure_states(
@@ -506,6 +509,19 @@ finalize_active_space_second_order_context(
       std::move(forward_context->selected_state_energies);
   context->selected_state_eigenvectors =
       std::move(forward_context->selected_state_eigenvectors);
+  // Davidson already formed both Ritz images. Retain selected columns rather
+  // than repeating a spin-product action when the coupled model is built.
+  if (forward_context->hamiltonian_eigenvectors.size() != 0) {
+    auto& images = context->selected_state_structure_images.emplace();
+    const auto n_states = static_cast<Eigen::Index>(selected_state_indices.size());
+    images.hamiltonian.resize(context->n_structures, n_states);
+    images.overlap.resize(context->n_structures, n_states);
+    for (Eigen::Index state = 0; state < n_states; ++state) {
+      const int root = selected_state_indices[state];
+      images.hamiltonian.col(state) = forward_context->hamiltonian_eigenvectors.col(root);
+      images.overlap.col(state) = forward_context->overlap_eigenvectors.col(root);
+    }
+  }
   const int n_roots =
       static_cast<int>(forward_context->eigen_result.eigenvalues.size());
   const Eigen::Map<const Eigen::MatrixXd> accepted_roots(

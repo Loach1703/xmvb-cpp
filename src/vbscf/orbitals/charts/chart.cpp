@@ -480,19 +480,6 @@ OrbitalChart::OrbitalChart(
     const AnalyticOrbitalDiagonal* hessian_diagonal)
     : packed_parameter_size_(parameter_view.size()) {
   diagnostics::ScopedPhase chart_phase(diagnostics::Phase::Chart);
-  if (ao_effective_h1e != nullptr &&
-      (ao_effective_h1e->rows() != input.n_basis_functions ||
-       ao_effective_h1e->cols() != input.n_basis_functions)) {
-    throw std::invalid_argument("AO effective one-electron matrix shape mismatch");
-  }
-  if (hessian_diagonal != nullptr &&
-      (hessian_diagonal->mo_coefficients.rows() != input.n_basis_functions ||
-       hessian_diagonal->mo_coefficients.cols() != input.n_basis_functions ||
-       hessian_diagonal->rotation_diagonal.rows() != input.n_basis_functions ||
-       hessian_diagonal->rotation_diagonal.cols() != input.n_basis_functions)) {
-    throw std::invalid_argument("analytic Hessian diagonal shape mismatch");
-  }
-
   const int n_inactive =
       (input.n_total_electrons - input.n_active_electrons) / 2;
   const int n_occupied = n_inactive + input.n_active_orbitals;
@@ -522,9 +509,6 @@ OrbitalChart::OrbitalChart(
   }
   const Eigen::MatrixXd stable_inactive_span_basis =
       build_stable_inactive_span_basis(global_inactive_orbitals, ao_overlap);
-  std::optional<InactiveOrbitalProjector> inactive_projector;
-  if (ao_effective_h1e != nullptr)
-    inactive_projector.emplace(*ao_effective_h1e, ao_overlap, global_inactive_orbitals);
   const bool use_active_subspace_gauge =
       complete_active_space && input.orbital_type == kOrbitalTypeOeo;
   active_subspace_gauge_ = use_active_subspace_gauge;
@@ -754,12 +738,64 @@ OrbitalChart::OrbitalChart(
           k,
           proj.local_reduced_size);
 
+      bb.orbitals.push_back(std::move(proj));
+    }
+
+    block_bases_.push_back(std::move(bb));
+    ++block_index;
+  }
+  if (ao_effective_h1e || hessian_diagonal)
+    set_curvature(input, ao_effective_h1e, hessian_diagonal);
+}
+
+void OrbitalChart::set_curvature(
+    const OrbitalPreparationInput& input,
+    const Eigen::MatrixXd* ao_effective_h1e,
+    const AnalyticOrbitalDiagonal* hessian_diagonal) {
+  if (ao_effective_h1e != nullptr &&
+      (ao_effective_h1e->rows() != input.n_basis_functions ||
+       ao_effective_h1e->cols() != input.n_basis_functions)) {
+    throw std::invalid_argument("AO effective one-electron matrix shape mismatch");
+  }
+  if (hessian_diagonal != nullptr &&
+      (hessian_diagonal->mo_coefficients.rows() != input.n_basis_functions ||
+       hessian_diagonal->mo_coefficients.cols() != input.n_basis_functions ||
+       hessian_diagonal->rotation_diagonal.rows() != input.n_basis_functions ||
+       hessian_diagonal->rotation_diagonal.cols() != input.n_basis_functions)) {
+    throw std::invalid_argument("analytic Hessian diagonal shape mismatch");
+  }
+
+  const int n_inactive = (input.n_total_electrons - input.n_active_electrons) / 2;
+  const Eigen::Map<const Eigen::MatrixXd> ao_overlap(
+      input.ao_overlap_matrix.data(), input.n_basis_functions, input.n_basis_functions);
+  Eigen::MatrixXd global_inactive_orbitals;
+  std::optional<InactiveOrbitalProjector> inactive_projector;
+  if (ao_effective_h1e) {
+    global_inactive_orbitals = Eigen::MatrixXd::Zero(
+        input.n_basis_functions, n_inactive);
+    for (int orbital = 0; orbital < n_inactive; ++orbital) {
+      const int count = stored_sparse_orbital_coefficient_count(input, orbital);
+      for (int coefficient = 0; coefficient < count; ++coefficient) {
+        const int basis = input.orbital_basis_index_table[
+            orbital * input.n_basis_functions + coefficient] - 1;
+        global_inactive_orbitals(basis, orbital) = input.orbital_value_table[
+            orbital * input.n_basis_functions + coefficient];
+      }
+    }
+    inactive_projector.emplace(*ao_effective_h1e, ao_overlap, global_inactive_orbitals);
+  }
+  for (auto& block : block_bases_) {
+    const auto& bf_indices = block.basis_function_indices;
+    for (auto& proj : block.orbitals) {
+      if (proj.local_reduced_size == 0) continue;
+      const Eigen::Index local_size = proj.tangent_basis.rows();
+      const int stored_count = stored_sparse_orbital_coefficient_count(input, proj.orbital_index);
       // Pull back the normalized, inactive-projected one-electron surrogate
       // into the same additive sparse chart as the exact HVP. Other inactive
       // orbitals remain fixed for an inactive target; all are removed for an
       // active target. Frozen coefficients contribute but have zero tangent.
-      if (hessian_diagonal != nullptr && proj.local_reduced_size > 0) {
-        const int target = m.orbital_index;
+      if (hessian_diagonal != nullptr) {
+        const int target = proj.orbital_index;
         const int local_active = target - n_inactive;
         Eigen::MatrixXd raw_direction = Eigen::MatrixXd::Zero(
             input.n_basis_functions, proj.local_reduced_size);
@@ -840,18 +876,18 @@ OrbitalChart::OrbitalChart(
         proj.inverse_curvature_block = std::move(positive_block.inverse);
         has_reduced_curvature_diagonal_ = true;
       }
-      if (ao_effective_h1e != nullptr && proj.local_reduced_size > 0) {
-        const auto& stored_rows = m.block_row_for_slot;
-        const bool inactive_target = m.orbital_index < n_inactive;
-        std::vector<int> stored_support(stored_rows.size());
-        for (std::size_t j = 0; j < stored_rows.size(); ++j)
-          stored_support[j] = bf_indices[stored_rows[j]];
+      if (ao_effective_h1e != nullptr) {
+        const bool inactive_target = proj.orbital_index < n_inactive;
+        std::vector<int> stored_support(stored_count);
+        for (std::size_t j = 0; j < stored_support.size(); ++j)
+          stored_support[j] = input.orbital_basis_index_table[
+              proj.orbital_index * input.n_basis_functions + j] - 1;
         const auto surrogate = inactive_projector->model(
-            stored_support, inactive_target ? m.orbital_index : -1);
-        Eigen::VectorXd stored_x(stored_rows.size());
+            stored_support, inactive_target ? proj.orbital_index : -1);
+        Eigen::VectorXd stored_x(stored_count);
         for (Eigen::Index j = 0; j < stored_x.size(); ++j)
           stored_x[j] = input.orbital_value_table[
-              m.orbital_index * input.n_basis_functions + j];
+              proj.orbital_index * input.n_basis_functions + j];
         Eigen::MatrixXd stored_U = Eigen::MatrixXd::Zero(
             stored_x.size(), proj.local_reduced_size);
         stored_U.topRows(local_size) = proj.tangent_basis;
@@ -878,11 +914,7 @@ OrbitalChart::OrbitalChart(
         has_reduced_curvature_diagonal_ = true;
       }
 
-      bb.orbitals.push_back(std::move(proj));
     }
-
-    block_bases_.push_back(std::move(bb));
-    ++block_index;
   }
   if (hessian_diagonal && active_subspace_gauge_)
     build_rotation_inverse(input, *hessian_diagonal);

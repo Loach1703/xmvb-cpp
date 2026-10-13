@@ -166,6 +166,9 @@ bool run_case(
       (result.overlap_eigenvectors - problem.overlap * computed_roots)
           .cwiseAbs()
           .maxCoeff();
+  const double hamiltonian_image_error =
+      (result.hamiltonian_eigenvectors - problem.hamiltonian * computed_roots)
+          .cwiseAbs().maxCoeff();
   const double max_residual = *std::max_element(
       result.relative_residual_norms.begin(),
       result.relative_residual_norms.end());
@@ -174,6 +177,7 @@ bool run_case(
       eigenvector_error <= eigenvector_tolerance &&
       orthonormality_error <= 1.0e-10 &&
       overlap_image_error <= 1.0e-12 &&
+      hamiltonian_image_error <= 1.0e-12 &&
       max_residual <= options.residual_tolerance;
 
   std::cout << label

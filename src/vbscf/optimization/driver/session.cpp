@@ -14,11 +14,9 @@
 
 namespace xmvb::vb::optimizer_detail {
 
-OrbitalChart build_orbital_chart(
+OrbitalChart build_orbital_geometry(
     const VbScfObjective& objective,
-    const SparseParameterLayout& parameter_view,
-    OrbitalPreconditioner preconditioner,
-    bool need_ah_mapping) {
+    const SparseParameterLayout& parameter_view) {
   const auto& orbital_preparation_input =
       objective.input().orbital_preparation_input;
   const auto& orbital_preparation_result =
@@ -35,6 +33,17 @@ OrbitalChart build_orbital_chart(
   const int n_occupied_orbitals =
       n_inactive_doubly_occupied_orbitals +
       orbital_preparation_input.n_active_orbitals;
+  return OrbitalChart(
+      orbital_preparation_input,
+      parameter_view,
+      orbital_preparation_result.auxiliary_orbital_matrix.leftCols(n_occupied_orbitals),
+      normalized_orbital_matrix,
+      nullptr, false, objective.input().complete_active_space);
+}
+
+void prepare_orbital_curvature(
+    const VbScfObjective& objective, OrbitalChart& chart,
+    OrbitalPreconditioner preconditioner, bool need_ah_mapping) {
   if (preconditioner == OrbitalPreconditioner::Automatic) {
     throw std::invalid_argument(
         "orbital-chart construction requires a resolved preconditioner");
@@ -54,15 +63,19 @@ OrbitalChart build_orbital_chart(
           ? &objective.gradient_result().ao_effective_one_electron_result
                  .ao_effective_h1e
           : nullptr;
-  return OrbitalChart(
-      orbital_preparation_input,
-      parameter_view,
-      orbital_preparation_result.auxiliary_orbital_matrix.leftCols(n_occupied_orbitals),
-      normalized_orbital_matrix,
-      one_electron,
-      false,
-      objective.input().complete_active_space,
+  chart.set_curvature(
+      objective.input().orbital_preparation_input, one_electron,
       hessian_diagonal ? &*hessian_diagonal : nullptr);
+}
+
+OrbitalChart build_orbital_chart(
+    const VbScfObjective& objective,
+    const SparseParameterLayout& parameter_view,
+    OrbitalPreconditioner preconditioner,
+    bool need_ah_mapping) {
+  auto chart = build_orbital_geometry(objective, parameter_view);
+  prepare_orbital_curvature(objective, chart, preconditioner, need_ah_mapping);
+  return chart;
 }
 
 bool orbital_gradient_converged(

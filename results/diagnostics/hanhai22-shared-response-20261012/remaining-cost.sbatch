@@ -17,14 +17,15 @@ set -eo pipefail
 module purge
 module load gcc/14.1.0
 root="$SLURM_SUBMIT_DIR"
-frozen="$root/fecl2-ritz-cost-1250646"
+frozen="$root/fecl2-ritz-cost-${XMVB_COST_BUILD_JOB:-1250646}"
 binary="$frozen/xmvb-cpp.exe"
 variant=scalar
 [[ "$SLURM_ARRAY_TASK_ID" == 0 ]] || variant="${XMVB_COST_CAPTURE:-sampled}"
-artifact="$root/remaining-cost-$SLURM_ARRAY_JOB_ID/LOFLEA-$variant"
+case_name="${XMVB_COST_CASE:-LOFLEA}"
+artifact="$root/remaining-cost-$SLURM_ARRAY_JOB_ID/$case_name-$variant"
 mkdir -p "$artifact"
-cp "$root/keyframe-lean-1250648/LOFLEA/input.xmi" "$artifact/"
-cp "$root/keyframe-lean-1250648/LOFLEA/"*.gbs "$artifact/"
+cp "$root/keyframe-lean-1250648/$case_name/input.xmi" "$artifact/"
+cp "$root/keyframe-lean-1250648/$case_name/"*.gbs "$artifact/"
 cp "$frozen/flags.txt" "$artifact/"
 cd "$artifact"
 export LC_ALL=C OMP_NUM_THREADS=32 OMP_PLACES=cores OMP_PROC_BIND=close OMP_MAX_ACTIVE_LEVELS=1
@@ -35,7 +36,7 @@ hostname > node.txt
 lscpu > cpu.txt
 module list > modules.txt 2>&1
 env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|SLURM_)' > execution-env.txt
-printf '%s\n' 'b9d775e4: unchanged new binary frozen in build 1250646; no old binary rerun' > source.txt
+cp "$frozen/source.txt" source.txt
 args=(input.xmi --optimizer-backend neo --eigensolver davidson
  --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3
  --energy-tolerance 1e-7 --exact-exchange-memory-mib 256 --neo-trace neo.tsv)

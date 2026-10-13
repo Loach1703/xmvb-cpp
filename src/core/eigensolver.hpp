@@ -82,6 +82,8 @@ DavidsonOptions make_davidson_options(
  */
 struct DavidsonResult {
   GeneralizedEigenResult eigenpairs;
+  /** @brief Exact retained Ritz image `H C`, including the finite CI residual. */
+  Eigen::MatrixXd hamiltonian_eigenvectors;
   /** @brief Matrix `S C` for the converged roots, retained without forming S. */
   Eigen::MatrixXd overlap_eigenvectors;
   std::vector<double> relative_residual_norms;
