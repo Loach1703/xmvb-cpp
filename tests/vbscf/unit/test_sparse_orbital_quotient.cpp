@@ -34,7 +34,7 @@ void require(bool condition, const std::string& message) {
 }
 constexpr double kFixtureForcing = 5.0e-2;
 
-/** @brief Check the reduced-rank Gram formula against independent dense inverses. */
+/** @brief Compare shared radial whitening with independent dense geometry. */
 void check_whitened_tangent_inverse() {
   constexpr int n = 9, d = 5;
   Eigen::MatrixXd seed(n, d), mixing(n, n);
@@ -51,6 +51,7 @@ void check_whitened_tangent_inverse() {
   for (const double conditioning : {1.0, 1.0e-4}) {
     const Eigen::MatrixXd s = mixing.transpose() * mixing +
         conditioning * Eigen::MatrixXd::Identity(n, n);
+    const TangentWhitening whitening(q, s);
     for (const double scale : {0.2, 1.0, 7.0}) {
       const Eigen::VectorXd coefficients = scale * raw;
       const double norm = std::sqrt(coefficients.dot(s * coefficients));
@@ -64,16 +65,13 @@ void check_whitened_tangent_inverse() {
           spectrum.eigenvalues().cwiseSqrt().cwiseInverse().asDiagonal() *
           spectrum.eigenvectors().transpose();
       for (const bool sphere : {false, true}) {
-        const WhitenedTangent result = whiten_orbital_tangent(q, coefficients, s, sphere);
-        const Eigen::MatrixXd base = q.transpose() * s * q;
-        const WhitenedTangent shared = whiten_orbital_tangent(q, coefficients, s, sphere, &base);
-        require((shared.basis - result.basis).norm() < 1e-12 * result.basis.norm() &&
-                (shared.inverse_gram - result.inverse_gram).norm() < 1e-12 * result.inverse_gram.norm(),
-                "shared accepted-point quotient metric changed the tangent");
+        const WhitenedTangent result = whitening.apply(coefficients, s, sphere);
         const Eigen::MatrixXd expected = sphere
             ? (norm * physical * inverse_root).eval() : (q * inverse_root).eval();
-        require((result.basis - expected).norm() < 2e-10 * expected.norm(),
-                "optimized whitening changed the symmetric horizontal representative");
+        const Eigen::MatrixXd rotation = expected.colPivHouseholderQr().solve(result.basis);
+        require((expected * rotation - result.basis).norm() < 2e-10 * expected.norm() &&
+                (rotation.transpose() * rotation - Eigen::MatrixXd::Identity(d, d)).norm() < 2e-9,
+                "shared whitening changed the physical horizontal lift");
         const Eigen::MatrixXd gram = result.basis.transpose() * result.basis;
         const Eigen::MatrixXd inverse = gram.ldlt().solve(Eigen::MatrixXd::Identity(d, d));
         require((result.inverse_gram - inverse).norm() < 2e-10 * inverse.norm(),
@@ -87,7 +85,21 @@ void check_whitened_tangent_inverse() {
       }
     }
   }
-  std::cout << "symmetric tangent whitening and rank-two raw Gram inverse: passed\n";
+  // A conservative congruence bound is insufficient here, but the actual
+  // updated metric is well conditioned. Test its secular rank certificate.
+  Eigen::Matrix3d s = Eigen::Matrix3d::Identity();
+  s(0, 0) = 1e8;
+  const Eigen::Matrix<double,3,2> q2 = Eigen::Matrix3d::Identity().leftCols<2>();
+  const TangentWhitening whitening(q2,s);
+  const Eigen::Vector3d regular(std::sqrt(1.0-1e-8)/1e4,0.0,1e-4);
+  const auto recovered = whitening.apply(regular,s,false);
+  require(recovered.basis.allFinite() && recovered.inverse_gram.allFinite(),
+          "secular rank certificate rejected a regular radial downdate");
+  bool rejected = false;
+  try { whitening.apply(Eigen::Vector3d(1e-4,0.0,1e-12),s,false); }
+  catch (const std::runtime_error&) { rejected = true; }
+  require(rejected,"shared radial whitening admitted a rank-deficient tangent");
+  std::cout << "shared radial whitening and raw Gram inverse: passed\n";
 }
 
 void check_response_spectrum_summary() {

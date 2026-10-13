@@ -446,8 +446,8 @@ OrbitalChart::OrbitalChart(
   // not share these complements.
   std::optional<Eigen::MatrixXd> full_inactive_quotient;
   std::optional<Eigen::MatrixXd> full_active_quotient;
-  std::optional<Eigen::MatrixXd> full_inactive_metric;
-  std::optional<Eigen::MatrixXd> full_active_metric;
+  std::optional<TangentWhitening> full_inactive_whitening;
+  std::optional<TangentWhitening> full_active_whitening;
 
   int block_index = 0;
   for (const auto& block : blocks) {
@@ -534,21 +534,21 @@ OrbitalChart::OrbitalChart(
           (m.orbital_index < n_inactive || use_active_subspace_gauge);
       Eigen::MatrixXd local_quotient;
       const Eigen::MatrixXd* quotient;
-      const Eigen::MatrixXd* quotient_metric = nullptr;
+      const TangentWhitening* whitening = nullptr;
       if (shared_gauge) {
         auto& shared = m.orbital_index < n_inactive
             ? full_inactive_quotient : full_active_quotient;
-        auto& shared_metric = m.orbital_index < n_inactive
-            ? full_inactive_metric : full_active_metric;
+        auto& shared_whitening = m.orbital_index < n_inactive
+            ? full_inactive_whitening : full_active_whitening;
         if (!shared) {
           shared.emplace(build_exact_local_sparse_quotient_basis(
               input, m.orbital_index, n_inactive,
               stable_inactive_span_basis, phys_orbital_matrix, ao_overlap,
               local_basis_indices, use_active_subspace_gauge));
-          shared_metric.emplace(shared->transpose() * ao_overlap * *shared);
+          shared_whitening.emplace(*shared, ao_overlap);
         }
         quotient = &*shared;
-        quotient_metric = &*shared_metric;
+        whitening = &*shared_whitening;
       } else {
         local_quotient = build_exact_local_sparse_quotient_basis(
             input, m.orbital_index, n_inactive,
@@ -600,13 +600,13 @@ OrbitalChart::OrbitalChart(
           stored_coefficients.tail(stored_count - local_size).isZero(0.0);
       const bool use_product_sphere_representative =
           !use_active_subspace_gauge && scaling_gauge_is_admissible;
-      WhitenedTangent tangent =
-          whiten_orbital_tangent(
-              stored_quotient_basis,
-              stored_coefficients,
-              stored_overlap,
-              use_product_sphere_representative,
-              quotient_metric);
+      std::optional<TangentWhitening> local_whitening;
+      if (!whitening) {
+        local_whitening.emplace(stored_quotient_basis, stored_overlap);
+        whitening = &*local_whitening;
+      }
+      WhitenedTangent tangent = whitening->apply(
+          stored_coefficients, stored_overlap, use_product_sphere_representative);
       proj.tangent_basis = tangent.basis.topRows(local_size);
       proj.inverse_raw_tangent_gram = std::move(tangent.inverse_gram);
       proj.uses_product_sphere_representative =

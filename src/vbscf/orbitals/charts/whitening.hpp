@@ -10,16 +10,23 @@ struct WhitenedTangent {
   Eigen::MatrixXd inverse_gram;
 };
 
-/** @brief Whiten an Euclidean-orthonormal quotient, retaining its horizontal gauge.
- * The normalization derivative supplies a rank-one correction. Its raw Gram
- * inverse is recovered from the same spectrum and a two-dimensional update,
- * without assembling or factoring another reduced-size matrix.
+/** @brief Shared accepted-point whitening followed by exact radial updates.
+ * The basis differs from per-orbital symmetric whitening by an orthogonal
+ * reduced-coordinate transformation. Horizontal lift and physical metric are
+ * unchanged. A shared quotient needs one factorization, not one per orbital.
  */
-WhitenedTangent whiten_orbital_tangent(
-    const Eigen::Ref<const Eigen::MatrixXd>& quotient,
-    const Eigen::Ref<const Eigen::VectorXd>& coefficients,
-    const Eigen::Ref<const Eigen::MatrixXd>& overlap,
-    bool sphere,
-    const Eigen::MatrixXd* quotient_metric = nullptr);
+class TangentWhitening {
+ public:
+  TangentWhitening(const Eigen::Ref<const Eigen::MatrixXd>& quotient,
+                  const Eigen::Ref<const Eigen::MatrixXd>& overlap);
+  WhitenedTangent apply(const Eigen::Ref<const Eigen::VectorXd>& coefficients,
+                       const Eigen::Ref<const Eigen::MatrixXd>& overlap,
+                       bool sphere) const;
+ private:
+  Eigen::MatrixXd basis_;
+  Eigen::MatrixXd metric_;
+  Eigen::MatrixXd eigenvectors_;
+  Eigen::VectorXd eigenvalues_;
+};
 
 }  // namespace xmvb::vb

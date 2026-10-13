@@ -1,0 +1,118 @@
+Shared accepted-point whitening with closed-form radial updates
+
+Derivation
+----------
+Q has Euclidean-orthonormal columns and spans the support-admissible horizontal
+quotient. Factor K=Q^T S Q once and form B=Q K^(-1/2), so B^T S B=I.
+For each raw orbital b, let n=sqrt(b^T S b), c=b/n, and u=B^T S c.
+The normalization derivative is J=(I-c c^T S)/n. Then
+
+  (JB)^T S (JB)=(I-u u^T)/n^2.
+
+With delta=1-u^T u>0 and t=sqrt(delta), define
+
+  F=(I-u u^T)^(-1/2)=I+u u^T/[t(1+t)],
+  F^(-1)=I-u u^T/(1+t).
+
+The coupled horizontal representative is W=n B F. The sphere representative
+is W=n(B-c u^T)F. Both satisfy (JW)^T S(JW)=I and retain their respective
+raw horizontal lifts. They need matrix-vector and outer-product operations
+per orbital, rather than a new dense spectral decomposition.
+
+Raw left inverse
+----------------
+Since Q^T Q=I, B^T B=K^(-1). For the coupled representative,
+
+  (W^T W)^(-1)=F^(-1) K F^(-1)/n^2.
+
+For the sphere representative E=B-c u^T, let Z=[B^T c,u] and
+D=[[0,-1],[-1,c^T c]]. Then E^T E=K^(-1)+Z D Z^T, and
+
+  T=(E^T E)^(-1)
+   =K-K Z(D^(-1)+Z^T K Z)^(-1)Z^T K,
+  (W^T W)^(-1)=F^(-1) T F^(-1)/n^2.
+
+Only a 2x2 inverse is required. Both F congruences are expanded into vector
+products and outer products, retaining O(d^2) rather than dense O(d^3) work.
+
+Coordinate consistency
+----------------------
+This construction differs from the old per-orbital symmetric inverse square
+root by an orthogonal transformation of reduced coordinates. It retains the
+same raw horizontal subspace and normalized AO metric, not identical basis
+vectors. Gradients, HVPs, preconditioners and recycled packed steps must use
+the current chart's pullback and left inverse consistently. The existing
+driver already uses these maps; independent geometric/derivative tests verify
+them. This is not an orthogonal-orbital rotation update.
+
+The numerical outer thresholds remain energy 1e-7 Eh and projected-gradient
+infinity norm 1e-3. The infinity norm is coordinate-component dependent, so
+an orthogonal basis change can alter its value and the stopping trajectory.
+No exact trajectory or action-count identity is assumed.
+
+Rank criterion
+--------------
+The original cutoff 64*epsilon*d*lambda_max is retained for the normalized
+metric. Congruence bounds certify lambda_min(K)*delta against the same cutoff
+using lambda_max(K). When this sufficient bound is inconclusive, the extreme
+eigenvalues of the diagonal rank-one downdate are computed by scalar secular
+equations, with bisection ending at floating-point adjacency. No full
+per-orbital spectral-solve fallback, empirical tolerance or iteration budget
+is retained. A test covers a regular updated metric that the conservative
+bound alone would reject, as well as an actually deficient tangent.
+
+Cost and memory
+---------------
+Full-AO inactive orbitals share one accepted-point factor, and complete-space
+OEO active orbitals share a second. The spectral work changes from
+O(N_orb*d^3) to O(N_groups*d^3+N_orb*d^2), with N_groups<=2 for these two
+full-AO sectors. Including AO normalization and basis materialization, work
+is O(N_groups*(n_bf^2*d+n_bf*d^2+d^3)
+      +N_orb*(n_bf^2+n_bf*d+d^2)).
+The algorithm does not remove all basis-dependent cubic work: it removes
+its repetition for every full-AO orbital. Restricted HAO supports and active
+rays retain their own gauge-dependent factors; no common OEO gauge is imposed.
+The point-local factors are shared, and no new worker team or per-thread AO
+matrix/integral graph copies are introduced.
+
+Tests and measured evidence
+---------------------------
+Hanhai22 build 1251843: quotient geometry, CIAH, keyframe, structure coupling
+and analytic diagonal tests passed. Tests compare the new and old dense
+horizontal representatives modulo an orthogonal coordinate transformation,
+physical whitening and dense raw-Gram inverses, including frozen supports
+and ill-conditioned cases.
+F2 and FeCl2 coupled finite differences used step 1e-4:
+  F2 orbital/structure HVP relative errors 2.17e-9 / 9.90e-9.
+  FeCl2 orbital/structure HVP relative errors 6.69e-9 / 1.06e-8.
+  FeCl2 directional curvature relative error 5.98e-9.
+  FeCl2 relaxed-HVP/Schur consistency relative error 3.88e-7, including
+  the existing inexact CI response solve; no response tolerance was loosened.
+
+Two-step captures 1251849, using saved previous measurements rather than
+rerunning older versions. FeCl2 at 32 threads, five chart constructions:
+  full whitening decompositions: 165 -> 10;
+  chart wall: 0.192779 -> 0.033031 s (5.84x);
+  whitening factor wall: 0.179212 -> 0.010830 s;
+  closed radial/Gram updates: 0.012847 s for 165 orbitals.
+  HVP count remains 40 in every FeCl2 prefix variant; MnF2 remains 20.
+The original pre-algebra chart wall was 0.445534 s, about 13.5x this value.
+
+Full regression 1251850, 32 threads, exact libcint, def2-TZVP, NEO/CIAH,
+Davidson, analytic diagonal, same input and numerical thresholds:
+  FeCl2: 12 steps, 257 HVP, -2181.624464870796 Eh, GNU time 6.07 s,
+         peak process RSS 478.008 MiB.
+  MnF2: 13 steps, 189 HVP, -1348.893353223862 Eh, GNU time 4.15 s,
+        peak process RSS 531.027 MiB.
+Previous algebra-only run 1251773:
+  FeCl2: 12 steps, 256 HVP, -2181.624464870235 Eh, 7.39 s, 486.543 MiB.
+  MnF2: 13 steps, 189 HVP, -1348.893353223861 Eh, 4.43 s, 495.758 MiB.
+Energy differences are 5.61e-10 and 1e-12 Eh. These are native single-run,
+shared-node measurements on the same cluster; node/load and allocator
+variability remain. No universal memory or action-count reduction is claimed.
+
+Artifacts
+---------
+results/diagnostics/hanhai22-shared-response-20261012/shared-whitening-build-1251843/
+results/diagnostics/hanhai22-shared-response-20261012/shared-whitening-capture-1251849/
+results/diagnostics/hanhai22-shared-response-20261012/shared-whitening-capture-1251850/
