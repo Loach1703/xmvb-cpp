@@ -1512,6 +1512,14 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
             result.orthogonal_coefficients.back());
   }
 
+  for (std::size_t i = 0; i < result.weights.size(); ++i)
+    for (std::size_t j = 0; j <= i; ++j) {
+      if (result.weights[i] == 0.0 || result.weights[j] == 0.0)
+        result.overlap_generators.push_back(Eigen::MatrixXd::Zero(n_orbitals, n_orbitals));
+      else
+        result.overlap_generators.push_back(direct_ci_->sigma.one_body_generator_adjoint(
+            result.orthogonal_coefficients[j], result.orthogonal_coefficients[i]));
+    }
   return result;
 }
 
@@ -1756,11 +1764,35 @@ StructureAction::active_integral_adjoint_direction(
       std::move(result.pair_kernel)};
 }
 
-StructureActiveIntegralAdjoint
-StructureAction::active_integral_response_adjoint(
+StructureResponseSweep StructureAction::apply_response(
+    const StructureAdjointState& state,
+    const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const {
+  if (coefficients.rows() != n_structures_ ||
+      coefficients.cols() != static_cast<Eigen::Index>(state.weights.size()) ||
+      !coefficients.allFinite())
+    throw std::invalid_argument("invalid structure response columns");
+  return contract_response(state, [&](int i) {
+    return expand_structure_block(coefficients.col(i));
+  }, true);
+}
+
+StructureActiveIntegralAdjoint StructureAction::active_integral_response_adjoint(
     const StructureAdjointState& state,
     const SelectedStateDeterminantMatrices& directional_selected_states,
     const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const {
+  if (directional_selected_states.states.size() != state.weights.size() ||
+      directional_selected_states.n_unique_alpha != n_unique_alpha_ ||
+      directional_selected_states.n_unique_beta != n_unique_beta_)
+    throw std::invalid_argument("invalid selected-subspace response dimensions");
+  return finish_response(state, contract_response(state, [&](int i) {
+    return directional_selected_states.states[i].coefficient_matrix;
+  }, false), state_multipliers);
+}
+
+StructureResponseSweep StructureAction::contract_response(
+    const StructureAdjointState& state,
+    const std::function<Eigen::MatrixXd(int)>& coefficients_at,
+    bool collect_images) const {
   if (!direct_ci_) {
     throw std::logic_error(
         "active-integral response adjoint requires orthogonal direct CI");
@@ -1769,13 +1801,7 @@ StructureAction::active_integral_response_adjoint(
   if (n_states == 0 || state.energies.size() != n_states ||
       state.source_coefficients.size() != n_states ||
       state.orthogonal_coefficients.size() != n_states ||
-      state.residuals.size() != n_states ||
-      directional_selected_states.states.size() != n_states ||
-      directional_selected_states.n_unique_alpha != n_unique_alpha_ ||
-      directional_selected_states.n_unique_beta != n_unique_beta_ ||
-      state_multipliers.rows() != static_cast<Eigen::Index>(n_states) ||
-      state_multipliers.cols() != static_cast<Eigen::Index>(n_states) ||
-      !state_multipliers.allFinite()) {
+      state.residuals.size() != n_states) {
     throw std::invalid_argument(
         "selected-subspace response adjoint inputs have incompatible dimensions");
   }
@@ -1789,11 +1815,15 @@ StructureAction::active_integral_response_adjoint(
   Eigen::MatrixXd generator_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);
 
+  StructureActionResult images;
+  if (collect_images) {
+    images.hamiltonian = Eigen::MatrixXd::Zero(n_structures_, n_states);
+    images.overlap = Eigen::MatrixXd::Zero(n_structures_, n_states);
+  }
   for (std::size_t state_index = 0;
        state_index < n_states;
        ++state_index) {
-    const auto& coefficients =
-        directional_selected_states.states[state_index].coefficient_matrix;
+    Eigen::MatrixXd coefficients = coefficients_at(static_cast<int>(state_index));
     if (coefficients.rows() != n_unique_alpha_ ||
         coefficients.cols() != n_unique_beta_ || !coefficients.allFinite()) {
       throw std::invalid_argument("invalid selected-subspace coefficient response");
@@ -1803,9 +1833,7 @@ StructureAction::active_integral_response_adjoint(
         !std::isfinite(state.energies[state_index])) {
       throw std::invalid_argument("invalid selected-subspace adjoint state");
     }
-    if (state_weight == 0.0) {
-      continue;
-    }
+    if (state_weight == 0.0 && !collect_images) continue;
     const auto& accepted = state.orthogonal_coefficients[state_index];
     if (accepted.rows() != n_unique_alpha_ ||
         accepted.cols() != n_unique_beta_ ||
@@ -1822,7 +1850,7 @@ StructureAction::active_integral_response_adjoint(
     Eigen::MatrixXd response_residual =
         Eigen::MatrixXd::Zero(n_unique_alpha_, n_unique_beta_);
     if (has_response) {
-      response = coefficients;
+      response = std::move(coefficients);
       direct_ci_->alpha_transform.apply_left(&response);
       direct_ci_->beta_transform().apply_right(&response);
       DirectCiResponse contracted =
@@ -1831,43 +1859,63 @@ StructureAction::active_integral_response_adjoint(
           2.0 * state_weight * contracted.integrals.one_electron;
       pair_gradient.noalias() +=
           2.0 * state_weight * contracted.integrals.pair_kernel;
+      if (collect_images) {
+        // Project the unshifted sigma, without subtracting and readding E q.
+        // One temporary carrier replaces the consumed coefficient buffer.
+        Eigen::MatrixXd projected = contracted.sigma;
+        direct_ci_->beta_transform().apply_adjoint_right(&projected);
+        direct_ci_->alpha_transform.apply_adjoint_left(&projected);
+        images.hamiltonian.col(state_index) = contract_spin_product_block(projected).col(0);
+      }
       response_residual = std::move(contracted.sigma);
       response_residual.noalias() -= state.energies[state_index] * response;
     }
-    // Orbital overlap directions are symmetric, so only
-    // sym(M W), W=diag(state weights), belongs to B^T.  Dividing its current
-    // column by w_i lets the existing 2 w_i generator adjoint consume the
-    // effective multiplier without retaining an antisymmetric gauge component.
-    for (std::size_t coupled_state = 0;
-         coupled_state < n_states;
-         ++coupled_state) {
-      const double multiplier = state_multipliers(
-              static_cast<Eigen::Index>(coupled_state),
-              static_cast<Eigen::Index>(state_index)) * 0.5 +
-          state_multipliers(
-              static_cast<Eigen::Index>(state_index),
-              static_cast<Eigen::Index>(coupled_state)) *
-              (0.5 * state.weights[coupled_state] / state_weight);
-      if (multiplier != 0.0) {
-        response_residual.noalias() +=
-            multiplier * state.orthogonal_coefficients[coupled_state];
-      }
-    }
-    generator_gradient.noalias() += 2.0 * state_weight *
-        direct_ci_->sigma.one_body_generator_adjoint(response_residual, accepted);
     if (has_response) {
+      generator_gradient.noalias() += 2.0 * state_weight *
+          direct_ci_->sigma.one_body_generator_adjoint(response_residual, accepted);
       generator_gradient.noalias() += 2.0 * state_weight *
           direct_ci_->sigma.one_body_generator_adjoint(
               state.residuals[state_index], response);
+      if (collect_images) {
+        // Both adjoint consumers have finished: reuse q as the overlap image.
+        direct_ci_->beta_transform().apply_adjoint_right(&response);
+        direct_ci_->alpha_transform.apply_adjoint_left(&response);
+        images.overlap.col(state_index) = contract_spin_product_block(response).col(0);
+      }
     }
   }
+  return {std::move(images), std::move(one_gradient), std::move(pair_gradient),
+      std::move(generator_gradient)};
+}
 
+StructureActiveIntegralAdjoint StructureAction::finish_response(
+    const StructureAdjointState& state, StructureResponseSweep sweep,
+    const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const {
+  const Eigen::Index n_states = state.weights.size();
+  if (!direct_ci_ || state_multipliers.rows() != n_states ||
+      state_multipliers.cols() != n_states || !state_multipliers.allFinite())
+    throw std::invalid_argument("invalid response multiplier");
+  // Only sym(M W) contributes for symmetric orbital-overlap directions.
+  for (Eigen::Index i = 0; i < n_states; ++i) {
+    if (state.weights[i] == 0.0) continue;
+    for (Eigen::Index j = 0; j < n_states; ++j) {
+      const double factor = state_multipliers(j,i) * 0.5 +
+          state_multipliers(i,j) * (0.5 * state.weights[j] / state.weights[i]);
+      if (factor == 0.0) continue;
+      const Eigen::Index high = std::max(i,j), low = std::min(i,j);
+      const auto& density = state.overlap_generators[high*(high+1)/2+low];
+      if (i >= j)
+        sweep.generator.noalias() += 2.0 * state.weights[i] * factor * density;
+      else
+        sweep.generator.noalias() += 2.0 * state.weights[i] * factor * density.transpose();
+    }
+  }
   NonorthogonalActiveIntegralAdjoint result =
       backpropagate_orthogonal_active_integral_adjoint(
           direct_ci_->integrals,
-          one_gradient,
-          pair_gradient,
-          generator_gradient);
+          sweep.one_electron,
+          sweep.pair_kernel,
+          sweep.generator);
   return StructureActiveIntegralAdjoint{
       std::move(result.overlap),
       std::move(result.one_electron),

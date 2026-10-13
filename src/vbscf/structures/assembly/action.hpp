@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -38,6 +39,16 @@ struct StructureActiveIntegralAdjoint {
   Eigen::MatrixXd pair_kernel;
 };
 
+/** @brief Shared response sweep; retains only structure images and active tensors.
+ * Spin-product workspaces are consumed one state at a time, not retained here.
+ */
+struct StructureResponseSweep {
+  StructureActionResult images;
+  Eigen::MatrixXd one_electron;
+  Eigen::MatrixXd pair_kernel;
+  Eigen::MatrixXd generator;
+};
+
 /** @brief Direction-independent selected-state data for direct-CI adjoints. */
 struct StructureAdjointState {
   std::vector<Eigen::MatrixXd> source_coefficients;
@@ -48,6 +59,8 @@ struct StructureAdjointState {
   Eigen::MatrixXd one_electron_gradient;
   Eigen::MatrixXd pair_kernel_gradient;
   Eigen::MatrixXd generator_gradient;
+  /** Upper-triangular accepted-state transition 1-RDMs for gauge multipliers. */
+  std::vector<Eigen::MatrixXd> overlap_generators;
 };
 
 /** @brief Direct-CI intermediates shared by structure and adjoint directions. */
@@ -194,6 +207,17 @@ public:
       const SelectedStateDeterminantMatrices& directional_selected_states,
       const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const;
 
+  /** @brief Computes Hq, Mq and the response adjoint in one direct-CI sweep. */
+  StructureResponseSweep apply_response(
+      const StructureAdjointState& state,
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const;
+
+  /** @brief Adds the horizontal-gauge multiplier and pulls back active tensors. */
+  StructureActiveIntegralAdjoint finish_response(
+      const StructureAdjointState& state,
+      StructureResponseSweep sweep,
+      const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const;
+
   /**
    * @brief Expands structure vectors directly onto unique spin products.
    *
@@ -285,6 +309,10 @@ public:
   StructureActionStorage storage() const noexcept;
 
 private:
+  StructureResponseSweep contract_response(
+      const StructureAdjointState& state,
+      const std::function<Eigen::MatrixXd(int)>& coefficients,
+      bool collect_images) const;
   friend class StructureMetricInverse;
   struct OrthogonalDirectCiData;
   struct TiledPairData;

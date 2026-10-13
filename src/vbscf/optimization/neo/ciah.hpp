@@ -53,6 +53,9 @@ private:
 
 /** Controls one bounded, matrix-free CIAH Davidson workspace. */
 struct CiahOptions {
+  /** @brief Joint H/G action when both images share physical intermediates. */
+  std::function<std::pair<Eigen::VectorXd, Eigen::VectorXd>(const Eigen::VectorXd&)>
+      apply_images;
   /** Eigenvalue tolerance; the complete coordinate residual uses its square root. */
   double tolerance = 1.0e-12;
   /** Relative threshold for dependent directions and projected metric rank. */

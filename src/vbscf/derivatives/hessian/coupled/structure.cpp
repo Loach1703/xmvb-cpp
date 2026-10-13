@@ -311,9 +311,10 @@ StructureCouplingAction StructureTangentOperator::apply_coupling(
 
 StructureCoordinateCouplingAction
 StructureTangentOperator::apply_coupling_coordinates(
-    const Eigen::VectorXd& coordinates) const {
+    const Eigen::VectorXd& coordinates,
+    StructureActiveIntegralAdjoint* adjoint) const {
   const StructureCoordinateCouplingBlock block =
-      apply_coupling_coordinate_block(coordinates);
+      apply_coupling_coordinate_block(coordinates, adjoint);
   return StructureCoordinateCouplingAction{
       block.hessian_coordinates.col(0),
       block.metric_coordinates.col(0),
@@ -323,13 +324,16 @@ StructureTangentOperator::apply_coupling_coordinates(
 
 StructureCoordinateCouplingBlock
 StructureTangentOperator::apply_coupling_coordinate_block(
-    const Eigen::Ref<const Eigen::MatrixXd>& coordinates) const {
+    const Eigen::Ref<const Eigen::MatrixXd>& coordinates,
+    StructureActiveIntegralAdjoint* adjoint) const {
   if (coordinates.rows() != tangent_size() || coordinates.cols() == 0 ||
       !coordinates.allFinite()) {
     throw std::invalid_argument(
         "structure coordinate block has incompatible dimensions or values");
   }
   const Eigen::Index width = coordinates.cols();
+  if (adjoint && (width != 1 || !action_->supports_integral_direction()))
+    throw std::invalid_argument("joint response requires one direct-CI direction");
   const Eigen::Index horizontal_rows = n_structures_ - n_states_;
   Eigen::MatrixXd transformed = Eigen::MatrixXd::Zero(
       n_structures_, n_states_ * width);
@@ -346,7 +350,18 @@ StructureTangentOperator::apply_coupling_coordinate_block(
     }
   }
 
-  const StructureActionResult images = action_->apply(raw);
+  StructureResponseSweep sweep;
+  StructureActionResult images;
+  if (adjoint) {
+    if (!accepted_point_->structure_adjoint_state)
+      accepted_point_->structure_adjoint_state = action_->prepare_active_adjoint(
+          accepted_point_->selected_state_matrices,
+          accepted_point_->selected_state_energies);
+    sweep = action_->apply_response(*accepted_point_->structure_adjoint_state, raw);
+    images = std::move(sweep.images);
+  } else {
+    images = action_->apply(raw);
+  }
   Eigen::MatrixXd shifted = images.hamiltonian;
   for (Eigen::Index block = 0; block < width; ++block) {
     for (int state = 0; state < n_states_; ++state) {
@@ -369,6 +384,9 @@ StructureTangentOperator::apply_coupling_coordinate_block(
   }
 
   Eigen::MatrixXd scaled_shifted = std::move(shifted);
+  if (adjoint)
+    *adjoint = action_->finish_response(*accepted_point_->structure_adjoint_state,
+        std::move(sweep), result.adjoint_multipliers.front());
   Eigen::MatrixXd scaled_overlap = images.overlap;
   for (Eigen::Index block = 0; block < width; ++block) {
     for (int state = 0; state < n_states_; ++state) {

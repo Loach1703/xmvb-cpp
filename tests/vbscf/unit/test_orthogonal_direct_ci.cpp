@@ -53,6 +53,50 @@ void check_fused_response(
           "fused response two-electron adjoint differs from separate contraction");
 }
 
+/** @brief Joint sweep agrees with independent H/S and differentiated adjoints. */
+void check_joint_structure_response(const xmvb::vb::StructureAction& action,
+    int n_alpha, int n_beta) {
+  const int n = action.n_structures();
+  xmvb::vb::SelectedStateDeterminantMatrices states;
+  states.n_structures = n;
+  states.n_unique_alpha = n_alpha;
+  states.n_unique_beta = n_beta;
+  states.normalized_state_weights = {0.3, 0.7};
+  states.states.resize(2);
+  Eigen::MatrixXd raw(n, 2);
+  for (int i = 0; i < 2; ++i) {
+    for (int j = 0; j < n; ++j) raw(j,i) = std::sin(0.23*(i+1)*(j+2));
+    states.states[i].normalized_state_weight = states.normalized_state_weights[i];
+    states.states[i].coefficient_matrix = action.expand_structure_block(raw.col(i));
+  }
+  const auto accepted = action.prepare_active_adjoint(states, {-1.3, -0.9});
+  const Eigen::MatrixXd multipliers =
+      (Eigen::Matrix2d() << 0.13, -0.04, 0.08, -0.21).finished();
+  for (bool zero : {false, true}) {
+    if (zero) raw.setZero();
+    else raw = raw.array().cos().matrix();
+    auto response = states;
+    for (int i = 0; i < 2; ++i)
+      response.states[i].coefficient_matrix = action.expand_structure_block(raw.col(i));
+    auto sweep = action.apply_response(accepted, raw);
+    const auto images = action.apply(raw);
+    require((sweep.images.hamiltonian-images.hamiltonian).norm() <
+        3e-11*std::max(1.0,images.hamiltonian.norm()) &&
+        (sweep.images.overlap-images.overlap).norm() <
+        3e-11*std::max(1.0,images.overlap.norm()), "joint response changed H/S images");
+    const auto joint = action.finish_response(accepted, std::move(sweep), multipliers);
+    const auto reference = action.active_integral_adjoint_direction(accepted,
+        &response, &multipliers, {}, {}, {}, nullptr, false);
+    require((joint.overlap-reference.overlap).norm() <
+        3e-11*std::max(1.0,reference.overlap.norm()) &&
+        (joint.one_electron-reference.one_electron).norm() <
+        3e-11*std::max(1.0,reference.one_electron.norm()) &&
+        (joint.pair_kernel-reference.pair_kernel).norm() <
+        3e-11*std::max(1.0,reference.pair_kernel.norm()),
+        "joint response changed the independent differentiated adjoint");
+  }
+}
+
 void append_combinations(
     int n_orbitals,
     int n_electrons,
@@ -1413,6 +1457,8 @@ void check_sigma_action() {
   const xmvb::vb::StructureAction full_action(
       full_terms, product_dimension, topology, packed_overlap,
       one_electron, two_electron, n_orbitals, &full_diagonal);
+  check_joint_structure_response(full_action, alpha.size(), beta.size());
+  check_joint_structure_response(topology_action, alpha.size(), beta.size());
   const std::size_t one_column_bytes = 5 * product_dimension * sizeof(double);
   require(xmvb::vb::StructureMetricInverse::fits(
       full_action, topology.alpha_reuse_table.unique_determinants,
@@ -1706,6 +1752,21 @@ void check_distinct_spin_sigma_action() {
   }
   const int n_beta = static_cast<int>(beta.size());
   const int product_dimension = static_cast<int>(alpha.size()) * n_beta;
+  std::vector<std::vector<int>> product_alpha, product_beta;
+  std::vector<std::vector<xmvb::vb::StructureExpansionTerm>> terms(product_dimension);
+  for (const auto& a : alpha)
+    for (const auto& b : beta) {
+      const int i = product_alpha.size();
+      product_alpha.push_back(a);
+      product_beta.push_back(b);
+      terms[i].push_back({i, 1.0});
+    }
+  const auto topology = xmvb::vb::build_same_spin_pair_topology(
+      product_alpha, product_beta, n_orbitals);
+  const xmvb::vb::StructureAction structure_action(terms, product_dimension,
+      topology, packed_overlap, one_electron, two_electron, n_orbitals,
+      nullptr, xmvb::vb::StructureActionMode::ActionOnly);
+  check_joint_structure_response(structure_action, alpha.size(), beta.size());
   Eigen::MatrixXd dense_hamiltonian(product_dimension, product_dimension);
   const xmvb::vb::DeterminantPairEvaluator evaluator;
   for (int target_alpha = 0;
@@ -1943,6 +2004,96 @@ void check_fused_spin_sectors() {
   }
 }
 
+/** @brief Same-binary joint/separate response comparison, not an optimizer replay. */
+void benchmark_structure_response() {
+  using Clock = std::chrono::steady_clock;
+  std::cout << "kernel,n_orbitals,n_alpha,n_beta,calls,wall_seconds,checksum\n"
+            << std::setprecision(17);
+  for (const auto sector : {std::array<int,3>{6,3,3}, {11,5,5}, {11,5,6}, {12,6,6}}) {
+    const int n = sector[0];
+    const auto alpha = complete_space(n, sector[1]), beta = complete_space(n, sector[2]);
+    const int products = alpha.size()*beta.size();
+    std::vector<std::vector<int>> product_alpha, product_beta;
+    std::vector<std::vector<xmvb::vb::StructureExpansionTerm>> terms(products);
+    product_alpha.reserve(products);
+    product_beta.reserve(products);
+    for (const auto& a : alpha)
+      for (const auto& b : beta) {
+        const int k = product_alpha.size();
+        product_alpha.push_back(a);
+        product_beta.push_back(b);
+        for (int j = 0; j < 3; ++j)
+          terms[k].push_back({j, std::sin(0.17*(k+1)*(j+2))/std::sqrt(products)});
+      }
+    const auto topology = xmvb::vb::build_same_spin_pair_topology(product_alpha, product_beta, n);
+    Eigen::MatrixXd r = Eigen::MatrixXd::Identity(n,n);
+    for (int i = 0; i < n; ++i)
+      for (int j = i+1; j < n; ++j) r(i,j) = 0.02*std::sin((i+1)*(j+2));
+    const Eigen::MatrixXd overlap = r.transpose()*r;
+    const std::vector<double> packed_overlap(overlap.data(), overlap.data()+overlap.size());
+    const Eigen::MatrixXd h = -Eigen::MatrixXd::Identity(n,n);
+    const int pairs = xmvb::vb::packed_active_pair_count(n);
+    xmvb::vb::ActiveSpaceTwoElectronResult eri;
+    eri.packed_active_two_electron_integrals.resize(
+        xmvb::vb::packed_active_two_electron_integral_count(n));
+    for (int j = 0; j < pairs; ++j)
+      for (int i = 0; i <= j; ++i)
+        eri.packed_active_two_electron_integrals[
+            xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(i,j)] =
+            0.03*std::cos(0.07*(i+1)*(j+2));
+    const xmvb::vb::StructureAction action(terms, 3, topology, packed_overlap,
+        h, eri, n, nullptr, xmvb::vb::StructureActionMode::ActionOnly);
+    xmvb::vb::SelectedStateDeterminantMatrices states;
+    states.n_structures = 3;
+    states.n_unique_alpha = alpha.size();
+    states.n_unique_beta = beta.size();
+    states.normalized_state_weights = {1.0};
+    states.states.resize(1);
+    states.states[0].normalized_state_weight = 1.0;
+    const Eigen::Vector3d c(0.3,-0.2,0.7), q(0.4,0.6,-0.3);
+    states.states[0].coefficient_matrix = action.expand_structure_block(c);
+    const auto accepted = action.prepare_active_adjoint(states, {-1.3});
+    const auto evaluate = [&](bool joint) {
+      xmvb::vb::StructureActionResult images;
+      xmvb::vb::StructureResponseSweep sweep;
+      Eigen::MatrixXd metric;
+      if (joint) {
+        sweep = action.apply_response(accepted,q);
+        images = std::move(sweep.images);
+        metric = images.overlap;
+      } else {
+        metric = action.apply_overlap(q);
+        images = action.apply(q);
+      }
+      Eigen::MatrixXd multiplier(1,1);
+      multiplier(0,0) = -c.dot(images.hamiltonian.col(0)+1.3*images.overlap.col(0));
+      xmvb::vb::StructureActiveIntegralAdjoint adjoint;
+      if (joint) adjoint = action.finish_response(accepted,std::move(sweep),multiplier);
+      else {
+        auto response = states;
+        response.states[0].coefficient_matrix = action.expand_structure_block(q);
+        adjoint = action.active_integral_response_adjoint(accepted,response,multiplier);
+      }
+      return metric.squaredNorm()+images.hamiltonian.squaredNorm()+
+          adjoint.overlap.squaredNorm()+adjoint.one_electron.squaredNorm()+
+          adjoint.pair_kernel.squaredNorm();
+    };
+    const double separate = evaluate(false), joint = evaluate(true);
+    require(std::abs(separate-joint) < 3e-11*std::max(1.0,std::abs(separate)),
+        "joint response timing checksum differs");
+    for (bool fused : {false,true}) {
+      constexpr int repeats = 3;
+      double checksum = 0;
+      const auto start = Clock::now();
+      for (int i = 0; i < repeats; ++i) checksum += evaluate(fused);
+      std::cout << (fused ? "joint," : "separate,") << n << ',' << alpha.size()
+                << ',' << beta.size() << ',' << repeats << ','
+                << std::chrono::duration<double>(Clock::now()-start).count()
+                << ',' << checksum << '\n';
+    }
+  }
+}
+
 /** @brief Bounded kernel timings; keep separate from convergence benchmarks. */
 void benchmark_sigma() {
   using Clock = std::chrono::steady_clock;
@@ -2014,6 +2165,10 @@ void benchmark_sigma() {
 
 int main(int argc, char** argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--benchmark-response") {
+      benchmark_structure_response();
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--benchmark") {
       benchmark_sigma();
       return 0;

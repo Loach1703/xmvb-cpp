@@ -301,6 +301,18 @@ Eigen::VectorXd ExactHvpOperator::State::apply_structure_coupling_adjoint(
       coefficient_response, adjoint_multipliers);
 }
 
+Eigen::VectorXd ExactHvpOperator::apply_structure_coupling_adjoint(
+    const StructureActiveIntegralAdjoint& adjoint) const {
+  return state_->apply_structure_coupling_adjoint(adjoint);
+}
+
+Eigen::VectorXd ExactHvpOperator::State::apply_structure_coupling_adjoint(
+    const StructureActiveIntegralAdjoint& adjoint) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::StructureAdjoint);
+  return pullback_structure_response(make_active_gradient_direction(adjoint,
+      current_input_->orbital_preparation_input.n_active_orbitals));
+}
+
 Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     const Eigen::VectorXd& reduced_direction,
     HvpComponents components,
@@ -1124,6 +1136,11 @@ Eigen::VectorXd ExactHvpOperator::State::apply_structure_response_adjoint(
       .outer_response_structure_active_gradient_wall_time_seconds +=
       active_gradient_seconds;
 
+  return pullback_structure_response(active_gradient);
+}
+
+Eigen::VectorXd ExactHvpOperator::State::pullback_structure_response(
+    const ActiveSpaceGradientDirection& active_gradient) const {
   const auto orbital_pullback_start = std::chrono::steady_clock::now();
   const std::vector<double> orbital_value_gradient =
       build_orbital_value_gradient_from_active_space_gradient_direction(

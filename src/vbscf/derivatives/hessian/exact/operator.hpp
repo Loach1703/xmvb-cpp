@@ -13,6 +13,7 @@ namespace xmvb::vb {
 class OrbitalChart;
 class SparseParameterLayout;
 class StructureAction;
+struct StructureActiveIntegralAdjoint;
 struct AcceptedPointContext;
 struct VbScfInput;
 
@@ -237,6 +238,10 @@ public:
 
   /** @brief Returns the canonical lazy accepted-point structure action. */
   const StructureAction& structure_action() const;
+
+  /** @brief Orbital pullback of an already contracted structure response. */
+  Eigen::VectorXd apply_structure_coupling_adjoint(
+      const StructureActiveIntegralAdjoint& adjoint) const;
 
   bool supports_analytic_core_model() const noexcept;
 

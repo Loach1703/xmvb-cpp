@@ -24,6 +24,7 @@
 namespace xmvb::vb {
 
 struct AcceptedOrbitalPreparationCache;
+struct ActiveSpaceGradientDirection;
 
 struct ExactHvpOperator::State {
   struct PrecomputedDirection;
@@ -60,6 +61,8 @@ struct ExactHvpOperator::State {
       const Eigen::Ref<const Eigen::MatrixXd>& adjoint_multipliers) const;
 
   const StructureAction& structure_action() const;
+  Eigen::VectorXd apply_structure_coupling_adjoint(
+      const StructureActiveIntegralAdjoint& adjoint) const;
 
   bool supports_analytic_core_model() const noexcept;
   std::uint64_t response_model_revision() const noexcept;
@@ -67,6 +70,8 @@ struct ExactHvpOperator::State {
   Diagnostics diagnostics() const;
 
 private:
+  Eigen::VectorXd pullback_structure_response(
+      const ActiveSpaceGradientDirection& gradient) const;
   Eigen::MatrixXd apply_reduced_batch_impl(
       const Eigen::Ref<const Eigen::MatrixXd>& reduced_directions,
       HvpComponents components,

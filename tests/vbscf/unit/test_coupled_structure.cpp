@@ -201,6 +201,16 @@ std::shared_ptr<xmvb::vb::AcceptedPointContext> accepted_point(
       xmvb::vb::StructureActionResult{
           fixture.hamiltonian * accepted->selected_state_eigenvectors,
           fixture.overlap * accepted->selected_state_eigenvectors};
+  auto& selected = accepted->selected_state_matrices;
+  selected.n_structures = accepted->n_structures;
+  selected.n_unique_alpha = selected.n_unique_beta = 2;
+  selected.normalized_state_weights = accepted->normalized_state_weights;
+  selected.states.resize(n_states);
+  for (int i = 0; i < n_states; ++i) {
+    selected.states[i].normalized_state_weight = accepted->normalized_state_weights[i];
+    selected.states[i].coefficient_matrix = fixture.action.expand_structure_block(
+        accepted->selected_state_eigenvectors.col(i));
+  }
   return accepted;
 }
 
@@ -305,6 +315,23 @@ void check_equal_weight_multistate(const StructureFixture& fixture) {
   const auto hy = structure.apply_hessian(horizontal_y);
   const auto coordinate_action = structure.apply_coupling_coordinates(
       structure.coordinates(horizontal_x));
+  xmvb::vb::StructureActiveIntegralAdjoint joint_adjoint;
+  const auto joint = structure.apply_coupling_coordinates(
+      structure.coordinates(horizontal_x), &joint_adjoint);
+  require((joint.hessian_coordinates-coordinate_action.hessian_coordinates).norm() < 3e-13 &&
+      (joint.metric_coordinates-coordinate_action.metric_coordinates).norm() < 3e-13 &&
+      (joint.adjoint_multipliers-coordinate_action.adjoint_multipliers).norm() < 3e-13,
+      "joint response changed horizontal Hessian, metric or multipliers");
+  auto response_states = accepted->selected_state_matrices;
+  for (int i = 0; i < structure.n_states(); ++i)
+    response_states.states[i].coefficient_matrix = fixture.action.expand_structure_block(
+        coordinate_action.coefficient_response.col(i));
+  const auto separate_adjoint = fixture.action.active_integral_response_adjoint(
+      *accepted->structure_adjoint_state, response_states, coordinate_action.adjoint_multipliers);
+  require((joint_adjoint.overlap-separate_adjoint.overlap).norm() < 3e-13 &&
+      (joint_adjoint.one_electron-separate_adjoint.one_electron).norm() < 3e-13 &&
+      (joint_adjoint.pair_kernel-separate_adjoint.pair_kernel).norm() < 3e-13,
+      "joint structure response changed the integral adjoint");
   const auto coordinate_y = structure.apply_coupling_coordinates(
       structure.coordinates(horizontal_y));
   Eigen::MatrixXd coordinate_block(structure.tangent_size(), 2);

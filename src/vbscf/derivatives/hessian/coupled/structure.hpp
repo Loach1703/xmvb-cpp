@@ -12,6 +12,7 @@ namespace xmvb::vb {
 
 struct AcceptedPointContext;
 class StructureAction;
+struct StructureActiveIntegralAdjoint;
 class StructureMetricInverse;
 
 /**
@@ -152,11 +153,13 @@ public:
    * coordinates, so no redundant ambient projection is performed.
    */
   StructureCoordinateCouplingAction apply_coupling_coordinates(
-      const Eigen::VectorXd& coordinates) const;
+      const Eigen::VectorXd& coordinates,
+      StructureActiveIntegralAdjoint* adjoint = nullptr) const;
 
   /** @brief Applies several coordinate directions in one H/S block action. */
   StructureCoordinateCouplingBlock apply_coupling_coordinate_block(
-      const Eigen::Ref<const Eigen::MatrixXd>& coordinates) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& coordinates,
+      StructureActiveIntegralAdjoint* adjoint = nullptr) const;
 
   /** @brief Applies the structure trust-region metric @f$PSP@f$. */
   StructureTangent apply_metric(const StructureTangent& tangent) const;

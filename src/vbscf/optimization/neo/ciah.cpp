@@ -113,10 +113,21 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
   const auto metric_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   // Evaluate each image once, only after the direction has been admitted.
-  Eigen::VectorXd metric_image = problem_.apply_metric(direction);
+  Eigen::VectorXd metric_image, hessian_image;
+  if (!options_.apply_images) metric_image = problem_.apply_metric(direction);
   const auto hessian_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
-  Eigen::VectorXd hessian_image = problem_.apply_hessian(direction);
+  if (options_.apply_images) {
+    auto images = options_.apply_images(direction);
+    hessian_image = std::move(images.first);
+    metric_image = std::move(images.second);
+    if (hessian_image.size() != direction.size() ||
+        metric_image.size() != direction.size() ||
+        !hessian_image.allFinite() || !metric_image.allFinite())
+      throw std::runtime_error("invalid joint CIAH operator images");
+  } else {
+    hessian_image = problem_.apply_hessian(direction);
+  }
   if (diagnostics::neo_trace_enabled() && residual) {
     // Audit BEFORE observe_images learns this direction. Afterwards coarse
     // exactness would make the inverse test tautological on its new samples.

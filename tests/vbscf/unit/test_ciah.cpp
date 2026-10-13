@@ -178,6 +178,25 @@ void check_anisotropic_spd() {
   require(result.converged,
           "anisotropic generalized CIAH failed to converge in full space");
   check_full_space_root(hessian, metric, gradient, result);
+  int joint_calls = 0;
+  CiahOptions joint_options;
+  joint_options.apply_images = [&](const Eigen::VectorXd& v) {
+    ++joint_calls;
+    return std::make_pair((hessian*v).eval(), (metric*v).eval());
+  };
+  const int separate_calls = actions;
+  CiahWorkspace joint(problem, Eigen::VectorXd::Ones(3), joint_options);
+  CiahResult joint_result;
+  for (int i = 0; i < 5; ++i) {
+    joint_result = joint.next(gradient);
+    check_images_and_residual(hessian, metric, gradient, joint_result);
+    if (joint_result.converged) break;
+  }
+  require(joint_result.converged && actions == separate_calls &&
+      joint_calls == joint_result.basis_size,
+      "joint CIAH action repeated a physical operator");
+  require_close(joint_result.step, result.step, 2e-12,
+      "joint H/G action changed the CIAH solution");
 }
 
 void check_indefinite_root_selection() {

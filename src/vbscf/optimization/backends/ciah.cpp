@@ -91,15 +91,25 @@ bool build_ciah_macro_step(
   // estimate. No metric inverse is needed to measure progress or keyframe
   // agreement. The physical metric remains in the generalized AH equation.
   const auto coordinate_norm = [](const Eigen::VectorXd& g) { return g.norm(); };
-  const auto action = [&](const Eigen::VectorXd& x) {
+  const auto action = [&](const Eigen::VectorXd& x, Eigen::VectorXd* metric_image) {
     Eigen::VectorXd image(dimension);
+    if (metric_image) {
+      metric_image->resize(dimension);
+      metric_image->head(no) = metric.apply(x.head(no));
+    }
     if (ns == 0) {
       image = hessian.apply_orbital(x);
     } else {
       const auto orbital = hessian.apply_orbital_coupling(x.head(no));
-      const auto ci = structure.apply_coupling_coordinates(x.tail(ns));
-      const Eigen::VectorXd adjoint = hessian.apply_structure_coupling_adjoint(
-          ci.coefficient_response, ci.adjoint_multipliers);
+      StructureActiveIntegralAdjoint active_adjoint;
+      const bool direct_ci = hessian.structure_action().supports_integral_direction();
+      const auto ci = structure.apply_coupling_coordinates(x.tail(ns),
+          direct_ci ? &active_adjoint : nullptr);
+      const Eigen::VectorXd adjoint = direct_ci
+          ? hessian.apply_structure_coupling_adjoint(active_adjoint)
+          : hessian.apply_structure_coupling_adjoint(
+              ci.coefficient_response, ci.adjoint_multipliers);
+      if (metric_image) metric_image->tail(ns) = ci.metric_coordinates;
       const Eigen::VectorXd forcing = structure.project_coordinates(
           orbital.scaled_structure_forcing);
       if (orbital.connection.has_value()) {
@@ -195,11 +205,17 @@ bool build_ciah_macro_step(
   initial_gradient.head(no) = gradient;
   // NeoProblem also serves trust-region solvers that require a physical dual
   // norm. CIAH deliberately does not call this callback.
-  NeoProblem problem(initial_gradient, action, metric_action,
+  NeoProblem problem(initial_gradient,
+      [&](const Eigen::VectorXd& x) { return action(x, nullptr); }, metric_action,
       [&](const Eigen::VectorXd& g) {
         return std::hypot(metric.dual_norm(g.head(no)),
             ns ? structure.dual_norm(g.tail(ns)) : 0.0);
       });
+  ciah_options.apply_images = [&](const Eigen::VectorXd& x) {
+    Eigen::VectorXd metric_image;
+    Eigen::VectorXd hessian_image = action(x, &metric_image);
+    return std::make_pair(std::move(hessian_image), std::move(metric_image));
+  };
   ciah_options.residual_preconditioner = precondition;
   Eigen::VectorXd seed = initial_gradient;
   if (orbital_guess_packed.size() == static_cast<Eigen::Index>(layout.size())) {
