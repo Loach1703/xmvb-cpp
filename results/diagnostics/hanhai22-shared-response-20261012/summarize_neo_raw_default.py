@@ -43,7 +43,7 @@ for batch in ['1252070', '1252077', '1252083']:
                          binary_sha256=(run/'hashes.txt').read_text().split()[0],
                          termination=termination, run_path=str(run)))
 with destination.open('w', newline='') as stream:
-    writer = csv.DictWriter(stream, fieldnames=rows[0].keys())
+    writer = csv.DictWriter(stream, fieldnames=rows[0].keys(), lineterminator='\n')
     writer.writeheader()
     writer.writerows(rows)
 for row in rows:
