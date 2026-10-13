@@ -96,7 +96,7 @@ Eigen::MatrixXd explicit_exterior(
   return exterior;
 }
 
-void check_exterior_transform() {
+void check_exterior_transform(int width) {
   const auto determinants = complete_space(6, 3);
   Eigen::MatrixXd orbital = Eigen::MatrixXd::Zero(6, 6);
   for (int row = 0; row < 6; ++row) {
@@ -109,7 +109,7 @@ void check_exterior_transform() {
   const Eigen::MatrixXd exterior = explicit_exterior(determinants, orbital);
   const xmvb::vb::ExteriorOrbitalTransform transform(determinants, orbital);
 
-  Eigen::MatrixXd coefficients(exterior.rows(), 7);
+  Eigen::MatrixXd coefficients(exterior.rows(), width);
   for (int column = 0; column < coefficients.cols(); ++column) {
     for (int row = 0; row < coefficients.rows(); ++row) {
       coefficients(row, column) =
@@ -122,7 +122,7 @@ void check_exterior_transform() {
       (left - exterior * coefficients).cwiseAbs().maxCoeff() < 2.0e-13,
       "left exterior action differs from explicit compound matrix");
 
-  Eigen::MatrixXd right(5, exterior.rows());
+  Eigen::MatrixXd right(width - 2, exterior.rows());
   for (int column = 0; column < right.cols(); ++column) {
     for (int row = 0; row < right.rows(); ++row) {
       right(row, column) =
@@ -210,6 +210,20 @@ void check_exterior_transform() {
               block_storage.leftCols(2).isZero(0.0) &&
               block_storage.rightCols(2).isZero(0.0),
           "inverse exterior block adjoint differs from a compound solve or modifies neighbors");
+
+  // Non-owning row blocks have an outer stride larger than their row count.
+  // Check both their result and untouched neighboring storage with parallel
+  // widths that do not divide evenly among workers.
+  Eigen::MatrixXd strided = Eigen::MatrixXd::Zero(right.rows() + 4, right.cols());
+  strided.middleRows(2, right.rows()) = original_right;
+  auto rows = strided.middleRows(2, right.rows());
+  transform.apply_right_block(rows);
+  require((rows - original_right * exterior.transpose()).cwiseAbs().maxCoeff() < 2.0e-13 &&
+              strided.topRows(2).isZero(0.0) && strided.bottomRows(2).isZero(0.0),
+          "parallel exterior transform modifies neighbors of a strided block");
+  transform.apply_inverse_right_block(rows);
+  require((rows - original_right).cwiseAbs().maxCoeff() < 3.0e-13,
+          "strided exterior inverse does not recover its input");
 }
 
 void check_planner() {
@@ -1915,7 +1929,8 @@ int main(int argc, char** argv) {
       benchmark_sigma();
       return 0;
     }
-    check_exterior_transform();
+    check_exterior_transform(7);
+    check_exterior_transform(259);
     check_planner();
     check_sigma_action();
     check_sigma_tile_boundary();

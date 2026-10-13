@@ -95,6 +95,11 @@ private:
   void validate_left(const Eigen::MatrixXd& coefficients) const;
   void validate_right(const Eigen::MatrixXd& coefficients) const;
   void validate_inverse() const;
+  /** @brief Ordered shears on disjoint columns; no per-worker carrier copy. */
+  void transform_left(Eigen::MatrixXd& coefficients, bool adjoint, bool inverse) const;
+  /** @brief Ordered shears on disjoint row ranges of a column-major block. */
+  void transform_right(Eigen::Ref<Eigen::MatrixXd> coefficients,
+                       bool adjoint, bool inverse) const;
 
   int n_orbitals_ = 0;
   int n_electrons_ = 0;

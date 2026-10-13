@@ -6,6 +6,9 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "core/openmp.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
+
 namespace xmvb::vb {
 namespace {
 
@@ -181,13 +184,7 @@ void ExteriorOrbitalTransform::apply_left(
     throw std::invalid_argument("left exterior transform output is null");
   }
   validate_left(*coefficients);
-  coefficients->array().colwise() *= determinant_scales_.array();
-  for (const Shear& shear : shears_) {
-    for (const DeterminantPair& pair : shear.pairs) {
-      coefficients->row(pair.target) +=
-          (shear.coefficient * pair.sign) * coefficients->row(pair.source);
-    }
-  }
+  transform_left(*coefficients, false, false);
 }
 
 void ExteriorOrbitalTransform::apply_right(
@@ -204,13 +201,7 @@ void ExteriorOrbitalTransform::apply_right_block(
     throw std::invalid_argument(
         "right exterior transform determinant dimension mismatch");
   }
-  coefficients.array().rowwise() *= determinant_scales_.transpose().array();
-  for (const Shear& shear : shears_) {
-    for (const DeterminantPair& pair : shear.pairs) {
-      coefficients.col(pair.target) +=
-          (shear.coefficient * pair.sign) * coefficients.col(pair.source);
-    }
-  }
+  transform_right(coefficients, false, false);
 }
 
 void ExteriorOrbitalTransform::apply_adjoint_left(
@@ -219,13 +210,7 @@ void ExteriorOrbitalTransform::apply_adjoint_left(
     throw std::invalid_argument("left exterior adjoint output is null");
   }
   validate_left(*coefficients);
-  for (auto shear = shears_.rbegin(); shear != shears_.rend(); ++shear) {
-    for (const DeterminantPair& pair : shear->pairs) {
-      coefficients->row(pair.source) +=
-          (shear->coefficient * pair.sign) * coefficients->row(pair.target);
-    }
-  }
-  coefficients->array().colwise() *= determinant_scales_.array();
+  transform_left(*coefficients, true, false);
 }
 
 void ExteriorOrbitalTransform::apply_adjoint_right(
@@ -242,13 +227,7 @@ void ExteriorOrbitalTransform::apply_adjoint_right_block(
     throw std::invalid_argument(
         "right exterior transform determinant dimension mismatch");
   }
-  for (auto shear = shears_.rbegin(); shear != shears_.rend(); ++shear) {
-    for (const DeterminantPair& pair : shear->pairs) {
-      coefficients.col(pair.source) +=
-          (shear->coefficient * pair.sign) * coefficients.col(pair.target);
-    }
-  }
-  coefficients.array().rowwise() *= determinant_scales_.transpose().array();
+  transform_right(coefficients, true, false);
 }
 
 void ExteriorOrbitalTransform::validate_inverse() const {
@@ -264,14 +243,7 @@ void ExteriorOrbitalTransform::apply_inverse_left(
     throw std::invalid_argument("inverse exterior transform output is null");
   validate_left(*coefficients);
   validate_inverse();
-  // Reverse the shear product before undoing its diagonal factor.
-  for (auto shear = shears_.rbegin(); shear != shears_.rend(); ++shear) {
-    for (const DeterminantPair& pair : shear->pairs) {
-      coefficients->row(pair.target) -=
-          (shear->coefficient * pair.sign) * coefficients->row(pair.source);
-    }
-  }
-  coefficients->array().colwise() /= determinant_scales_.array();
+  transform_left(*coefficients, false, true);
 }
 
 void ExteriorOrbitalTransform::apply_inverse_adjoint_left(
@@ -280,13 +252,7 @@ void ExteriorOrbitalTransform::apply_inverse_adjoint_left(
     throw std::invalid_argument("inverse exterior adjoint output is null");
   validate_left(*coefficients);
   validate_inverse();
-  coefficients->array().colwise() /= determinant_scales_.array();
-  for (const Shear& shear : shears_) {
-    for (const DeterminantPair& pair : shear.pairs) {
-      coefficients->row(pair.source) -=
-          (shear.coefficient * pair.sign) * coefficients->row(pair.target);
-    }
-  }
+  transform_left(*coefficients, true, true);
 }
 
 void ExteriorOrbitalTransform::apply_inverse_right_block(
@@ -294,13 +260,7 @@ void ExteriorOrbitalTransform::apply_inverse_right_block(
   if (coefficients.cols() != dimension())
     throw std::invalid_argument("inverse exterior column dimension mismatch");
   validate_inverse();
-  for (auto shear = shears_.rbegin(); shear != shears_.rend(); ++shear) {
-    for (const DeterminantPair& pair : shear->pairs) {
-      coefficients.col(pair.target) -=
-          (shear->coefficient * pair.sign) * coefficients.col(pair.source);
-    }
-  }
-  coefficients.array().rowwise() /= determinant_scales_.transpose().array();
+  transform_right(coefficients, false, true);
 }
 
 void ExteriorOrbitalTransform::apply_inverse_adjoint_right_block(
@@ -308,11 +268,73 @@ void ExteriorOrbitalTransform::apply_inverse_adjoint_right_block(
   if (coefficients.cols() != dimension())
     throw std::invalid_argument("inverse exterior adjoint column dimension mismatch");
   validate_inverse();
-  coefficients.array().rowwise() /= determinant_scales_.transpose().array();
-  for (const Shear& shear : shears_) {
-    for (const DeterminantPair& pair : shear.pairs) {
-      coefficients.col(pair.source) -=
-          (shear.coefficient * pair.sign) * coefficients.col(pair.target);
+  transform_right(coefficients, true, true);
+}
+
+void ExteriorOrbitalTransform::transform_left(
+    Eigen::MatrixXd& coefficients, bool adjoint, bool inverse) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiTransformLeft);
+  const bool reverse = adjoint != inverse;
+  const int n_shears = static_cast<int>(shears_.size());
+  const int workers = bounded_openmp_thread_count(
+      coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients.size()),
+      coefficients.cols());
+  // A column is an independent vector. Keep it resident while applying the
+  // complete ordered product, rather than streaming strided rows per shear.
+#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
+  for (Eigen::Index column = 0; column < coefficients.cols(); ++column) {
+    auto values = coefficients.col(column);
+    if (!reverse) {
+      if (inverse) values.array() /= determinant_scales_.array();
+      else values.array() *= determinant_scales_.array();
+    }
+    for (int index = 0; index < n_shears; ++index) {
+      const Shear& shear = shears_[reverse ? n_shears - 1 - index : index];
+      const double factor = inverse ? -shear.coefficient : shear.coefficient;
+      for (const DeterminantPair& pair : shear.pairs) {
+        const int target = adjoint ? pair.source : pair.target;
+        const int source = adjoint ? pair.target : pair.source;
+        values[target] += (factor * pair.sign) * values[source];
+      }
+    }
+    if (reverse) {
+      if (inverse) values.array() /= determinant_scales_.array();
+      else values.array() *= determinant_scales_.array();
+    }
+  }
+}
+
+void ExteriorOrbitalTransform::transform_right(
+    Eigen::Ref<Eigen::MatrixXd> coefficients, bool adjoint, bool inverse) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiTransformRight);
+  const bool reverse = adjoint != inverse;
+  const int n_shears = static_cast<int>(shears_.size());
+  const int workers = bounded_openmp_thread_count(
+      coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients.size()),
+      coefficients.rows());
+  // Workers own disjoint row ranges. Each range executes all shears without
+  // intermediate barriers. Column segments stay contiguous for SIMD updates.
+#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
+  for (int part = 0; part < workers; ++part) {
+    const Eigen::Index first = coefficients.rows() * part / workers;
+    const Eigen::Index end = coefficients.rows() * (part + 1) / workers;
+    auto values = coefficients.middleRows(first, end - first);
+    if (!reverse) {
+      if (inverse) values.array().rowwise() /= determinant_scales_.transpose().array();
+      else values.array().rowwise() *= determinant_scales_.transpose().array();
+    }
+    for (int index = 0; index < n_shears; ++index) {
+      const Shear& shear = shears_[reverse ? n_shears - 1 - index : index];
+      const double factor = inverse ? -shear.coefficient : shear.coefficient;
+      for (const DeterminantPair& pair : shear.pairs) {
+        const int target = adjoint ? pair.source : pair.target;
+        const int source = adjoint ? pair.target : pair.source;
+        values.col(target) += (factor * pair.sign) * values.col(source);
+      }
+    }
+    if (reverse) {
+      if (inverse) values.array().rowwise() /= determinant_scales_.transpose().array();
+      else values.array().rowwise() *= determinant_scales_.transpose().array();
     }
   }
 }
