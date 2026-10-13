@@ -18,6 +18,12 @@ struct DirectCiIntegralAdjoint {
   Eigen::MatrixXd pair_kernel;
 };
 
+/** @brief Sigma and integral adjoint sharing one spin-string tile sweep. */
+struct DirectCiResponse {
+  Eigen::MatrixXd sigma;
+  DirectCiIntegralAdjoint integrals;
+};
+
 /** @brief One generator action; inputs are views, output is caller-owned. */
 struct DirectCiGeneratorRequest {
   Eigen::Ref<const Eigen::MatrixXd> coefficients;
@@ -87,6 +93,14 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       const Eigen::Ref<const Eigen::MatrixXd>& right) const;
 
+  /** @brief Returns H * response and the integral derivative of response.dot(H * state).
+   * Reuses the response scatter; two shared tiles serve both contractions.
+   * Inputs follow apply() packing and may be non-owning strided blocks.
+   */
+  DirectCiResponse apply_with_adjoint(
+      const Eigen::Ref<const Eigen::MatrixXd>& response,
+      const Eigen::Ref<const Eigen::MatrixXd>& state) const;
+
   /**
    * @brief Unsymmetrized one-body adjoint for an orbital-generator action.
    *
@@ -138,6 +152,22 @@ private:
       int beta_target,
       Eigen::Ref<Eigen::MatrixXd> intermediate) const;
   const SpinConnections& beta_connections() const noexcept;
+
+  /** @brief Shared adjoint sweep; non-null sigma additionally receives H * left. */
+  DirectCiIntegralAdjoint contract_adjoint(
+      const Eigen::Ref<const Eigen::MatrixXd>& left,
+      const Eigen::Ref<const Eigen::MatrixXd>& right,
+      Eigen::MatrixXd* sigma) const;
+
+  /** @brief Cooperative sigma contraction inside the current OpenMP team.
+   * Each output beta column has one owner. All workers must call this method.
+   */
+  void apply_sigma_tile(
+      int alpha_begin, int alpha_count, int block_begin, int block_count,
+      int beta_begin, int beta_count,
+      const Eigen::Ref<const Eigen::MatrixXd>& scattered,
+      Eigen::Ref<Eigen::MatrixXd> workspace,
+      Eigen::Ref<Eigen::MatrixXd> sigma) const;
 
   int n_orbitals_ = 0;
   int n_alpha_ = 0;

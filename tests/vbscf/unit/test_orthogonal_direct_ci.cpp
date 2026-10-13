@@ -1,3 +1,4 @@
+#include <array>
 #include <cmath>
 #include <chrono>
 #include <iomanip>
@@ -33,6 +34,23 @@ void require(bool condition, const std::string& message) {
   if (!condition) {
     throw std::runtime_error(message);
   }
+}
+
+void check_fused_response(
+    const xmvb::vb::DirectCiSigmaAction& action,
+    const Eigen::Ref<const Eigen::MatrixXd>& response,
+    const Eigen::Ref<const Eigen::MatrixXd>& state) {
+  const auto fused = action.apply_with_adjoint(response, state);
+  const auto sigma = action.apply(response);
+  const auto adjoint = action.integral_adjoint(response, state);
+  require((fused.sigma - sigma).norm() < 3e-12 * std::max(1.0, sigma.norm()),
+          "fused response sigma differs from separate action");
+  require((fused.integrals.one_electron - adjoint.one_electron).norm() <
+              3e-12 * std::max(1.0, adjoint.one_electron.norm()),
+          "fused response one-electron adjoint differs from separate contraction");
+  require((fused.integrals.pair_kernel - adjoint.pair_kernel).norm() <
+              3e-12 * std::max(1.0, adjoint.pair_kernel.norm()),
+          "fused response two-electron adjoint differs from separate contraction");
 }
 
 void append_combinations(
@@ -485,6 +503,17 @@ void check_sigma_action() {
   }
   const xmvb::vb::DirectCiIntegralAdjoint integral_adjoint =
       sigma_action.integral_adjoint(left_coefficients, coefficients);
+  check_fused_response(sigma_action, left_coefficients, coefficients);
+  check_fused_response(sigma_action, coefficients, coefficients);
+  check_fused_response(sigma_action, Eigen::MatrixXd::Zero(
+      coefficients.rows(), coefficients.cols()), coefficients);
+  Eigen::MatrixXd padded_left = Eigen::MatrixXd::Zero(
+      coefficients.rows() + 3, coefficients.cols());
+  Eigen::MatrixXd padded_right = padded_left;
+  padded_left.middleRows(1, coefficients.rows()) = left_coefficients;
+  padded_right.middleRows(2, coefficients.rows()) = coefficients;
+  check_fused_response(sigma_action, padded_left.middleRows(1, coefficients.rows()),
+                       padded_right.middleRows(2, coefficients.rows()));
   const xmvb::vb::DirectCiIntegralAdjoint reverse_integral_adjoint =
       sigma_action.integral_adjoint(coefficients, left_coefficients);
   require(
@@ -1571,10 +1600,12 @@ void check_sigma_tile_boundary() {
     }
   require((action.apply(coefficients) - expected).cwiseAbs().maxCoeff() < 2e-12,
           "direct-CI partial tile or RHS packing differs from known spectrum");
+  check_fused_response(action, coefficients, coefficients);
 #ifdef _OPENMP
   const int dynamic = omp_get_dynamic();
   omp_set_dynamic(1);
   const Eigen::MatrixXd dynamic_result = action.apply(coefficients);
+  check_fused_response(action, coefficients, coefficients);
   omp_set_dynamic(dynamic);
   require((dynamic_result - expected).cwiseAbs().maxCoeff() < 2e-12,
           "direct-CI dynamic team reduction differs from known spectrum");
@@ -1582,7 +1613,10 @@ void check_sigma_tile_boundary() {
 #pragma omp parallel num_threads(2)
   {
 #pragma omp single
-    nested_result = action.apply(coefficients);
+    {
+      nested_result = action.apply(coefficients);
+      check_fused_response(action, coefficients, coefficients);
+    }
   }
   require((nested_result - expected).cwiseAbs().maxCoeff() < 2e-12,
           "direct-CI nested team reduction differs from known spectrum");
@@ -1699,6 +1733,7 @@ void check_distinct_spin_sigma_action() {
     }
   }
   const Eigen::MatrixXd sigma = action.apply(coefficients);
+  check_fused_response(action, coefficients, coefficients);
   for (int block = 0; block < block_width; ++block) {
     Eigen::VectorXd packed_coefficients(product_dimension);
     for (int alpha_index = 0;
@@ -1881,14 +1916,45 @@ void check_demand_driven_structure_diagonal() {
       "zero Davidson Jacobi overlap was not rejected explicitly");
 }
 
+/** @brief Distinct spin sectors, including equal sizes but different occupations. */
+void check_fused_spin_sectors() {
+  for (const auto& sector : {std::array<int, 3>{11, 5, 6}, {10, 4, 5}, {10, 5, 4},
+                            {11, 1, 5}, {11, 5, 1}, {10, 5, 0}, {10, 0, 5}}) {
+    const int n_orbitals = sector[0];
+    const auto alpha = complete_space(n_orbitals, sector[1]);
+    const auto beta = complete_space(n_orbitals, sector[2]);
+    const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+    xmvb::vb::OrthogonalActiveIntegrals integrals;
+    integrals.one_electron = Eigen::MatrixXd::Identity(n_orbitals, n_orbitals);
+    Eigen::MatrixXd factors(5, n_pairs);
+    for (int pair = 0; pair < n_pairs; ++pair)
+      for (int row = 0; row < factors.rows(); ++row)
+        factors(row, pair) = 0.04 * std::cos(0.13 * (row + 1) * (pair + 2));
+    integrals.pair_kernel = factors.transpose() * factors;
+    const xmvb::vb::DirectCiSigmaAction action(alpha, beta, integrals);
+    Eigen::MatrixXd response(alpha.size(), 2 * beta.size());
+    Eigen::MatrixXd state(response.rows(), response.cols());
+    for (int column = 0; column < response.cols(); ++column)
+      for (int row = 0; row < response.rows(); ++row) {
+        response(row, column) = std::sin(0.07 * (row + 2) * (column + 3));
+        state(row, column) = std::cos(0.03 * (row + 3) * (column + 1));
+      }
+    check_fused_response(action, response, state);
+  }
+}
+
 /** @brief Bounded kernel timings; keep separate from convergence benchmarks. */
 void benchmark_sigma() {
   using Clock = std::chrono::steady_clock;
-  std::cout << "kernel,n_orbitals,n_strings,block_width,calls,wall_seconds,checksum\n"
+  std::cout << "kernel,n_orbitals,n_alpha,n_beta,block_width,calls,wall_seconds,checksum\n"
             << std::setprecision(17);
-  for (int n_orbitals : {6, 11}) {
-    const auto spin = complete_space(n_orbitals, n_orbitals / 2);
-    const int n_strings = static_cast<int>(spin.size());
+  for (const auto& sector : {std::array<int, 3>{6, 3, 3}, {11, 5, 5}, {11, 5, 6},
+                            {12, 6, 6}, {11, 1, 5}, {11, 5, 1}}) {
+    const int n_orbitals = sector[0];
+    const auto alpha = complete_space(n_orbitals, sector[1]);
+    const auto beta = complete_space(n_orbitals, sector[2]);
+    const int n_alpha = static_cast<int>(alpha.size());
+    const int n_beta = static_cast<int>(beta.size());
     const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
     xmvb::vb::OrthogonalActiveIntegrals integrals;
     integrals.one_electron = Eigen::MatrixXd::Identity(n_orbitals, n_orbitals);
@@ -1897,9 +1963,9 @@ void benchmark_sigma() {
       for (int i = 0; i < factors.rows(); ++i)
         factors(i, j) = 0.07 * std::sin(0.17 * (i + 1) * (j + 2));
     integrals.pair_kernel = factors.transpose() * factors;
-    const xmvb::vb::DirectCiSigmaAction action(spin, spin, integrals);
+    const xmvb::vb::DirectCiSigmaAction action(alpha, beta, integrals);
     for (int width : {1, 4}) {
-      Eigen::MatrixXd coefficients(n_strings, width * n_strings);
+      Eigen::MatrixXd coefficients(n_alpha, width * n_beta);
       for (int j = 0; j < coefficients.cols(); ++j)
         for (int i = 0; i < coefficients.rows(); ++i)
           coefficients(i, j) = std::sin(0.031 * (i + 1) * (j + 2));
@@ -1909,15 +1975,37 @@ void benchmark_sigma() {
       for (int repeat = 0; repeat < repeats; ++repeat)
         checksum += action.apply(coefficients).squaredNorm();
       const double wall = std::chrono::duration<double>(Clock::now() - start).count();
-      std::cout << "sigma," << n_orbitals << ',' << n_strings << ',' << width
+      std::cout << "sigma," << n_orbitals << ',' << n_alpha << ',' << n_beta << ',' << width
                 << ',' << repeats << ',' << wall << ',' << checksum << '\n';
       start = Clock::now();
       const auto adjoint = action.integral_adjoint(coefficients, coefficients);
       const double adjoint_wall = std::chrono::duration<double>(Clock::now() - start).count();
-      std::cout << "adjoint," << n_orbitals << ',' << n_strings << ',' << width
+      std::cout << "adjoint," << n_orbitals << ',' << n_alpha << ',' << n_beta << ',' << width
                 << ",1," << adjoint_wall << ','
                 << adjoint.one_electron.squaredNorm() + adjoint.pair_kernel.squaredNorm()
                 << '\n';
+      Eigen::MatrixXd state = coefficients.array().cos().matrix();
+      check_fused_response(action, coefficients, state);
+      for (bool fused : {false, true}) {
+        double total = 0.0;
+        start = Clock::now();
+        for (int repeat = 0; repeat < repeats; ++repeat) {
+          if (fused) {
+            const auto result = action.apply_with_adjoint(coefficients, state);
+            total += result.sigma.squaredNorm() + result.integrals.one_electron.squaredNorm() +
+                result.integrals.pair_kernel.squaredNorm();
+          } else {
+            const auto value = action.apply(coefficients);
+            const auto gradient = action.integral_adjoint(coefficients, state);
+            total += value.squaredNorm() + gradient.one_electron.squaredNorm() +
+                gradient.pair_kernel.squaredNorm();
+          }
+        }
+        const double elapsed = std::chrono::duration<double>(Clock::now() - start).count();
+        std::cout << (fused ? "response_fused," : "response_separate,")
+                  << n_orbitals << ',' << n_alpha << ',' << n_beta << ',' << width << ',' << repeats
+                  << ',' << elapsed << ',' << total << '\n';
+      }
     }
   }
 }
@@ -1936,6 +2024,7 @@ int main(int argc, char** argv) {
     check_sigma_action();
     check_sigma_tile_boundary();
     check_distinct_spin_sigma_action();
+    check_fused_spin_sectors();
     check_demand_driven_structure_diagonal();
     std::cout << "orthogonal direct-CI planner and exterior transform: passed\n";
     return 0;

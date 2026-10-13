@@ -1,15 +1,20 @@
 """Compare saved runs with the exterior-transform baseline; no workloads run.
 
-Usage: python3 compare-sigma.py sigma-batched-1250771 sigma-reduction-1250785
+Usage: python3 compare-sigma.py [--baseline SAVED_RUN] NEW_RUN [NEW_RUN ...]
 Output: CSV on stdout. Raw artifacts are kept beside this script.
 """
+import argparse
 import csv
 from pathlib import Path
 import re
 import sys
 
 ROOT = Path(__file__).resolve().parent
-BASELINE = ROOT / "transform-clean-1250728"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--baseline", default="transform-clean-1250728")
+parser.add_argument("runs", nargs="+")
+args = parser.parse_args()
+BASELINE = ROOT / args.baseline
 
 
 def read_run(run):
@@ -36,11 +41,15 @@ writer = csv.writer(sys.stdout, lineterminator="\n")
 fields = ("steps", "hvp", "energy_Eh", "wall_s", "rss_MiB", "node")
 writer.writerow(("run", "case", *fields, *("baseline_" + f for f in fields),
                  "energy_delta_Eh", "speedup", "input_hashes_equal"))
-for name in sys.argv[1:]:
+for name in args.runs:
     for exit_file in sorted((ROOT / name).glob("*/run.exit")):
         run = exit_file.parent
-        before = read_run(BASELINE / run.name)
         after = read_run(run)
+        if not (BASELINE / run.name / "run.exit").exists():
+            writer.writerow((name, run.name, *(after[f] for f in fields),
+                             *("" for _ in fields), "", "", ""))
+            continue
+        before = read_run(BASELINE / run.name)
         writer.writerow((name, run.name, *(after[f] for f in fields),
                          *(before[f] for f in fields),
                          after["energy_Eh"] - before["energy_Eh"],

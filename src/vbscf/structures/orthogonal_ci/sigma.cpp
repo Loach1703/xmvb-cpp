@@ -14,6 +14,9 @@
 namespace xmvb::vb {
 namespace {
 
+// Use the same contiguous alpha extent for standalone and fused sigma work.
+constexpr int kSigmaAlphaTile = 160;
+
 std::uint64_t determinant_mask(
     const std::vector<int>& occupied,
     int n_orbitals) {
@@ -395,7 +398,6 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
   // buffers by one explicit workspace budget.  A wider alpha tile increases
   // GEMM efficiency without changing the mathematical action.
   constexpr std::size_t kWorkspaceBytes = 64ULL * 1024ULL * 1024ULL;
-  constexpr int kMaximumAlphaTile = 160;
   const std::size_t bytes_per_alpha =
       static_cast<std::size_t>(n_threads) * block_width *
       (static_cast<std::size_t>(n_beta_) + 2ULL * n_pairs) * sizeof(double);
@@ -404,7 +406,7 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
       std::max(
           1,
           std::min(
-              kMaximumAlphaTile,
+              kSigmaAlphaTile,
               static_cast<int>(kWorkspaceBytes /
                   std::max<std::size_t>(bytes_per_alpha, 1)))));
   const int maximum_columns = alpha_tile * block_width;
@@ -604,6 +606,88 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     const Eigen::Ref<const Eigen::MatrixXd>& right) const {
   diagnostics::ScopedPhase phase(diagnostics::Phase::CiIntegralAdjoint);
+  return contract_adjoint(left, right, nullptr);
+}
+
+DirectCiResponse DirectCiSigmaAction::apply_with_adjoint(
+    const Eigen::Ref<const Eigen::MatrixXd>& response,
+    const Eigen::Ref<const Eigen::MatrixXd>& state) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiResponse);
+  DirectCiResponse result;
+  result.integrals = contract_adjoint(response, state, &result.sigma);
+  return result;
+}
+
+void DirectCiSigmaAction::apply_sigma_tile(
+    int alpha_begin, int alpha_count, int block_begin, int block_count,
+    int beta_begin, int beta_count,
+    const Eigen::Ref<const Eigen::MatrixXd>& scattered,
+    Eigen::Ref<Eigen::MatrixXd> workspace,
+    Eigen::Ref<Eigen::MatrixXd> sigma) const {
+  const int rows = alpha_count * block_count;
+  const int n_pairs = static_cast<int>(hamiltonian_pair_kernel_.rows());
+  // Alpha links only change the row: each beta target owns its output columns.
+#pragma omp for schedule(static)
+  for (int beta = 0; beta < beta_count; ++beta) {
+    // The previous adjoint no longer needs this storage. Change its layout to
+    // contiguous per-beta matrices and consume each GEMM while it is local.
+    Eigen::Map<Eigen::MatrixXd> transformed(
+        workspace.data() + static_cast<Eigen::Index>(beta) * rows * n_pairs,
+        rows, n_pairs);
+    transformed.noalias() = scattered.middleRows(beta * rows, rows) *
+        hamiltonian_pair_kernel_.transpose();
+    for (int alpha = 0; alpha < alpha_count; ++alpha) {
+      const int target = alpha_begin + alpha;
+      const auto add = [&](int source, int pair, double sign) {
+        for (int block = 0; block < block_count; ++block) {
+          sigma(source, (block_begin + block) * n_beta_ + beta_begin + beta) +=
+              sign * transformed(block * alpha_count + alpha, pair);
+        }
+      };
+      for (int occupied : alpha_->occupied[target]) {
+        add(target, TwoElectronIndexer::packed_pair_index(occupied, occupied), 1.0);
+      }
+      const auto& links = alpha_->singles[target];
+      for (std::size_t link = 0; link < links.size(); ++link) {
+        add(links.sources[link], links.pairs[link], links.signs[link]);
+      }
+    }
+  }
+
+  // Packed one-body generators are Hermitian: reverse links have the same
+  // pair and sign. Pull contributions into the owned beta column rather than
+  // scattering into thread-private copies of the output carrier.
+  const SpinConnections& beta_graph = beta_connections();
+#pragma omp for schedule(static)
+  for (int beta = 0; beta < n_beta_; ++beta) {
+    const auto add = [&](int source_beta, int pair, double sign) {
+      if (source_beta < beta_begin || source_beta >= beta_begin + beta_count) return;
+      for (int block = 0; block < block_count; ++block) {
+        const double* source = workspace.data() +
+            (static_cast<Eigen::Index>(source_beta - beta_begin) * n_pairs + pair) * rows +
+            block * alpha_count;
+        double* target = sigma.col((block_begin + block) * n_beta_ + beta).data() +
+            alpha_begin;
+#pragma omp simd
+        for (int alpha = 0; alpha < alpha_count; ++alpha) {
+          target[alpha] += sign * source[alpha];
+        }
+      }
+    };
+    for (int occupied : beta_graph.occupied[beta]) {
+      add(beta, TwoElectronIndexer::packed_pair_index(occupied, occupied), 1.0);
+    }
+    const auto& links = beta_graph.singles[beta];
+    for (std::size_t link = 0; link < links.size(); ++link) {
+      add(links.sources[link], links.pairs[link], links.signs[link]);
+    }
+  }
+}
+
+DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
+    const Eigen::Ref<const Eigen::MatrixXd>& left,
+    const Eigen::Ref<const Eigen::MatrixXd>& right,
+    Eigen::MatrixXd* sigma) const {
   if (left.rows() != n_alpha_ || right.rows() != n_alpha_ ||
       left.cols() <= 0 || left.cols() != right.cols() ||
       left.cols() % n_beta_ != 0 || !left.allFinite() ||
@@ -626,8 +710,12 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
       block_width, workspace_bytes / bytes_per_row));
   const std::size_t bytes_per_alpha =
       bytes_per_row * block_tile;
+  // A fused tile also feeds sigma's link gather. Retain its established alpha
+  // extent instead of using the entire alpha space as an adjoint-only tile.
+  // The remaining budget becomes beta rows, not extra per-worker storage.
+  const int alpha_limit = sigma == nullptr ? n_alpha_ : std::min(n_alpha_, kSigmaAlphaTile);
   const int alpha_tile = static_cast<int>(std::min<std::size_t>(
-      n_alpha_, workspace_bytes / bytes_per_alpha));
+      alpha_limit, workspace_bytes / bytes_per_alpha));
   const int rows_per_beta = alpha_tile * block_tile;
   const int beta_tile = static_cast<int>(std::min<std::size_t>(
       n_beta_, workspace_bytes / (bytes_per_alpha * alpha_tile)));
@@ -643,6 +731,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
   Eigen::MatrixXd left_intermediate(maximum_rows, n_pairs);
   Eigen::MatrixXd right_intermediate(maximum_rows, n_pairs);
   Eigen::MatrixXd effective_kernel_adjoint = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
+  if (sigma != nullptr) sigma->setZero(n_alpha_, left.cols());
 
 #pragma omp parallel if(n_threads > 1) num_threads(n_threads)
   {
@@ -684,6 +773,12 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
                 left_intermediate.topRows(rows * beta_count)
                     .middleCols(row_first, row_end - row_first).transpose() *
                 right_intermediate.topRows(rows * beta_count).middleCols(first, end - first);
+          }
+          if (sigma != nullptr) {
+            // The adjoint has consumed the right tile. Reuse its storage for
+            // K times the response scatter, without regenerating that scatter.
+            apply_sigma_tile(alpha_begin, alpha_count, block_begin, block_count,
+                beta_begin, beta_count, left_intermediate, right_intermediate, *sigma);
           }
         }
       }

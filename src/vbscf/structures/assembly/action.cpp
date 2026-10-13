@@ -1825,14 +1825,14 @@ StructureAction::active_integral_response_adjoint(
       response = coefficients;
       direct_ci_->alpha_transform.apply_left(&response);
       direct_ci_->beta_transform().apply_right(&response);
-      const DirectCiIntegralAdjoint integral_gradient =
-          direct_ci_->sigma.integral_adjoint(response, accepted);
+      DirectCiResponse contracted =
+          direct_ci_->sigma.apply_with_adjoint(response, accepted);
       one_gradient.noalias() +=
-          2.0 * state_weight * integral_gradient.one_electron;
+          2.0 * state_weight * contracted.integrals.one_electron;
       pair_gradient.noalias() +=
-          2.0 * state_weight * integral_gradient.pair_kernel;
-      response_residual = direct_ci_->sigma.apply(response) -
-          state.energies[state_index] * response;
+          2.0 * state_weight * contracted.integrals.pair_kernel;
+      response_residual = std::move(contracted.sigma);
+      response_residual.noalias() -= state.energies[state_index] * response;
     }
     // Orbital overlap directions are symmetric, so only
     // sym(M W), W=diag(state weights), belongs to B^T.  Dividing its current
