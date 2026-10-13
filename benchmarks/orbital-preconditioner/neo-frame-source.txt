@@ -1,0 +1,10 @@
+Base: master b5e61c14 (unwhitened NEO).
+Changes: consumer-specific curvature construction; full-OEO single-state CIAH
+with analytic Hessian diagonal retains its existing exact frame inverse without
+constructing unused positive/signed local eigensystems. HAO, selected spaces,
+state averaging, one-electron CIAH and TN/L-BFGS retain their required blocks.
+Tests compare signed inverse actions at positive/negative shifts, diagonals,
+coordinate lifts and clipping, in whitened/unwhitened and constrained charts.
+Macro rejection prints existing scalar evidence only; no acceptance change,
+additional gradient/HVP, tolerance relaxation, or large per-thread allocation.
+Unrelated local RI and .gitignore changes are excluded from the patch.
