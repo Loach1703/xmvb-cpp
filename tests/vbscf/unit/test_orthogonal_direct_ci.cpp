@@ -1549,7 +1549,8 @@ void check_sigma_action() {
 void check_sigma_tile_boundary() {
   constexpr int n_orbitals = 10;
   constexpr int block_width = 2;
-  const auto spin = complete_space(n_orbitals, 4); // 210 strings, tile limit 160.
+  // 252 strings: partial alpha tile and uneven beta ownership at 32 workers.
+  const auto spin = complete_space(n_orbitals, 5);
   xmvb::vb::OrthogonalActiveIntegrals integrals;
   integrals.one_electron = Eigen::MatrixXd::Zero(n_orbitals, n_orbitals);
   for (int i = 0; i < n_orbitals; ++i)

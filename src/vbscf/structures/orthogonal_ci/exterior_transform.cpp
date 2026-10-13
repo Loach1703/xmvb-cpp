@@ -412,6 +412,7 @@ void ExteriorOrbitalTransform::apply_directional_left(
     const ExteriorTransformDirection& direction,
     Eigen::MatrixXd* coefficients,
     Eigen::MatrixXd* directional_coefficients) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiDirectionalTransform);
   if (coefficients == nullptr || directional_coefficients == nullptr ||
       coefficients->rows() != directional_coefficients->rows() ||
       coefficients->cols() != directional_coefficients->cols() ||
@@ -446,6 +447,7 @@ void ExteriorOrbitalTransform::apply_directional_right(
     const ExteriorTransformDirection& direction,
     Eigen::MatrixXd* coefficients,
     Eigen::MatrixXd* directional_coefficients) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiDirectionalTransform);
   if (coefficients == nullptr || directional_coefficients == nullptr ||
       coefficients->rows() != directional_coefficients->rows() ||
       coefficients->cols() != directional_coefficients->cols() ||
@@ -480,6 +482,7 @@ void ExteriorOrbitalTransform::apply_directional_adjoint_left(
     const ExteriorTransformDirection& direction,
     Eigen::MatrixXd* coefficients,
     Eigen::MatrixXd* directional_coefficients) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiDirectionalTransform);
   if (coefficients == nullptr || directional_coefficients == nullptr ||
       coefficients->rows() != directional_coefficients->rows() ||
       coefficients->cols() != directional_coefficients->cols() ||
@@ -511,6 +514,7 @@ void ExteriorOrbitalTransform::apply_directional_adjoint_right(
     const ExteriorTransformDirection& direction,
     Eigen::MatrixXd* coefficients,
     Eigen::MatrixXd* directional_coefficients) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiDirectionalTransform);
   if (coefficients == nullptr || directional_coefficients == nullptr ||
       coefficients->rows() != directional_coefficients->rows() ||
       coefficients->cols() != directional_coefficients->cols() ||

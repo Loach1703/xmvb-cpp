@@ -1415,20 +1415,14 @@ StructureActionResult StructureAction::apply_integral_direction(
         project(std::move(connection)), std::move(connection_norm)};
   }
   for (int block = 0; block < block_width; ++block) {
-    Eigen::MatrixXd delta_hamiltonian_block =
+    auto delta_hamiltonian_block =
         delta_spin_hamiltonians.middleCols(
             block * n_unique_beta_, n_unique_beta_);
-    Eigen::MatrixXd delta_overlap_block =
+    auto delta_overlap_block =
         delta_spin_overlaps.middleCols(
             block * n_unique_beta_, n_unique_beta_);
-    direct_ci_->beta_transform().apply_adjoint_right(
-        &delta_hamiltonian_block);
-    direct_ci_->beta_transform().apply_adjoint_right(
-        &delta_overlap_block);
-    delta_spin_hamiltonians.middleCols(
-        block * n_unique_beta_, n_unique_beta_) = delta_hamiltonian_block;
-    delta_spin_overlaps.middleCols(
-        block * n_unique_beta_, n_unique_beta_) = delta_overlap_block;
+    direct_ci_->beta_transform().apply_adjoint_right_block(delta_hamiltonian_block);
+    direct_ci_->beta_transform().apply_adjoint_right_block(delta_overlap_block);
   }
   direct_ci_->alpha_transform.apply_adjoint_left(
       &delta_spin_hamiltonians);

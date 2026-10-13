@@ -505,20 +505,23 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
 
 #pragma omp for schedule(static)
       for (int beta = 0; beta < n_beta_; ++beta) {
+        // Reuse the first worker's tile as the sum. Each beta column has one
+        // owner, and workers are visited in the original reduction order.
+        // Contiguous AXPY loops replace scalar cross-worker strided loads.
+        double* sum = partial_sigma[0].col(beta).data();
+        for (int source_thread = 1; source_thread < team_size; ++source_thread) {
+          const double* source = partial_sigma[source_thread].col(beta).data();
+#pragma omp simd
+          for (int row = 0; row < active_columns; ++row) {
+            sum[row] += source[row];
+          }
+        }
         for (int block = 0; block < block_width; ++block) {
-          for (int local_alpha = 0;
-               local_alpha < alpha_count;
-               ++local_alpha) {
-            const int row = block * alpha_count + local_alpha;
-            double value = 0.0;
-            for (int source_thread = 0;
-                 source_thread < team_size;
-                 ++source_thread) {
-              value += partial_sigma[source_thread](row, beta);
-            }
-            sigma(
-                alpha_begin + local_alpha,
-                block * n_beta_ + beta) += value;
+          double* target = sigma.col(block * n_beta_ + beta).data() + alpha_begin;
+          const double* source = sum + block * alpha_count;
+#pragma omp simd
+          for (int local_alpha = 0; local_alpha < alpha_count; ++local_alpha) {
+            target[local_alpha] += source[local_alpha];
           }
         }
       }
@@ -600,6 +603,7 @@ void DirectCiSigmaAction::apply_one_body_generators(
 DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     const Eigen::Ref<const Eigen::MatrixXd>& right) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiIntegralAdjoint);
   if (left.rows() != n_alpha_ || right.rows() != n_alpha_ ||
       left.cols() <= 0 || left.cols() != right.cols() ||
       left.cols() % n_beta_ != 0 || !left.allFinite() ||
@@ -727,6 +731,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
 Eigen::MatrixXd DirectCiSigmaAction::one_body_generator_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     const Eigen::Ref<const Eigen::MatrixXd>& right) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::CiGeneratorAdjoint);
   if (left.rows() != n_alpha_ || right.rows() != n_alpha_ ||
       left.cols() <= 0 || left.cols() != right.cols() ||
       left.cols() % n_beta_ != 0 || !left.allFinite() ||
