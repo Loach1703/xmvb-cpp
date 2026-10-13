@@ -613,6 +613,35 @@ void check_inverse_spectrum() {
   require(actions==before,"inverse spectrum diagnostic performed a Hessian action");
 }
 
+/** @brief A deliberately wrong progress estimate cannot certify a Ritz residual. */
+void check_deferred_norms() {
+  Eigen::Matrix3d hessian;
+  hessian << 1.0, 0.8, 0.3, 0.8, 2.0, 0.4, 0.3, 0.4, 3.0;
+  const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
+  const Eigen::Vector3d gradient(1.0, 0.0, 0.0);
+  int norms = 0;
+  const auto problem = dense_problem(hessian, metric, gradient, nullptr, nullptr, &norms);
+  CiahOptions options;
+  options.estimate_dual_norm = [](const Eigen::VectorXd&) { return 0.0; };
+  options.norm_below = [&](const Eigen::VectorXd& r, double threshold) {
+    return dual_norm(metric, r) < threshold;
+  };
+  CiahWorkspace workspace(problem, options);
+  auto result = workspace.next(gradient);
+  require(!result.norms_certified && norms == 0 && !result.converged,
+      "a progress-only candidate forced an inverse or falsely converged");
+  require(workspace.projected_dual_norm(result.residual) < 1e-12 &&
+      result.residual.norm() > 0.1,
+      "deferred-norm test does not exercise a residual outside the AH subspace");
+  workspace.certify_norms(result);
+  require(result.norms_certified && norms == 1, "complete residual was not certified");
+  check_images_and_residual(hessian, metric, gradient, result);
+  workspace.certify_norms(result);
+  require(norms == 1, "the same candidate repeated a norm solve");
+  auto next = workspace.next(gradient);
+  require(next.basis_size == 2, "zero progress estimate suppressed a real residual direction");
+}
+
 }  // namespace
 
 int main() {
@@ -632,6 +661,7 @@ int main() {
     check_sampled_schur_spectrum();
     check_inverse_spectrum();
     check_restart_phase();
+    check_deferred_norms();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

@@ -112,6 +112,14 @@ bool build_ciah_macro_step(
         std::chrono::duration<double>(end-structure_start).count());
     return std::hypot(orbital_norm, structure_norm);
   };
+  const auto norm_below = [&](const Eigen::VectorXd& g, double threshold) {
+    const double orbital_squared = std::pow(metric.dual_norm(g.head(no)), 2);
+    if (threshold <= 0.0 || orbital_squared >= threshold * threshold) return false;
+    return !ns || structure.dual_norm_below(g.tail(ns),
+        std::sqrt(threshold * threshold - orbital_squared), structure_metric);
+  };
+  ciah_options.estimate_dual_norm = diagonal_norm;
+  ciah_options.norm_below = norm_below;
   // Explicitly bounded diagnostic only; never assemble a production metric.
   // FeCl2 has 419 structure coordinates (about 1.34 MiB per matrix).
   Eigen::LLT<Eigen::MatrixXd> audit_metric;
@@ -323,6 +331,10 @@ bool build_ciah_macro_step(
   while (true) {
     candidate = workspace.next(predicted_gradient);
     ++record->micro_iterations;
+    // Before the existing start cycle, only progress and the full residual
+    // direction are needed. Never substitute the estimate in a decision.
+    if (candidate.converged || candidate.exhaustion ||
+        candidate.basis_size >= ah_start_cycle) workspace.certify_norms(candidate);
     const bool ready = candidate.converged || candidate.exhaustion ||
         (candidate.basis_size >= ah_start_cycle &&
          candidate.residual_norm < ah_start_tolerance);
@@ -442,18 +454,22 @@ bool build_ciah_macro_step(
     if (since_keyframe >= interval || predicted_norm < keyframe_norm / gradient_trust) {
       const Keyframe exact = evaluate_keyframe(displacement);
       const double actual_norm = dual_norm(exact.gradient);
-      const double mismatch = dual_norm(exact.gradient - predicted_gradient);
+      const Eigen::VectorXd correction = exact.gradient - predicted_gradient;
+      const bool mismatch_small = norm_below(correction, gradient_trust * predicted_norm);
+      const double mismatch_estimate = diagonal_norm(correction);
       if (diagnostics::neo_event_trace_enabled()) {
-        const Eigen::VectorXd correction = exact.gradient - predicted_gradient;
         const double captured = workspace.projected_dual_norm(correction);
         const double secant = correction.dot(keyframe_step);
         diagnostics::neo_trace("ciah_keyframe_secant",
-            "mismatch=%.17g,captured=%.17g,displacement_norm=%.17g,secant=%.17g,secant_cosine=%.17g",
-            mismatch, captured, length, secant,
-            mismatch > 0.0 && length > 0.0 ? secant / (mismatch * length) : 0.0);
+            "mismatch_estimate=%.17g,captured=%.17g,displacement_norm=%.17g,secant=%.17g,mismatch_small=%d",
+            mismatch_estimate, captured, length, secant, static_cast<int>(mismatch_small));
       }
-      const bool keep_keyframe = mismatch < gradient_trust * predicted_norm ||
+      const bool keep_keyframe = mismatch_small ||
           actual_norm < gradient_trust * micro_gradient_tolerance;
+      // Model agreement controls further microsteps, not true-energy descent.
+      // Keep an evaluated lower-energy candidate even when its model is stale;
+      // normal macro acceptance still reoptimizes CI and checks real energy.
+      keyframes.save(exact.energy,displacement,hessian_displacement,last_step,candidate);
       if (audit_structure_metric) {
         const double diagonal_actual = diagonal_norm(exact.gradient);
         const double diagonal_predicted = diagonal_norm(predicted_gradient);
@@ -475,8 +491,8 @@ bool build_ciah_macro_step(
         if (keep_keyframe) audit_keyframe_norm = full_actual;
       }
       diagnostics::neo_trace("ciah_keyframe",
-          "actual=%.17g,predicted=%.17g,mismatch=%.17g,energy=%.17g,accepted=%d",
-          actual_norm, predicted_norm, mismatch, exact.energy,
+          "actual=%.17g,predicted=%.17g,mismatch_estimate=%.17g,mismatch_small=%d,energy=%.17g,accepted=%d",
+          actual_norm, predicted_norm, mismatch_estimate, static_cast<int>(mismatch_small), exact.energy,
           static_cast<int>(keep_keyframe));
       if (diagnostics::neo_event_trace_enabled()) {
         const double actual_orbital = metric.dual_norm(exact.gradient.head(no));
@@ -484,13 +500,12 @@ bool build_ciah_macro_step(
         const double mismatch_orbital = metric.dual_norm(
             (exact.gradient-predicted_gradient).head(no));
         diagnostics::neo_trace("ciah_keyframe_blocks",
-            "actual_orbital=%.17g,actual_structure_squared=%.17g,predicted_orbital=%.17g,predicted_structure_squared=%.17g,mismatch_orbital=%.17g,mismatch_structure_squared=%.17g",
+            "actual_orbital=%.17g,actual_structure_squared=%.17g,predicted_orbital=%.17g,predicted_structure_squared=%.17g,mismatch_orbital=%.17g,mismatch_structure_estimate_squared=%.17g",
             actual_orbital, std::max(0.0,actual_norm*actual_norm-actual_orbital*actual_orbital),
             predicted_orbital, std::max(0.0,predicted_norm*predicted_norm-predicted_orbital*predicted_orbital),
-            mismatch_orbital, std::max(0.0,mismatch*mismatch-mismatch_orbital*mismatch_orbital));
+            mismatch_orbital, std::max(0.0,mismatch_estimate*mismatch_estimate-mismatch_orbital*mismatch_orbital));
       }
       if (keep_keyframe) {
-        keyframes.save(exact.energy,displacement,hessian_displacement,last_step,candidate);
         predicted_gradient = exact.gradient;
         energy_model.refresh(exact.energy, exact.gradient);
         diagnostics::neo_trace("ciah_model_refresh",
@@ -523,9 +538,9 @@ bool build_ciah_macro_step(
     // A keyframe changes the RHS, not the immutable Hessian images.
     const Eigen::VectorXd frozen_gradient = initial_gradient + hessian_displacement;
     diagnostics::neo_trace("ciah_micro_end",
-        "reason=%s,source=%.17g,predicted=%.17g,frozen_model=%.17g,keyframe_correction=%.17g,last_ritz=%.17g",
-        micro_stop, dual_norm(initial_gradient), dual_norm(predicted_gradient),
-        dual_norm(frozen_gradient), dual_norm(predicted_gradient - frozen_gradient),
+        "reason=%s,source_estimate=%.17g,predicted_estimate=%.17g,frozen_model_estimate=%.17g,keyframe_correction_estimate=%.17g,last_ritz=%.17g",
+        micro_stop, diagonal_norm(initial_gradient), diagonal_norm(predicted_gradient),
+        diagonal_norm(frozen_gradient), diagonal_norm(predicted_gradient - frozen_gradient),
         candidate.residual_norm);
   }
 
@@ -648,8 +663,8 @@ bool build_ciah_macro_step(
     // It is NOT the last Ritz residual or a nonlinear stationarity certificate.
     const Eigen::VectorXd frozen_gradient = initial_gradient + hessian_displacement;
     diagnostics::neo_trace("ciah_macro_model",
-        "source=%.17g,frozen_model=%.17g,orbital=%.17g,structure_diagonal=%.17g,last_ritz=%.17g,scale=%.17g",
-        dual_norm(initial_gradient), dual_norm(frozen_gradient),
+        "source_estimate=%.17g,frozen_model_estimate=%.17g,orbital=%.17g,structure_diagonal=%.17g,last_ritz=%.17g,scale=%.17g",
+        diagonal_norm(initial_gradient), diagonal_norm(frozen_gradient),
         metric.dual_norm(frozen_gradient.head(no)),
         ns ? structure.diagonal_dual_norm(frozen_gradient.tail(ns)) : 0.0,
         last_ritz_norm, scale);

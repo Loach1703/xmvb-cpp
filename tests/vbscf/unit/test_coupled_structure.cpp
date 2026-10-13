@@ -74,6 +74,29 @@ void check_metric_recycling() {
       (metric*known-action(direction)).norm() <=
           std::sqrt(std::numeric_limits<double>::epsilon()) * action(direction).norm(),
       "an existing AH metric image relaunched CG");
+
+  // The captured component is exactly zero, but the complete residual is large.
+  xmvb::core::MetricSolveWorkspace decisions(2);
+  Eigen::Matrix3d diagonal = Eigen::Vector3d(2.0, 0.001, 7.0).asDiagonal();
+  const Eigen::VectorXd e0 = Eigen::VectorXd::Unit(3, 0);
+  decisions.observe(e0, diagonal * e0);
+  const Eigen::VectorXd outside = Eigen::VectorXd::Unit(3, 1);
+  int actions = 0;
+  const auto metric_action = [&](const Eigen::VectorXd& v) {
+    ++actions;
+    return (diagonal * v).eval();
+  };
+  const auto jacobi = [&](const Eigen::VectorXd& v) {
+    return (v.array() / diagonal.diagonal().array()).matrix().eval();
+  };
+  require(!decisions.norm_below(outside, 10.0, metric_action, jacobi) && actions == 1,
+      "projected-zero residual was accepted or launched a full inverse solve");
+  require(decisions.norm_below(outside, 40.0, metric_action, jacobi),
+      "ambiguous lower bound did not use the complete metric solve");
+  const double norm = std::sqrt(outside.dot(diagonal.inverse() * outside));
+  require(!decisions.norm_below(outside, 0.999*norm, metric_action, jacobi) &&
+      decisions.norm_below(outside, 1.001*norm, metric_action, jacobi),
+      "decision comparison changed its threshold");
 }
 
 struct StructureFixture {

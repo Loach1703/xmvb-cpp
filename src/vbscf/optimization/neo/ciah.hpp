@@ -63,6 +63,10 @@ struct CiahOptions {
   double operator_relative_accuracy = 0.0;
   /** @brief Observe a direction after its HVP, reusing the computed metric image. */
   std::function<void(const Eigen::VectorXd&,const Eigen::VectorXd&)> observe_images;
+  /** @brief Progress estimate only; never certifies an AH or keyframe decision. */
+  NeoDualNorm estimate_dual_norm;
+  /** @brief Certify a strict comparison in the complete physical dual metric. */
+  std::function<bool(const Eigen::VectorXd&, double)> norm_below;
   /** Optional eigenvalue-shifted residual preconditioner. */
   std::function<Eigen::VectorXd(const Eigen::VectorXd&, double)>
       residual_preconditioner;
@@ -78,7 +82,14 @@ struct CiahResult {
   Eigen::VectorXd metric_step;
   /** alpha * (gradient + H * step - eigenvalue * G * step). */
   Eigen::VectorXd residual;
+  /** @brief Complete physical norm, valid only after certify_norms(). */
   double residual_norm = 0.0;
+  /** @brief Whether physical residual/model norms have been evaluated. */
+  bool norms_certified = false;
+  /** @brief Diagnostic estimate, distinct from the physical residual norm. */
+  double residual_estimate = 0.0;
+  /** @brief Known cross/metric terms in ||g+Hp||^2; excludes ||r/alpha||^2. */
+  double model_norm_offset = 0.0;
   /** @brief Full dual norm of gradient + H * step, reusing the AH residual norm.
    * Valid for the unscaled Ritz step; clipping requires a fresh norm.
    */
@@ -162,6 +173,9 @@ public:
 
   /** Append the previous residual direction, then return the next AH root. */
   CiahResult next(const Eigen::VectorXd& current_gradient);
+
+  /** @brief Evaluate complete norms once, when a candidate needs a decision. */
+  void certify_norms(CiahResult& result) const;
 
   int basis_size() const noexcept {
     return static_cast<int>(basis_.size());

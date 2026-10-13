@@ -187,6 +187,10 @@ public:
   double dual_norm(const Eigen::VectorXd& covector,
       core::MetricSolveWorkspace* workspace = nullptr) const;
 
+  /** @brief Certified threshold comparison; a lower bound only permits rejection. */
+  bool dual_norm_below(const Eigen::VectorXd& covector, double threshold,
+      core::MetricSolveWorkspace& workspace) const;
+
   /** @brief Positive Jacobi Riesz preconditioner, not a dual-norm substitute. */
   Eigen::VectorXd apply_inverse_metric_diagonal(const Eigen::VectorXd& covector) const;
 

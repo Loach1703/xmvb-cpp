@@ -126,6 +126,33 @@ public:
 
   int size() const noexcept { return static_cast<int>(basis_.size()); }
 
+  /** @brief Certify a strict dual-norm comparison, including uncaptured RHS.
+   * A variational lower bound can reject the comparison after one metric
+   * action. It cannot accept it: unresolved comparisons use the unchanged
+   * true-residual Riesz solve. No global spectral estimate is assumed.
+   */
+  template<class Action, class Inverse>
+  bool norm_below(const Eigen::VectorXd& rhs, double threshold,
+                  const Action& action, const Inverse& inverse) {
+    if (threshold <= 0.0) return false;
+    if (rhs.isZero()) return true;
+    Eigen::VectorXd trial = Eigen::VectorXd::Zero(rhs.size());
+    Eigen::VectorXd residual = rhs;
+    for (int i = 0; i < size(); ++i) {
+      const double weight = basis_[i].dot(rhs);
+      trial.noalias() += weight * basis_[i];
+      residual.noalias() -= weight * images_[i];
+    }
+    // The uncaptured residual is retained, not discarded by Galerkin projection.
+    trial += inverse(residual);
+    const Eigen::VectorXd image = action(trial);
+    const double work = rhs.dot(trial), squared = trial.dot(image);
+    if (squared > 0.0 && std::abs(work) >= threshold * std::sqrt(squared))
+      return false;
+    const Eigen::VectorXd solution = solve(rhs, action, inverse);
+    return rhs.dot(solution) < threshold * threshold;
+  }
+
   /** @brief Admit an already computed primal/metric pair without a new action. */
   void observe(const Eigen::VectorXd& vector, const Eigen::VectorXd& image) {
     if (size() >= capacity_ || vector.isZero()) return;

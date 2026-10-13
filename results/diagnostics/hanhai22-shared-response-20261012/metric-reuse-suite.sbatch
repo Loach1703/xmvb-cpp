@@ -27,7 +27,8 @@ IFS=$'\t' read -r case_name input_source orbital_type <<< "$row"
 [[ -n "$case_name" && -f "$root/$input_source" && -x "$binary" ]] || exit 64
 label="$case_name"
 [[ "$SLURM_ARRAY_TASK_ID" != 15 ]] || label="$case_name-audit"
-artifact="$root/metric-reuse-$SLURM_ARRAY_JOB_ID/$label"
+run_label="${XMVB_METRIC_RUN_LABEL:-metric-reuse}"
+artifact="$root/$run_label-$SLURM_ARRAY_JOB_ID/$label"
 mkdir -p "$artifact"
 cp "$root/$input_source" "$artifact/input.xmi"
 cp "$root/regression-1246756/241/"*.gbs "$artifact/"
@@ -40,13 +41,13 @@ export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
 unset XMVB_NEO_TRACE XMVB_NEO_CANDIDATE_AUDIT
 # Native jobs have no diagnostic-only norm evaluations. One NEW-binary capture
 # attributes metric reuse separately; its wall time is not a native speed claim.
-[[ "$SLURM_ARRAY_TASK_ID" != 15 ]] || export XMVB_NEO_TRACE=scalar
+[[ "$SLURM_ARRAY_TASK_ID" != 15 && "${XMVB_METRIC_TRACE_CASE:-}" != "$case_name" ]] || export XMVB_NEO_TRACE=scalar
 hostname > node.txt
 lscpu > cpu.txt
 module list > modules.txt 2>&1
 env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|SLURM_|XMVB_NEO_)' > execution-env.txt
 printf '%s\n' "$orbital_type" > orbital-type.txt
-printf '%s\n' 'Certified fixed-point metric inverse-image reuse; unchanged CIAH/HVP/thresholds' > source.txt
+printf '%s\n' "$run_label; unchanged CIAH/HVP/coordinate/convergence thresholds" > source.txt
 sha256sum "$binary" input.xmi *.gbs > hashes.txt
 printf '%s\n' "$binary input.xmi --optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --exact-exchange-memory-mib 256 --neo-trace neo.tsv" > command.txt
 status=0
