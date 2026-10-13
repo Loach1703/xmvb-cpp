@@ -106,6 +106,12 @@ struct CiahResult {
   int new_hvp_actions = 0;
   /** No further subspace expansion is available. */
   bool exhaustion = false;
+
+  /** @brief Inexact solve of the current shifted AH equation.
+   * Tests the full residual after removing its reference-component scale.
+   * This does not certify a Newton macrostep or decrease of its gradient norm.
+   */
+  bool resolved(double rhs_norm, double relative_accuracy) const noexcept;
 };
 
 /** @brief Direction from the lowest origin-gradient AH root in the retained span.
@@ -167,9 +173,9 @@ private:
 /**
  * Davidson iteration for the generalized augmented Hessian of one fixed model.
  *
- * The NeoProblem must outlive this workspace. `next` may receive a refreshed
- * gradient after a nonlinear microstep; all admitted directions and their
- * Hessian/metric images remain attached to the same immutable problem.
+ * The NeoProblem must outlive this workspace. Call `reset_rhs` before supplying
+ * a changed gradient to `next`. All admitted directions and their Hessian/metric
+ * images remain attached to the same immutable problem.
  */
 class CiahWorkspace {
 public:
@@ -192,7 +198,17 @@ public:
   explicit CiahWorkspace(const NeoProblem& problem, CiahOptions options)
       : CiahWorkspace(problem, std::nullopt, std::move(options)) {}
 
-  /** Append the previous residual direction, then return the next AH root. */
+  /** @brief Mark a changed RHS for a cached-space Ritz solve before expansion.
+   * Retains every direction and its H/G images, but discards the old equation's
+   * residual and eigenvalue-settling history. With a nonempty retained space,
+   * the next call makes no new HVP.
+   */
+  void reset_rhs() noexcept;
+
+  /** @brief Return the next AH root, enriching on the current RHS residual.
+   * Call `reset_rhs` when the supplied gradient changes; that first call only
+   * reprojects cached images. Subsequent calls may admit one HVP direction.
+   */
   CiahResult next(const Eigen::VectorXd& current_gradient);
 
   /** @brief Re-solve the lowest AH root at an origin gradient using cached data.

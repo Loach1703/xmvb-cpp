@@ -376,6 +376,7 @@ void check_gradient_refresh_and_preconditioner() {
   const CiahResult settled = workspace.next(old_gradient);
   require(settled.converged && settled.new_hvp_actions == 0,
           "unchanged AH root did not satisfy eigenvalue-change convergence");
+  workspace.reset_rhs();
   const CiahResult refreshed = workspace.next(new_gradient);
   require(refreshed.new_hvp_actions == 0 && actions == 1 &&
               refreshed.basis_size == first.basis_size,
@@ -399,6 +400,130 @@ void check_gradient_refresh_and_preconditioner() {
   const CiahResult repeated = workspace.next(new_gradient);
   require(repeated.new_hvp_actions == 0 && actions == 2,
           "repeated CIAH query recomputed a Hessian image");
+}
+
+/** @brief An early projected AH step may increase the full model gradient. */
+void check_fixed_rhs_forcing_and_reprojection() {
+  constexpr double epsilon = 0.01;
+  constexpr double coupling = 4.0;
+  Eigen::Matrix2d hessian;
+  hessian << 1.0, coupling,
+             coupling, coupling * coupling + 1.0;
+  const Eigen::Matrix2d metric = Eigen::Matrix2d::Identity();
+  const Eigen::Vector2d gradient(epsilon, 0.0);
+  int actions = 0, metric_calls = 0, norm_calls = 0;
+  const NeoProblem problem = dense_problem(hessian, metric, gradient,
+      &actions, &metric_calls, &norm_calls);
+  CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 0));
+  const CiahResult early = workspace.next(gradient);
+  check_images_and_residual(hessian, metric, gradient, early);
+  const Eigen::VectorXd changed_gradient = gradient + early.hessian_step;
+  require(hessian.determinant() > 0.0 && early.eigenvalue < 0.0 &&
+          early.step.norm() < 0.03 &&
+          gradient.dot(early.step) +
+              0.5 * early.step.dot(early.hessian_step) < 0.0 &&
+          changed_gradient.norm() > 3.0 * gradient.norm(),
+          "SPD projected AH fixture did not increase the model residual");
+  require(!early.resolved(gradient.norm(), 1.0 / 3.0) &&
+          early.resolved(gradient.norm(), 10.0) &&
+          !early.resolved(-1.0, 1.0 / 3.0) &&
+          !early.resolved(gradient.norm(), -1.0),
+          "AH forcing did not use the full unscaled residual");
+
+  // Consuming this deliberately unresolved step changes the AH RHS. The old
+  // pending residual must not cause a Hessian action before a new Ritz solve.
+  workspace.reset_rhs();
+  const CiahResult reprojected = workspace.next(changed_gradient);
+  require(reprojected.new_hvp_actions == 0 && actions == 1 &&
+          metric_calls == 1 && norm_calls == 0 &&
+          reprojected.basis_size == early.basis_size && !reprojected.converged,
+          "RHS refresh expanded an obsolete residual or reused convergence history");
+  check_images_and_residual(hessian, metric, changed_gradient, reprojected);
+  const Eigen::VectorXd obsolete_rhs_residual = reprojected.reference_component *
+      (gradient + hessian * reprojected.step -
+       reprojected.eigenvalue * metric * reprojected.step);
+  require((reprojected.residual - obsolete_rhs_residual).norm() > epsilon,
+          "RHS refresh retained the old AH right-hand side");
+  const CiahResult enriched = workspace.next(changed_gradient);
+  require(enriched.new_hvp_actions == 1 && actions == 2 &&
+          metric_calls == 2 && norm_calls == 0 &&
+          enriched.resolved(changed_gradient.norm(), 1.0 / 3.0),
+          "fixed refreshed RHS did not enrich to a resolved full-space AH root");
+  check_images_and_residual(hessian, metric, changed_gradient, enriched);
+  check_full_space_root(hessian, metric, changed_gradient, enriched);
+  const CiahResult settled = workspace.next(changed_gradient);
+  require(settled.converged && settled.new_hvp_actions == 0 && actions == 2,
+          "fixed refreshed RHS repeated an action after full-space convergence");
+
+  // Waiting on the original fixed RHS gives the independent dense AH oracle.
+  int original_actions = 0;
+  const NeoProblem original = dense_problem(
+      hessian, metric, gradient, &original_actions);
+  CiahWorkspace fixed(original, Eigen::VectorXd::Unit(2, 0));
+  const CiahResult unresolved = fixed.next(gradient);
+  require(!unresolved.resolved(gradient.norm(), 1.0 / 3.0),
+          "fixed-RHS oracle fixture was already resolved in one direction");
+  const CiahResult resolved = fixed.next(gradient);
+  require(resolved.resolved(gradient.norm(), 1.0 / 3.0) &&
+          original_actions == 2,
+          "fixed-RHS AH enrichment failed the relative forcing condition");
+  check_full_space_root(hessian, metric, gradient, resolved);
+
+  CiahResult small_rhs;
+  small_rhs.residual_norm = 0.0;
+  require(!small_rhs.resolved(0.0, 1.0 / 3.0),
+          "zero reference weight passed unscaled AH forcing");
+  small_rhs.reference_component = 0.2;
+  require(small_rhs.resolved(0.0, 1.0 / 3.0),
+          "exact AH equation failed zero-RHS forcing");
+  small_rhs.residual_norm = 1.0e-12;
+  require(!small_rhs.resolved(0.0, 1.0 / 3.0) &&
+          small_rhs.resolved(1.0e-9, 1.0 / 3.0),
+          "small-RHS forcing lost its reference-component scaling");
+}
+
+/** @brief An RHS-specific dependent expansion must not exhaust future RHSs. */
+void check_rhs_reset_clears_expansion_exhaustion() {
+  const Eigen::Matrix2d hessian = Eigen::Vector2d(2.0, 3.0).asDiagonal();
+  const Eigen::Matrix2d metric = Eigen::Matrix2d::Identity();
+  const Eigen::Vector2d old_gradient(0.2, 0.5);
+  const Eigen::Vector2d new_gradient(0.3, 0.4);
+  int actions = 0;
+  const NeoProblem problem = dense_problem(hessian, metric, old_gradient, &actions);
+  bool dependent = true;
+  CiahOptions options;
+  options.residual_preconditioner =
+      [&](const Eigen::VectorXd&, double) {
+        Eigen::VectorXd direction = Eigen::VectorXd::Zero(2);
+        direction[dependent ? 0 : 1] = 1.0;
+        return direction;
+      };
+  options.residual_direction = [](const Eigen::VectorXd&) {
+    return Eigen::VectorXd::Unit(2, 0);
+  };
+  CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 0), options);
+  const CiahResult first = workspace.next(old_gradient);
+  require(first.residual_norm > 0.1 && actions == 1,
+      "dependent-expansion fixture has no unresolved complement");
+  const CiahResult exhausted = workspace.next(old_gradient);
+  require(exhausted.exhaustion && exhausted.new_hvp_actions == 0 && actions == 1,
+      "dependent expansion did not mark its original RHS exhausted");
+  dependent = false;
+  workspace.reset_rhs();
+  const CiahResult reprojected = workspace.next(new_gradient);
+  require(!reprojected.exhaustion && reprojected.new_hvp_actions == 0 &&
+          actions == 1,
+      "new RHS inherited an old dependent-expansion exhaustion");
+  check_images_and_residual(hessian, metric, new_gradient, reprojected);
+  const CiahResult enriched = workspace.next(new_gradient);
+  require(enriched.new_hvp_actions == 1 && actions == 2 &&
+          enriched.basis_size == 2,
+      "new RHS could not enrich after old dependent expansion");
+  check_full_space_root(hessian, metric, new_gradient, enriched);
+  workspace.reset_rhs();
+  const CiahResult capped = workspace.next(old_gradient);
+  require(capped.exhaustion && capped.new_hvp_actions == 0 && actions == 2,
+      "RHS reset bypassed the hard basis-size cap");
 }
 
 /** @brief Incremental projections agree with full rebuilding after every admission. */
@@ -428,6 +553,11 @@ void check_incremental_projection() {
     // must remain reusable without either a Hessian or metric evaluation.
     Eigen::VectorXd rhs = gradient;
     rhs[iteration%n] += 0.01*(iteration+1);
+    if (iteration) workspace.reset_rhs();
+    const auto reprojected = workspace.next(rhs);
+    if (iteration)
+      require(reprojected.new_hvp_actions == 0,
+          "changed RHS caused an action before cached-space reprojection");
     const auto result = workspace.next(rhs);
     const int m = directions.size();
     Eigen::MatrixXd q(n,m);
@@ -495,6 +625,7 @@ void check_accumulated_microstep_images() {
   Eigen::VectorXd predicted = initial;
   Eigen::VectorXd prefix, prefix_image;
   for (int micro = 0; micro < 3; ++micro) {
+    if (micro) workspace.reset_rhs();
     const auto candidate = workspace.next(predicted);
     const double scale = micro == 0 ? 0.5 : 0.75;
     displacement += scale * candidate.step;
@@ -792,8 +923,12 @@ void check_coordinate_norms() {
   require(next.basis_size == 2, "full residual did not expand the AH space");
   check_images_and_residual(hessian, metric, gradient, next);
   const Eigen::Vector3d refreshed = gradient + Eigen::Vector3d(.02, -.03, .01);
+  workspace.reset_rhs();
   next = workspace.next(refreshed);
+  require(next.new_hvp_actions == 0 && next.basis_size == 2,
+      "coordinate-norm RHS refresh did not reproject cached images first");
   check_images_and_residual(hessian, metric, refreshed, next);
+  next = workspace.next(refreshed);
   check_full_space_root(hessian, metric, refreshed, next);
   require(norms == 0, "Ritz or keyframe RHS update evaluated the physical dual norm");
 }
@@ -807,6 +942,8 @@ int main() {
     check_cached_origin_ray();
     check_origin_ray_macro_energy();
     check_gradient_refresh_and_preconditioner();
+    check_fixed_rhs_forcing_and_reprojection();
+    check_rhs_reset_clears_expansion_exhaustion();
     check_incremental_projection();
     check_metric_validation();
     check_accumulated_microstep_images();

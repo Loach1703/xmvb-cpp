@@ -28,7 +28,6 @@ namespace {
 // Initial policies follow PySCF newton_casscf.update_orb_ci. They control
 // approximate microsteps, not the VBSCF outer accuracy contract.
 constexpr double max_component = 0.03;
-constexpr double ah_start_tolerance = 500.0;
 constexpr double gradient_trust = 3.0;
 constexpr int ah_start_cycle = 3;
 constexpr int keyframe_interval = 5;
@@ -299,9 +298,14 @@ bool build_ciah_macro_step(
   while (true) {
     candidate = workspace.next(predicted_gradient);
     ++record->micro_iterations;
+    const double rhs_norm = coordinate_norm(predicted_gradient);
+    // A cached-only candidate can be consumed if the CURRENT AH equation is
+    // resolved. Otherwise enrich using its current residual before consuming
+    // an approximate step. The Ritz residual includes the reference alpha.
+    const bool forcing_resolved = candidate.resolved(rhs_norm, 1.0 / gradient_trust);
     const bool ready = candidate.converged || candidate.exhaustion ||
         (candidate.basis_size >= ah_start_cycle &&
-         candidate.residual_norm < ah_start_tolerance);
+         (forcing_resolved || candidate.new_hvp_actions != 0));
     if (!ready) continue;
 
     Eigen::VectorXd step = candidate.step;
@@ -379,10 +383,11 @@ bool build_ciah_macro_step(
     ++since_keyframe;
     const double predicted_norm = coordinate_norm(predicted_gradient);
     diagnostics::neo_trace("ciah_micro",
-        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g",
+        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g,rhs_norm=%.17g,forcing_target=%.17g,forcing_resolved=%d",
         candidate.basis_size, micro_steps, candidate.eigenvalue,
         candidate.reference_component, candidate.residual_norm, predicted_norm,
-        step_scale, largest, candidate.residual.head(no).norm(), candidate.residual.tail(ns).norm());
+        step_scale, largest, candidate.residual.head(no).norm(), candidate.residual.tail(ns).norm(),
+        rhs_norm,rhs_norm / gradient_trust,static_cast<int>(forcing_resolved));
     if (micro_steps > 3 && predicted_norm > gradient_trust * keyframe_norm) {
       displacement -= step;
       hessian_displacement -= image;
@@ -484,6 +489,10 @@ bool build_ciah_macro_step(
         break;
       }
     }
+    // The microstep and possibly a keyframe changed the RHS. Reproject that
+    // RHS in the retained space before spending an HVP on enrichment; a
+    // residual from the previously consumed equation is no longer current.
+    workspace.reset_rhs();
   }
 
   if (diagnostics::neo_event_trace_enabled()) {

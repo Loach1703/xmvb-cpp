@@ -1,5 +1,143 @@
 # Origin-model globalization of a nonlinear CIAH sequence
 
+## Reproject a changed AH right-hand side before enrichment
+
+The origin-model residual and the keyframe-anchored predicted gradient are
+different quantities. With accumulated displacement $\mathbf p$, the most
+recent keyframe $\mathbf p_a$, and its exact pulled-back gradient $\mathbf g_a$,
+
+$$
+\mathbf f=\mathbf g_0+\mathcal H_0\mathbf p,\qquad
+\mathbf w=\mathbf g_a+\mathcal H_0(\mathbf p-\mathbf p_a).
+$$
+
+Refreshing $\mathbf w$ but retaining the accumulated $\mathcal H_0\mathbf p$
+is consistent. Neither $\mathbf f$ nor $\mathbf w$ is the gradient after the
+macro trial's separate CI relaxation. A rising $\|\mathbf f\|$ alone does
+not establish a wrong keyframe derivative.
+
+For an AH correction $\boldsymbol\delta$ at the current right-hand side,
+the retained Ritz residual is
+
+$$
+\mathbf r=\alpha\left(\mathbf w+\mathcal H_0\boldsymbol\delta
+-\omega\mathcal G_0\boldsymbol\delta\right).
+$$
+
+Here $\alpha$ is the reference component and $\omega$ the Ritz eigenvalue.
+The norm is the existing complete coordinate norm, including components
+outside the retained trial space. A small projected Galerkin residual is
+not sufficient. A cached-only candidate can be consumed without another
+HVP when its current shifted AH equation satisfies
+
+$$
+\|\mathbf r\|_{\mathrm{coord}}
+\le |\alpha|\eta\|\mathbf w\|_{\mathrm{coord}},\qquad
+\eta=\frac{1}{\gamma},\quad \gamma=3,
+$$
+
+where $\gamma$ is the existing gradient trust factor. No new adjustable
+parameter is introduced. This is a cached-space reuse policy, not a
+claim that $1/3$ is mathematically unique or optimal. If a cached-only
+candidate fails this test, enrich using its current residual before
+consuming an approximate CIAH step. Requiring the relative test for every
+approximate step was investigated and rejected by molecular regression,
+as reported below. The previous absolute approximate-step threshold of
+500 is removed. The existing
+absolute AH convergence and subspace-exhaustion exits remain; an exhausted
+candidate is consumed at most once before ending the microstep sequence.
+The subspace capacity remains 30 and all outer accuracy criteria remain
+unchanged.
+
+After a consumed microstep or keyframe changes the right-hand side,
+discard the old pending expansion residual and eigenvalue-settling history.
+First reproject the new right-hand side using cached $Q$, $\mathcal H_0Q$
+and $\mathcal G_0Q$, with no additional HVP. If it is not resolved, use
+its new complete residual for the next enrichment. An expansion failure
+specific to the old right-hand side is also cleared; a hard capacity
+limit still applies. Cached-space reprojection, residual enrichment and
+actual microstep execution are thus separate decisions. The method still
+permits inexact CIAH microsteps after a fresh current-residual enrichment;
+it does not claim that every consumed step solves the full AH equation
+to relative accuracy $1/3$.
+
+This does not impose monotonic model-gradient norms. With clipping factor
+$\tau$, the next working gradient satisfies
+
+$$
+\mathbf w_{\mathrm{next}}
+=(1-\tau)\mathbf w+\tau\omega\mathcal G_0\boldsymbol\delta
++\frac{\tau}{\alpha}\mathbf r.
+$$
+
+Negative curvature, the AH shift, and clipping can increase this norm even
+for an accurately solved eigenproblem. True keyframe gradients and relaxed
+macro energies retain their original role. A fixed relative forcing bound
+does not by itself establish quadratic local convergence.
+
+Independent unit checks include a positive-definite strongly coupled
+two-dimensional example in which a premature projected step decreases
+quadratic energy while increasing its full gradient. Further checks cover
+a nonzero obsolete expansion residual, zero-HVP reprojection, small
+right-hand sides, reference-component scaling, right-hand-side-specific
+dependent directions, and the unchanged hard capacity limit.
+
+### Rejected strict-forcing experiment
+
+Build 1252737 required the relative condition above for every approximate
+step. The subspace capacity and all numerical tolerances were unchanged.
+Native regression 1252739 showed FeCl2 changing from 13/276 outer steps/HVP
+to 89/2670, with time increasing from 5.76 to 41.87 s. More importantly,
+it terminated at -2181.617971793065 Eh, 6.493 mEh above the saved low-energy
+endpoint. Satisfying outer stopping criteria at this different point is
+not a successful numerical comparison. MnF2 changed from 13/160 to 21/630.
+The bounded porphine test 1252740 used all 30 directions in each macro,
+90 HVP for three steps in both spin sectors, and was slower with less
+energy decrease than the saved three-step reference. The strict gate is
+not retained in the production policy. These results also show why merely
+seeking a smaller algebraic residual is not sufficient to improve orbital
+globalization or its total cost.
+
+### Current-RHS enrichment validation
+
+Frozen build 1252752 passed the ten unit executables and the PySCF F2 CTest
+on Hanhai22. Native regression 1252754 converged in all eight cases. The
+six matched NEO energies differ from their saved reference by less than
+$1.1\times10^{-9}$ Eh. FeCl2 retained its low-energy endpoint with 13
+macro steps and 267 HVP, compared with 13/276 in the reference. MnF2 used
+11/158 instead of 13/160. Wall time did not improve uniformly: FeCl2 was
+5.76/6.10 s and MnF2 4.02/4.28 s in these single runs. Cached reprojections
+are counted as AH solver calls but not as HVP; `micro_iterations` therefore
+must not be interpreted as an HVP count.
+
+Bounded late-point porphine test 1252755 again used matching input/basis
+hashes. It completed three accepted macro steps in both spin sectors:
+
+| Spin | HVP old/current | Final energy current / Eh | Wall old/current / s | RSS current / GiB |
+|---|---:|---:|---:|---:|
+| Singlet | 35/35 | -2244.733651327344 | 192.37/236.17 | 38.62 |
+| Triplet | 44/43 | -2244.782346867970 | 210.50/244.53 | 38.63 |
+
+The current runs shared anode16 with separate 32-core affinities; the saved
+reference ran on anode39/anode24. Unchanged initial diagonal construction
+alone rose from about 30 to 41 s in the current singlet run. Total wall time
+must not be attributed exclusively to the changed AH logic. Nevertheless,
+the HVP counts and energy decreases are essentially comparable, not evidence
+of a major porphine convergence improvement. These three-step tests ended
+at the diagnostic iteration limit and are not converged results.
+
+Full convergence job 1252776 runs the current policy from the original
+input guesses, without the diagnostic macro cap. The pre-existing job
+1252674 remains available as the original-guess reference; it is not rerun.
+The current policy fixes RHS/enrichment consistency, but no claim that it
+solves porphine's slow convergence is justified until the full runs finish.
+Paired native and prefix CSVs are named `rhs-current-20261014.csv` and
+`rhs-current-prefix-20261014.csv`; rejected strict-forcing records are
+retained separately as `rhs-strict-rejected-20261014.csv` and
+`rhs-strict-rejected-prefix-20261014.csv`. The `converged` field in these
+CSVs describes the program's stopping status, not agreement with a reference
+energy; the strict FeCl2 endpoint must not be counted as a successful match.
+
 ## The rejected-ray defect
 
 The co-iterative augmented Hessian (CIAH) iteration retains curvature images

@@ -43,6 +43,15 @@ void check_projected_symmetry(
 
 }  // namespace
 
+bool CiahResult::resolved(double rhs_norm, double relative_accuracy) const noexcept {
+  const double alpha = std::abs(reference_component);
+  return std::isfinite(residual_norm) && residual_norm >= 0.0 &&
+      std::isfinite(alpha) && alpha > 0.0 &&
+      std::isfinite(rhs_norm) && rhs_norm >= 0.0 &&
+      std::isfinite(relative_accuracy) && relative_accuracy >= 0.0 &&
+      residual_norm <= alpha * relative_accuracy * rhs_norm;
+}
+
 CiahWorkspace::CiahWorkspace(
     const NeoProblem& problem,
     std::optional<Eigen::VectorXd> initial_direction,
@@ -67,6 +76,16 @@ CiahWorkspace::CiahWorkspace(
   metric_projection_ = hessian_projection_;
   hessian_magnitude_ = hessian_projection_;
   metric_magnitude_ = hessian_projection_;
+}
+
+void CiahWorkspace::reset_rhs() noexcept {
+  pending_residual_.reset();
+  pending_eigenvalue_ = 0.0;
+  pending_residual_norm_ = 0.0;
+  previous_eigenvalue_.reset();
+  // An expansion can be dependent for one RHS but useful for the next.
+  // A hard basis-size cap is checked again by next().
+  exhausted_ = false;
 }
 
 Eigen::VectorXd CiahWorkspace::precondition(
