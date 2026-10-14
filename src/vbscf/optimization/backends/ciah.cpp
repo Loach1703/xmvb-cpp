@@ -286,6 +286,14 @@ bool build_ciah_macro_step(
   Eigen::VectorXd hessian_displacement = displacement;
   Eigen::VectorXd predicted_gradient = initial_gradient;
   CiahEnergyModel energy_model(energy, initial_gradient);
+  const bool model_audit = diagnostics::ciah_model_audit_enabled();
+  Eigen::VectorXd audit_anchor, audit_anchor_image;
+  diagnostics::CiahKeyframeProbe audit_origin;
+  if (model_audit) {
+    audit_anchor = displacement;
+    audit_anchor_image = hessian_displacement;
+    audit_origin = {initial_gradient, energy};
+  }
   CiahKeyframes keyframes(energy);
   Eigen::VectorXd last_step = displacement;
   // Retain the finite Ritz residual rather than assuming exact CI stationarity.
@@ -299,6 +307,7 @@ bool build_ciah_macro_step(
   bool audited_origin_step = false;
   bool audited_structure_path = false;
   bool energy_model_stopped = false;
+  std::optional<double> interpolated_energy;
   const char* micro_stop = "unset";
   CiahResult candidate;
   setup_phase.stop();
@@ -437,6 +446,17 @@ bool build_ciah_macro_step(
       if (step_audit) diagnostics::audit_orbital_step(
           orbitals, chart, displacement.head(no), "keyframe", micro_steps);
       const Keyframe exact = evaluate_keyframe(displacement);
+      if (model_audit) {
+        const int saved_keyframes = record->keyframes;
+        diagnostics::audit_ciah_model(audit_anchor, audit_origin,
+            displacement-audit_anchor, hessian_displacement-audit_anchor_image,
+            {exact.gradient, exact.energy}, static_cast<int>(no), coordinate_norm,
+            [&](const Eigen::VectorXd& point) {
+              const auto value = evaluate_keyframe(point);
+              return diagnostics::CiahKeyframeProbe{value.gradient, value.energy};
+            });
+        record->keyframes = saved_keyframes;
+      }
       if (ns && !audited_structure_path && diagnostics::ciah_keyframe_audit_enabled()) {
         const int saved_keyframes = record->keyframes;
         diagnostics::audit_ciah_keyframe(displacement, hessian_displacement,
@@ -494,6 +514,11 @@ bool build_ciah_macro_step(
         diagnostics::ScopedPhase refresh_phase(diagnostics::Phase::CiahRefresh);
         predicted_gradient = exact.gradient;
         energy_model.refresh(exact.energy, exact.gradient);
+        if (model_audit) {
+          audit_anchor = displacement;
+          audit_anchor_image = hessian_displacement;
+          audit_origin = {exact.gradient, exact.energy};
+        }
         diagnostics::neo_trace("ciah_model_refresh",
             "energy=%.17g,source_energy=%.17g,anchored_prediction=%.17g,origin_prediction=%.17g",
             exact.energy, energy, energy - exact.energy,
@@ -505,11 +530,23 @@ bool build_ciah_macro_step(
             diagnostics::neo_event_trace_enabled() &&
             diagnostics::neo_candidate_audit_enabled();
       } else {
-        displacement -= step;
-        hessian_displacement -= image;
-        energy_model.remove(step, image);
-        predicted_gradient = previous_gradient;
-        last_step = previous_step;
+        // A failed keyframe invalidates the entire unchecked segment, not
+        // just its last microstep. Use its already available true endpoint
+        // data to shorten that segment; no extra HVP or gradient is needed.
+        const auto minimum = energy_model.minimum(exact.energy, exact.gradient);
+        const Eigen::VectorXd removed =
+            (1.0-minimum.fraction)*energy_model.displacement();
+        const Eigen::VectorXd removed_image =
+            (1.0-minimum.fraction)*energy_model.image();
+        displacement -= removed;
+        hessian_displacement -= removed_image;
+        energy_model.remove(removed, removed_image);
+        predicted_gradient -= removed_image;
+        last_step = minimum.fraction*step;
+        interpolated_energy = minimum.energy;
+        diagnostics::neo_trace("ciah_segment_interpolation",
+            "anchor_energy=%.17g,endpoint_energy=%.17g,fraction=%.17g,interpolated_energy=%.17g",
+            energy_model.anchor_energy(), exact.energy, minimum.fraction, minimum.energy);
         ++record->rejected_trial_count;
         micro_stop = "keyframe_mismatch";
         break;
@@ -532,7 +569,7 @@ bool build_ciah_macro_step(
         candidate.residual_norm);
   }
 
-  double final_reduction = energy - energy_model.energy();
+  double final_reduction = energy - interpolated_energy.value_or(energy_model.energy());
   if (diagnostics::neo_trace_enabled()) {
     // A diagnostic of the actual coupled trial space, not just its A block.
     // Neither inverse callback evaluates an HVP or changes the retained space.

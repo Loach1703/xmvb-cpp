@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <cmath>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -10,6 +11,11 @@
 #include "vbscf/optimization/neo/problem.hpp"
 
 namespace xmvb::vb {
+
+struct CiahSegmentMinimum {
+  double fraction;
+  double energy;
+};
 
 /** @brief Frozen curvature with an energy/gradient anchor refreshed at keyframes.
  *
@@ -56,6 +62,43 @@ public:
 
   /** @brief Incremental displacement since the last accepted keyframe. */
   const Eigen::VectorXd& displacement() const noexcept { return step_; }
+  const Eigen::VectorXd& image() const noexcept { return image_; }
+
+  /** @brief Minimize the endpoint Hermite cubic on the already evaluated segment.
+   * Uses true energies and directional derivatives at both ends. This only
+   * proposes a trial; the usual relaxed-energy evaluation still accepts it.
+   */
+  CiahSegmentMinimum minimum(double endpoint_energy,
+                            const Eigen::VectorXd& endpoint_gradient) const {
+    const double delta = endpoint_energy-energy_;
+    const double slope = gradient_.dot(step_);
+    const double end_slope = endpoint_gradient.dot(step_);
+    const double a = 3*delta-2*slope-end_slope;
+    const double b = slope+end_slope-2*delta;
+    CiahSegmentMinimum result{0.0, energy_};
+    double best = 0.0;
+    const auto consider = [&](double t) {
+      if (!(t > 0.0 && t <= 1.0)) return;
+      const double value = t*(slope+t*(a+t*b));
+      if (value < best) {
+        best = value;
+        result = {t, energy_+value};
+      }
+    };
+    consider(1.0);
+    if (b == 0.0) {
+      if (a != 0.0) consider(-slope/(2*a));
+    } else {
+      const double discriminant = a*a-3*b*slope;
+      if (discriminant >= 0.0) {
+        // Stable quadratic roots, including a nearly linear derivative.
+        const double q = -a-std::copysign(std::sqrt(discriminant), a);
+        consider(q/(3*b));
+        if (q != 0.0) consider(slope/q);
+      }
+    }
+    return result;
+  }
 
 private:
   double energy_;

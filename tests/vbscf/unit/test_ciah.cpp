@@ -652,6 +652,37 @@ void check_accumulated_microstep_images() {
 }
 
 /** @brief Energy anchoring must follow the same keyframe as the refreshed RHS. */
+void check_keyframe_segment_minimum() {
+  using xmvb::vb::CiahEnergyModel;
+  for (const double cubic : {0.0, 1e-15, 0.4}) {
+    const double minimum = 0.3;
+    const auto value = [&](double t) {
+      const double x = t-minimum;
+      return -10.0+x*x+cubic*x*x*x;
+    };
+    const auto derivative = [&](double t) {
+      const double x = t-minimum;
+      return 2*x+3*cubic*x*x;
+    };
+    // The Hermite data, not the deliberately wrong frozen curvature,
+    // must determine the finite-step correction.
+    CiahEnergyModel model(value(0), Eigen::VectorXd::Constant(1, derivative(0)));
+    model.add(Eigen::VectorXd::Ones(1), Eigen::VectorXd::Constant(1, -7.0));
+    const auto trial = model.minimum(value(1), Eigen::VectorXd::Constant(1, derivative(1)));
+    require(std::abs(trial.fraction-minimum) < 1e-12,
+            "keyframe Hermite minimum depends on stale curvature");
+    require(std::abs(trial.energy-value(minimum)) < 1e-12,
+            "keyframe Hermite energy is incorrect");
+  }
+  for (const double slope : {-1.0, 1.0}) {
+    CiahEnergyModel model(-10, Eigen::VectorXd::Constant(1, slope));
+    model.add(Eigen::VectorXd::Ones(1), Eigen::VectorXd::Zero(1));
+    const auto trial = model.minimum(-10+slope, Eigen::VectorXd::Constant(1, slope));
+    require(trial.fraction == (slope < 0 ? 1.0 : 0.0),
+            "linear segment chose the wrong endpoint");
+  }
+}
+
 void check_keyframe_energy_model() {
   using xmvb::vb::CiahEnergyModel;
   const Eigen::Vector2d g0(1.0, -0.5);
@@ -948,6 +979,7 @@ int main() {
     check_metric_validation();
     check_accumulated_microstep_images();
     check_keyframe_energy_model();
+    check_keyframe_segment_minimum();
     check_converged_root_reuse();
     check_coarse_balancing_inverse();
     check_keyframe_checkpoint();

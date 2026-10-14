@@ -1145,6 +1145,121 @@ its hash. Job 1254861 failed because an empty positional sbatch argument was
 not preserved; 1254863 uses explicit named arguments and completed. This was
 a reporting-job argument error, not a failure of the chemistry calculation.
 
+### Finite-model scaling diagnosis (2026-10-14)
+
+Build 1254887 passed the same twelve unit tests. Slurm array 1254888 runs
+three macros of FeCl2 and the original-guess singlet with the opt-in
+`XMVB_NEO_KEYFRAME_AUDIT=model` diagnostic. It does not alter directions or
+acceptance. The expensive extra keyframe evaluations are absent in normal
+runs. `summarize_model_scale.py` extracts all measurements, including the
+two finite-difference increments, into JSON.
+
+For an exact anchor $x_a$, segment $s$, true gradient $g_a$, and frozen
+origin Hessian $H_0$, measure
+
+$$
+e_E(t)=E(x_a+ts)-E(x_a)-t g_a^T s-\tfrac12t^2s^TH_0s,
+\qquad e_g(t)=g(x_a+ts)-g_a-tH_0s.
+$$
+
+Central differences at increments 1e-3 and 3e-4 independently estimate
+$H(x_a)s$. Replacing $H_0s$ by this local image in the diagnostic separates
+stale curvature from finite-step Taylor remainder. The measured norm is the
+existing full coordinate dual norm; block Euclidean norms are explicitly
+labeled and not added to represent that full norm.
+
+Singlet macros 2 and 3 fail at their **first** keyframes, before any gradient
+refresh. Their respective local/frozen image relative differences are
+1.63e-6 and 3.52e-6 at the smaller finite-difference increment. Their errors
+approach cubic energy and quadratic gradient scaling as the step decreases.
+Thus their principal failure is finite-segment overextension, not a
+post-keyframe stale Hessian or an observed origin derivative omission.
+
+| Macro 2 fraction | Actual joint energy change (mEh) | Frozen prediction (mEh) | Energy error (mEh) | Gradient error |
+|---|---:|---:|---:|---:|
+| 1 | +21.179375 | -10.888852 | 32.068226 | 0.229213 |
+| 1/2 | -3.066329 | -6.466063 | 3.399734 | 0.053596 |
+| 1/4 | -3.125269 | -3.488441 | 0.363172 | 0.012306 |
+| 1/8 | -1.767162 | -1.808073 | 0.040910 | 0.002919 |
+
+These are fixed transported joint candidates, not relaxed-CI macro energies.
+The full orbital-only, CI-only and joint changes are +2.1955, +12.1039 and
++21.1794 mEh. Overshoot is not confined to only one block.
+
+Stale curvature is separately visible at macro 1's second keyframe. Along
+that segment, frozen directional curvature is -0.00181831 Eh but local
+curvature is +0.00054363 Eh. Its frozen-gradient error scales approximately
+linearly; using local curvature restores the higher-order behavior. This is
+a separate approximation effect, not the cause of macros 2 and 3. Merely
+rebuilding curvature after every keyframe would miss the principal failure
+and add substantial cost.
+
+### Segment correction and short validation
+
+The previous mismatch branch removed only the last microstep. That removal
+has no relation to the measured nonlinear error of the whole unchecked
+segment. Instead, use the two already available true energies and gradients
+to construct a one-dimensional Hermite cubic, without another action:
+
+$$
+h(t)=E_a+d_0t+a t^2+b t^3,\qquad
+d_0=g_a^Ts,\quad d_1=g_b^Ts,\quad \Delta=E_b-E_a,
+$$
+$$
+a=3\Delta-2d_0-d_1,\qquad b=d_0+d_1-2\Delta.
+$$
+
+The proposed fraction minimizes $h$ on $[0,1]$, considering both endpoints
+and real stationary roots. The existing relaxed-CI energy evaluation still
+accepts or backtracks the trial; the interpolant is not an energy certificate.
+The chosen point is on the same finite orbital/CI map used for both endpoint
+gradients. Cached frozen HVP images transform linearly with the shortened
+segment, so no new HVP or full-metric solve is required. The existing mismatch
+trigger and all convergence thresholds are unchanged. This corrects the
+failed-segment handling; it does not make frozen curvature exact or eliminate
+all early nonlinear error.
+
+Build 1254923 includes analytic polynomial tests of the interpolation,
+including a deliberately wrong frozen curvature, almost quadratic data and
+endpoint minima. Array 1254926 tests the four small regressions to convergence
+and the singlet for three macros with the expensive audit disabled.
+
+Both jobs completed. The singlet intentionally stops at three macros with
+native exit 2, not a failed convergence attempt or a converged endpoint.
+
+| Singlet macro | Previous accepted energy (Eh) | Corrected accepted energy (Eh) | Previous / corrected HVP | Previous / corrected actual-to-predicted decrease |
+|---|---:|---:|---:|---:|
+| 1 | -2244.718905306270 | -2244.718905306259 | 12 / 12 | 1.1354 / 1.1354 |
+| 2 | -2244.719262254437 | -2244.722743361525 | 8 / 8 | 0.03648 / 0.99982 |
+| 3 | -2244.719597088286 | -2244.723715875025 | 8 / 18 | 0.02939 / 1.01034 |
+
+At macro 2 the Hermite minimizer is 0.377504 of the unchecked segment.
+It predicts 3.838734 mEh decrease and the relaxed trial yields 3.838055 mEh.
+It uses exactly the same eight HVP and two counted keyframes as the prior
+macro 2. At macro 3 a changed trajectory uses eighteen HVP and five
+keyframes; the final failed segment is shortened to 0.367737. Total HVP
+therefore increases from 28 to 38 over the first three macros, while the
+terminal short-run energy improves by 4.118787 mEh. This is evidence of
+improved failed-segment handling, **not yet improved full-run time or counts**.
+
+The new short run uses GNU wall 277.56 s and peak RSS 40467.98 MiB. The saved
+old full run has no equivalent standalone three-macro end-to-end timing;
+the derivative-instrumented diagnostic time must not serve as a speed baseline.
+
+| Small regression | Previous / corrected macros | Previous / corrected HVP | Energy change (Eh) | Previous / corrected wall (s) | Previous / corrected RSS (MiB) |
+|---|---:|---:|---:|---:|---:|
+| F2-OEO | 3 / 3 | 13 / 13 | +1.19e-10 | 0.25 / 0.30 | 18.33 / 18.39 |
+| FeCl2 | 15 / 15 | 252 / 251 | +2.86e-10 | 6.89 / 7.68 | 518.13 / 538.34 |
+| MnF2 | 10 / 10 | 159 / 159 | -1.14e-12 | 3.46 / 4.45 | 518.29 / 483.63 |
+| 241 | 3 / 3 | 20 / 20 | -1.40e-11 | 2.07 / 1.98 | 843.84 / 820.76 |
+
+All four small runs converge with exit 0. Timings are single runs on
+different nodes; the new runs enable scalar tracing. No general speedup is
+claimed. Neither a new convergence condition nor an expensive routine
+certification was introduced. The previously completed 17-macro singlet
+belongs to the pre-interpolation S-horizontal version; it is not a measured
+full-run result for this correction.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.

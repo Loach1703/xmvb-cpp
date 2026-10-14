@@ -1,0 +1,25 @@
+shared radial whitening and raw Gram inverse: passed
+Inactive occupation and active unit-model production blocks: passed
+polar pullback ambient secant: passed (packed error 5.85503e-06, untransported error 0.290358)
+unequal supports with off-support cancellation: passed (12 -> 7)
+stored but frozen active tail: passed (11 -> 7)
+full support: passed (24 -> 14)
+mixed full-support AO ordering: passed (24 -> 14)
+metric inverse true-residual certificates and RHS scaling: passed
+metric inverse true-residual certificates and RHS scaling: passed
+metric inverse true-residual certificates and RHS scaling: passed
+metric inverse true-residual certificates and RHS scaling: passed
+analytic physical metric orbital blocks: passed
+analytic physical metric orbital blocks: passed
+analytic physical metric orbital blocks: passed
+analytic physical metric orbital blocks: passed
+complete-CAS metric gauge, adjoint, projector and dual invariance: passed
+residual-driven Newton subspace: passed
+response-model image refresh and radius reuse: passed
+inactive gauge rotation: passed (24 -> 14)
+ill-conditioned inactive representative: passed (24 -> 14)
+no inactive orbitals: passed (6 -> 4)
+metric inverse true-residual certificates and RHS scaling: passed
+inactive only: passed (6 -> 4)
+metric inverse true-residual certificates and RHS scaling: passed
+all coordinates are scale gauge: passed (2 -> 0)
