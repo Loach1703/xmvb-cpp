@@ -60,6 +60,7 @@ set(XMVB_INPUT_SOURCES
 
 set(XMVB_OUTPUT_SOURCES
   output/molden/writer.cpp
+  output/orbitals/writer.cpp
   output/text/report.cpp
   output/text/sections.cpp
   output/text/structure.cpp
@@ -227,6 +228,10 @@ add_custom_target(
 add_dependencies(xmvb xmvb_assets)
 
 if (BUILD_TESTING)
+  add_executable(test_output_orbitals ${CMAKE_SOURCE_DIR}/tests/output/test_orbitals.cpp)
+  target_link_libraries(test_output_orbitals PRIVATE xmvb_output xmvb_guess)
+  add_test(NAME output_orbitals COMMAND test_output_orbitals)
+
   add_executable(
     test_output_structure
     output/text/structure.cpp

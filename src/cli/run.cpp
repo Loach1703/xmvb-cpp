@@ -12,6 +12,7 @@
 #include "output/text/report.hpp"
 #include "output/trace/binary.hpp"
 #include "output/molden/writer.hpp"
+#include "output/orbitals/writer.hpp"
 #include "output/trace/accepted_iteration.hpp"
 #include "output/trace/neo.hpp"
 #include "output/trace/tnhvp.hpp"
@@ -134,6 +135,10 @@ int run(Options command_line) {
         result.optimized_input.orbital_preparation_input.orbital_value_table);
   }
   const bool command_converged = result.converged;
+  if (command_converged) {
+    xmvb::output::write_orbital_file(
+        fs::path(input_path), result.optimized_input.orbital_preparation_input);
+  }
   std::optional<fs::path> molden_output_path;
   if (load_result.request_molden_output) {
     molden_output_path =
