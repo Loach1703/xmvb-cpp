@@ -58,7 +58,8 @@
         "geometries/cu2o2-f060.xyz",
         "geometries/cu2o2-f080.xyz",
         "geometries/cu2o2-f100.xyz"
-      ]
+      ],
+      "si_active_description": "2006 SI section 16/14: sy1 O2s,O2pz,O3pz; sy2 O2py,O2px,O3py,O3px; sy3 O2s,O2pz+Cu3d,O2pz-Cu3d; sy4 O2py+Cu3d,O2px,O2py-Cu3d,O3px. These describe delocalized symmetry orbitals in the original convention, not atom-local AO indices to delete."
     },
     {
       "system": "Co2(CO)6C2H2",
@@ -68,13 +69,17 @@
       ],
       "basis": "aug-cc-pVTZ",
       "point_group": "C2v",
-      "multiplicity": null,
+      "multiplicity": 1,
       "geometry_source": "2019 paper supplementary material, section VI D",
       "avas_targets": "Co 3dx2-y2,3dxy,3dxz,3dyz; acetylene carbon 2py,2pz",
-      "orientation": "SI has Co-Co along y and C-C along x, whereas main text AVAS description uses Co-Co along z. Resolve by a common rotation of geometry and directional targets, not a literal reuse of labels.",
-      "unresolved": "SI lists coordinates/basis/energy, not charge or multiplicity; neutral singlet is a candidate, not explicitly verified. Confirm target state and AVAS threshold.",
+      "orientation": "Preserve SI file; prepared proper rotation (x,y,z)->(x,-z,y), determinant +1, so Co-Co lies along z and acetylene C-C along x. Use main-text directional AO targets only in this rotated frame.",
+      "unresolved": "2019 specific root not explicitly labeled. AVAS threshold 0.3 is the paper's usual choice, not an explicitly repeated Co setting; validate dimension (18,13) and active characters. HF/AVAS has not been run.",
       "geometry_file": "geometries/co2-carbonyl.xyz",
-      "reference_energy_Eh": -3516.24319296
+      "reference_energy_Eh": -3516.24319296,
+      "charge": 0,
+      "spin_evidence": "2007 original study ic070278t identifies singlet diradical character; supports neutral-singlet preparation, but 2019 SI does not explicitly label its root.",
+      "spin_source": "https://pubs.acs.org/doi/10.1021/ic070278t",
+      "avas_geometry_file": "geometries/co2-carbonyl-avas.xyz"
     },
     {
       "system": "FeCl3",
@@ -138,5 +143,16 @@
   "supplement_files": [
     "sources/Supplementary_Material.pdf",
     "/home/txia/.codex/attachments/638795f2-7539-4489-8621-0ffeb65f0031/jp056791e_si_001.pdf"
-  ]
+  ],
+  "input_preparation": {
+    "status": "scripts prepared, no numerical orbitals generated",
+    "exporter": "export_shared.py",
+    "pyscf": "pyscf_shared.py",
+    "scope": "C1 matched comparison; not symmetry-restricted reproduction of the literature",
+    "blocked_by": [
+      "Cu (16,18)->(16,14) selection is not specified unambiguously",
+      "No HF/AVAS preparation authorized on compute nodes yet"
+    ],
+    "note": "Export requires one approved Cartesian MO frame, checkpoint, matching Gaussian basis and geometry; generates both input.xmi and initial_mo.npy from that one frame."
+  }
 }
