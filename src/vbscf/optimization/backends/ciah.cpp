@@ -14,6 +14,7 @@
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "vbscf/diagnostics/orbitals/ciah_keyframe.hpp"
 #include "vbscf/diagnostics/performance/phases.hpp"
 #include "vbscf/optimization/driver/options.hpp"
 #include "vbscf/optimization/driver/result.hpp"
@@ -291,6 +292,7 @@ bool build_ciah_macro_step(
   bool audit_next_keyframe_step = false;
   bool audited_keyframe_step = false;
   bool audited_origin_step = false;
+  bool audited_structure_path = false;
   bool energy_model_stopped = false;
   const char* micro_stop = "unset";
   CiahResult candidate;
@@ -421,6 +423,25 @@ bool build_ciah_macro_step(
         keyframe_interval - std::log(length + 1.0e-7));
     if (since_keyframe >= interval || predicted_norm < keyframe_norm / gradient_trust) {
       const Keyframe exact = evaluate_keyframe(displacement);
+      if (ns && !audited_structure_path &&
+          diagnostics::neo_trace_context.keyframe == 1 &&
+          diagnostics::ciah_keyframe_audit_enabled()) {
+        const int saved_keyframes = record->keyframes;
+        const auto carrier = diagnostics::audit_ciah_orbital_geometry(
+            displacement.head(no), *context, hessian.structure_action(), structure,
+            [&](const Eigen::VectorXd& point) {
+              OrbitalPreparationInput trial = orbitals;
+              layout.unpack(build_nonredundant_lifted_trial_parameters(
+                  orbitals, chart, layout, point), &trial);
+              return trial;
+            });
+        diagnostics::audit_ciah_keyframe(displacement, initial_gradient,
+            hessian_displacement, exact.gradient, c0,
+            context->normalized_state_weights[0], structure, hessian.structure_action(), carrier,
+            [&](const Eigen::VectorXd& point) { return evaluate_keyframe(point).gradient; });
+        record->keyframes = saved_keyframes;
+        audited_structure_path = true;
+      }
       const double actual_norm = coordinate_norm(exact.gradient);
       const Eigen::VectorXd correction = exact.gradient - predicted_gradient;
       const double mismatch_norm = coordinate_norm(correction);

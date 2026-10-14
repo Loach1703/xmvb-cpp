@@ -141,8 +141,9 @@ StructureTangentOperator::StructureTangentOperator(
   constraint_qr_.compute(selected_images.overlap);
   metric_inverse_ = accepted_point_->metric_inverse(action);
   if (metric_inverse_) diagnostics::neo_trace("ciah_metric_factors",
-      "bytes=%zu,blocks=%zu,max_block=%d", metric_inverse_->factor_bytes(),
-      metric_inverse_->block_count(), metric_inverse_->max_block_size());
+      "bytes=%zu,blocks=%zu,max_block=%d,carrier_diagonal=%d", metric_inverse_->factor_bytes(),
+      metric_inverse_->block_count(), metric_inverse_->max_block_size(),
+      static_cast<int>(action_->supports_carrier_diagonal()));
 }
 
 int StructureTangentOperator::n_structures() const noexcept {

@@ -280,9 +280,9 @@ PySCF coupled Newton and the C++ code share their headline defaults
 No such parameter was adjusted in this audit.
 
 Remaining source-level differences are the chosen generalized AH metric,
-the finite raw-coefficient orbital update, CI preconditioning in raw VB
-structure coordinates versus the orthogonal spin-product carrier, and exact
-versus approximate keyframe gradients. They can change early finite-subspace
+the finite raw-coefficient orbital update, the pulled-back carrier CI
+preconditioner and coarse enrichment versus PySCF's component diagonal, and
+exact versus approximate keyframe gradients. They can change early finite-subspace
 steps. In particular, the C++ generalized metric is a block-diagonal orbital
 subspace metric plus structure overlap, not a demonstrated full wavefunction
 norm. Nonzero CI representation connection in the Hessian does not by itself
@@ -295,6 +295,188 @@ of these remaining differences as the reason for the higher final endpoint.
 The next discriminating check is covariance of the first joint AH direction,
 metric and preconditioner between the two coordinate representations, not
 another endpoint energy replay or a threshold sweep.
+
+### First-keyframe finite-response audit (2026-10-14)
+
+Jobs **1253979** and **1254011** run only the first original-guess singlet
+macro, with opt-in diagnostic evaluations. No optimizer parameter, HVP,
+convergence criterion or finite update is changed. Both `test_ciah` and
+`test_coupled_structure` pass in the Slurm allocation. Timings include the
+extra diagnostic evaluations and are not performance results.
+
+The live branch reports `carrier_diagonal=1`. The accepted CI coordinate
+gradient norm is `3.71962e-8` (physical dual norm `1.94037e-8`). Thus neither
+the raw-VB-diagonal hypothesis nor forcing that tiny origin CI residual to
+zero explains the keyframe's approximately `0.09564` structure mismatch.
+
+Let the actual accumulated displacement be $(p,q)$, the origin structure
+gradient be $g_{s,0}$, and the two structure components of the origin Hessian
+image be $L_o=H_{so}p$ and $L_c=H_{ss}q$. All gradients below are pulled back
+to the same immutable origin coordinates. Define
+
+$$
+e_o(t)=g_s(tp,0)-g_{s,0}-tL_o,\qquad
+e_c(t)=g_s(0,tq)-g_{s,0}-tL_c,
+$$
+
+$$
+e_m(t)=g_s(tp,tq)-g_s(tp,0)-g_s(0,tq)+g_{s,0}.
+$$
+
+The true total remainder is $e_o+e_c+e_m$. That reconstruction is an
+algebraic identity, not an independent derivative certification.
+
+| Fraction of the actual displacement | Pure orbital remainder | Pure CI remainder | Mixed remainder | Total remainder |
+|---|---:|---:|---:|---:|
+| 1/8 | 0.00228273 | 3.97558e-7 | 0.000951480 | 0.00244464 |
+| 1/4 | 0.00886515 | 3.18022e-6 | 0.00384984 | 0.00952093 |
+| 1/2 | 0.0317566 | 2.54340e-5 | 0.0153382 | 0.0342812 |
+| 1 | 0.0889979 | 0.000203224 | 0.0555502 | 0.0956424 |
+
+These are Euclidean structure-covector norms in the C++ chart, not
+coordinate-invariant norms shared with PySCF. Physical dual norms show the
+same dominance: at the full displacement, the three remainders are
+`0.0673105`, `0.000151375` and `0.0416982`.
+
+Two central-difference probes on the actual joint displacement give
+structure-HVP errors `1.81120e-8` and `1.68758e-9` at offsets `1e-3` and
+`3e-4`. An independent pure-orbital probe at `3e-4` verifies $H_{so}p$ to
+`2.99195e-9`. Their image norms are `0.00859195` and `0.0996305`, respectively.
+This verifies the linearization along the tested paths, not every Hessian
+direction or the finite-step model.
+
+There is strong cancellation in the linear coupled prediction:
+$\|L_o\|=0.0996305$, $\|L_c\|=0.0953108$, but
+$\|L_o+L_c\|=0.00859195$. Their angle is **175.632 degrees**, and the sum of
+individual norms is **22.689 times** the resulting norm. The finite orbital
+and mixed terms invalidate that cancellation; the small predicted structure
+gradient is consequently not evidence of a small true structure gradient.
+
+Source comparison distinguishes a valid AH metric from a covariant one.
+The current block-diagonal metric contains $G_s=Z^TMZ$, with
+$\delta C=Zq/\sqrt{2}$ for this single state. In PySCF's instantaneous
+orthogonal carrier, $y=F(b)C$, and its normalized tangent is
+
+$$
+\delta y=\frac{FZq}{\sqrt{2}}
+ +(I-yy^T)\,DF(b)[p]C_0.
+$$
+
+Thus the exact pullback of the carrier Euclidean norm has a $G_s/2$ CI
+block plus representation-connection cross terms. The current metric is
+still an admissible positive step metric, but not that strict PySCF
+pullback. This difference can change finite AH directions; it has not yet
+been established as the dominant cause.
+
+The C++ raw additive path rebuilds core projection, active overlap and
+its Cholesky factor before applying alpha/beta exterior transforms to fixed
+raw structure coefficients. PySCF coupled Newton updates its orthogonal
+MO frame and normalizes additive CI coefficients in that frame. The finite
+paths differ. The existence of the exterior transform alone does not prove
+it dominates the measured remainder: orbital variation changes both the
+carrier map and the orthogonal integrals. The follow-up geometry audit
+measures those representation changes without another CI solve.
+
+Job **1254022** measures the geometry along the same pure-orbital path.
+Origin active overlap differs from identity by `3.98932e-14`. Its derivative
+along the step has Frobenius norm `0.0459643`. At the full displacement,
+the overlap change is `0.367171`, of which the nonlinear remainder has norm
+`0.365174`; the Cholesky upper factor changes by `0.198854`. The normalized
+carrier coefficient change is `0.0191648`, with nonlinear remainder
+`0.0190995`. Its unnormalized norm becomes `0.994614`, so a missing scalar
+normalization alone cannot explain the large response mismatch. These
+geometric norms do not bound Hamiltonian-weighted gradient changes.
+
+Job **1254034** additionally audits the first PySCF coupled-Newton keyframe.
+It leaves the actual approximate-gradient return untouched. It applies the
+origin HVP once to the saved cumulative displacement and constructs one
+exact gradient at the rotated orbitals with the **same fixed CI vector**;
+it performs no extra CI solve. The exact gradient here uses PySCF's
+instantaneous rotated coordinate frame, not the C++ raw chart.
+
+| PySCF first-keyframe quantity | Orbital norm | CI norm | Joint norm |
+|---|---:|---:|---:|
+| Linear prediction | 0.0833668 | 0.0279660 | 0.0879325 |
+| Returned approximate keyframe gradient | 0.0822709 | 0.0514441 | 0.0970309 |
+| Exact fixed-CI keyframe gradient | 0.0825502 | 0.0530228 | 0.0981119 |
+| Prediction minus exact gradient | 0.00856218 | 0.0294426 | 0.0306623 |
+| Approximation minus exact gradient | 0.00763778 | 0.00176764 | 0.00783966 |
+
+PySCF therefore also has a finite-step structural-model remainder. Its
+small approximate/exact CI-gradient difference (`0.00176764`) does not
+support an explanation based solely on comparing an exact C++ keyframe
+against an inaccurate PySCF CI keyframe. Do not interpret ratios between
+C++ raw-covector norms and PySCF orthogonal-coordinate norms as invariant
+error ratios. The saved `first-keyframe.json` and `first-keyframe.npz` retain
+the actual PySCF quantities for further mapped comparisons.
+
+### Finite carrier counterfactual: a specific leading source isolated
+
+Job **1254043** adds a matrix-free counterfactual to the same first-macro
+audit. Let $F_t$ be the current exact raw-structure to orthogonal
+unique-spin-product map, $N_t=\|F_t C_0\|$, and $y_t=F_tC_0/N_t$.
+Hold the **orthogonal carrier Hamiltonian $h_0$ fixed**, while allowing only
+$F_t$ and its normalization to vary. The resulting structure covector is
+
+$$
+g_s^{F}(t)=\frac{\sqrt{2}}{N_t}
+ Z^TF_t^T(h_0-E_t^{F})y_t,\qquad E_t^{F}=y_t^Th_0y_t.
+$$
+
+This is a coordinate-defined counterfactual, not a separate physical
+calculation or a replacement VB wavefunction. On this complete singlet
+structure sector, it is evaluated through the retained origin action:
+
+$$
+\widetilde C_t=M_0^{-1}F_0^Ty_t,\qquad
+h_0y_t=F_0M_0^{-1}H_0\widetilde C_t.
+$$
+
+Completeness matters: $F_0M_0^{-1}F_0^T$ is identity on the selected spin
+sector, not on arbitrary product vectors or arbitrary selected-structure
+subspaces. The measured closure residual
+$\|F_0\widetilde C_t-y_t\|$ is at most `9.44e-17` on these probes. Shared
+occupation-block inverse factors are reused; no dense H/M matrix, extra
+AO integral transformation, CI solve or per-thread carrier copy is made.
+
+The carrier-only remainder is
+$e_F(t)=g_s^F(t)-g_s^F(0)-t(g_s^F)'(0)$, with the derivative measured at
+`+/-3e-4`. The remaining vector is $e_o(t)-e_F(t)$; it includes Hamiltonian
+changes **and their cross terms with the carrier map**, so it is not a
+pure-integral contribution.
+
+| Step fraction | Carrier-only remainder | Remaining remainder | Actual pure-orbital remainder |
+|---|---:|---:|---:|
+| 1/8 | 0.00232136 | 0.000370491 | 0.00228273 |
+| 1/4 | 0.00903990 | 0.00168414 | 0.00886515 |
+| 1/2 | 0.0324772 | 0.00809489 | 0.0317566 |
+| 1 | 0.0898271 | 0.0377999 | 0.0889979 |
+
+These norms do not add: the full-step cross inner product is
+`-0.000788553`. No percentage attribution is claimed. Nevertheless, holding
+$h_0$ fixed still reproduces the large pure-orbital remainder's scale across
+all four fractions. This causally isolates finite carrier-map motion as a
+leading mechanism in this chart, rather than blaming electronic-integral
+changes or an incorrect directional Hessian alone.
+
+The actual implementation independently changes raw orbital coefficients
+and raw structure coefficients. Orbital normalization and core projection
+change the active Gram matrix; its Cholesky/exterior map then changes the
+normalized carrier CI even with raw $C$ held fixed. The infinitesimal
+connection is included in the verified HVP, but its large **finite nonlinear
+remainder** is not represented by the origin linear coupled-gradient model.
+That remainder spoils the strong orbital/CI cancellation described above.
+PySCF's orthogonal-frame finite update does not have this changing-overlap
+normalization map. This is a finite-chart/CI-transport issue, not evidence
+that nonorthogonal orbitals or VB derivatives are intrinsically incorrect.
+
+The next derivation should align finite orbital retraction and CI transport
+while preserving the intended VB variational space and their gradient/HVP
+pullbacks. It must distinguish a complete spin sector (exact carrier
+transport is representable) from an arbitrary selected VB structure space
+(such transport need not remain in the selected space). Merely changing the
+CI preconditioner or AH metric does not remove the measured finite map
+nonlinearity; no parameter adjustment or production solver change was made.
 
 ## Artifacts
 
