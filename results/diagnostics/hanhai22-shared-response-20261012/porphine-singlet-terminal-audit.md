@@ -743,6 +743,178 @@ macro, micro, role, stage and raw values with source-line references, plus
 accepted-only CSV and aggregate CSV/JSON. Original logs remain available;
 compressed logs are retained as repository evidence.
 
+## Raw representatives versus physical active spaces (2026-10-14)
+
+This audit uses the current finite-CI-transport implementation, not the earlier
+pre-transport native trajectory. Native job 1254394 records only two macros,
+with unchanged CIAH, HVP, thresholds and preconditioner. Its extra code writes
+raw orbital snapshots before canonicalization; it adds no objective or HVP.
+Build 1254377 passed orbital geometry, CIAH and arbitrary-selected-space CI
+transport tests. The deliberate two-macro native exit is 2, not convergence.
+
+Geometry jobs 1254391, 1254434, 1254460, 1254479 and 1254511 run on Hanhai22 compute nodes.
+They use saved native/PySCF orbitals and the AO overlap only: no Hamiltonian,
+many-body sigma, energy or gradient evaluation. The last job contains the full
+analysis, including the local-sphere counterfactual and script/snapshot hashes.
+Saved PySCF AH macro orbitals and its completed low-energy checkpoint
+are reused; neither PySCF nor an old native version is rerun.
+
+### Gauge-independent comparison
+
+First remove the inactive span from the active columns and form an
+S-orthonormal frame for that projected span. Principal angles then compare
+physical subspaces, independently of raw orbital norms, phases, mixing and
+export canonicalization. The saved initial native/PySCF active spaces agree
+within 1.3e-6 degrees. A saved exact/raw-versus-Molden calibration bounds the
+active-space angle error from eight-decimal export at 1.6e-5 degrees.
+
+| Comparison | Largest active principal angle |
+|---|---:|
+| Current NEO macro 1 vs PySCF macro 1 | 5.8708 degrees |
+| Current NEO macro 2 vs PySCF macro 2 | 39.7865 degrees |
+| Current NEO macro 1 to macro 2 | 8.8260 degrees |
+| PySCF macro 1 to macro 2 | 41.4136 degrees |
+| Current NEO terminal vs PySCF low-energy terminal | 89.9997 degrees |
+
+The old first-macro difference of about 21.94 degrees preceded production CI
+transport and must not be quoted as the current result. Transport substantially
+improves the first macro; physical paths diverge strongly in the second.
+Terminal subspaces differ, not merely their raw representatives. Different
+methods need not follow identical paths or converge to the same local minimum;
+this table does not alone prove an incorrect gradient or stationary energy.
+At macro 2 only one active principal direction differs strongly (39.7865
+degrees); the other ten angles are below 4 degrees. At the terminal point three
+directions differ by about 55.22, 55.55 and 90 degrees. It would be misleading
+to describe all eleven active directions as orthogonal between the endpoints.
+
+### Exact candidate geometry and the hidden finite-path crossing
+
+Independent differentiation of the core and projected-active span projectors
+reproduces the native accepted physical tangent norm to 1.7e-15. The second
+accepted candidate and exported canonicalized active space differ by only
+3.4e-6 degrees, consistent with Molden precision. Thus neither a wrong logged
+step norm nor export canonicalization explains the observed physical divergence.
+
+| Macro/stage | Physical tangent norm | Largest active angle | Active-frame polar orientation | Same-tangent isometry vs raw active angle |
+|---|---:|---:|---:|---:|
+| 1, accepted | 0.978722 | 38.4966 degrees | +1 | 9.0207 degrees |
+| 2, first keyframe | 0.466900 | 20.9519 degrees | -1 | 21.9994 degrees |
+| 2, full macro trial | 0.430968 | 30.5726 degrees | -1 | 35.0260 degrees |
+| 2, half-step accepted | 0.215484 | 8.8260 degrees | +1 | 2.8532 degrees |
+
+The isometry here is a geometry-only counterfactual with exactly the same
+physical first tangent. Its skew-generator reconstruction error is below
+7.2e-15. It is not an optimizer implementation, an electronic-energy test, or
+permission to assume closure of an arbitrary selected VB space. Nor does it
+uniformly improve a projector Taylor remainder: macro 1's remainder is larger
+under that isometry, whereas macro 2's full-trial remainder is 0.151901 instead
+of 0.833101 under the actual raw update.
+
+A local-sphere exponential constructed from each normalized raw tangent was
+also tested geometrically, without changing NEO or evaluating its energy. It
+removes the orientation reversal in these candidates, but changes the second
+keyframe's true active angle from 20.9519 to 49.9890 degrees; the full macro
+trial becomes 33.1662 degrees. Thus it is not equivalent to either the raw
+update or the collective same-tangent isometry. This reinforces the need to
+derive the complete orbital/CI pullback before trying a new production update.
+
+At the second keyframe, raw orbital 98 has alpha=-1.280040, theta=1.100975 and
+normalized raw-ray angle 1.819871 radians (104.27 degrees). Its negative
+longitudinal coefficient is real, but the resulting pathology is not just
+individual-orbital scaling. Along the exact additive segment from macro origin
+to this keyframe, one active principal angle reaches 90 degrees at fraction
+0.781756, then the endpoint returns to an unsigned 20.9519 degrees. At that
+crossing the active Gram condition is about 175.8: the active orbitals remain
+linearly independent. For the full macro trial, the corresponding crossing is
+at fraction 0.884797, with active Gram condition about 156.2. The path crosses
+the old-active graph chart, not a singular physical active basis.
+
+To see the mechanism, let the origin projected active columns be T0=Q0 R0,
+with Q0^T S Q0=I. At a candidate let T be its active columns after removing
+its current inactive span. Define W=T R0^-1, L=Q0^T S W and E=W-Q0 L. Then
+Q0^T S E=0 and, whenever L is invertible,
+
+$$
+\operatorname{span}(T)
+=\operatorname{span}\!\left(Q_0+E L^{-1}\right).
+$$
+
+The first projector derivative removes the active-parallel contribution, but
+the finite update still depends on L^-1. In the second keyframe the first-order
+active-parallel Frobenius norm is 1.350605 while the physical external tangent
+norm is only 0.449683. The parallel measure includes removable column scaling;
+it is not a norm of additional physical degrees of freedom. Positive scaling
+does not alter a span, but its combination with an external increment changes
+the finite graph denominator and can reverse its sign. The endpoint L has
+smallest singular value 0.273844 and negative determinant. In the full macro
+trial its smallest singular value
+is 0.128225. The half-step candidate retains positive orientation.
+
+This is why a modest physical tangent norm need not mean a modest, well-behaved
+finite subspace path under the Euclidean raw lift. The complete-OEO chart uses
+an Euclidean complement of gauge generators (`orbitals/charts/chart.cpp`),
+whereas the physical metric uses S-projected subspace changes. These are valid
+quotient coordinates at first order but do not bound the discarded parallel
+representative component at a finite step.
+
+### Coupled model failure and the PySCF difference
+
+At the second keyframe, the actual coupled gradient norm is 0.985829 versus
+model prediction 0.063051. The structure components are respectively 0.979898
+and 0.053263 in the native coordinate norm. The keyframe is rejected. The full
+macro trial predicts a 3.99623 mEh decrease but actually increases the relaxed
+energy by 6.20311 mEh; the half step is accepted with rho=0.930389. This is a
+measured failure of the finite coupled model on the candidate, not evidence
+that the Newton residual tolerance should be tightened.
+
+The native finite CI transport uses the Cholesky representation R and
+representation cross-Grams R_p^T R_0 (`optimization/coupled/ci_transport.cpp`),
+not the physical overlap of the two orthogonal active frames. Such a transport
+is a valid coordinate retraction but is not an invariant physical-state map
+under arbitrary active-frame rotations/reflections. For example an orthogonal
+active rotation leaves the Gram and R unchanged, although keeping the same
+physical multiconfigurational state requires an exterior-power CI coefficient
+transformation. A pure active rotation is excluded from the complete-CAS
+reduced chart; that example alone is not an on-chart bug. However the measured
+admissible finite update above generates an actual frame-orientation reversal,
+which Gram-only transport does not encode explicitly. The CI tangent is then
+required to compensate a strongly nonlinear representative change.
+
+The installed PySCF source differs concretely: `mc1step.update_rotate_matrix`
+uses expmat(unpack(dx)), and `newton_casscf.extract_rotation` composes that
+unitary update while adding and normalizing CI increments. Redundant
+active-active rotations are not independent AH variables. On the saved PySCF
+macro 1-to-2 path, the active frame polar overlap has positive orientation and
+only 0.120734 degrees internal polar angle, against the native rejected
+candidate's reflection. Both methods freeze an origin Hessian across keyframes;
+that shared feature is not itself a missing-HVP bug. Default orbital-AH PySCF
+and native coupled AH are not identical subproblem trajectories.
+
+An orientation reversal alone is not a physical error: corresponding CI
+coefficient transformations can absorb it. The issue here is its coexistence
+with a large finite-path excursion, Gram-only coefficient extension and a
+measured structure-gradient prediction failure. Do not equate an orbital phase
+change by itself with the final energy discrepancy.
+
+The concrete weakness now isolated is the uncontrolled finite representative
+motion of the raw lift/update and its interaction with the finite CI extension.
+It explains an actual second-macro model rejection and where the physical path
+starts diverging. It does **not yet prove** this is the sole cause of the final
+0.344725 mEh gap, or that any chosen exponential update will reach PySCF's basin.
+No macro-2 derivative audit or electronic-energy test of the same-tangent
+counterfactual has been made in this round. An individual-orbital sphere update
+alone does not remove active-parallel mixing or supply CI frame covariance.
+The next root-targeted change needs a consistent horizontal finite lift and CI
+frame transport, retaining projected treatment for nonclosed selected spaces,
+rather than a new clipping constant, residual threshold, or endpoint test.
+
+The diagnostic-only two-macro run uses 19 HVP, reaches
+-2244.722528082080 Eh, and has wall 222.96 s / peak RSS 39.5207 GiB. This includes
+geometry logs/snapshot I/O and is not a performance benchmark or a convergence
+claim. Full raw snapshots, scalar log, executable hash, test evidence and the
+geometry-only script/JSON are retained in `step-geometry-1254394`,
+`step-geometry-build-1254377`, and `representative-analysis-1254511`.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.

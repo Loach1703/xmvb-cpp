@@ -4,6 +4,10 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
@@ -54,6 +58,26 @@ void audit_orbital_step(const OrbitalPreparationInput& input,
   if (base_reduced.size()) offset = chart.expand_retract_input_tangent(input, base_reduced);
   const int n_inactive = (input.n_total_electrons - input.n_active_electrons) / 2;
   const int n_occupied = n_inactive + input.n_active_orbitals;
+  std::ofstream origin_file, trial_file;
+  std::filesystem::path origin_path, trial_path;
+  const char* folder = std::getenv("XMVB_NEO_ORBITAL_PATH");
+  if (folder && *folder && std::strncmp(stage, "micro_", 6) != 0) {
+    static int sequence = 0;
+    ++sequence;
+    std::filesystem::create_directories(folder);
+    std::ostringstream name;
+    name << "macro-" << std::setw(3) << std::setfill('0')
+         << neo_trace_context.keyframe;
+    origin_path = std::filesystem::path(folder) / (name.str() + "-origin.bin");
+    name << '-' << stage << '-' << std::setw(4) << sequence;
+    trial_path = std::filesystem::path(folder) / (name.str() + ".bin");
+    if (!std::filesystem::exists(origin_path)) {
+      origin_file.open(origin_path, std::ios::binary);
+      if (!origin_file) throw std::runtime_error("cannot write orbital origin snapshot");
+    }
+    trial_file.open(trial_path, std::ios::binary);
+    if (!trial_file) throw std::runtime_error("cannot write orbital path snapshot");
+  }
   // Two AO vectors are reused serially. The shared AO overlap is borrowed;
   // neither a per-orbital metric copy nor a per-thread workspace is needed.
   Eigen::VectorXd b(input.n_basis_functions), delta(input.n_basis_functions);
@@ -68,12 +92,28 @@ void audit_orbital_step(const OrbitalPreparationInput& input,
       delta[basis] = raw[flat];
     }
     const auto geometry = measure_orbital_step(b, delta, input.ao_overlap_matrix);
+    if (origin_file.is_open()) origin_file.write(
+        reinterpret_cast<const char*>(b.data()), b.size() * sizeof(double));
+    if (trial_file.is_open()) {
+      const Eigen::VectorXd trial = b + delta;
+      trial_file.write(reinterpret_cast<const char*>(trial.data()), trial.size() * sizeof(double));
+    }
     neo_trace("orbital_step_geometry",
         "stage=%s,micro=%d,orbital=%d,role=%s,coefficients=%d,alpha=%.17g,theta=%.17g,"
         "step_norm=%.17g,actual_angle=%.17g,norm_ratio=%.17g",
         stage, micro, orbital + 1, orbital < n_inactive ? "inactive" : "active", count,
         geometry.alpha, geometry.theta, geometry.step_norm,
         geometry.actual_angle, geometry.norm_ratio);
+  }
+  if (trial_file.is_open()) {
+    trial_file.close();
+    if (origin_file.is_open()) origin_file.close();
+    if (!trial_file || !origin_file)
+      throw std::runtime_error("orbital path snapshot write failed");
+    neo_trace("orbital_step_snapshot",
+        "stage=%s,micro=%d,n_bf=%zu,n_core=%d,n_active=%zu,origin=%s,trial=%s",
+        stage, micro, input.n_basis_functions, n_inactive, input.n_active_orbitals,
+        origin_path.c_str(), trial_path.c_str());
   }
 }
 
