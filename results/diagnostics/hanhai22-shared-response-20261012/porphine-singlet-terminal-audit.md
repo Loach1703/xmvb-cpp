@@ -1260,6 +1260,23 @@ certification was introduced. The previously completed 17-macro singlet
 belongs to the pre-interpolation S-horizontal version; it is not a measured
 full-run result for this correction.
 
+### Original-guess full runs of the segment correction
+
+Array **1255029**, submitted on Hanhai22 on 2026-10-14, runs singlet (task 0)
+and triplet (task 1) independently with `porphine-segment.sbatch`. Both use
+the frozen, tested build 1254923 containing correction `5b0adda9`; the script
+checks binary SHA256 `50952c0628a45b6573c9bfc3199414abb8cfc8cdad17427b5a23d9d6a3d52cb8`.
+Inputs are copied directly from `inputs/singlet` and `inputs/triplet`, with
+`guess=read`, full OEO CAS(8,11), cc-pVDZ, exact libcint and multiplicities
+1 and 3. These are original guesses, not any optimized restart.
+
+Each task has 32 bound cores, Davidson, analytic diagonal, gradient tolerance
+1e-3 and energy tolerance 1e-7 Eh. No short-run iteration override is passed;
+the original deck contains `itmax=1000`. The scheduler reservation is 24 h.
+Finite-difference, step-geometry and candidate diagnostics are disabled;
+scalar iteration records and GNU time/RSS remain enabled. At submission both
+tasks were pending for priority; no convergence result is yet implied.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.
