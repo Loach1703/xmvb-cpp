@@ -570,6 +570,81 @@ Artifacts: `porphine-ci-transport-1254085/run.err`, `neo.tsv`,
 is `porphine-ci-transport.sbatch`; diagnostic mode is the existing audit
 variable with value `transport`, not a new optimizer parameter.
 
+## Production finite transport and full pullback (2026-10-14)
+
+The prototype has now been replaced by `optimization/coupled/CiTransport`.
+It uses actual selected-space cross-Gram actions and normal equations, not
+an assumption that the selected structure space is closed. Complete ambient
+spin-string carriers use exterior-transform actions; incomplete carriers use
+directed, tiled unique-string overlap contractions without full-space padding.
+The actual trial transforms reuse immutable complete-sector metric factors.
+No origin factor is rebound and no AO ERI array is copied per thread.
+
+Finite keyframe gradients include normalization, the inactive projector,
+active-overlap Cholesky derivatives, and both sides of the normal equation.
+The origin HVP retains the nonstationary CI residual curvature. The old
+diagnostic-only transport source has been removed. Coordinates, AH policy,
+preconditioner, screening, and convergence thresholds are unchanged.
+
+Build 1254176 passed all eight tests, including independent cross-Gram
+adjoints, raw-overlap/Cholesky pullbacks, and an arbitrary three-dimensional
+selected-space transport test with a deliberately nonstationary CI vector.
+The latter verifies both orbital/structure gradients and the full origin
+curvature, not just coefficient transport.
+
+The first molecular keyframe was audited using the actual accumulated
+orbital/structure displacement. Absolute HVP errors below are in the full
+joint coordinate vector; the gradient check compares a finite-point energy
+directional derivative to the full transported gradient dot displacement.
+
+| Molecule | FD scale | Full HVP error | Orbital HVP error | Structure HVP error | Energy derivative error (Eh) |
+|---|---:|---:|---:|---:|---:|
+| FeCl2 | 1e-3 | 4.7804e-10 | 3.4203e-10 | 3.3397e-10 | 4.1929e-9 |
+| FeCl2 | 3e-4 | 1.0024e-9 | 9.7616e-10 | 2.2770e-10 | 2.5290e-8 |
+| Porphine singlet | 1e-3 | 1.6885e-8 | 3.2314e-9 | 1.6573e-8 | 1.1698e-8 |
+| Porphine singlet | 3e-4 | 6.8410e-9 | 6.6722e-9 | 1.5103e-9 | 1.9679e-8 |
+
+Native 32-thread Hanhai22 small-system results (GNU process wall/RSS;
+diagnostic audits disabled):
+
+| Case | Macro steps | Orbital HVP | Final energy (Eh) | Wall (s) | RSS (MiB) |
+|---|---:|---:|---:|---:|---:|
+| F2-OEO | 3 | 15 | -198.689800050559 | 0.30 | 18.51 |
+| FeCl2 | 26 | 455 | -2181.624464867798 | 11.69 | 495.82 |
+| MnF2 | 11 | 157 | -1348.893353292904 | 3.87 | 499.16 |
+| 241 | 3 | 20 | -230.720590533847 | 2.01 | 810.52 |
+
+Existing screening-corrected native runs 1253625 are reused, not rerun:
+F2-OEO 3 macros/12 HVP/0.17 s, FeCl2 13/270/5.49 s, MnF2 11/158/4.15 s.
+Final energy differences are respectively +4.917e-9, -3.066e-9, and
++4.3e-11 Eh. Thus energy parity holds, but this transport is **not a universal
+convergence improvement**: FeCl2 takes more steps. Independent integration
+reviews found no origin gradient scaling or duplicated pullback terms;
+the molecular FD checks support the implemented derivatives. Step-count
+regression must not be hidden by changing tolerances.
+
+For porphine singlet, the first macro starts at -2244.7047418329 Eh in both
+runs. Existing run 1253652 reaches -2244.7118115414 Eh with 11 HVP;
+integrated transport reaches -2244.7197611390 Eh with the same 11 HVP.
+Projected infinity gradient changes from 1.20833749e-2 to 1.05294761e-2.
+This is a 2.12x larger first-macro energy decrease, not a convergence proof.
+The audited one-macro run costs 137.31 s and 39.521 GiB RSS, including eight
+additional gradient evaluations; it is not a production timing comparison.
+Its application exit 2 is the intentional diagnostic iteration cap.
+
+After short validation, native original-guess convergence jobs were submitted
+as array 1254189_0 (singlet) and 1254189_1 (triplet), 32 cores each. No audit
+evaluations or shortened optimization cap are enabled. Both initially queue
+on scheduler priority. Their final energy, macro/HVP count, wall time, and
+peak RSS remain pending. The frozen binary SHA256 is
+`6c1fa8192000f4e5c2d7aed8879f3710394ef10354d28b6a6268c99e3e0d247c`.
+
+Artifacts: `transport-build-1254176`, `transport-regression-1254179`,
+`transport-regression-1254187` (FeCl2 first-macro audit),
+`transport-build.sbatch`, `transport-regression.sbatch`, and
+`porphine-transport-converge.sbatch`. The theoretical derivation remains in
+the local, ignored `article/finite_ci_transport.md`.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.

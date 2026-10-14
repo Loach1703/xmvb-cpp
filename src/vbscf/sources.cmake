@@ -29,6 +29,7 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/expansion/expander.cpp
   vbscf/structures/orthogonal_ci/exterior_transform.cpp
   vbscf/structures/orthogonal_ci/metric.cpp
+  vbscf/structures/overlap/representation.cpp
   vbscf/structures/orthogonal_ci/integrals.cpp
   vbscf/structures/orthogonal_ci/planner.cpp
   vbscf/structures/orthogonal_ci/sigma.cpp
@@ -40,6 +41,7 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
 set(XMVB_VBSCF_ORBITAL_SOURCES
   vbscf/orbitals/spinor/frame.cpp
   vbscf/orbitals/preparation/preparer.cpp
+  vbscf/orbitals/preparation/overlap_pullback.cpp
   vbscf/orbitals/pullback/operator.cpp
   vbscf/orbitals/gauge/localized.cpp
   vbscf/orbitals/charts/partition.cpp
@@ -123,10 +125,10 @@ set(XMVB_VBSCF_DERIVATIVE_SOURCES
 set(XMVB_VBSCF_DIAGNOSTIC_SOURCES
   vbscf/diagnostics/orbitals/chart_audit.cpp
   vbscf/diagnostics/orbitals/ciah_keyframe.cpp
-  vbscf/diagnostics/orbitals/ci_transport.cpp
 )
 
 set(XMVB_VBSCF_OPTIMIZATION_SOURCES
+  vbscf/optimization/coupled/ci_transport.cpp
   vbscf/optimization/backends/ciah.cpp
   vbscf/optimization/backends/lbfgs.cpp
   vbscf/optimization/backends/neo.cpp

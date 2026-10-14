@@ -8,6 +8,7 @@
 namespace xmvb::vb {
 
 class StructureAction;
+class ExteriorOrbitalTransform;
 
 /** @brief Exact complete-space overlap inverse with occupation-block factors.
  * Borrows an immutable action, which must outlive this object. Completeness of
@@ -30,6 +31,12 @@ public:
 
   /** @brief Applies the overlap inverse, chunking RHS by the workspace budget. */
   Eigen::MatrixXd apply(const Eigen::Ref<const Eigen::MatrixXd>& rhs) const;
+
+  /** @brief Trial metric inverse sharing immutable selected-sector factors. */
+  Eigen::MatrixXd apply_at_transform(
+      const Eigen::Ref<const Eigen::MatrixXd>& rhs,
+      const ExteriorOrbitalTransform& alpha,
+      const ExteriorOrbitalTransform& beta) const;
 
   /** @brief Reuse the factors after their same-topology action has been moved.
    * No factor or integral data are copied. The new action must outlive this

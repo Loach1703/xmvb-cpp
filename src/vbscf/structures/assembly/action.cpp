@@ -1108,6 +1108,13 @@ Eigen::MatrixXd StructureAction::orthogonalize_structure_block(
   return orthogonal;
 }
 
+Eigen::MatrixXd StructureAction::carrier_generator_adjoint(
+    const Eigen::Ref<const Eigen::MatrixXd>& left,
+    const Eigen::Ref<const Eigen::MatrixXd>& right) const {
+  if (!direct_ci_) throw std::logic_error("carrier generator requires a complete ambient carrier");
+  return direct_ci_->sigma.one_body_generator_adjoint(left, right);
+}
+
 double StructureAction::complete_space_residual_norm(
     const Eigen::Ref<const Eigen::VectorXd>& coefficients, double energy) const {
   if (!direct_ci_ || coefficients.size() != n_structures_ ||

@@ -3,46 +3,22 @@
 #include <functional>
 #include <Eigen/Core>
 
-namespace xmvb::vb {
-class StructureAction;
-class StructureTangentOperator;
-struct AcceptedPointContext;
-struct OrbitalPreparationInput;
+namespace xmvb::vb::diagnostics {
 
-namespace diagnostics {
-
-/** @brief Opt-in first-keyframe derivative/path audit; never a solver policy. */
-bool ciah_keyframe_audit_enabled();
-
-/** @brief Frozen-integral carrier remainders at four fractions of the step. */
-struct CiahCarrierAudit {
-  Eigen::MatrixXd remainders;
+struct CiahKeyframeProbe {
+  Eigen::VectorXd gradient;
+  double energy = 0.0;
 };
 
-/** @brief Measure carrier transport and its frozen-integral counterfactual. */
-CiahCarrierAudit audit_ciah_orbital_geometry(
-    const Eigen::VectorXd& orbital_displacement,
-    const AcceptedPointContext& origin,
-    const StructureAction& action,
-    const StructureTangentOperator& structure,
-    const std::function<OrbitalPreparationInput(const Eigen::VectorXd&)>& trial_orbitals);
+/** @brief Opt-in derivative audit, never an optimizer acceptance rule. */
+bool ciah_keyframe_audit_enabled();
 
-/**
- * @brief Split finite structure response into orbital, CI and mixed terms.
- * Uses saved origin HVP images and matrix-free H/M actions, without dense
- * structure matrices. The callback evaluates a fixed-C gradient, not relaxed CI.
- */
+/** @brief Full transported gradient/HVP check at the actual first keyframe. */
 void audit_ciah_keyframe(
     const Eigen::VectorXd& displacement,
-    const Eigen::VectorXd& origin_gradient,
     const Eigen::VectorXd& hessian_displacement,
     const Eigen::VectorXd& actual_gradient,
-    const Eigen::MatrixXd& origin_coefficients,
-    double weight,
-    const StructureTangentOperator& structure,
-    const StructureAction& action,
-    const CiahCarrierAudit& carrier,
-    const std::function<Eigen::VectorXd(const Eigen::VectorXd&)>& evaluate_gradient);
+    int orbital_size,
+    const std::function<CiahKeyframeProbe(const Eigen::VectorXd&)>& evaluate);
 
-}  // namespace diagnostics
-}  // namespace xmvb::vb
+}  // namespace xmvb::vb::diagnostics

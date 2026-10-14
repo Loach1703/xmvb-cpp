@@ -15,12 +15,12 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 #include "vbscf/diagnostics/orbitals/ciah_keyframe.hpp"
-#include "vbscf/diagnostics/orbitals/ci_transport.hpp"
 #include "vbscf/diagnostics/performance/phases.hpp"
 #include "vbscf/optimization/driver/options.hpp"
 #include "vbscf/optimization/driver/result.hpp"
 #include "vbscf/optimization/globalization/line_search.hpp"
 #include "vbscf/optimization/neo/ciah.hpp"
+#include "vbscf/optimization/coupled/ci_transport.hpp"
 #include "vbscf/optimization/preconditioners/coarse.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 
@@ -79,6 +79,9 @@ bool build_ciah_macro_step(
   const Eigen::Index no = chart.reduced_size();
   const Eigen::Index ns = use_structure_response ? structure.tangent_size() : 0;
   const Eigen::Index dimension = no + ns;
+  std::unique_ptr<CiTransport> transport;
+  if (ns) transport = std::make_unique<CiTransport>(
+      orbitals, layout, chart, *context, hessian.structure_action(), structure);
   CiahOptions ciah_options;
   double energy_scale = 0.0;
   for (const double state_energy : context->selected_state_energies)
@@ -156,6 +159,12 @@ bool build_ciah_macro_step(
       orbital_image.tail(ns) = forcing;
       structure_image.head(no) = adjoint;
       structure_image.tail(ns) = ci.hessian_coordinates;
+      const auto curvature = transport->curvature(x.head(no), x.tail(ns));
+      image.head(no) += curvature.orbital_from_orbital + curvature.orbital_from_structure;
+      image.tail(ns) += curvature.structure_from_orbital;
+      orbital_image.head(no) += curvature.orbital_from_orbital;
+      orbital_image.tail(ns) += curvature.structure_from_orbital;
+      structure_image.head(no) += curvature.orbital_from_structure;
       if (diagnostics::neo_event_trace_enabled()) {
         const double orbital_energy = x.head(no).dot(orbital.orbital_hessian);
         const double structure_energy = x.tail(ns).dot(ci.hessian_coordinates);
@@ -213,6 +222,7 @@ bool build_ciah_macro_step(
   };
   Eigen::VectorXd initial_gradient = Eigen::VectorXd::Zero(dimension);
   initial_gradient.head(no) = gradient;
+  if (ns) initial_gradient.tail(ns) = transport->origin_structure_gradient();
   // NeoProblem also serves trust-region solvers that require a physical dual
   // norm. CIAH deliberately does not call this callback.
   NeoProblem problem(initial_gradient,
@@ -246,34 +256,26 @@ bool build_ciah_macro_step(
   CiahWorkspace workspace(problem, seed, ciah_options);
 
   const Eigen::MatrixXd c0 = context->selected_state_eigenvectors;
-  const double coordinate_scale = std::sqrt(2.0 * context->normalized_state_weights[0]);
   const auto coefficients = [&](const Eigen::VectorXd& displacement) {
     Eigen::MatrixXd c = c0;
-    if (ns) c += structure.coefficient_response_coordinates(displacement.tail(ns));
+    if (ns) c = transport->retract(displacement.head(no), displacement.tail(ns)).coefficients;
     return c;
   };
   const auto evaluate_keyframe = [&](const Eigen::VectorXd& displacement) {
     diagnostics::ScopedPhase keyframe_phase(diagnostics::Phase::CiahKeyframe, true);
     const auto parameters = build_nonredundant_lifted_trial_parameters(
         orbitals, chart, layout, displacement.head(no));
-    const Eigen::MatrixXd c = coefficients(displacement);
-    const auto exact = objective->evaluate_coupled_keyframe(parameters, c);
     Keyframe keyframe;
-    keyframe.gradient.resize(dimension);
-    keyframe.gradient.head(no) = chart.project_reduced_gradient(exact.orbital_gradient);
     if (ns) {
-      // C_raw/norm is the finite overlap-normalized coefficient retraction.
-      // Its derivative contributes 1/norm; simply projecting (H-E M)C
-      // would compare gradients from different coefficient coordinates.
-      const auto normalized = exact.normalized_structure_coefficients.col(0);
-      const double norm = c.col(0).dot(normalized) / normalized.squaredNorm();
-      if (!(norm > 0.0) || !std::isfinite(norm)) {
-        throw std::runtime_error("CIAH keyframe coefficient normalization is singular");
-      }
-      keyframe.gradient.tail(ns) = structure.project_coordinates(
-          (coordinate_scale / norm) * exact.structure_residuals);
+      const auto point = transport->retract(displacement.head(no), displacement.tail(ns));
+      const auto exact = objective->evaluate_coupled_keyframe(parameters, point.coefficients);
+      keyframe.gradient = transport->gradient(point, exact);
+      keyframe.energy = exact.energy;
+    } else {
+      const auto exact = objective->evaluate_coupled_keyframe(parameters, c0);
+      keyframe.gradient = chart.project_reduced_gradient(exact.orbital_gradient);
+      keyframe.energy = exact.energy;
     }
-    keyframe.energy = exact.energy;
     ++record->keyframes;
     return keyframe;
   };
@@ -284,7 +286,7 @@ bool build_ciah_macro_step(
   CiahEnergyModel energy_model(energy, initial_gradient);
   CiahKeyframes keyframes(energy);
   Eigen::VectorXd last_step = displacement;
-  // The initial structure gradient is zero at the relaxed accepted point.
+  // Retain the finite Ritz residual rather than assuming exact CI stationarity.
   double keyframe_norm = coordinate_norm(initial_gradient);
   // newton_casscf.kernel passes 0.3 * its outer gradient tolerance to
   // update_orb_ci; the microstep/keyframe tests use that inner tolerance.
@@ -426,39 +428,13 @@ bool build_ciah_macro_step(
       const Keyframe exact = evaluate_keyframe(displacement);
       if (ns && !audited_structure_path &&
           diagnostics::neo_trace_context.keyframe == 1 &&
-          diagnostics::ciah_ci_transport_audit_enabled()) {
-        diagnostics::audit_ciah_ci_transport(displacement, predicted_gradient.tail(ns),
-            exact.gradient.tail(ns), *context, objective->input().structure_data,
-            hessian.structure_action(), structure, layout,
-            [&](const Eigen::VectorXd& point) {
-              OrbitalPreparationInput trial = orbitals;
-              layout.unpack(build_nonredundant_lifted_trial_parameters(
-                  orbitals, chart, layout, point), &trial);
-              return trial;
-            },
-            [&](const Eigen::VectorXd& point, const Eigen::MatrixXd& coefficients) {
-              return objective->evaluate_coupled_keyframe(
-                  build_nonredundant_lifted_trial_parameters(orbitals, chart, layout, point),
-                  coefficients);
-            });
-        audited_structure_path = true;
-      }
-      if (ns && !audited_structure_path &&
-          diagnostics::neo_trace_context.keyframe == 1 &&
           diagnostics::ciah_keyframe_audit_enabled()) {
         const int saved_keyframes = record->keyframes;
-        const auto carrier = diagnostics::audit_ciah_orbital_geometry(
-            displacement.head(no), *context, hessian.structure_action(), structure,
-            [&](const Eigen::VectorXd& point) {
-              OrbitalPreparationInput trial = orbitals;
-              layout.unpack(build_nonredundant_lifted_trial_parameters(
-                  orbitals, chart, layout, point), &trial);
-              return trial;
+        diagnostics::audit_ciah_keyframe(displacement, hessian_displacement,
+            exact.gradient, static_cast<int>(no), [&](const Eigen::VectorXd& point) {
+              const auto value = evaluate_keyframe(point);
+              return diagnostics::CiahKeyframeProbe{value.gradient, value.energy};
             });
-        diagnostics::audit_ciah_keyframe(displacement, initial_gradient,
-            hessian_displacement, exact.gradient, c0,
-            context->normalized_state_weights[0], structure, hessian.structure_action(), carrier,
-            [&](const Eigen::VectorXd& point) { return evaluate_keyframe(point).gradient; });
         record->keyframes = saved_keyframes;
         audited_structure_path = true;
       }

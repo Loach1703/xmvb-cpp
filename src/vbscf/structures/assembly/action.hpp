@@ -251,6 +251,11 @@ public:
   Eigen::MatrixXd orthogonalize_structure_block(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
 
+  /** @brief Representation-only one-body adjoint; never applies the Hamiltonian. */
+  Eigen::MatrixXd carrier_generator_adjoint(
+      const Eigen::Ref<const Eigen::MatrixXd>& left,
+      const Eigen::Ref<const Eigen::MatrixXd>& right) const;
+
   /** @brief Whether the carrier diagonal and one-column workspace fit the action budget. */
   bool supports_carrier_diagonal() const noexcept;
 
@@ -304,6 +309,8 @@ public:
 
   int n_determinants() const noexcept;
   int n_structures() const noexcept;
+  int n_alpha_strings() const noexcept { return n_unique_alpha_; }
+  int n_beta_strings() const noexcept { return n_unique_beta_; }
 
   /** @brief Reports the retained factor storage and channel representations. */
   StructureActionStorage storage() const noexcept;
