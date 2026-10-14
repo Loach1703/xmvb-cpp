@@ -1,0 +1,73 @@
+{
+  "status": "preparation_only_no_jobs_submitted",
+  "methods": ["native_NEO", "PySCF_default_AH"],
+  "excluded": ["21_aromatic_molecules", "block_LBFGS"],
+  "paper": "Kreplin, Knowles, Werner, J. Chem. Phys. 150, 194106 (2019)",
+  "paper_url": "https://pubs.aip.org/jcp/article/150/19/194106/197166/Second-order-MCSCF-optimization-revisited-I",
+  "source_pdf": "/home/txia/.codex/attachments/c1ed9f1a-b35b-41d0-8927-1bfdcfbef256/ORCA-casscf-2.pdf",
+  "supplement_status": "Publisher access returned HTTP 403; no supplementary geometry downloaded or verified",
+  "cases": [
+    {
+      "system": "[Cu2O2(NH3)6]2+",
+      "charge": 2,
+      "multiplicity": 1,
+      "state": "1Ag in C2h",
+      "basis": "all-electron aug-cc-pVTZ",
+      "cas": [[8,10], [16,14], [16,16]],
+      "path_F": [0,20,40,60,80,100],
+      "geometry_source": "Cramer et al., J. Phys. Chem. A 110, 1991-2004 (2006), reference 122 supporting information",
+      "geometry_source_url": "https://pubs.acs.org/doi/10.1021/jp056791e",
+      "si_filename": "jp056791esi20051123_064633.pdf",
+      "si_url": "https://pubs.acs.org/doi/suppl/10.1021/jp056791e/suppl_file/jp056791esi20051123_064633.pdf",
+      "initial_guess": "F=0: closed-shell HF then AVAS; subsequent F points use previous geometry's optimized orbitals",
+      "avas_threshold": 0.3,
+      "avas_targets_large": "O 2s,3s,2p,3p and Cu 3dyz; O-O on z axis, Cu displaced along y",
+      "avas_targets_small": "O 2px,3px,2pz,3pz and Cu 3dyz",
+      "atomic_targets": "O target orbitals from SA-CASSCF/cc-pVTZ averaging three degenerate 3P states with 2s,3s,2p,3p active",
+      "unresolved": "Main text says AVAS yields (16,18) then proceeds with (16,14); verify orbital selection, SI coordinates, basis conventions and integral approximation before generating decks"
+    },
+    {
+      "system": "Co2(CO)6C2H2",
+      "cas": [18,13],
+      "basis": "aug-cc-pVTZ",
+      "point_group": "C2v",
+      "multiplicity": null,
+      "geometry_source": "2019 paper supplementary material, section VI D",
+      "avas_targets": "Co 3dx2-y2,3dxy,3dxz,3dyz; acetylene carbon 2py,2pz",
+      "orientation": "Co-Co along z; C-C along x",
+      "unresolved": "Verify charge, multiplicity, target state, AVAS threshold and Cartesian coordinates from SI"
+    },
+    {
+      "system": "FeCl3",
+      "multiplicity": 6,
+      "state": "6A1prime in D3h; table labels 6Ag in an Abelian subgroup",
+      "cas": [[9,12], [15,15]],
+      "basis": {"Fe": "cc-pVTZ", "Cl": "cc-pV(T+d)Z"},
+      "avas_targets": "Fe 3d,4d",
+      "avas_thresholds": [0.3,0.1],
+      "geometry_source": "2019 paper supplementary material, planar geometry",
+      "unresolved": "Verify Cartesian geometry and charge from SI; do not substitute generic FeCl3 geometry"
+    },
+    {
+      "system": "Al4O2",
+      "cas": [12,12],
+      "basis": "aug-cc-pVDZ",
+      "point_group": "Cs",
+      "active_irreps": "8 a-prime, 4 a-double-prime",
+      "multiplicity": null,
+      "avas_targets": "Both oxygen 2p shells; Al1 3pz; Al2 and Al3 3px,3pz",
+      "avas_threshold": 0.4,
+      "geometry_source": "2019 paper supplementary material",
+      "branch_warning": "Adding Al1 3py to AVAS targets gives a different CAS(12,12) minimum 17 mEh lower in the paper",
+      "unresolved": "Verify charge, multiplicity, geometry and atom labels from SI before preparing AVAS"
+    }
+  ],
+  "comparison_requirements": [
+    "One shared initial orbital frame per matched NEO/PySCF calculation; no independent guess generation",
+    "Match Cartesian versus spherical AO functions, Hamiltonian, electron count, core treatment and integral approximation",
+    "A C1 native run is not an exact reproduction of a symmetry-restricted literature state; resolve both solvers' common space before running",
+    "AVAS radial reference orbitals are part of the initial-guess specification; thresholds alone do not reproduce them",
+    "Assess carrier and workspace memory before large-CAS cases",
+    "Do not submit any jobs without the user's next instruction"
+  ]
+}
