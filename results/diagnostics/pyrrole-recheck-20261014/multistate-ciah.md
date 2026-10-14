@@ -91,3 +91,27 @@ Array 1255306 completed both small regressions. F2-SA-HAO converged in
 The independent coupled orbital/structure HVP finite-difference relative
 errors were 4.96e-9 / 1.51e-9 (HAO), 7.14e-9 / 4.12e-9 (OEO).
 The pyrrole jobs 1255310_2/3 are running; their total benefit remains pending.
+
+## First molecular results (1255310)
+
+BLO converged in 2 macros / 13 orbital HVP / 13 structure actions,
+141.866773 s internal wall, 144.77 s GNU wall, 24099484 KiB peak RSS.
+Its state energies are -417.513869168244 and -417.478838172582 Eh;
+average -417.496353670413 Eh. This is slower than block-LBFGS (63.37 s),
+despite far fewer actions than the old NEO route.
+
+First-macro orbital HVP / structure actions:
+
+| Case | Old coupled solver | Unified CIAH |
+|---|---:|---:|
+| OEO | 42 / 514 | 18 / 18 |
+| BLO | 39 / 1097 | 10 / 10 |
+
+New first macros have zero rejected trials. OEO macro 1 reaches
+-417.497853900970 Eh (printed -417.4978539010), near the same-guess PySCF
+terminal energy. Macro 2 decreases further to -417.4978572749 Eh, with
+step-Hessian-step -3.3430639744e-6 Eh and actual reduction 3.3739095215e-6 Eh.
+Its physical gradient grows from 8.61e-5 to 6.98e-3. This is a downhill
+negative-curvature step, not evidence that the new run has converged to the
+PySCF endpoint. No claim of a resolved 7 mEh difference is justified yet.
+At this snapshot OEO has 2 accepted macros / 24 HVP and is still running.
