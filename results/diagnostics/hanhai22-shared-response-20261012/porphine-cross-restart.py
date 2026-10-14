@@ -18,8 +18,8 @@ convergence_run = len(sys.argv) > 3 and sys.argv[3] == "converge"
 macro_limit = 1000 if convergence_run else 2
 source_mode = sys.argv[4] if len(sys.argv) > 4 else "endpoint"
 spin_tag = sys.argv[5] if len(sys.argv) > 5 else "triplet"
-assert spin_tag in ("singlet", "triplet")
-spin = 0 if spin_tag == "singlet" else 2
+assert spin_tag in ("singlet", "triplet", "quintet")
+spin = {"singlet": 0, "triplet": 2, "quintet": 4}[spin_tag]
 assert spin_tag == "triplet" or source_mode == "original"
 assert source_mode in ("endpoint", "original")
 assert source_mode != "original" or convergence_run
