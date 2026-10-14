@@ -27,8 +27,8 @@ export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
 export LD_LIBRARY_PATH="/home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib:${LD_LIBRARY_PATH:-}"
 export XMVB_NEO_TRACE=scalar
 unset XMVB_NEO_KEYFRAME_AUDIT XMVB_NEO_ORBITAL_STEP_AUDIT XMVB_NEO_ORBITAL_PATH XMVB_NEO_CANDIDATE_AUDIT
-binary="$root/horizontal-build-1254923/xmvb-cpp.exe"
-expected=50952c0628a45b6573c9bfc3199414abb8cfc8cdad17427b5a23d9d6a3d52cb8
+binary="$root/horizontal-build-${BUILD_JOB:-1254923}/xmvb-cpp.exe"
+expected="${BINARY_SHA:-50952c0628a45b6573c9bfc3199414abb8cfc8cdad17427b5a23d9d6a3d52cb8}"
 printf '%s  %s\n' "$expected" "$binary" | sha256sum -c -
 arguments=(--optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal
   --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --exact-exchange-memory-mib 256 --neo-trace neo.tsv)

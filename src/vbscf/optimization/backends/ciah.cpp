@@ -308,6 +308,7 @@ bool build_ciah_macro_step(
   bool audited_structure_path = false;
   bool energy_model_stopped = false;
   std::optional<double> interpolated_energy;
+  std::optional<CiahSegmentMinimum> energy_segment_minimum;
   const char* micro_stop = "unset";
   CiahResult candidate;
   setup_phase.stop();
@@ -499,12 +500,12 @@ bool build_ciah_macro_step(
             mismatch_orbital, std::max(0.0,mismatch_norm*mismatch_norm-mismatch_orbital*mismatch_orbital));
       }
       if (keep_keyframe) {
-        // Gradient agreement alone can miss an energy model that predicts
-        // descent while its exact segment climbs. Do not extrapolate that
-        // frozen curvature further. Keep this actual keyframe displacement
-        // for the normal relaxed-CI macro trial; it may still lower energy.
         if (energy_model.descent_mismatch(exact.energy)) {
           energy_model_stopped = true;
+          // Joint energy can rise while relaxed CI still lowers the macro
+          // energy. Keep the full trial; retain an interior candidate only
+          // for a subsequent rejection of that actual relaxed objective.
+          energy_segment_minimum = energy_model.minimum(exact.energy, exact.gradient);
           micro_stop = "keyframe_energy_model";
           diagnostics::neo_trace("ciah_keyframe_energy_model",
               "anchor=%.17g,predicted=%.17g,actual=%.17g,stop=1",
@@ -646,6 +647,7 @@ bool build_ciah_macro_step(
     last_converged = false;
     scale = 1.0;
     origin_restarted = true;
+    energy_segment_minimum.reset();
     accepted->parameters = build_nonredundant_lifted_trial_parameters(
         orbitals, chart, layout, displacement.head(no));
     diagnostics::neo_trace("ciah_origin_restart",
@@ -690,6 +692,25 @@ bool build_ciah_macro_step(
       break;
     }
     ++record->rejected_trial_count;
+    if (energy_segment_minimum) {
+      const auto minimum = *energy_segment_minimum;
+      energy_segment_minimum.reset();
+      if (minimum.fraction > 0.0 && minimum.fraction < 1.0) {
+        displacement -= (1.0-minimum.fraction)*energy_model.displacement();
+        hessian_displacement -= (1.0-minimum.fraction)*energy_model.image();
+        last_step *= minimum.fraction;
+        linear = initial_gradient.dot(displacement);
+        quadratic = displacement.dot(hessian_displacement);
+        final_reduction = energy-minimum.energy;
+        scale = 1.0;
+        accepted->parameters = build_nonredundant_lifted_trial_parameters(
+            orbitals, chart, layout, displacement.head(no));
+        diagnostics::neo_trace("ciah_energy_segment_trial",
+            "fraction=%.17g,interpolated_energy=%.17g,rejected_relaxed_energy=%.17g",
+            minimum.fraction, minimum.energy, accepted->trial.energy);
+        continue;
+      }
+    }
     if (keyframes.available()) {
       auto point = keyframes.take();
       diagnostics::neo_trace("ciah_keyframe_backtrack",

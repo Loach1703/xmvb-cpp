@@ -1,0 +1,498 @@
+{
+  "before": [
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 1,
+      "energy": -2244.7189053063,
+      "hvp": 12,
+      "cumulative_hvp": 12,
+      "keyframes": 3,
+      "actual_reduction": 0.014163473371809232,
+      "physical_gradient": 0.08651918676528722,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 2,
+      "energy": -2244.7192622544,
+      "hvp": 8,
+      "cumulative_hvp": 20,
+      "keyframes": 2,
+      "actual_reduction": 0.00035694816688192077,
+      "physical_gradient": 0.06746976823451521,
+      "stop": "keyframe_mismatch",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 3,
+      "energy": -2244.7195970883,
+      "hvp": 8,
+      "cumulative_hvp": 28,
+      "keyframes": 2,
+      "actual_reduction": 0.0003348338486830471,
+      "physical_gradient": 0.10318093969047694,
+      "stop": "keyframe_mismatch",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 4,
+      "energy": -2244.7213527667,
+      "hvp": 8,
+      "cumulative_hvp": 36,
+      "keyframes": 2,
+      "actual_reduction": 0.0017556784196131048,
+      "physical_gradient": 0.09450520393690709,
+      "stop": "keyframe_energy_model",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 5,
+      "energy": -2244.7228546392,
+      "hvp": 11,
+      "cumulative_hvp": 47,
+      "keyframes": 3,
+      "actual_reduction": 0.0015018724625406321,
+      "physical_gradient": 0.05806555925384893,
+      "stop": "keyframe_energy_model",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 6,
+      "energy": -2244.7236201533,
+      "hvp": 17,
+      "cumulative_hvp": 64,
+      "keyframes": 4,
+      "actual_reduction": 0.0007655141571376589,
+      "physical_gradient": 0.012931408444332267,
+      "stop": "keyframe_energy_model",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 7,
+      "energy": -2244.7240324013,
+      "hvp": 19,
+      "cumulative_hvp": 83,
+      "keyframes": 3,
+      "actual_reduction": 0.00041224797678296454,
+      "physical_gradient": 0.008427541969077539,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 8,
+      "energy": -2244.7251021578,
+      "hvp": 15,
+      "cumulative_hvp": 98,
+      "keyframes": 3,
+      "actual_reduction": 0.0010697565376176499,
+      "physical_gradient": 0.01858314040386157,
+      "stop": "keyframe_mismatch",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 9,
+      "energy": -2244.7285632902,
+      "hvp": 12,
+      "cumulative_hvp": 110,
+      "keyframes": 3,
+      "actual_reduction": 0.003461132317170268,
+      "physical_gradient": 0.03549525420445919,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 10,
+      "energy": -2244.7327104576,
+      "hvp": 18,
+      "cumulative_hvp": 128,
+      "keyframes": 3,
+      "actual_reduction": 0.004147167433075083,
+      "physical_gradient": 0.029619181144588495,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 11,
+      "energy": -2244.7343341648,
+      "hvp": 12,
+      "cumulative_hvp": 140,
+      "keyframes": 3,
+      "actual_reduction": 0.0016237072059084312,
+      "physical_gradient": 0.02737496381903211,
+      "stop": "keyframe_mismatch",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 12,
+      "energy": -2244.7350932574,
+      "hvp": 17,
+      "cumulative_hvp": 157,
+      "keyframes": 3,
+      "actual_reduction": 0.0007590926461489289,
+      "physical_gradient": 0.03626578838217695,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 13,
+      "energy": -2244.7374058502,
+      "hvp": 14,
+      "cumulative_hvp": 171,
+      "keyframes": 3,
+      "actual_reduction": 0.0023125927473302,
+      "physical_gradient": 0.08445876413295153,
+      "stop": "keyframe_mismatch",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 14,
+      "energy": -2244.7397127262,
+      "hvp": 15,
+      "cumulative_hvp": 186,
+      "keyframes": 3,
+      "actual_reduction": 0.0023068759619491175,
+      "physical_gradient": 0.0463114433031877,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 15,
+      "energy": -2244.7409614365,
+      "hvp": 13,
+      "cumulative_hvp": 199,
+      "keyframes": 4,
+      "actual_reduction": 0.001248710365871375,
+      "physical_gradient": 0.023434986166867195,
+      "stop": "keyframe_mismatch",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 16,
+      "energy": -2244.7410711008,
+      "hvp": 26,
+      "cumulative_hvp": 225,
+      "keyframes": 5,
+      "actual_reduction": 0.00010966427998937434,
+      "physical_gradient": 0.00040297471932040956,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-horizontal-1254797",
+      "macro": 17,
+      "energy": -2244.7410711935,
+      "hvp": 17,
+      "cumulative_hvp": 242,
+      "keyframes": 2,
+      "actual_reduction": 9.26802385947667e-08,
+      "physical_gradient": 0.00048692327471139214,
+      "stop": "gradient_growth",
+      "interpolations": []
+    }
+  ],
+  "after": [
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 1,
+      "energy": -2244.7189053063,
+      "hvp": 12,
+      "cumulative_hvp": 12,
+      "keyframes": 3,
+      "actual_reduction": 0.01416347336180479,
+      "physical_gradient": 0.08651918676502637,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 2,
+      "energy": -2244.7227433615,
+      "hvp": 8,
+      "cumulative_hvp": 20,
+      "keyframes": 2,
+      "actual_reduction": 0.0038380552459784667,
+      "physical_gradient": 0.0568289419784174,
+      "stop": "keyframe_mismatch",
+      "interpolations": [
+        {
+          "anchor_energy": "-2244.7189053062593",
+          "endpoint_energy": "-2244.6977259317428",
+          "fraction": "0.37750406395321306",
+          "interpolated_energy": "-2244.7227440405281"
+        }
+      ]
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 3,
+      "energy": -2244.723715875,
+      "hvp": 18,
+      "cumulative_hvp": 38,
+      "keyframes": 5,
+      "actual_reduction": 0.0009725135196276824,
+      "physical_gradient": 0.0035192906748595276,
+      "stop": "keyframe_mismatch",
+      "interpolations": [
+        {
+          "anchor_energy": "-2244.7236921182985",
+          "endpoint_energy": "-2244.7236543479612",
+          "fraction": "0.36773652646717592",
+          "interpolated_energy": "-2244.7237059231975"
+        }
+      ]
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 4,
+      "energy": -2244.723805733,
+      "hvp": 18,
+      "cumulative_hvp": 56,
+      "keyframes": 3,
+      "actual_reduction": 8.985801559902029e-05,
+      "physical_gradient": 0.004821547100504297,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 5,
+      "energy": -2244.7241801666,
+      "hvp": 20,
+      "cumulative_hvp": 76,
+      "keyframes": 3,
+      "actual_reduction": 0.0003744335626834072,
+      "physical_gradient": 0.005166841959555078,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 6,
+      "energy": -2244.7257051799,
+      "hvp": 14,
+      "cumulative_hvp": 90,
+      "keyframes": 3,
+      "actual_reduction": 0.0015250133410518174,
+      "physical_gradient": 0.016239941463896273,
+      "stop": "keyframe_mismatch",
+      "interpolations": [
+        {
+          "anchor_energy": "-2244.7247914281897",
+          "endpoint_energy": "-2244.7255952662672",
+          "fraction": "1",
+          "interpolated_energy": "-2244.7255952662672"
+        }
+      ]
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 7,
+      "energy": -2244.7300061137,
+      "hvp": 14,
+      "cumulative_hvp": 104,
+      "keyframes": 3,
+      "actual_reduction": 0.004300933776903548,
+      "physical_gradient": 0.03462687499402042,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 8,
+      "energy": -2244.7335246709,
+      "hvp": 17,
+      "cumulative_hvp": 121,
+      "keyframes": 3,
+      "actual_reduction": 0.0035185571850888664,
+      "physical_gradient": 0.03209210984410115,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 9,
+      "energy": -2244.7342762962,
+      "hvp": 8,
+      "cumulative_hvp": 129,
+      "keyframes": 2,
+      "actual_reduction": 0.0007516253372159554,
+      "physical_gradient": 0.015848061413461664,
+      "stop": "keyframe_mismatch",
+      "interpolations": [
+        {
+          "anchor_energy": "-2244.7335246709063",
+          "endpoint_energy": "-2244.7341987048312",
+          "fraction": "0.87401161205622724",
+          "interpolated_energy": "-2244.7342180604824"
+        }
+      ]
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 10,
+      "energy": -2244.7343788116,
+      "hvp": 16,
+      "cumulative_hvp": 145,
+      "keyframes": 3,
+      "actual_reduction": 0.00010251533967675641,
+      "physical_gradient": 0.0033116311858234783,
+      "stop": "gradient_growth",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 11,
+      "energy": -2244.7344230097,
+      "hvp": 6,
+      "cumulative_hvp": 151,
+      "keyframes": 1,
+      "actual_reduction": 4.41981001131353e-05,
+      "physical_gradient": 0.010397507106757067,
+      "stop": "gradient_growth",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 12,
+      "energy": -2244.7352508249,
+      "hvp": 13,
+      "cumulative_hvp": 164,
+      "keyframes": 3,
+      "actual_reduction": 0.000827815247248509,
+      "physical_gradient": 0.04317254471190093,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 13,
+      "energy": -2244.7373491617,
+      "hvp": 12,
+      "cumulative_hvp": 176,
+      "keyframes": 3,
+      "actual_reduction": 0.002098336807648593,
+      "physical_gradient": 0.07249996095752537,
+      "stop": "keyframe_mismatch",
+      "interpolations": [
+        {
+          "anchor_energy": "-2244.7362953782431",
+          "endpoint_energy": "-2244.7365261279519",
+          "fraction": "0.68150217377090261",
+          "interpolated_energy": "-2244.7366146044592"
+        }
+      ]
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 14,
+      "energy": -2244.7395623926,
+      "hvp": 13,
+      "cumulative_hvp": 189,
+      "keyframes": 3,
+      "actual_reduction": 0.0022132308777145226,
+      "physical_gradient": 0.04839625826460454,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 15,
+      "energy": -2244.7409501485,
+      "hvp": 12,
+      "cumulative_hvp": 201,
+      "keyframes": 4,
+      "actual_reduction": 0.0013877559040338383,
+      "physical_gradient": 0.02014046126039191,
+      "stop": "keyframe_mismatch",
+      "interpolations": [
+        {
+          "anchor_energy": "-2244.7407962148336",
+          "endpoint_energy": "-2244.7409086143462",
+          "fraction": "1",
+          "interpolated_energy": "-2244.7409086143462"
+        }
+      ]
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 16,
+      "energy": -2244.7410731051,
+      "hvp": 23,
+      "cumulative_hvp": 224,
+      "keyframes": 4,
+      "actual_reduction": 0.00012295659325900488,
+      "physical_gradient": 0.0021064914942764165,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 17,
+      "energy": -2244.7410742827,
+      "hvp": 15,
+      "cumulative_hvp": 239,
+      "keyframes": 3,
+      "actual_reduction": 1.1775600796681829e-06,
+      "physical_gradient": 0.0008291176694408602,
+      "stop": "keyframe_energy_model",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 18,
+      "energy": -2244.7410752792,
+      "hvp": 27,
+      "cumulative_hvp": 266,
+      "keyframes": 3,
+      "actual_reduction": 9.964796845451929e-07,
+      "physical_gradient": 0.000602895347207161,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 19,
+      "energy": -2244.7410757254,
+      "hvp": 28,
+      "cumulative_hvp": 294,
+      "keyframes": 3,
+      "actual_reduction": 4.4626267481362447e-07,
+      "physical_gradient": 0.00011300009892157117,
+      "stop": "micro_budget",
+      "interpolations": []
+    },
+    {
+      "run": "porphine-segment-1255029",
+      "macro": 20,
+      "energy": -2244.7410757278,
+      "hvp": 6,
+      "cumulative_hvp": 300,
+      "keyframes": 1,
+      "actual_reduction": 2.383785613346845e-09,
+      "physical_gradient": 5.605554190908583e-05,
+      "stop": "micro_gradient",
+      "interpolations": []
+    }
+  ],
+  "hvp_through_17": [
+    242,
+    239
+  ],
+  "additional_tail_hvp": 61,
+  "first_new_macro_below_old_terminal": 16
+}

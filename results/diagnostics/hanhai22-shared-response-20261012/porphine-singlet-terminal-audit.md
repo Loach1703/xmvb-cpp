@@ -1277,6 +1277,102 @@ Finite-difference, step-geometry and candidate diagnostics are disabled;
 scalar iteration records and GNU time/RSS remain enabled. At submission both
 tasks were pending for priority; no convergence result is yet implied.
 
+### Why the interpolated singlet uses 300 instead of 242 HVP
+
+Completed job 1255029 gives 20 singlet macros, 300 HVP, energy
+-2244.741075727799 Eh, GNU wall 1311.37 s and peak RSS 41440228 KiB.
+Its triplet converges in 14 macros / 194 HVP at -2244.790835178042 Eh,
+GNU wall 936.41 s and peak RSS 41452168 KiB. The triplet lacks a standalone
+S-horizontal-only full-run control; do not attribute its entire improvement
+over job 1254189 to interpolation alone.
+
+`compare_segment_trajectory.py` compares saved logs, not replayed calculations:
+
+| Work interval | S-horizontal only | Plus interpolation |
+|---|---:|---:|
+| HVP through macro 16 | 225 | 224 |
+| HVP through macro 17 | 242 | 239 |
+| HVP in macros 18, 19, 20 | absent | 27 + 28 + 6 = 61 |
+| Total | 242 | 300 |
+
+Thus the net difference is **61 - 3 = 58**, not a uniform rise in cost per
+macro. The new trajectory first passes the old terminal energy at macro 16,
+with 224 HVP, but its gradient and subsequent energy changes do not yet meet
+the same stopping conditions. Old macro 17 decreases energy by 9.268e-8 Eh;
+new macro 17 decreases it by 1.178e-6 Eh. New macros 18/19 still decrease it
+by 9.965e-7 and 4.463e-7 Eh. These are legitimate continuing optimization
+steps under the unchanged energy criterion, not redundant convergence
+certifications. The final gradient is also smaller. Earlier wording that
+called the entire additional cost a tail regression was too broad.
+
+No interpolation occurs in new macros 16--20. Macros 18 and 19 end at the
+existing micro-budget, with 27 and 28 basis directions. Their keyframe
+gradients remain consistent enough to continue, so there is no evidence that
+repeated interpolation or new certifications directly consume those actions.
+
+There is, however, a concrete asymmetry at macro 17. The gradient agreement
+test accepts a keyframe while the energy model detects an uphill segment:
+
+| Quantity | Energy (Eh) |
+|---|---:|
+| Last true keyframe anchor | -2244.741074176259 |
+| Frozen prediction for segment endpoint | -2244.741076388892 |
+| Actual joint endpoint | -2244.741072999789 |
+| Relaxed full macro trial (rejected) | -2244.741073075282 |
+| Relaxed previous keyframe (accepted) | -2244.741074282673 |
+
+The energy-mismatch branch exits **before** segment interpolation, tries the
+full displacement, then backtracks to the previous keyframe. The gradient-
+mismatch branch instead uses endpoint energies and slopes to choose an
+interior point. The stored new trajectory has no energy-mismatch exit in
+macros 1--16, making macro 17 the first expected behavioral difference of a
+change in that branch. This is a prediction to verify, not a claim that the
+new full-run cost has already improved.
+
+Build 1255139 tested a direct branch unification, including a refreshed-anchor
+polynomial with an uphill exact endpoint and an incorrectly descending frozen
+model. Array 1255145 ran the four small regression systems. That first variant
+changed F2-OEO from 3 macros / 13 HVP / -198.689800055565 Eh to 8 macros /
+48 HVP / -198.692137328784 Eh; FeCl2 changed from 15 / 251 to 16 / 256.
+The F2 energy change is not evidence by itself of incorrect physics, but it
+shows that unconditional interpolation changes successful relaxed-CI paths.
+This variant is not retained.
+
+The important distinction is that a fixed transported joint energy increase
+does not imply an increase after reoptimizing CI. The revised implementation
+therefore retains the full relaxed-CI trial. Only if that actual objective
+rejects the full displacement does it try the interior Hermite candidate,
+before falling back to a saved keyframe. Endpoint values are already owned;
+there is no extra HVP, gradient, metric inverse or threshold. An additional
+energy-only trial is possible if the interior candidate itself is rejected;
+no cost-free global speedup is promised. Origin restart discards the pending
+candidate because it belongs to a different ray. Build 1255153 / regression
+1255158 exercise this narrower rule before the final origin-restart guard.
+
+A full original-
+guess singlet run is required to reach macro 17 because the earlier run did
+not save accepted-point restart files for that macro; the old version is not
+rerun. No claim is made that this one branch accounts for all 61 tail HVP.
+
+The narrower regression 1255158 converges all four small systems:
+
+| Case | Previous interpolation macros / HVP | Interior-on-rejection macros / HVP | New energy (Eh) |
+|---|---:|---:|---:|
+| F2-OEO | 3 / 13 | 3 / 14 | -198.689800055434 |
+| FeCl2 | 15 / 251 | 13 / 240 | -2181.624464862725 |
+| MnF2 | 10 / 159 | 10 / 159 | -1348.893353289840 |
+| 241 | 3 / 20 | 3 / 20 | -230.720590533864 |
+
+None of these four traces invokes origin restart. Final build 1255164 adds
+only the pending-candidate invalidation on origin restart, passes all twelve
+unit executables, and freezes SHA256
+`bc2003c898dddf977d76ac6bb6e4a5fd03f0700dd9957595c2eb73e830cfcfbb`.
+Original-guess singlet task **1255168_0** uses that binary with the same
+thresholds and 32 cores, expensive diagnostics disabled. Its purpose is to
+check preservation of the earlier trajectory and improvement at macro 17
+and beyond. It is newly submitted, not yet a measured speedup or proof of
+fewer than 20 macros. Previous versions are not rerun.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.

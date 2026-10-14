@@ -681,6 +681,18 @@ void check_keyframe_segment_minimum() {
     require(trial.fraction == (slope < 0 ? 1.0 : 0.0),
             "linear segment chose the wrong endpoint");
   }
+  // A refreshed anchor can satisfy the gradient agreement test while its
+  // frozen quadratic predicts descent for an actually uphill endpoint.
+  CiahEnergyModel refreshed(-9.0, Eigen::VectorXd::Ones(1));
+  refreshed.add(Eigen::VectorXd::Constant(1, 3.0), Eigen::VectorXd::Ones(1));
+  refreshed.refresh(-10.0, Eigen::VectorXd::Constant(1, -0.4));
+  refreshed.add(Eigen::VectorXd::Ones(1), Eigen::VectorXd::Zero(1));
+  require(refreshed.descent_mismatch(-9.4),
+          "uphill refreshed segment was not detected");
+  const auto shortened = refreshed.minimum(-9.4, Eigen::VectorXd::Constant(1, 1.6));
+  require(std::abs(shortened.fraction-0.2) < 1e-12 &&
+          std::abs(shortened.energy+10.04) < 1e-12,
+          "energy mismatch correction did not preserve the refreshed anchor");
 }
 
 void check_keyframe_energy_model() {
