@@ -893,10 +893,10 @@ int main(int argc, char** argv) {
         Eigen::VectorXd orbital = chart.project_reduced_gradient(
             layout.gather_from_full(
                 fixed.gradient.sparse_orbital_energy_gradient));
-        Eigen::MatrixXd scaled_residuals = fixed.structure_residuals;
+        Eigen::MatrixXd scaled_residuals = fixed.coefficient_gradient;
         for (Eigen::Index state = 0;
              state < scaled_residuals.cols(); ++state) {
-          scaled_residuals.col(state) *= std::sqrt(
+          scaled_residuals.col(state) /= std::sqrt(
               2.0 * accepted.second_order_context
                   ->normalized_state_weights[static_cast<std::size_t>(state)]);
         }

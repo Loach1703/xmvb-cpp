@@ -55,8 +55,8 @@ private:
 /**
  * @brief Gradient at prescribed, variationally nonstationary structure states.
  *
- * Each supplied structure column is normalized in the current structure
- * overlap metric, matching CIAH's independent state normalization.
+ * The supplied equal-weight state subspace is orthonormalized in its small
+ * Gram metric and diagonalized within that subspace, without a full CI solve.
  * `structure_residuals` stores
  * @f$(H-E_sS)c_s@f$ for the normalized columns.  No structure eigensystem is
  * solved. Only `gradient.scf_result.total_energy` is populated in the SCF
@@ -66,6 +66,8 @@ struct ActiveSpaceFixedStructureGradient {
   ActiveSpaceGradientResult gradient;
   Eigen::MatrixXd normalized_coefficients;
   Eigen::MatrixXd structure_residuals;
+  /** Derivative with respect to the original, unnormalized coefficient block. */
+  Eigen::MatrixXd coefficient_gradient;
 };
 
 /**

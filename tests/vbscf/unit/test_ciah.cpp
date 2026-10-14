@@ -130,8 +130,8 @@ void check_restart_phase() {
   negative.next_structure_guess=response;
   positive.next_orbital_guess_packed=reference;
   negative.next_orbital_guess_packed=reference;
-  positive.align_structure_phase(reference,metric*root);
-  negative.align_structure_phase(reference,-metric*root);
+  positive.align_structure_frame(reference,metric*root);
+  negative.align_structure_frame(reference,-metric*root);
   require_close(positive.next_structure_guess,response,1.0e-14,
       "CIAH changed a phase-consistent structure seed");
   require_close(negative.next_structure_guess,-response,1.0e-14,
@@ -144,6 +144,14 @@ void check_restart_phase() {
   require_close(coupling*positive.next_structure_guess,
       -coupling*negative.next_structure_guess,1.0e-14,
       "CIAH restart violates coupled-action phase covariance");
+  const Eigen::MatrixXd frame = Eigen::Matrix3d::Identity().leftCols(2);
+  Eigen::Matrix2d rotation;
+  rotation << std::cos(0.7), -std::sin(0.7), std::sin(0.7), std::cos(0.7);
+  CiahMacroStep block;
+  block.next_structure_guess = frame;
+  block.align_structure_frame(frame, frame * rotation);
+  require((block.next_structure_guess - frame * rotation).norm() < 1e-14,
+      "CIAH state-frame alignment fails an equal-weight root rotation");
 }
 
 void check_anisotropic_spd() {

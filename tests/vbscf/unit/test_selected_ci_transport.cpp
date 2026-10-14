@@ -8,6 +8,7 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Core>
 #include <Eigen/QR>
+#include <Eigen/Eigenvalues>
 
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
@@ -184,6 +185,7 @@ VbScfCoupledKeyframeEvaluation fake_fixed_evaluation(
   fixed.normalized_structure_coefficients = c / norm;
   fixed.structure_residuals =
       (k - e_ci * m) * fixed.normalized_structure_coefficients;
+  fixed.coefficient_gradient = (2.0 / norm) * fixed.structure_residuals;
   fixed.orbital_gradient =
       fixed_raw_gradient(point.input, layout, c, w, k);
   return fixed;
@@ -365,11 +367,112 @@ void check_selected_transport() {
           "origin old HVP plus transport curvature fails gradient FD");
 }
 
+/** @brief Two-state transport on a nonclosed three-structure subspace. */
+void check_multistate_transport() {
+  const auto input = make_input();
+  const SparseParameterLayout layout(input);
+  const auto prepared = ActiveSpaceOrbitalPreparer().prepare(input);
+  const Eigen::MatrixXd w = selected_w();
+  const Eigen::MatrixXd f0 = explicit_carrier(input, w);
+  const Eigen::Matrix3d m0 = f0.transpose() * f0;
+  const Eigen::Matrix3d k = model_hamiltonian();
+  Eigen::MatrixXd c0(3, 2);
+  c0 << 0.64, 0.21, -0.39, 0.73, 0.52, -0.31;
+  Eigen::LLT<Eigen::MatrixXd> gram(c0.transpose() * m0 * c0);
+  c0 = (c0 * gram.matrixU().solve(Eigen::Matrix2d::Identity())).eval();
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> roots(c0.transpose() * k * c0);
+  c0 = (c0 * roots.eigenvectors()).eval();
+  const OrbitalChart chart(input, layout, prepared.auxiliary_orbital_matrix.leftCols(4),
+      prepared.physical_orbital_frame.normalized_orbital_matrix,
+      nullptr, false, false, nullptr, OrbitalChart::Coordinates::Unwhitened);
+  StructureDiagonal diagonal;
+  diagonal.hamiltonian = k.diagonal();
+  diagonal.overlap = m0.diagonal();
+  SameSpinPairCacheContext topology;
+  const auto action = make_action(w, active_overlap(prepared), diagonal, &topology);
+  auto accepted = std::make_shared<AcceptedPointContext>();
+  accepted->prepared_active_space.orbital_result = prepared;
+  accepted->same_spin_pair_cache = topology;
+  accepted->n_active_orbitals = accepted->n_structures = 3;
+  accepted->selected_state_indices = {0, 1};
+  accepted->normalized_state_weights = {0.5, 0.5};
+  accepted->selected_state_energies = {roots.eigenvalues()[0], roots.eigenvalues()[1]};
+  accepted->selected_state_eigenvectors = c0;
+  accepted->selected_state_structure_images = StructureActionResult{k * c0, m0 * c0};
+  const StructureTangentOperator structure(accepted, action);
+  const CiTransport transport(input, layout, chart, *accepted, action, structure);
+  const auto energy = [&](const OrbitalPreparationInput& trial, const Eigen::MatrixXd& c) {
+    const Eigen::MatrixXd f = explicit_carrier(trial, w);
+    const Eigen::MatrixXd g = c.transpose() * f.transpose() * f * c;
+    return 0.5 * g.ldlt().solve(Eigen::MatrixXd(c.transpose() * k * c)).trace() +
+        0.1 * layout.pack(trial).squaredNorm();
+  };
+  const auto fixed = [&](const CiTransportPoint& point) {
+    VbScfCoupledKeyframeEvaluation result;
+    const Eigen::MatrixXd& c = point.coefficients;
+    const Eigen::MatrixXd f = explicit_carrier(point.input, w);
+    const Eigen::MatrixXd m = f.transpose() * f;
+    const Eigen::MatrixXd inverse = (c.transpose() * m * c).ldlt().solve(Eigen::Matrix2d::Identity());
+    result.energy = energy(point.input, c);
+    result.coefficient_gradient = (k*c - m*c*inverse*(c.transpose()*k*c))*inverse;
+    const auto packed = layout.pack(point.input);
+    result.orbital_gradient.resize(packed.size());
+    for (Eigen::Index j = 0; j < packed.size(); ++j) {
+      Eigen::VectorXd plus = packed, minus = packed;
+      plus[j] += 2e-6; minus[j] -= 2e-6;
+      auto ip = point.input, im = point.input;
+      layout.unpack(plus, &ip); layout.unpack(minus, &im);
+      result.orbital_gradient[j] = (energy(ip, c) - energy(im, c)) / 4e-6;
+    }
+    return result;
+  };
+  Eigen::VectorXd x = Eigen::VectorXd::LinSpaced(chart.reduced_size()+structure.tangent_size(), -0.04, 0.05);
+  const auto value = [&](const Eigen::VectorXd& v) {
+    auto point = transport.retract(v.head(chart.reduced_size()), v.tail(structure.tangent_size()));
+    return energy(point.input, point.coefficients);
+  };
+  const auto point = transport.retract(x.head(chart.reduced_size()), x.tail(structure.tangent_size()));
+  const Eigen::VectorXd gradient = transport.gradient(point, fixed(point));
+  Eigen::VectorXd numerical(x.size());
+  for (Eigen::Index j = 0; j < x.size(); ++j) {
+    Eigen::VectorXd plus=x, minus=x;
+    plus[j] += 1e-5; minus[j] -= 1e-5;
+    numerical[j] = (value(plus)-value(minus))/2e-5;
+  }
+  require(relative_error(gradient, numerical) < 2e-6,
+      "multistate selected transport gradient fails energy finite differences");
+  const auto derivative = [&](const Eigen::VectorXd& v, bool transported) {
+    CiTransportPoint p;
+    if (transported) {
+      p = transport.retract(v.head(chart.reduced_size()), v.tail(structure.tangent_size()));
+      return transport.gradient(p, fixed(p));
+    }
+    p.input = chart.retract_step(input, v.head(chart.reduced_size()));
+    p.coefficients = c0 + structure.coefficient_response_coordinates(v.tail(structure.tangent_size()));
+    const auto f = fixed(p);
+    Eigen::VectorXd g(v.size());
+    g.head(chart.reduced_size()) = chart.project_reduced_gradient(f.orbital_gradient);
+    g.tail(structure.tangent_size()) = structure.project_coordinates(f.coefficient_gradient);
+    return g;
+  };
+  const Eigen::VectorXd direction = x.normalized();
+  const auto curvature = transport.curvature(direction.head(chart.reduced_size()),
+                                             direction.tail(structure.tangent_size()));
+  Eigen::VectorXd correction(x.size());
+  correction.head(chart.reduced_size()) = curvature.orbital_from_orbital + curvature.orbital_from_structure;
+  correction.tail(structure.tangent_size()) = curvature.structure_from_orbital;
+  const Eigen::VectorXd before = (derivative(2e-4*direction, false)-derivative(-2e-4*direction, false))/4e-4;
+  const Eigen::VectorXd after = (derivative(2e-4*direction, true)-derivative(-2e-4*direction, true))/4e-4;
+  require(relative_error(before+correction, after) < 4e-5,
+      "multistate transport Hessian correction fails gradient finite differences");
+}
+
 }  // namespace
 
 int main() {
   try {
     check_selected_transport();
+    check_multistate_transport();
     std::cout << "Selected-space CI transport gradient and curvature: passed\n";
     return 0;
   } catch (const std::exception& error) {

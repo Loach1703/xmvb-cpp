@@ -189,6 +189,7 @@ VbScfObjective::evaluate_coupled_keyframe(
   result.normalized_structure_coefficients =
       std::move(fixed.normalized_coefficients);
   result.structure_residuals = std::move(fixed.structure_residuals);
+  result.coefficient_gradient = std::move(fixed.coefficient_gradient);
   result.energy = fixed.gradient.scf_result.total_energy;
   diagnostics::neo_trace("ciah_keyframe_cost",
       "seconds=%.17g,active=%.17g,two_electron_backward=%.17g,ao_backward=%.17g,orbital_backward=%.17g",

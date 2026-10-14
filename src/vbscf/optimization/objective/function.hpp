@@ -40,6 +40,7 @@ struct VbScfCoupledKeyframeEvaluation {
   Eigen::VectorXd orbital_gradient;
   Eigen::MatrixXd normalized_structure_coefficients;
   Eigen::MatrixXd structure_residuals;
+  Eigen::MatrixXd coefficient_gradient;
   double energy = 0.0;
 };
 

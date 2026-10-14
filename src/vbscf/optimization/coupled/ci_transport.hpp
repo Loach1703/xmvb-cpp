@@ -19,7 +19,7 @@ struct CiTransportPoint {
   OrbitalPreparationResult prepared;
   Eigen::MatrixXd upper;
   Eigen::MatrixXd origin_direction;
-  Eigen::VectorXd base_coefficients;
+  Eigen::MatrixXd base_coefficients;
   Eigen::MatrixXd coefficients;
 };
 
@@ -49,8 +49,8 @@ public:
   Eigen::VectorXd origin_structure_gradient() const;
 
 private:
-  Eigen::VectorXd solve(const Eigen::MatrixXd& upper,
-                       const Eigen::VectorXd& rhs) const;
+  Eigen::MatrixXd solve(const Eigen::MatrixXd& upper,
+                       const Eigen::MatrixXd& rhs) const;
   Eigen::VectorXd raw_direction(const Eigen::VectorXd& reduced) const;
 
   const OrbitalPreparationInput& input_;
@@ -63,9 +63,10 @@ private:
   OrbitalOverlapPullback origin_pullback_;
   Eigen::MatrixXd upper_;
   Eigen::MatrixXd zero_;
-  Eigen::VectorXd c0_;
-  Eigen::VectorXd gc0_;
-  Eigen::VectorXd lambda0_;
+  Eigen::MatrixXd c0_;
+  Eigen::MatrixXd gc0_;
+  Eigen::MatrixXd lambda0_;
+  double coordinate_scale_;
   Eigen::VectorXd diagonal_;
   Eigen::MatrixXd residual_upper_gradient_;
   Eigen::MatrixXd residual_overlap_gradient_;

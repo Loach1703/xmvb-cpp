@@ -54,7 +54,7 @@ void check_keyframe(bool complete_carrier) {
     c(i, 1) = std::cos(0.73 * (i + 1));
   }
   const std::vector<int> states{0, data.n_structures - 1};
-  const std::vector<double> weights{0.3, 0.7};
+  const std::vector<double> weights{0.5, 0.5};
   const xmvb::vb::OrbitalGradientEvaluator evaluator;
   const auto evaluate = [&](const Eigen::MatrixXd& coefficients) {
     return evaluator.evaluate_fixed_structure(input, states, weights, 0.4, coefficients);
@@ -66,8 +66,16 @@ void check_keyframe(bool complete_carrier) {
   const auto scaled = evaluate(2.7 * c);
   require(std::abs(scaled.gradient.scf_result.total_energy -
                    fixed.gradient.scf_result.total_energy) < 1e-11 &&
-              (scaled.structure_residuals - fixed.structure_residuals).norm() < 1e-11,
+              (2.7 * scaled.coefficient_gradient - fixed.coefficient_gradient).norm() < 1e-11,
           "fixed-state normalization changed energy or residual");
+  Eigen::Matrix2d change;
+  change << 1.2, -0.3, 0.2, 0.8;
+  const auto mixed = evaluate(c * change);
+  require(std::abs(mixed.gradient.scf_result.total_energy -
+                   fixed.gradient.scf_result.total_energy) < 1e-11 &&
+              (mixed.coefficient_gradient * change.transpose() -
+               fixed.coefficient_gradient).norm() < 1e-10,
+          "equal-weight keyframe depends on the state frame");
   constexpr double delta = 1e-5;
   for (int i = 0; i < 6; ++i) {
     const double value = orbitals.orbital_value_table[i];
@@ -81,8 +89,6 @@ void check_keyframe(bool complete_carrier) {
             "fixed-state orbital gradient differs from finite differences");
   }
   for (int state = 0; state < 2; ++state) {
-    const auto normalized = fixed.normalized_coefficients.col(state);
-    const double norm = c.col(state).dot(normalized) / normalized.squaredNorm();
     for (int i = 0; i < c.rows(); ++i) {
       const double value = c(i, state);
       c(i, state) = value + delta;
@@ -91,7 +97,7 @@ void check_keyframe(bool complete_carrier) {
       const double minus = evaluate(c).gradient.scf_result.total_energy;
       c(i, state) = value;
       require(std::abs((plus - minus) / (2 * delta) -
-                       2 * weights[state] * fixed.structure_residuals(i, state) / norm) < 2e-7,
+                       fixed.coefficient_gradient(i, state)) < 2e-7,
               "fixed-state structure residual differs from finite differences");
     }
   }

@@ -143,7 +143,6 @@ set(XMVB_VBSCF_OPTIMIZATION_SOURCES
   vbscf/optimization/neo/curvature.cpp
   vbscf/optimization/neo/globalization.cpp
   vbscf/optimization/neo/problem.cpp
-  vbscf/optimization/neo/response_solver.cpp
   vbscf/optimization/neo/solver.cpp
   vbscf/optimization/preconditioners/block_inverse_bfgs.cpp
   vbscf/optimization/preconditioners/hessian_diagonal.cpp

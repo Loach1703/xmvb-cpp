@@ -12,6 +12,8 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include <Eigen/Cholesky>
+#include <Eigen/Eigenvalues>
 
 #include "vbscf/integrals/active/preparation/space.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
@@ -1079,22 +1081,27 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
   const auto action_start_time = std::chrono::steady_clock::now();
   StructureActionResult images =
       context.structure_action->apply(structure_coefficients);
-  context.selected_state_eigenvectors = structure_coefficients;
-  for (int state = 0; state < n_states; ++state) {
-    const double norm_squared = structure_coefficients.col(state).dot(
-        images.overlap.col(state));
-    if (!(norm_squared >
-          256.0 * std::numeric_limits<double>::epsilon()) ||
-        !std::isfinite(norm_squared)) {
-      throw std::runtime_error(
-          "fixed structure keyframe has a singular overlap norm");
-    }
-    const double norm = std::sqrt(norm_squared);
-    context.selected_state_eigenvectors.col(state) /= norm;
-    // Linearity: normalizing a coefficient column only scales its two images.
-    images.hamiltonian.col(state) /= norm;
-    images.overlap.col(state) /= norm;
-  }
+  for (const double weight : normalized_weights)
+    if (std::abs(weight - normalized_weights.front()) >
+        64.0 * std::numeric_limits<double>::epsilon())
+      throw std::invalid_argument("fixed-state keyframes require equal weights");
+  // E = w Tr[(C^T M C)^-1 C^T H C]. Independent column normalization
+  // is insufficient: finite transported states are not mutually orthogonal.
+  const Eigen::MatrixXd gram = structure_coefficients.transpose() * images.overlap;
+  Eigen::LLT<Eigen::MatrixXd> gram_factor(gram);
+  if (gram_factor.info() != Eigen::Success)
+    throw std::runtime_error("fixed structure keyframe has a singular state Gram matrix");
+  const Eigen::MatrixXd white = gram_factor.matrixU().solve(
+      Eigen::MatrixXd::Identity(n_states, n_states));
+  const Eigen::MatrixXd projected_h = white.transpose() *
+      (structure_coefficients.transpose() * images.hamiltonian) * white;
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(projected_h);
+  if (spectrum.info() != Eigen::Success)
+    throw std::runtime_error("fixed structure keyframe state diagonalization failed");
+  const Eigen::MatrixXd transform = white * spectrum.eigenvectors();
+  context.selected_state_eigenvectors = structure_coefficients * transform;
+  images.hamiltonian = (images.hamiltonian * transform).eval();
+  images.overlap = (images.overlap * transform).eval();
   context.selected_state_energies.resize(n_states);
   double electronic_energy = 0.0;
   for (int state = 0; state < n_states; ++state) {
@@ -1127,6 +1134,8 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
   fixed.structure_residuals.noalias() -=
       images.overlap * Eigen::Map<const Eigen::VectorXd>(
           context.selected_state_energies.data(), n_states).asDiagonal();
+  fixed.coefficient_gradient =
+      (2.0 * normalized_weights.front()) * fixed.structure_residuals * transform.transpose();
   return fixed;
 }
 
