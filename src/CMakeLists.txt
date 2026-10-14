@@ -259,6 +259,13 @@ if (BUILD_TESTING)
   add_test(NAME libcint_ri COMMAND test_libcint_ri)
   set_tests_properties(libcint_ri PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+
+  add_executable(test_libcint_shell_screening
+    ${CMAKE_SOURCE_DIR}/tests/vbscf/unit/test_libcint_shell_screening.cpp)
+  target_link_libraries(test_libcint_shell_screening PRIVATE xmvb_libcint)
+  add_test(NAME libcint_shell_screening COMMAND test_libcint_shell_screening)
+  set_tests_properties(libcint_shell_screening PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(
     NAME input_auxiliary_basis
     COMMAND

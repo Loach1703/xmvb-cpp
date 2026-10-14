@@ -90,16 +90,16 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
     }
   }
 
-  std::vector<double> shell_pair_maxima;
-  if (options.use_historical_shell_pair_prescreen) {
-    shell_pair_maxima.assign(
+  std::vector<double> shell_pair_bounds;
+  if (options.use_shell_pair_prescreen) {
+    shell_pair_bounds.assign(
         n_shells * (n_shells + 1) / 2,
         0.0);
     if (n_threads <= 1) {
       for (int shell_i = 0; shell_i < n_shells; ++shell_i) {
         for (int shell_j = 0; shell_j <= shell_i; ++shell_j) {
-          shell_pair_maxima[pair_index(shell_i, shell_j)] =
-              evaluator.evaluate_max_abs_raw_two_electron_shell_pair(
+          shell_pair_bounds[pair_index(shell_i, shell_j)] =
+              evaluator.evaluate_two_electron_shell_pair_bound(
                   shell_i, shell_j, workspaces[0]);
         }
       }
@@ -114,8 +114,8 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
 #pragma omp for schedule(dynamic)
         for (int shell_i = 0; shell_i < n_shells; ++shell_i) {
           for (int shell_j = 0; shell_j <= shell_i; ++shell_j) {
-            shell_pair_maxima[pair_index(shell_i, shell_j)] =
-                evaluator.evaluate_max_abs_raw_two_electron_shell_pair(
+            shell_pair_bounds[pair_index(shell_i, shell_j)] =
+                evaluator.evaluate_two_electron_shell_pair_bound(
                     shell_i,
                     shell_j, workspaces[thread_index]);
           }
@@ -139,10 +139,10 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
         for (int shell_j = 0; shell_j <= shell_i; ++shell_j) {
           for (int shell_k = 0; shell_k <= shell_i; ++shell_k) {
             for (int shell_l = 0; shell_l <= shell_k; ++shell_l) {
-              if (options.use_historical_shell_pair_prescreen) {
+              if (options.use_shell_pair_prescreen) {
                 const double shell_pair_product =
-                    shell_pair_maxima[pair_index(shell_i, shell_j)] *
-                    shell_pair_maxima[pair_index(shell_k, shell_l)];
+                    shell_pair_bounds[pair_index(shell_i, shell_j)] *
+                    shell_pair_bounds[pair_index(shell_k, shell_l)];
                 if (std::sqrt(shell_pair_product) < options.integral_tolerance) {
                   continue;
                 }

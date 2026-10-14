@@ -135,7 +135,13 @@ public:
       int auxiliary_shell,
       LibcintShellWorkspace& workspace) const;
 
-  double evaluate_max_abs_raw_two_electron_shell_pair(
+  /** @brief Maximum normalized `(mu nu|mu nu)` in a shell pair.
+   *
+   * Its square root is a Schwarz bound for the same unit-normalized AOs as
+   * evaluate_two_electron_shell_quartet(). Raw contraction scales must not
+   * enter the shell screening criterion.
+   */
+  double evaluate_two_electron_shell_pair_bound(
       int shell_i,
       int shell_j,
       LibcintShellWorkspace& workspace) const;

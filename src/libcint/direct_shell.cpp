@@ -631,7 +631,7 @@ const LibcintThreeCenterShellBlock& LibcintDirectShellEvaluator::evaluate_three_
   return result;
 }
 
-double LibcintDirectShellEvaluator::evaluate_max_abs_raw_two_electron_shell_pair(
+double LibcintDirectShellEvaluator::evaluate_two_electron_shell_pair_bound(
     int shell_i,
     int shell_j,
     LibcintShellWorkspace& workspace) const {
@@ -640,6 +640,8 @@ double LibcintDirectShellEvaluator::evaluate_max_abs_raw_two_electron_shell_pair
 
   const int ao_count_i = shell_ao_count(input_, shell_i);
   const int ao_count_j = shell_ao_count(input_, shell_j);
+  const int offset_i = shell_ao_offset(input_, shell_i);
+  const int offset_j = shell_ao_offset(input_, shell_j);
   auto& buffer = workspace.quartet.values;
   buffer.resize(static_cast<std::size_t>(ao_count_i) *
                 ao_count_j * ao_count_i * ao_count_j);
@@ -652,14 +654,19 @@ double LibcintDirectShellEvaluator::evaluate_max_abs_raw_two_electron_shell_pair
     return 0.0;
   }
 
-  double max_abs_value = 0.0;
-  for (double value : buffer) {
-    const double abs_value = std::abs(value);
-    if (abs_value > max_abs_value) {
-      max_abs_value = abs_value;
+  double bound = 0.0;
+  for (int j = 0; j < ao_count_j; ++j) {
+    for (int i = 0; i < ao_count_i; ++i) {
+      const std::size_t index = static_cast<std::size_t>(i) +
+          static_cast<std::size_t>(ao_count_i) *
+          (static_cast<std::size_t>(j) + static_cast<std::size_t>(ao_count_j) *
+           (static_cast<std::size_t>(i) + static_cast<std::size_t>(ao_count_i) * j));
+      const double scale =
+          ao_normalization_[offset_i + i] * ao_normalization_[offset_j + j];
+      bound = std::max(bound, std::abs(buffer[index]) * scale * scale);
     }
   }
-  return max_abs_value;
+  return bound;
 }
 
 }  // namespace xmvb::vb

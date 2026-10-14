@@ -6,16 +6,16 @@
 namespace xmvb::vb {
 
 struct LibcintMaterializedIntegralProviderOptions {
+  /** @brief Absolute discard threshold in unit-normalized AO integrals. */
   double integral_tolerance = 1.0e-10;
-  bool use_historical_shell_pair_prescreen = true;
+  bool use_shell_pair_prescreen = true;
 };
 
 /**
- * @brief Correctness-first C++ materialized AO integral provider backed by libcint.
+ * @brief Builds normalized-AO four-center integrals with Schwarz screening.
  *
- * This provider rebuilds the historical `HHF / ggf / g2eidx` buffer contract
- * directly from `LibcintInput` so numerical
- * kernels can be compared without changing their downstream interfaces.
+ * Returns canonical unique AO-pair indices and values without retaining a
+ * second representation of the integral tensor.
  */
 class LibcintMaterializedIntegralProvider {
 public:
