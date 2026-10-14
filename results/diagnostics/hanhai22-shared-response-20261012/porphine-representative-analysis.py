@@ -247,6 +247,8 @@ def main():
     parser.add_argument("root", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--snapshots", type=Path)
+    parser.add_argument("--terminal", type=Path,
+                        help="Additional native terminal Molden file to compare with the saved PySCF endpoint")
     args = parser.parse_args()
     root = args.root
     mol, _ = scf.chkfile.load_scf(str(root / "porphine-reference.chk"))
@@ -272,6 +274,8 @@ def main():
                neo1=read_molden(root / "transport-regression-1254179/singlet/input.molden", mol),
                neo2=read_molden(root / "step-geometry-1254271/singlet/input.molden", mol),
                neo_terminal=read_molden(root / "porphine-transport-1254189/singlet/input.molden", mol))
+    if args.terminal:
+        raw["neo_current_terminal"] = read_molden(args.terminal, mol)
     if args.snapshots:
         # Use the audited run's accepted frames, not stale pre-fix endpoints.
         raw["neo1"] = np.fromfile(args.snapshots / "macro-002-origin.bin").reshape((469, 100), order="F")
@@ -289,6 +293,9 @@ def main():
     report = dict(provenance=dict(slurm_job_id=os.environ["SLURM_JOB_ID"],
                                  script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                                  snapshots=str(args.snapshots) if args.snapshots else None,
+                                 current_terminal=str(args.terminal) if args.terminal else None,
+                                 current_terminal_sha256=hashlib.sha256(args.terminal.read_bytes()).hexdigest()
+                                 if args.terminal else None,
                                  baseline_terminal_native_job="1254189"),
                   ao_overlap_error=float(np.max(np.abs(s-exported_s))),
                   molden_coefficient_rounding=float(np.max(np.abs(exact-rounded))),
@@ -302,6 +309,10 @@ def main():
     for left, right in (("neo1", "pyscf1"), ("neo2", "pyscf2"),
                         ("neo_terminal", "pyscf_low")):
         report["between"][left+"_"+right] = compare(frames[left], frames[right], s)
+    if args.terminal:
+        for right in ("pyscf_low", "neo_terminal"):
+            report["between"]["neo_current_terminal_"+right] = compare(
+                frames["neo_current_terminal"], frames[right], s)
     for left, right in (("neo1", "neo2"), ("pyscf1", "pyscf2"),
                         ("pyscf2", "pyscf3"), ("pyscf3", "pyscf4")):
         report["consecutive"][left+"_"+right] = dict(

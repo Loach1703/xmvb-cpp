@@ -1087,6 +1087,64 @@ Evidence: `horizontal-build-1254753`, `horizontal-regression-1254764`,
 `summarize_horizontal.py`. The summary contains both machine-readable CSV
 and JSON, including every derivative error rather than only the best one.
 
+### Completed original-guess S-horizontal run (2026-10-14)
+
+Job **1254797** has now converged normally, exit 0. It uses the already
+qualified `d543161b` S-horizontal implementation, frozen binary from build
+1254753, the original input guess, and the unchanged convergence thresholds.
+No further optimizer change was made while this run was completing. The
+earlier two-macro conclusion above is retained as a short-test limitation;
+the completed trajectory now resolves the large high-energy discrepancy on
+this example.
+
+| Method / saved job | Macros | Orbital HVP | Total energy (Eh) | GNU wall (s) | Peak RSS (GiB) |
+|---|---:|---:|---:|---:|---:|
+| Previous NEO / 1254189 | 57 | 972 | -2244.740725558855 | 3480.19 | 39.518 |
+| S-horizontal NEO / 1254797 | 17 | 242 | -2244.741071193477 | 1199.48 | 39.519 |
+| PySCF default AH / 1248772 | 128 | not equivalent | -2244.741070284000 | 11960.00 | 85.160 |
+
+All are original-guess singlet runs on Hanhai22 with 32 allocated cores.
+Old NEO and PySCF were **not rerun**. These are single-run end-to-end timings,
+not repeated timing qualification. PySCF reports 1951 JK and 336 micro steps;
+those counters must not be labeled native coupled HVP.
+
+The energy difference from the saved PySCF endpoint changes from
+**+344.725 microhartree to -0.909 microhartree**. The final native energy
+change is -9.2680e-8 Eh and projected gradient infinity norm is 5.1548e-5;
+both original stopping conditions pass. Native wall time is 2.90 times
+shorter than the previous native run, and HVP count is 4.02 times smaller,
+without a material peak-memory change. Initial preparation takes 66.66 s;
+the native SCF loop takes 1129.07 s. GNU wall includes process overhead.
+
+The small early model ratios remain: macro 2 has rho=0.03648 and macro 3
+has rho=0.02939. This is not evidence that the finite model is globally exact.
+The subsequent trajectory does escape the previous endpoint: macro 15 is
+-2244.7409614365 Eh; macro 16 is -2244.7410711008 Eh. The final two ratios
+are 1.000089 and 1.014334. Thus the short-test mismatch did not imply that
+the corrected run would still converge to the previous high-energy basin.
+
+Geometry-only Slurm job **1254863** compares the saved final orbitals,
+using AO overlap and subspace projectors, without a Hamiltonian or energy
+evaluation. The new and PySCF active spaces are **not identical**: maximum
+active principal angle is 65.27 degrees (core: 60.66 degrees, total occupied:
+65.26 degrees). Their energy agreement alone must not be presented as
+identity of their wavefunctions, densities, or stationary points. In
+particular, this audit does not attribute the remaining subspace difference
+to weak occupations or symmetry without additional evidence.
+
+The follow-up interface review found consistent vector/covector maps,
+origin-chart keyframe gradients, and the actual selected-space overlap in
+finite CI transport. Cross-macro CI seed projection remains an approximate
+search initialization; it is not evidence of an incorrect Hessian. No new
+production patch is justified by that observation alone.
+
+`summarize_porphine_horizontal.py` parses the stored outputs into
+`porphine-horizontal-1254797/comparison.csv` and `comparison.json`. The
+geometry script now accepts an explicit `--terminal` Molden path and records
+its hash. Job 1254861 failed because an empty positional sbatch argument was
+not preserved; 1254863 uses explicit named arguments and completed. This was
+a reporting-job argument error, not a failure of the chemistry calculation.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.

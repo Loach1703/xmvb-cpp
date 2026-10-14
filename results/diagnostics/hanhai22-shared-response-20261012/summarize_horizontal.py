@@ -10,7 +10,9 @@ ROOT = Path(__file__).resolve().parent
 
 
 def measure(folder):
-    text = (folder / "output.out").read_text()
+    output = folder / "output.out"
+    text = output.read_text() if output.exists() else gzip.open(
+        folder / "output.out.gz", "rt").read()
     resource = (folder / "resource.time").read_text()
     rows = list(csv.DictReader((folder / "neo.tsv").open(), delimiter="\t"))
     wall = re.search(r"Elapsed \(wall clock\) time.*?:\s*([\d:.]+)", resource).group(1)
