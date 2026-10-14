@@ -3,7 +3,7 @@
 #SBATCH --partition=CPU-192C768GB
 #SBATCH --qos=qos_cpu_192c768gb
 #SBATCH --account=xiatao
-#SBATCH --array=0
+#SBATCH --array=1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
@@ -27,16 +27,20 @@ export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
 export LD_LIBRARY_PATH="/home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib:${LD_LIBRARY_PATH:-}"
 export XMVB_NEO_TRACE=scalar
 unset XMVB_NEO_KEYFRAME_AUDIT XMVB_NEO_ORBITAL_STEP_AUDIT XMVB_NEO_ORBITAL_PATH XMVB_NEO_CANDIDATE_AUDIT
-binary="/home/guqqgroup/xiatao/xmvb-runs/pyrrole-recheck-20261014/horizontal-build-1255480/xmvb-cpp.exe"
-expected="a5313100b12fd57e7d876e0d21c9333df5cc9d1a4d4dfca126c25b3f5da9b602"
+binary="/home/guqqgroup/xiatao/xmvb-runs/fecl2-fromcas-20261014/run-1255567/xmvb-cpp.exe"
+expected="cff4f5adb192a44b775086c95bd10fadf679231c37bd78a34ea63efd8d2e0100"
 printf '%s  %s\n' "$expected" "$binary" | sha256sum -c -
 arguments=(--optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal
   --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --exact-exchange-memory-mib 256 --neo-trace neo.tsv)
 hostname > node.txt
 lscpu > cpu.txt
 module list > modules.txt 2>&1
-printf '%s\n' 'master 39201b81; build 1255480; local uncommitted RI edits excluded' > source.txt
-printf '%s  %s\n' e7d58d653a5d99f6acee301e0096e582dedd7a9f47c22b4d2c2ace013ab351fb input.xmi | sha256sum -c -
+printf '%s\n' 'master 824ddec9; executable includes b0b163a6 orbital output; local uncommitted RI edits excluded' > source.txt
+case "$state" in
+  singlet) input_hash=e7d58d653a5d99f6acee301e0096e582dedd7a9f47c22b4d2c2ace013ab351fb ;;
+  triplet) input_hash=79edd76ddc6902f84492592cfd70054a449b403ea150b4429ce5306e415ce8eb ;;
+esac
+printf '%s  %s\n' "$input_hash" input.xmi | sha256sum -c -
 env | sort > environment.txt
 sha256sum "$binary" input.xmi *.gbs > hashes.txt
 printf '%s\n' "${arguments[@]}" > arguments.txt
