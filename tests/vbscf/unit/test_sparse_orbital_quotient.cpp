@@ -70,7 +70,7 @@ void check_whitened_tangent_inverse() {
         const WhitenedTangent result = whitening.apply(coefficients, s, sphere);
         const RawTangent raw_result = raw_metric.apply(q, coefficients, s, sphere);
         const Eigen::MatrixXd conversion =
-            raw_result.inverse_gram * raw_result.basis.transpose() * result.basis;
+            raw_result.inverse_gram * raw_result.basis.transpose() * s * result.basis;
         const Eigen::MatrixXd raw_coordinate_metric = q.transpose()*s*q -
             raw_result.projection*raw_result.projection.transpose();
         const Eigen::MatrixXd raw_coordinate_inverse = raw_metric.inverse() +
@@ -84,7 +84,7 @@ void check_whitened_tangent_inverse() {
         require((raw_coordinate_metric * raw_coordinate_inverse -
                  Eigen::MatrixXd::Identity(d,d)).norm() < 2e-8,
                 "raw coordinate inverse failed its residual");
-        const Eigen::MatrixXd raw_gram = raw_result.basis.transpose() * raw_result.basis;
+        const Eigen::MatrixXd raw_gram = raw_result.basis.transpose() * s * raw_result.basis;
         require((raw_gram * raw_result.inverse_gram -
                  Eigen::MatrixXd::Identity(d,d)).norm() < 2e-8,
                 "unwhitened representative has an incorrect left inverse");
@@ -98,10 +98,10 @@ void check_whitened_tangent_inverse() {
         require((expected * rotation - result.basis).norm() < 2e-10 * expected.norm() &&
                 (rotation.transpose() * rotation - Eigen::MatrixXd::Identity(d, d)).norm() < 2e-9,
                 "shared whitening changed the physical horizontal lift");
-        const Eigen::MatrixXd gram = result.basis.transpose() * result.basis;
+        const Eigen::MatrixXd gram = result.basis.transpose() * s * result.basis;
         const Eigen::MatrixXd inverse = gram.ldlt().solve(Eigen::MatrixXd::Identity(d, d));
         require((result.inverse_gram - inverse).norm() < 2e-10 * inverse.norm(),
-                "rank-two raw tangent inverse differs from a dense reference");
+                "raw AO-metric inverse differs from a dense reference");
         require((gram * result.inverse_gram - Eigen::MatrixXd::Identity(d, d)).norm() < 2e-9,
                 "raw tangent left inverse failed its dense residual");
         const Eigen::MatrixXd normalized_tangent = jacobian * result.basis;
@@ -208,7 +208,8 @@ OrbitalPreparationInput make_input(
   input.orbital_type = 1;
   input.ao_overlap_matrix = Eigen::MatrixXd::Identity(
       coefficients.rows(), coefficients.rows());
-  // Nontrivial SPD AO metric; the algebraic gauge must not depend on it.
+  // Nontrivial SPD AO metric; the admissible gauge span is algebraic, while
+  // its horizontal complement uses this metric.
   input.ao_overlap_matrix.array() += 0.07;
   input.orbital_value_table.assign(coefficients.size(), 0.0);
   input.orbital_basis_index_table.assign(coefficients.size(), 0);
@@ -234,6 +235,27 @@ Eigen::MatrixXd dense(const OrbitalPreparationInput& input) {
     }
   }
   return c;
+}
+
+Eigen::MatrixXd packed_ao_metric(
+    const OrbitalPreparationInput& input,
+    const SparseParameterLayout& view) {
+  Eigen::MatrixXd metric = Eigen::MatrixXd::Zero(view.size(), view.size());
+  for (int orbital = 0; orbital < input.n_orbitals; ++orbital) {
+    const int count = view.orbital_coefficient_count(orbital);
+    for (int row = 0; row < count; ++row) {
+      const int ao_row = input.orbital_basis_index_table[
+          orbital * input.n_basis_functions + row] - 1;
+      for (int column = 0; column < count; ++column) {
+        const int ao_column = input.orbital_basis_index_table[
+            orbital * input.n_basis_functions + column] - 1;
+        metric(view.packed_index(orbital, row),
+               view.packed_index(orbital, column)) =
+            input.ao_overlap_matrix(ao_row, ao_column);
+      }
+    }
+  }
+  return metric;
 }
 
 /** @brief Curvature surrogates must not change quotient maps or stationarity. */
@@ -413,8 +435,21 @@ void check(const std::string& name, const OrbitalPreparationInput& input,
   require(audit.current_retained_gauge_dimension == 0 &&
               audit.current_missing_physical_dimension == 0,
           name + ": incorrect physical image");
+  // The admissible gauge is unchanged; each raw lift must use its AO-metric
+  // horizontal complement, including restricted and frozen sparse supports.
+  const Eigen::MatrixXd sparse_metric = packed_ao_metric(input, view);
+  const Eigen::MatrixXd gauge_horizontal =
+      audit.packed_gauge_basis.transpose() * sparse_metric * u;
+  require(gauge_horizontal.norm() <
+              5.0e-10 * std::max(1.0, (sparse_metric * u).norm()),
+          name + ": raw quotient lift is not S-horizontal to admissible gauge");
+  require(audit.quotient_dimension == space.reduced_size(),
+          name + ": AO-metric horizontal lift lost a physical dimension");
   const OrbitalPhysicalMetric coupled_metric(input, space.uses_active_subspace_gauge());
   for (int gauge = 0; gauge < audit.packed_gauge_basis.cols(); ++gauge) {
+    require(space.project_vector(audit.packed_gauge_basis.col(gauge)).reduced_gradient.norm() <
+                1.0e-10,
+            name + ": quotient vector projection retained a gauge direction");
     require(coupled_metric.squared_norm(
                 view, audit.packed_gauge_basis.col(gauge)) < 1.0e-18,
             name + ": coupled metric did not annihilate gauge");
@@ -588,6 +623,9 @@ void check(const std::string& name, const OrbitalPreparationInput& input,
          reduced_covector)
                 .norm() < 1e-10,
         name + ": reduced covector lift is not a right inverse");
+    require((audit.packed_gauge_basis.transpose() *
+             space.expand_gradient(reduced_covector)).norm() < 1.0e-10,
+            name + ": lifted covector does not annihilate admissible gauge");
     Eigen::VectorXd secant_step =
         Eigen::VectorXd::LinSpaced(u.cols(), 0.3, 1.2).normalized();
     Eigen::VectorXd secant_gradient_change =
@@ -609,6 +647,43 @@ void check(const std::string& name, const OrbitalPreparationInput& input,
     const auto trial = space.retract_step(input, d, 0.01);
     require((view.pack(trial) - x - 0.01 * u * d).norm() < 1e-12,
             name + ": additive retraction");
+    const auto opposite = space.retract_step(input, -d, 0.01);
+    require((view.pack(trial) + view.pack(opposite) - 2.0 * x).norm() < 1e-12 &&
+                trial.orbital_basis_index_table == input.orbital_basis_index_table &&
+                opposite.orbital_basis_index_table == input.orbital_basis_index_table,
+            name + ": opposite raw lifts changed the sparse graph");
+    const Eigen::MatrixXd original_orbitals = dense(input);
+    const Eigen::MatrixXd trial_orbitals = dense(trial);
+    const Eigen::MatrixXd opposite_orbitals = dense(opposite);
+    const int n_inactive =
+        (input.n_total_electrons - input.n_active_electrons) / 2;
+    for (int orbital = 0; orbital < n_inactive; ++orbital) {
+      const Eigen::VectorXd metric_origin =
+          input.ao_overlap_matrix * original_orbitals.col(orbital);
+      require(metric_origin.dot(trial_orbitals.col(orbital)) > 0.0 &&
+                  metric_origin.dot(opposite_orbitals.col(orbital)) > 0.0,
+              name + ": fixed-core chart flipped an inactive frame column");
+    }
+    const Eigen::VectorXd raw_coupling =
+        Eigen::VectorXd::LinSpaced(view.size(), -0.6, 0.8);
+    const Eigen::MatrixXd raw_hessian =
+        sparse_metric + 0.03 * raw_coupling * raw_coupling.transpose();
+    const Eigen::VectorXd raw_linear =
+        Eigen::VectorXd::LinSpaced(view.size(), 0.4, -0.3);
+    const auto pulled_gradient = [&](const OrbitalPreparationInput& point) {
+      const Eigen::VectorXd packed = view.pack(point);
+      return space.project_reduced_gradient(raw_hessian * packed + raw_linear);
+    };
+    constexpr double derivative_step = 1.0e-5;
+    const Eigen::VectorXd finite_hvp =
+        (pulled_gradient(space.retract_step(input, derivative_step * d)) -
+         pulled_gradient(space.retract_step(input, -derivative_step * d))) /
+        (2.0 * derivative_step);
+    const Eigen::VectorXd analytic_hvp =
+        space.project_reduced_gradient(raw_hessian * u * d);
+    require((finite_hvp - analytic_hvp).norm() <
+                2.0e-9 * std::max(1.0, analytic_hvp.norm()),
+            name + ": reduced HVP lost the raw retraction pullback");
     // Stored but frozen slots must not change.
     std::vector<bool> differentiable(input.orbital_value_table.size(), false);
     for (int slot : view.differentiable_parameter_indices()) differentiable[slot] = true;
@@ -655,6 +730,31 @@ void check_complete_oeo_active_subspace_gauge() {
       complete_cas_chart.structural_diagnostics();
   require(complete_diagnostics.product_sphere_orbital_count == 0,
           "complete-CAS OEO chart was split into independent orbital rays");
+
+  for (const auto coordinates : {OrbitalChart::Coordinates::Whitened,
+                                OrbitalChart::Coordinates::Unwhitened}) {
+    const OrbitalChart chart(input, view, orbitals, orbitals, nullptr,
+                             false, true, nullptr, coordinates);
+    Eigen::VectorXd raw = chart.expand_step(
+        Eigen::VectorXd::LinSpaced(chart.reduced_size(), -0.9, 0.7));
+    for (int slot = 0; slot < 5; ++slot) raw[view.packed_index(0, slot)] = 0.0;
+    const Eigen::VectorXd step = chart.project_vector(raw).reduced_gradient;
+    const Eigen::MatrixXd core = orbitals.leftCols(1);
+    const Eigen::MatrixXd active = orbitals.rightCols(2) - core *
+        (core.transpose() * input.ao_overlap_matrix * core).ldlt().solve(
+            core.transpose() * input.ao_overlap_matrix * orbitals.rightCols(2));
+    const Eigen::MatrixXd origin_gram = active.transpose() * input.ao_overlap_matrix * active;
+    for (const double scale : {1.0, 4.0, 20.0}) {
+      const Eigen::MatrixXd moved = dense(chart.retract_step(input, step, scale));
+      require((moved.leftCols(1)-core).norm() < 1.0e-12,
+              "fixed-core OEO test moved the core");
+      const Eigen::MatrixXd cross = active.transpose() * input.ao_overlap_matrix * moved.rightCols(2);
+      require((cross-origin_gram).norm() < 2.0e-11,
+              "S-horizontal OEO finite step changed its active graph orientation");
+      require(cross.determinant() > 0,
+              "fixed-core OEO finite step reversed the active frame");
+    }
+  }
 
   Eigen::VectorXd active_mixing = Eigen::VectorXd::Zero(view.size());
   for (int slot = 0; slot < 5; ++slot) {

@@ -915,6 +915,178 @@ claim. Full raw snapshots, scalar log, executable hash, test evidence and the
 geometry-only script/JSON are retained in `step-geometry-1254394`,
 `step-geometry-build-1254377`, and `representative-analysis-1254511`.
 
+## Corrective S-horizontal quotient lift (2026-10-14)
+
+The correction changes the accepted-point *linear lift*, not the orbital
+normalization formula, nonlinear CI extension, HVP policy or tolerances. Let
+G_p contain the existing support-admissible gauge generators on orbital p's
+allowed coefficient slots and let S_p be the corresponding principal AO
+overlap submatrix. The forbidden-support nullspace is constructed exactly as
+before; only the complement is changed:
+
+$$
+G_p^T S_p U_p=0,
+\qquad
+\delta b_p=L_p z_p.
+$$
+
+Here U_p spans the nullspace and L_p is its existing normalized raw lift,
+with optional coordinate whitening only for the older TN/L-BFGS charts.
+Since S_p is positive definite, a vector v in both span(G_p) and its
+S_p-orthogonal complement satisfies v^T S_p v=0, hence v=0. The new complement
+therefore removes the same gauge rank and retains the same physical dimension.
+Active--active generators still enter **only** the complete-CAS OEO chart;
+arbitrary selected structures retain their independent active rays. Frozen
+coefficient tails and unequal HAO supports keep their exact admissible gauge.
+
+At a canonical full-OEO accepted point, active columns are S-orthogonal to
+the core. The new lift makes core increments S-orthogonal to the old core,
+and complete-CAS active increments S-orthogonal to the old occupied span.
+It therefore removes the raw radial/active-parallel first jet responsible
+for the measured folding. With a fixed core, if T0^T S X=0, then
+
+$$
+T_0^T S(T_0+tX)=T_0^T S T_0
+$$
+
+for every finite t. This fixes the active graph orientation for that fixed-core
+path. Simultaneous core motion can still cause second-order changes; this is
+not a claim of global no-reflection or guaranteed basin identity.
+
+Changing U_p alone is insufficient. An Euclidean left inverse would no longer
+annihilate the gauge. Vector recovery and covector lifting must be dual:
+
+$$
+D_p=L_p^T S_p L_p,\qquad
+P_p=D_p^{-1}L_p^T S_p,\qquad
+z_p=P_p\delta b_p,\qquad
+g_{z,p}=L_p^T g_{b,p},\qquad
+\widetilde g_{b,p}=P_p^T g_{z,p}.
+$$
+
+Consequently P_p L_p=I, P_p G_p=0, L_p^T P_p^T=I and G_p^T P_p^T=0.
+This is necessary for recycled directions, transported secants and the
+analytic full-OEO physical dual norm. The chart's vector projection, packed
+gradient projection, gradient expansion and rotation inverse are all changed
+together; no caller keeps interpreting the same inverse as an Euclidean Gram.
+
+No per-orbital cubic inverse is introduced. For the unwhitened representative,
+write n=||b||_S, c=b/n, M=U^T S U, r=U^T S c, v=M^-1 r and
+delta=1-r^T v. With s=1 for the product-sphere representative and 0 otherwise,
+
+$$
+L=n(U-scr^T),\qquad
+D^{-1}=\frac{1}{n^2}\left(M^{-1}+s\frac{vv^T}{\delta}\right).
+$$
+
+The existing shared M^-1 supplies this action. For a whitened B satisfying
+B^T S B=I and u=B^T S c, the corresponding inverse raw AO Gram is I/n^2
+for the sphere representative and (I-uu^T)/n^2 otherwise. These formulas also
+cover frozen-tail charts where scaling is not admissible. The obsolete
+Euclidean rank-two inverse is deleted, rather than retained as a fallback.
+
+For the analytic full-AO preconditioner, let E=Q_ext^T S L/n be its existing
+frame map. Since span(L)=span(Q_ext), its inverse is
+
+$$
+E^{-1}=n^2 D^{-1} E^T.
+$$
+
+The implementation reuses E and D^-1, and retains its existing residual
+certificate; no extra AO multiplication or factorization is required.
+
+All trial orbital coefficients are still b+Lz. L is immutable within a macro,
+so the raw-orbital gradient pullback is L^T g and its Hessian pullback is
+L^T H L. The finite CI extension recomputes its actual Cholesky direction using
+the same L, and its gradient/curvature pullbacks remain in that coordinate
+system. No derivative of an across-accepted-point basis is added to a trial,
+and no exponential-retraction second derivative is silently omitted.
+
+The opt-in keyframe derivative audit now checks
+the first keyframe of **each** audited macro, so macro 2 is no longer excluded.
+It is still not an optimizer acceptance criterion.
+
+### Qualification of the implemented correction
+
+Build 1254753 passes twelve tests: sparse-orbital quotient, arbitrary selected
+CI transport, CI transport, representation overlap, overlap pullback, OEO
+normalization pullback, CIAH, coupled structure, normalized orbital curvature,
+analytic Hessian diagonal, orbital step geometry, and shifted-metric
+preconditioner. Added assertions explicitly check S-horizontal lifts, gauge
+annihilation by both vector projection and dual covector lift, unchanged
+physical dimensions/supports, large fixed-core OEO finite graph orientation,
+and pulled Hessian finite differences. The binary SHA-256 is
+`871bb8a0f5ba78664c471f99c47537bb0e28a9b95e30c3bea3acf3ec46c49126`.
+
+Molecular array 1254764 runs four native regressions to convergence, and the
+singlet only to two macros with derivative instrumentation. All use Hanhai22,
+32 bound cores, the original guesses, exact libcint, Davidson, analytic
+Hessian-diagonal preconditioning and unchanged stopping thresholds. Existing
+1254179 results supply the before column; no old version is rerun.
+
+| Case | Macros before / after | HVP before / after | Wall seconds before / after | Peak RSS MiB before / after | After energy (Eh) | After-minus-before (Eh) |
+|---|---:|---:|---:|---:|---:|---:|
+| F2-OEO | 3 / 3 | 15 / 13 | 0.30 / 0.25 | 18.51 / 18.33 | -198.689800055684 | -5.13e-9 |
+| FeCl2 | 26 / 15 | 455 / 252 | 11.69 / 6.89 | 495.82 / 518.13 | -2181.624464860406 | +7.39e-9 |
+| MnF2 | 11 / 10 | 157 / 159 | 3.87 / 3.46 | 499.16 / 518.29 | -1348.893353289841 | +3.06e-9 |
+| 241 | 3 / 3 | 20 / 20 | 2.01 / 2.07 | 810.52 / 843.84 | -230.720590533850 | -2.98e-12 |
+
+These are single runs on different Hanhai22 nodes, not repeated timing
+qualification. The current round targets correctness, not performance.
+It does not claim universal speed or memory improvement.
+
+Geometry-only job 1254782 analyzes the new exact snapshots with the same
+projector/isometry formulas. At the first keyframe of macro 2:
+
+| Quantity | Previous raw lift | Corrected S-horizontal lift |
+|---|---:|---:|
+| Max active abs(alpha) | 1.280040 | 1.49e-16 |
+| Active-parallel tangent Frobenius norm | 1.350605 | 3.76e-16 |
+| Active frame polar orientation | -1 | +1 |
+| Actual active space versus same-tangent isometry | 21.9994 degrees | 1.1032 degrees |
+| Actual structure-gradient norm | 0.979898 | 0.113134 |
+| Actual / predicted coupled gradient norm | 0.985829 / 0.063051 | 0.221672 / 0.029301 |
+
+The corrected accepted macro-2 frame has positive orientation and internal
+polar angle 0.2405 degrees; its physical tangent norm agrees independently
+with the native record to machine precision. Thus the previously diagnosed
+raw folding mechanism is removed on the tested candidates, rather than
+merely hidden by smaller step limits.
+
+The actual first keyframe of each of the two macros also receives an opt-in
+full transported HVP/gradient audit. These are derivatives of the current
+finite joint map, not repeated cross-program fixed-point energy comparisons.
+
+| Macro | Perturbation | Full HVP error norm | Finite joint energy-derivative error (Eh) |
+|---|---:|---:|---:|
+| 1 | 1e-3 | 1.73e-8 | 9.97e-9 |
+| 1 | 3e-4 | 6.72e-9 | 1.12e-7 |
+| 2 | 1e-3 | 1.66e-7 | 4.10e-8 |
+| 2 | 3e-4 | 1.63e-8 | 1.07e-7 |
+
+This round does **not** close the final singlet energy gap. The corrected
+macro-2 keyframe still fails the model-mismatch test (0.229213). Its relaxed
+full macro decreases energy by only 0.356948 mEh against a predicted
+9.785949 mEh, rho=0.036476. Two-macro final energy is -2244.719262254443 Eh,
+above the previous two-macro -2244.722528082080 Eh. The corrected and PySCF
+macro-2 active spaces still differ by 41.5051 degrees. Fixing representative
+drift is therefore confirmed, but neither improved early energy descent nor
+identity with the final PySCF basin has been demonstrated.
+
+The derivative-instrumented two-macro run uses 20 HVP, wall 219.22 seconds,
+RSS 40469.00 MiB; its intentional exit is 2. It is not a native speed result.
+Job 1254797 runs the corrected singlet to convergence from the **original**
+input, with the derivative audit and raw snapshot output disabled. It retains
+scalar/angle logs to detect any later recurrence; there is no new optimizer
+threshold or extra endpoint criterion. Its eventual terminal energy, total
+macro/HVP counts and resource totals must be reported before calling the
+singlet energy issue resolved.
+
+Evidence: `horizontal-build-1254753`, `horizontal-regression-1254764`,
+`representative-analysis-1254782`, the build/run wrappers, and
+`summarize_horizontal.py`. The summary contains both machine-readable CSV
+and JSON, including every derivative error rather than only the best one.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.

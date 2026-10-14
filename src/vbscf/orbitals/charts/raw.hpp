@@ -7,6 +7,7 @@ namespace xmvb::vb {
 /** @brief A quotient representative without a coordinate inverse square root. */
 struct RawTangent {
   Eigen::MatrixXd basis;
+  /** @brief Inverse of basis^T S basis for vector/covector duality. */
   Eigen::MatrixXd inverse_gram;
   Eigen::VectorXd projection, inverse_projection;
   double radial_gap = 1.0;

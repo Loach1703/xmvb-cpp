@@ -4,7 +4,7 @@
 
 namespace xmvb::vb {
 
-/** @brief Normalized orbital tangent and its raw-coordinate left-inverse metric. */
+/** @brief Normalized orbital tangent and inverse of its raw AO-metric Gram. */
 struct WhitenedTangent {
   Eigen::MatrixXd basis;
   Eigen::MatrixXd inverse_gram;

@@ -20,6 +20,6 @@ mkdir -p "$run"
 export PYTHONPATH="$root/porphine-reference-audit-1247977/python" PYTHONNOUSERSITE=1
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 arguments=("$root" "$run")
-if [[ $# == 1 ]]; then arguments+=(--snapshots "$root/step-geometry-$1/singlet/frames"); fi
+if [[ $# == 1 ]]; then arguments+=(--snapshots "$1"); fi
 srun --exact --ntasks=1 --cpus-per-task=8 --cpu-bind=cores \
   python3 "$root/porphine-representative-analysis.py" "${arguments[@]}" > "$run/analysis.out" 2> "$run/analysis.err"

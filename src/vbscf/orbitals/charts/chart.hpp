@@ -209,12 +209,11 @@ private:
     std::vector<int> flat_indices;
     std::vector<int> packed_indices;
     std::vector<int> block_rows;
-    // Horizontal representative of the support-admissible quotient. NEO
+    // S-horizontal representative of the support-admissible quotient. NEO
     // leaves its AO coordinate metric explicit; TN/L-BFGS normalize it.
     Eigen::MatrixXd tangent_basis;
-    // Left-inverse metric needed to recover reduced vector coordinates from
-    // packed raw-coefficient tangents. Gradients use the transpose pullback
-    // and must not use this inverse.
+    // Inverse of L^T S_local L. Vectors use this with L^T S_local;
+    // covectors pull back with L^T and lift with the transpose dual map.
     Eigen::MatrixXd inverse_raw_tangent_gram;
     // Only unwhitened charts store these local AO tangent metrics.
     std::shared_ptr<const RawTangentMetric> coordinate_base;
@@ -260,6 +259,11 @@ private:
     Eigen::MatrixXd block_overlap_matrix;
     std::vector<OrbitalProjector> orbitals;
   };
+
+  /** @brief Apply a borrowed block AO metric on one orbital's allowed slots. */
+  Eigen::VectorXd local_metric_image(
+      const BlockBasis& block, const OrbitalProjector& orbital,
+      const Eigen::VectorXd& local) const;
 
   ProjectionResult project_impl(
       const Eigen::VectorXd& packed_vector,

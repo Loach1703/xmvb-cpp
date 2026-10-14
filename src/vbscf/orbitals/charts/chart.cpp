@@ -305,13 +305,28 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
     return Eigen::MatrixXd::Identity(local_size, local_size);
   }
 
-  // LAPACKE requires the actual column-major stride, not a transpose view.
-  // This complement fixes the inter-orbital quotient gauge.  The independent
-  // scaling gauge is converted to an S-tangent representative later, after
-  // applying the orbital-normalization Jacobian; changing all gauge
-  // complements here would select a different physical horizontal lift.
-  const Eigen::MatrixXd horizontal_constraints =
-      local_gauge_generators.transpose();
+  // The admissible gauge is unchanged. Choose its S-horizontal complement:
+  // G^T S_local U=0, not G^T U=0. Otherwise a small physical tangent can have
+  // large raw radial/active-parallel parts and fold its finite additive path.
+  Eigen::MatrixXd horizontal_constraints(local_gauge_generators.cols(), local_size);
+  if (local_size == input.n_basis_functions) {
+    // Borrow the full AO overlap; only gauge-width matrices are temporary.
+    // Scatter also supports a full-AO table whose entries are permuted.
+    Eigen::MatrixXd gauge = Eigen::MatrixXd::Zero(
+        input.n_basis_functions, local_gauge_generators.cols());
+    for (int row = 0; row < local_size; ++row)
+      gauge.row(local_basis_indices[row]) = local_gauge_generators.row(row);
+    const Eigen::MatrixXd covariant_gauge = ao_overlap * gauge;
+    for (int row = 0; row < local_size; ++row)
+      horizontal_constraints.col(row) = covariant_gauge.row(local_basis_indices[row]).transpose();
+  } else {
+    Eigen::MatrixXd local_overlap(local_size, local_size);
+    for (int row = 0; row < local_size; ++row)
+      for (int column = 0; column < local_size; ++column)
+        local_overlap(row, column) = ao_overlap(
+            local_basis_indices[row], local_basis_indices[column]);
+    horizontal_constraints.noalias() = local_gauge_generators.transpose() * local_overlap;
+  }
   diagnostics::record_matrix_shape(diagnostics::Phase::ChartGaugeSvd,
                                   horizontal_constraints.rows(), horizontal_constraints.cols());
   Eigen::JacobiSVD<Eigen::MatrixXd> gauge_svd(
@@ -676,7 +691,8 @@ OrbitalChart::OrbitalChart(
           const Eigen::VectorXd scaling_residual =
               x_p - proj.tangent_basis *
                         (proj.inverse_raw_tangent_gram *
-                         (proj.tangent_basis.transpose() * x_p));
+                         (proj.tangent_basis.transpose() *
+                          local_metric_image(bb, proj, x_p)));
           proj.relative_scaling_residual =
               scaling_residual.norm() / local_coefficient_norm;
         }
@@ -952,6 +968,19 @@ OrbitalChart::structural_diagnostics() const noexcept {
   return diagnostics;
 }
 
+Eigen::VectorXd OrbitalChart::local_metric_image(
+    const BlockBasis& block, const OrbitalProjector& orbital,
+    const Eigen::VectorXd& local) const {
+  Eigen::VectorXd embedded = Eigen::VectorXd::Zero(block.basis_function_indices.size());
+  for (Eigen::Index row = 0; row < local.size(); ++row)
+    embedded[orbital.block_rows[row]] = local[row];
+  const Eigen::VectorXd image = block.block_overlap_matrix * embedded;
+  Eigen::VectorXd result(local.size());
+  for (Eigen::Index row = 0; row < local.size(); ++row)
+    result[row] = image[orbital.block_rows[row]];
+  return result;
+}
+
 OrbitalChart::ProjectionResult
 OrbitalChart::project_impl(
     const Eigen::VectorXd& packed_vector,
@@ -983,6 +1012,8 @@ OrbitalChart::project_impl(
                projector.packed_indices[i] < packed_parameter_size_);
         g_p[i] = packed_vector[projector.packed_indices[i]];
       }
+      if (recover_tangent_coordinates)
+        g_p = local_metric_image(block_basis, projector, g_p);
       const Eigen::VectorXd pulled_back =
           projector.tangent_basis.transpose() * g_p;
       const Eigen::VectorXd z_p = recover_tangent_coordinates
@@ -997,8 +1028,10 @@ OrbitalChart::project_impl(
             recover_tangent_coordinates
                 ? z_p
                 : projector.inverse_raw_tangent_gram * z_p;
-        const Eigen::VectorXd dx_p =
+        Eigen::VectorXd dx_p =
             projector.tangent_basis * projection_coordinates;
+        if (!recover_tangent_coordinates)
+          dx_p = local_metric_image(block_basis, projector, dx_p);
         assert(dx_p.allFinite());
         for (Eigen::Index i = 0; i < dx_p.size(); ++i)
           result.packed_projected_gradient[projector.packed_indices[i]] += dx_p[i];
@@ -1433,12 +1466,13 @@ Eigen::VectorXd OrbitalChart::expand_gradient(
   for (const auto& block_basis : block_bases_) {
     for (const auto& projector : block_basis.orbitals) {
       if (projector.local_reduced_size <= 0) continue;
-      const Eigen::VectorXd local =
+      const Eigen::VectorXd representative =
           projector.tangent_basis *
           (projector.inverse_raw_tangent_gram *
            reduced_gradient.segment(
                projector.local_reduced_offset,
                projector.local_reduced_size));
+      const Eigen::VectorXd local = local_metric_image(block_basis, projector, representative);
       for (Eigen::Index row = 0; row < local.size(); ++row) {
         packed[projector.packed_indices[row]] += local[row];
       }

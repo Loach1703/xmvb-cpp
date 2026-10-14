@@ -13,7 +13,7 @@ struct CiahKeyframeProbe {
 /** @brief Opt-in derivative audit, never an optimizer acceptance rule. */
 bool ciah_keyframe_audit_enabled();
 
-/** @brief Full transported gradient/HVP check at the actual first keyframe. */
+/** @brief Opt-in gradient/HVP check at the first keyframe of each macro. */
 void audit_ciah_keyframe(
     const Eigen::VectorXd& displacement,
     const Eigen::VectorXd& hessian_displacement,

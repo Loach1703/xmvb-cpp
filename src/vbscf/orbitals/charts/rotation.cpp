@@ -54,12 +54,12 @@ void OrbitalChart::build_rotation_inverse(
         raw[row] = input.orbital_value_table[
             orbital.orbital_index * input.n_basis_functions + row];
       const double norm = std::sqrt(raw.dot(input.ao_overlap_matrix * raw));
-      // U spans the Euclidean gauge complement. Projecting an orthonormal
-      // external vector onto U changes it only by occupied gauge components.
-      // Therefore E^{-1}=||b|| (U^T U)^{-1} U^T Q_ext, without another SVD.
-      orbital.ah_frame_inverse.noalias() = norm * orbital.inverse_raw_tangent_gram *
-          orbital.tangent_basis.transpose() * model.mo_coefficients.rightCols(width);
       const Eigen::MatrixXd forward = orbital.ah_rotation_components.bottomRows(width);
+      // L=||b|| Q_ext E for an S-horizontal lift. Recover E^{-1} from the
+      // shared AO-metric Gram and existing frame map, without another AO
+      // multiplication, factorization or explicit whitening.
+      orbital.ah_frame_inverse.noalias() = norm * norm *
+          orbital.inverse_raw_tangent_gram * forward.transpose();
       const Eigen::MatrixXd error = forward * orbital.ah_frame_inverse -
           Eigen::MatrixXd::Identity(width, width);
       const double bound = 512.0 * std::numeric_limits<double>::epsilon() *

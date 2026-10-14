@@ -272,6 +272,10 @@ def main():
                neo1=read_molden(root / "transport-regression-1254179/singlet/input.molden", mol),
                neo2=read_molden(root / "step-geometry-1254271/singlet/input.molden", mol),
                neo_terminal=read_molden(root / "porphine-transport-1254189/singlet/input.molden", mol))
+    if args.snapshots:
+        # Use the audited run's accepted frames, not stale pre-fix endpoints.
+        raw["neo1"] = np.fromfile(args.snapshots / "macro-002-origin.bin").reshape((469, 100), order="F")
+        raw["neo2"] = read_molden(args.snapshots.parent / "input.molden", mol)
     py_path = root / "porphine-path-1253884/pyscf-4"
     raw["pyscf_initial"] = np.load(py_path / "initial-mo.npy")[:, :100] * scale[:, None]
     for macro in range(1, 5):
@@ -283,7 +287,9 @@ def main():
     rounded = read_molden(root / "porphine-path-1253884/neo-1/input.molden", mol)
     frames = {name: geometry(b, s) for name, b in raw.items()}
     report = dict(provenance=dict(slurm_job_id=os.environ["SLURM_JOB_ID"],
-                                 script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()),
+                                 script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                                 snapshots=str(args.snapshots) if args.snapshots else None,
+                                 baseline_terminal_native_job="1254189"),
                   ao_overlap_error=float(np.max(np.abs(s-exported_s))),
                   molden_coefficient_rounding=float(np.max(np.abs(exact-rounded))),
                   molden_geometry_rounding=compare(geometry(exact, s), geometry(rounded, s), s),

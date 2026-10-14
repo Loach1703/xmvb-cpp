@@ -4,7 +4,6 @@
 #include <limits>
 #include <stdexcept>
 #include <Eigen/Cholesky>
-#include <Eigen/LU>
 #include <lapacke.h>
 
 #include "vbscf/diagnostics/performance/phases.hpp"
@@ -68,19 +67,11 @@ RawTangent RawTangentMetric::apply(
     if (info != 0 || !(spectrum[0] > rank_factor * spectrum[n - 1]))
       throw std::runtime_error("raw normalized-orbital metric is rank deficient");
   }
-  result.inverse_gram = Eigen::MatrixXd::Identity(r.size(), r.size());
+  // Inverse of L^T S L, not the Euclidean raw Gram. This supplies quotient
+  // vector coordinates and their dual covector lift without another factor.
+  result.inverse_gram = inverse_;
   if (sphere) {
-    Eigen::MatrixXd z(r.size(), 2);
-    z.col(0).noalias() = quotient.transpose() * c;
-    z.col(1) = r;
-    Eigen::Matrix2d small = z.transpose() * z;
-    small(0, 0) -= c.squaredNorm();
-    small(0, 1) -= 1.0;
-    small(1, 0) -= 1.0;
-    const Eigen::FullPivLU<Eigen::Matrix2d> factor(small);
-    if (!factor.isInvertible())
-      throw std::runtime_error("raw sphere representative is rank deficient");
-    result.inverse_gram.noalias() -= z * factor.solve(z.transpose());
+    result.inverse_gram.noalias() += image * image.transpose() / delta;
   }
   result.inverse_gram /= squared_norm;
   if (!result.basis.allFinite() || !result.inverse_projection.allFinite() ||

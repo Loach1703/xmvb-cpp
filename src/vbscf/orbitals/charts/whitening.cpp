@@ -5,7 +5,6 @@
 #include <stdexcept>
 #include <utility>
 
-#include <Eigen/LU>
 #include <lapacke.h>
 
 #include "vbscf/diagnostics/performance/phases.hpp"
@@ -56,14 +55,6 @@ std::pair<double, double> downdated_extremes(
     else if (secular(last) < 0.0L) maximum = root(lower, last);
   }
   return {minimum, maximum};
-}
-
-/** @brief Apply (I+b*u*u^T) K (I+b*u*u^T) with quadratic work. */
-void radial_congruence(Eigen::MatrixXd& matrix, const Eigen::VectorXd& u, double b) {
-  const Eigen::VectorXd image = matrix * u;
-  const double quadratic = u.dot(image);
-  matrix.noalias() += b * (u * image.transpose() + image * u.transpose());
-  matrix.noalias() += (b * b * quadratic) * (u * u.transpose());
 }
 
 }  // namespace
@@ -126,30 +117,16 @@ WhitenedTangent TangentWhitening::apply(
   }
   const double root = std::sqrt(delta);
   const double beta = 1.0 / (root * (1.0 + root));
-  const double inverse_beta = -1.0 / (1.0 + root);
   const Eigen::VectorXd image = basis_ * u;
   WhitenedTangent result;
   result.basis = basis_;
   result.basis.noalias() += beta * image * u.transpose();
   if (sphere) result.basis.noalias() -= (c / root) * u.transpose();
   result.basis *= norm;
-  result.inverse_gram = metric_;
-  if (sphere) {
-    // E=B-c*u^T. Invert E^T E=K^-1+Z D Z^T, with Z=[B^T c,u].
-    Eigen::MatrixXd update(metric_.rows(), 2);
-    update.col(0).noalias() = basis_.transpose() * c;
-    update.col(1) = u;
-    const Eigen::MatrixXd weighted = metric_ * update;
-    Eigen::Matrix2d small = update.transpose() * weighted;
-    small(0, 0) -= c.squaredNorm();
-    small(0, 1) -= 1.0;
-    small(1, 0) -= 1.0;
-    const Eigen::FullPivLU<Eigen::Matrix2d> factor(small);
-    if (!factor.isInvertible())
-      throw std::runtime_error("singular normalized-orbital raw tangent metric");
-    result.inverse_gram.noalias() -= weighted * factor.solve(weighted.transpose());
-  }
-  radial_congruence(result.inverse_gram, u, inverse_beta);
+  // A sphere representative has L^T S L=||b||^2 I. Without removing
+  // the radial representative its inverse is (I-u*u^T)/||b||^2.
+  result.inverse_gram = Eigen::MatrixXd::Identity(u.size(), u.size());
+  if (!sphere) result.inverse_gram.noalias() -= u * u.transpose();
   result.inverse_gram /= squared_norm;
   result.inverse_gram = (0.5 * (result.inverse_gram + result.inverse_gram.transpose())).eval();
   if (!result.basis.allFinite() || !result.inverse_gram.allFinite())

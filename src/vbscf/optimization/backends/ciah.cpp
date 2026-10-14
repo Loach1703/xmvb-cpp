@@ -437,9 +437,7 @@ bool build_ciah_macro_step(
       if (step_audit) diagnostics::audit_orbital_step(
           orbitals, chart, displacement.head(no), "keyframe", micro_steps);
       const Keyframe exact = evaluate_keyframe(displacement);
-      if (ns && !audited_structure_path &&
-          diagnostics::neo_trace_context.keyframe == 1 &&
-          diagnostics::ciah_keyframe_audit_enabled()) {
+      if (ns && !audited_structure_path && diagnostics::ciah_keyframe_audit_enabled()) {
         const int saved_keyframes = record->keyframes;
         diagnostics::audit_ciah_keyframe(displacement, hessian_displacement,
             exact.gradient, static_cast<int>(no), [&](const Eigen::VectorXd& point) {
