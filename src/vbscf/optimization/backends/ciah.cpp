@@ -15,6 +15,7 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 #include "vbscf/diagnostics/orbitals/ciah_keyframe.hpp"
+#include "vbscf/diagnostics/orbitals/ci_transport.hpp"
 #include "vbscf/diagnostics/performance/phases.hpp"
 #include "vbscf/optimization/driver/options.hpp"
 #include "vbscf/optimization/driver/result.hpp"
@@ -423,6 +424,25 @@ bool build_ciah_macro_step(
         keyframe_interval - std::log(length + 1.0e-7));
     if (since_keyframe >= interval || predicted_norm < keyframe_norm / gradient_trust) {
       const Keyframe exact = evaluate_keyframe(displacement);
+      if (ns && !audited_structure_path &&
+          diagnostics::neo_trace_context.keyframe == 1 &&
+          diagnostics::ciah_ci_transport_audit_enabled()) {
+        diagnostics::audit_ciah_ci_transport(displacement, predicted_gradient.tail(ns),
+            exact.gradient.tail(ns), *context, objective->input().structure_data,
+            hessian.structure_action(), structure, layout,
+            [&](const Eigen::VectorXd& point) {
+              OrbitalPreparationInput trial = orbitals;
+              layout.unpack(build_nonredundant_lifted_trial_parameters(
+                  orbitals, chart, layout, point), &trial);
+              return trial;
+            },
+            [&](const Eigen::VectorXd& point, const Eigen::MatrixXd& coefficients) {
+              return objective->evaluate_coupled_keyframe(
+                  build_nonredundant_lifted_trial_parameters(orbitals, chart, layout, point),
+                  coefficients);
+            });
+        audited_structure_path = true;
+      }
       if (ns && !audited_structure_path &&
           diagnostics::neo_trace_context.keyframe == 1 &&
           diagnostics::ciah_keyframe_audit_enabled()) {

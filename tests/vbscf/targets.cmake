@@ -15,6 +15,7 @@ set(_xmvb_vbscf_unit_targets
   test_cofactor_differential
   test_coupled_structure
   test_ciah
+  test_ci_transport
   test_curvature_decomposition
   test_davidson
   test_eigen_response
@@ -50,6 +51,7 @@ endforeach()
 
 if (BUILD_TESTING)
   add_test(NAME ciah COMMAND test_ciah)
+  add_test(NAME ci_transport COMMAND test_ci_transport)
   add_test(NAME spinor_strings COMMAND test_spinor_strings)
   add_test(NAME spinor_projection COMMAND test_spinor_projection)
   set_tests_properties(spinor_strings spinor_projection PROPERTIES

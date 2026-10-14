@@ -478,6 +478,98 @@ transport is representable) from an arbitrary selected VB structure space
 CI preconditioner or AH metric does not remove the measured finite map
 nonlinearity; no parameter adjustment or production solver change was made.
 
+### Projected finite CI transport: derivation and first-keyframe validation
+
+The theory is recorded separately in `article/finite_ci_transport.md`.
+It preserves the existing nonorthogonal raw orbital update and its origin
+first derivative. It retains the origin carrier connection in the target,
+then projects that target into the **current selected VB image**:
+
+$$
+v=F_0(C_0+Zq/\sqrt2)+DF_0[p]C_0,\qquad
+M_p C_*=F_p^T v.
+$$
+
+For arbitrary selection, the projection residual is generally nonzero.
+The derivative includes $(dF_p)^T(v-F_p C_*)$; it is not dropped. Finite
+keyframe gradients require the full coefficient-transport chain, including
+its orbital term. At the origin, an approximate CI state also requires a
+residual-weighted Hessian correction. These terms are derived explicitly;
+the corrected finite update must not be enabled with the old fixed-C
+keyframe gradient alone.
+
+Job **1254085** builds the diagnostic and runs three unit executables on
+Hanhai22 compute node anode01, then audits the original singlet's first
+keyframe. The optimizer continues to consume its original candidate;
+the transported values are **not** returned to its AH workspace. The AH
+metric, preconditioner, origin HVP and outer thresholds are unchanged.
+This is not a convergence or performance benchmark.
+
+| Same first-keyframe orbital displacement | Original raw CI update | Projected finite transport |
+|---|---:|---:|
+| Actual structure gradient norm, origin q coordinates | 0.0944827 | 0.0322300 |
+| Error against the same origin structure HVP prediction | 0.0956424 | 0.0267007 |
+| Fixed-CI total energy / Eh | -2244.711209544314 | -2244.712506527170 |
+
+The mismatch is reduced by **3.5820 times**. Both gradients use the same
+origin q coordinates; the transported gradient includes its exact q-chain
+pullback. The energy row compares prescribed CI states at the identical
+orbital keyframe, not independently relaxed CI energies or final endpoints.
+The transported coefficient correction norm is `0.0260300`. The complete
+sector's measured carrier projection residual is `5.88710e-17`, normal
+residual `1.12284e-16`, and relative metric-solve residual `1.04131e-16`.
+
+Derivative checks along the actual accumulated direction give:
+
+| Check | Result |
+|---|---:|
+| Structure HVP error, offset 1e-3 | 1.65387e-8 |
+| Structure HVP error, offset 3e-4 | 1.55013e-9 |
+| Included CI-residual correction to structure HVP | 1.02289e-9 |
+| Origin coefficient first-derivative error, offset 3e-4 | 4.51005e-10 |
+| Finite joint energy derivative: analytic | -0.00729314316946 |
+| Finite joint energy derivative: central difference | -0.00729317738054 |
+| Joint derivative absolute discrepancy | 3.42111e-8 |
+| Transport coefficient directional-derivative discrepancy | 2.85204e-10 |
+| Separate finite CI energy derivative discrepancy | 8.20407e-10 |
+
+The finite joint derivative contains both the fixed-C orbital derivative
+and $g_C^T DC_*$. The CI derivative uses $L^TF_0^TF_pM_p^{-1}g_C$, not the
+old fixed-C projection. Only the structure component of the molecular HVP
+is certified by this probe; a production full-vector transported HVP still
+needs the orbital residual-adjoint terms described in the theory.
+
+`test_ci_transport` also uses a rectangular synthetic map with a deliberately
+nonstationary CI state to verify the Hessian correction, and a genuine
+three-orbital exterior map with **three selected doubly occupied structures**
+(two electrons in each spin sector). Its selected carrier is 9 by 3, and
+is not invariant under the exterior transform. Maximum unit-check error is
+`4.68039e-8`; the reported nonclosure residual is `0.0140568`. Normal-equation
+stationarity and the finite CI gradient pass despite nonclosure. Thus the
+closed molecular example is not being used as a proof for arbitrary subsets.
+
+All three executables (`test_ci_transport`, `test_ciah`,
+`test_coupled_structure`) pass. The native molecular application exits 2
+at its intentional one-macro cap; Slurm wrapper completes successfully.
+It performs nine additional fixed-C gradient evaluations, costing 29.4695 s
+in total. GNU process wall time is 136.37 s and peak RSS 41,438,504 KiB
+(39.5188 GiB), including those audits. These are diagnostic resources, not
+the cost of an integrated production transport policy. No AO ERI array is
+copied into the trial action or per-thread workspaces.
+
+The short test supports the finite-transport mechanism and a substantially
+better first structural prediction. It does not yet establish a reduced
+macro count or convergence to the PySCF endpoint. Before any production
+integration, complete the transported orbital-gradient adjoint and the
+CI-residual full HVP terms; arbitrary subsets require their selected-space
+overlap solve, not the complete-sector factor inverse used by this admitted
+molecular prototype.
+
+Artifacts: `porphine-ci-transport-1254085/run.err`, `neo.tsv`,
+`resource.time`, source/binary hashes and unit outputs. The bounded wrapper
+is `porphine-ci-transport.sbatch`; diagnostic mode is the existing audit
+variable with value `transport`, not a new optimizer parameter.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.
