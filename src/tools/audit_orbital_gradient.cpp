@@ -230,6 +230,22 @@ void run_audit(int argc, char** argv) {
   const Eigen::VectorXd packed_tangent = chart.expand_step(reduced_direction);
   write_doubles(prefix + "packed_tangent_f64.bin",
                 packed_tangent.data(), packed_tangent.size());
+  // Export the existing AO adjoints, not a second gradient evaluation. These
+  // separate an orbital pullback discrepancy from an integral/operator one.
+  const auto& gradient_data = objective.gradient_result();
+  const auto& hcore = objective.input().ao_integral_input.ao_core_hamiltonian_matrix;
+  const auto& core_fock = gradient_data.ao_effective_one_electron_result.ao_effective_h1e;
+  const auto& density = gradient_data.orbital_preparation_result.inactive_density_matrix;
+  const auto& accepted = *objective.second_order_context();
+  write_doubles(prefix + "hcore_f64.bin", hcore.data(), hcore.size());
+  write_doubles(prefix + "core_fock_f64.bin", core_fock.data(), core_fock.size());
+  write_doubles(prefix + "inactive_density_f64.bin", density.data(), density.size());
+  write_doubles(prefix + "inactive_adjoint_f64.bin",
+                accepted.total_inactive_density_gradient.data(),
+                accepted.total_inactive_density_gradient.size());
+  write_doubles(prefix + "active_adjoint_f64.bin",
+                accepted.total_active_auxiliary_gradient.data(),
+                accepted.total_active_auxiliary_gradient.size());
 
   std::cout << std::setprecision(17)
             << "input = " << argv[1] << '\n'
