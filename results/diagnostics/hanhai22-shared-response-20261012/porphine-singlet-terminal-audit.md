@@ -180,6 +180,122 @@ Normalized AO overlap error is 1.37e-13 and orbital Gram error 1.63e-12.
 The job has entered conventional integral generation; no final Molcas energy
 is available yet.
 
+## Corrected original-guess endpoint and orbital-path audit
+
+Corrected singlet job **1253652** completed with 86 accepted macrosteps,
+1333 orbital HVPs, energy **-2244.740725398494 Eh**, physical gradient norm
+`9.52249589e-4`, and final energy change `-4.6988e-8 Eh`. Wall time was
+1:10:46 and peak process RSS 39.5197 GiB. It satisfies the unchanged stopping
+contract, but remains **0.344885506 mEh above** the original-guess PySCF
+reference. The screening repair did not remove the different-endpoint issue.
+
+Historical files did not retain per-macro orbitals. Array **1253884** therefore
+records only the first 1/4 corrected NEO macros and the first 4 PySCF default
+AH macros, with the original inputs and thresholds unchanged. The C++ runs
+use the same frozen executable as 1253652, the existing scalar event trace,
+and a final orbital-table export; no full H/S snapshots or additional
+finite-difference audits are enabled. Native exit 2 is the deliberate cap.
+PySCF snapshots are passive callbacks; approximate microstep densities are
+explicitly distinguished from fully solved accepted macro densities.
+
+Geometric analysis jobs **1253900** and **1253912** evaluate the AO overlap
+only and read saved orbitals/densities. They do not solve another CI problem,
+evaluate fixed-point energies, or change either optimizer. The active-space
+comparisons are invariant to orbital signs, ordering and internal basis changes.
+
+| Diagnostic | Macro 1 | Macro 4 |
+|---|---:|---:|
+| Largest active-space principal angle, NEO vs default AH | 21.9444 degrees | 89.9569 degrees |
+| Largest core-space principal angle | 2.0967 degrees | 2.7250 degrees |
+| Physical 1RDM difference, orthonormal AO Frobenius norm | 0.12442 | 0.16594 |
+
+The NEO 1RDM for this comparison is reconstructed from existing natural
+orbital output, rounded to six decimals. Its NO Gram error is at most
+`3.34e-6` and electron trace error at most `1.39e-5`; these are not
+derivative-accuracy measurements. The observed density differences are
+well above that output precision.
+
+At macro 4, the nearly orthogonal pair of active principal directions has
+occupations approximately `0.000159` (NEO) and `0.000582` (PySCF). Projection
+onto the complete Cartesian Fe d AO subspace is respectively `0.986739` and
+`6.03e-7`. Thus a weakly occupied Fe-d-like active direction is replaced by
+a non-Fe-d direction on the default AH path. These geometric projector
+weights are not atomic charges or pure atomic 3d/4d occupations. The data do
+not show loss of active-space dimension or an internal orbital gauge error.
+They do not alone prove when the two eventual basins became unavoidable.
+
+The first NEO keyframe (after six accumulated microsteps) isolates a model
+failure before the first accepted macro:
+
+| Coordinate gradient norm | Predicted | Actual |
+|---|---:|---:|
+| Orbital | 0.1032800 | 0.1018237 |
+| Structure | 0.00859195 | 0.0944827 |
+
+Structure mismatch norm is about `0.0956434`, versus orbital mismatch
+`0.0156719`. The accepted macro predicts a decrease of 61.5035 mEh but
+actually lowers relaxed energy by only 7.06971 mEh (`rho=0.114948`). It exits
+on the existing micro budget, while the predicted gradient is still
+0.110992 (source norm 0.164488). These facts locate an early failure of the
+finite coupled model's structure prediction. They are not proof of an
+incorrect infinitesimal HVP.
+
+Source review confirms an important baseline distinction: the PySCF
+reference uses **default mc1step**, not `mc.newton()`. Its AH search is
+orbital-only, with approximate CI-density updates between rotations. Our
+single-state NEO searches a joint orbital/structure AH space. PySCF's own
+coupled `newton_casscf` also retains an origin Hessian across keyframes, so
+freezing the Hessian is not by itself a bug. The finite additive CI
+normalization pullback in the C++ code includes the normalization factor;
+no missing factor has been identified by this source review.
+
+A **one-macro**, original-guess PySCF coupled-Newton control, **1253926_3**,
+was submitted to distinguish joint-model path selection from C++-specific
+coordinate/update behavior. It is not a new convergence baseline, and no
+threshold is varied. Its callback contracts the accepted CI vector for its
+1RDM because `newton_casscf`'s macro-local `casdm1` remains stale until
+post-loop finalization. Do not use that stale local as accepted density.
+
+Scripts: `porphine-path.sbatch`, `porphine-path-pyscf.py`,
+`porphine-path-newton.py`, `porphine-path-analysis.py` and its Slurm wrapper.
+Numeric evidence: `porphine-path-1253884/path-comparison.json`.
+
+### Matched coupled-Newton control completed
+
+Job **1253926_3** completed its one diagnostic macro in 130 seconds including
+setup/output. Analysis job **1253932** reads its saved orbital frame and CI
+1RDM. No energy/gradient reevaluation is performed by the geometric analysis.
+
+| First-macro method | Accepted energy / Eh | Largest active-space angle from initial | HVP/actions recorded |
+|---|---:|---:|---:|
+| Corrected C++ joint CIAH/NEO | -2244.711811541401 | 19.6137 degrees | 11 orbital HVP |
+| PySCF default orbital AH | -2244.722012550095 | 41.1563 degrees | JK count is not an HVP count |
+| PySCF coupled Newton | -2244.720783342431 | 37.6230 degrees | 16 coupled HVP |
+
+PySCF coupled Newton's first active subspace is 6.9947 degrees from default
+AH, but 18.0391 degrees from C++ NEO. Thus simply attributing the C++
+branch to the use of a joint orbital/structure model is insufficient.
+PySCF coupled Newton and the C++ code share their headline defaults
+(0.03 component cap, 10 base microsteps, AH start cycle 3, keyframe interval 5).
+No such parameter was adjusted in this audit.
+
+Remaining source-level differences are the chosen generalized AH metric,
+the finite raw-coefficient orbital update, CI preconditioning in raw VB
+structure coordinates versus the orthogonal spin-product carrier, and exact
+versus approximate keyframe gradients. They can change early finite-subspace
+steps. In particular, the C++ generalized metric is a block-diagonal orbital
+subspace metric plus structure overlap, not a demonstrated full wavefunction
+norm. Nonzero CI representation connection in the Hessian does not by itself
+make this positive step-length metric invalid; no missing-cross-metric bug
+has been proved.
+
+The diagnosis establishes early active-space branching and concentrated
+structure-model prediction error. It does **not** yet causally isolate one
+of these remaining differences as the reason for the higher final endpoint.
+The next discriminating check is covariance of the first joint AH direction,
+metric and preconditioner between the two coordinate representations, not
+another endpoint energy replay or a threshold sweep.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.

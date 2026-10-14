@@ -1,0 +1,663 @@
+{
+  "gram_errors": {
+    "initial": 1.1635207926054369e-15,
+    "neo-1": 3.497202527569243e-14,
+    "neo-4": 1.432187701766452e-14,
+    "pyscf-1": 1.7985612998927536e-14,
+    "pyscf-2": 4.196643033083092e-14,
+    "pyscf-3": 7.860379014346108e-14,
+    "pyscf-4": 1.021405182655144e-13
+  },
+  "fe_cartesian_d_projector_weight": {
+    "initial": 6.953855686683065,
+    "neo-1": 6.866649850250106,
+    "neo-4": 6.819492414791307,
+    "pyscf-1": 6.81219103043118,
+    "pyscf-2": 6.439846086407541,
+    "pyscf-3": 5.825073108223851,
+    "pyscf-4": 5.7875262206132465
+  },
+  "from_initial": {
+    "neo-1": {
+      "core": {
+        "max_angle_degrees": 2.545177964456696,
+        "projector_distance": 0.09969556041624676
+      },
+      "active": {
+        "max_angle_degrees": 19.61374975383195,
+        "projector_distance": 0.6645782958925858
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 19.613744741901815,
+        "projector_distance": 0.6575781175168737
+      },
+      "left_core_right_active_weight": 0.004797820198022862
+    },
+    "neo-4": {
+      "core": {
+        "max_angle_degrees": 4.430109004880708,
+        "projector_distance": 0.17515151072673035
+      },
+      "active": {
+        "max_angle_degrees": 28.54745285479384,
+        "projector_distance": 0.9359210582707331
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 28.54749677852447,
+        "projector_distance": 0.9200105611203373
+      },
+      "left_core_right_active_weight": 0.015049954554343221
+    },
+    "pyscf-1": {
+      "core": {
+        "max_angle_degrees": 4.6349074879825665,
+        "projector_distance": 0.17227700718620048
+      },
+      "active": {
+        "max_angle_degrees": 41.156267607460734,
+        "projector_distance": 1.16814729133932
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 41.15634920582294,
+        "projector_distance": 1.1560011756678947
+      },
+      "left_core_right_active_weight": 0.014475443944207208
+    },
+    "pyscf-2": {
+      "core": {
+        "max_angle_degrees": 6.748789341813977,
+        "projector_distance": 0.24454922652087527
+      },
+      "active": {
+        "max_angle_degrees": 43.173793903751076,
+        "projector_distance": 1.5225152181318484
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 43.174080032621774,
+        "projector_distance": 1.503673805306414
+      },
+      "left_core_right_active_weight": 0.029336830452255713
+    },
+    "pyscf-3": {
+      "core": {
+        "max_angle_degrees": 6.925624561391669,
+        "projector_distance": 0.2517172111209792
+      },
+      "active": {
+        "max_angle_degrees": 80.1521967537174,
+        "projector_distance": 1.830441315447097
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 80.152066525029,
+        "projector_distance": 1.8138665479844125
+      },
+      "left_core_right_active_weight": 0.031079150037938527
+    },
+    "pyscf-4": {
+      "core": {
+        "max_angle_degrees": 7.1221682772170025,
+        "projector_distance": 0.2605577481606581
+      },
+      "active": {
+        "max_angle_degrees": 89.95675744113466,
+        "projector_distance": 1.8484229808949284
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 89.95675700460812,
+        "projector_distance": 1.830814387807123
+      },
+      "left_core_right_active_weight": 0.0333276509841748
+    }
+  },
+  "between_methods": {
+    "1": {
+      "core": {
+        "max_angle_degrees": 2.0966625387232884,
+        "projector_distance": 0.07715681635553509
+      },
+      "active": {
+        "max_angle_degrees": 21.944365057060327,
+        "projector_distance": 0.7089401492828075
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 21.9444350003994,
+        "projector_distance": 0.7050618396007814
+      },
+      "left_core_right_active_weight": 0.0028596261505846134
+    },
+    "4": {
+      "core": {
+        "max_angle_degrees": 2.724956785672677,
+        "projector_distance": 0.10020673302995341
+      },
+      "active": {
+        "max_angle_degrees": 89.9568596178408,
+        "projector_distance": 1.489234242287954
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 89.95685951110781,
+        "projector_distance": 1.4860169889049288
+      },
+      "left_core_right_active_weight": 0.004925668285057821
+    }
+  },
+  "to_saved_endpoints": {
+    "initial": {
+      "historical_high": {
+        "core": {
+          "max_angle_degrees": 89.92873234441971,
+          "projector_distance": 1.4312591369680872
+        },
+        "active": {
+          "max_angle_degrees": 89.94243358385201,
+          "projector_distance": 2.1694091290920925
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.8471021857818,
+          "projector_distance": 1.6332616398220765
+        },
+        "left_core_right_active_weight": 1.0222413091338467
+      },
+      "pyscf_low": {
+        "core": {
+          "max_angle_degrees": 87.73694697153677,
+          "projector_distance": 1.4341000621248987
+        },
+        "active": {
+          "max_angle_degrees": 89.99980910822215,
+          "projector_distance": 2.413837524186624
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.99982024407808,
+          "projector_distance": 2.026791830525107
+        },
+        "left_core_right_active_weight": 1.0229143491554196
+      }
+    },
+    "neo-1": {
+      "historical_high": {
+        "core": {
+          "max_angle_degrees": 89.9283244126388,
+          "projector_distance": 1.4228474078609328
+        },
+        "active": {
+          "max_angle_degrees": 89.93339744366831,
+          "projector_distance": 2.087165068169429
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.83689091198946,
+          "projector_distance": 1.5295441339339482
+        },
+        "left_core_right_active_weight": 1.0106094242613934
+      },
+      "pyscf_low": {
+        "core": {
+          "max_angle_degrees": 87.72828378875715,
+          "projector_distance": 1.4238501916978707
+        },
+        "active": {
+          "max_angle_degrees": 89.99980760708026,
+          "projector_distance": 2.33813416132026
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.99980449807944,
+          "projector_distance": 1.886621535268091
+        },
+        "left_core_right_active_weight": 1.0088424439804045
+      }
+    },
+    "neo-4": {
+      "historical_high": {
+        "core": {
+          "max_angle_degrees": 89.93470527852357,
+          "projector_distance": 1.4193915332958305
+        },
+        "active": {
+          "max_angle_degrees": 89.93535693753222,
+          "projector_distance": 2.041228617123282
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.80441970319409,
+          "projector_distance": 1.4693026730292167
+        },
+        "left_core_right_active_weight": 1.0058433940199338
+      },
+      "pyscf_low": {
+        "core": {
+          "max_angle_degrees": 87.7307776062496,
+          "projector_distance": 1.4197239208618249
+        },
+        "active": {
+          "max_angle_degrees": 89.96244764664415,
+          "projector_distance": 2.305397682042179
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.9995896765539,
+          "projector_distance": 1.8311958425728916
+        },
+        "left_core_right_active_weight": 1.0033268195437268
+      }
+    },
+    "pyscf-1": {
+      "historical_high": {
+        "core": {
+          "max_angle_degrees": 89.92921242412217,
+          "projector_distance": 1.4193543300611609
+        },
+        "active": {
+          "max_angle_degrees": 89.9293377734689,
+          "projector_distance": 2.030447559723373
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.80037380730893,
+          "projector_distance": 1.4540817617262003
+        },
+        "left_core_right_active_weight": 1.0058649757492706
+      },
+      "pyscf_low": {
+        "core": {
+          "max_angle_degrees": 87.72376426196885,
+          "projector_distance": 1.419533021491054
+        },
+        "active": {
+          "max_angle_degrees": 89.90127181730247,
+          "projector_distance": 2.2879405726248137
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.94664599735981,
+          "projector_distance": 1.7987929498118607
+        },
+        "left_core_right_active_weight": 1.0030249012328145
+      }
+    },
+    "pyscf-2": {
+      "historical_high": {
+        "core": {
+          "max_angle_degrees": 89.93753332385916,
+          "projector_distance": 1.4175592174753364
+        },
+        "active": {
+          "max_angle_degrees": 89.93745698185498,
+          "projector_distance": 2.1917814898939767
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.79612210819745,
+          "projector_distance": 1.6733295941525232
+        },
+        "left_core_right_active_weight": 1.003460436539072
+      },
+      "pyscf_low": {
+        "core": {
+          "max_angle_degrees": 87.7112798061162,
+          "projector_distance": 1.4175932783136846
+        },
+        "active": {
+          "max_angle_degrees": 88.61721961869024,
+          "projector_distance": 2.289867236864949
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 87.9596647402177,
+          "projector_distance": 1.801906264238363
+        },
+        "left_core_right_active_weight": 1.0005548455514812
+      }
+    },
+    "pyscf-3": {
+      "historical_high": {
+        "core": {
+          "max_angle_degrees": 89.77689093953472,
+          "projector_distance": 1.4173582989664142
+        },
+        "active": {
+          "max_angle_degrees": 89.79371003336328,
+          "projector_distance": 2.438315160562558
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.79378194681631,
+          "projector_distance": 1.9855224766479638
+        },
+        "left_core_right_active_weight": 1.0031964032846903
+      },
+      "pyscf_low": {
+        "core": {
+          "max_angle_degrees": 87.57132028724715,
+          "projector_distance": 1.4173021940408956
+        },
+        "active": {
+          "max_angle_degrees": 88.7650373037033,
+          "projector_distance": 2.3041814279222876
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 88.75626919605175,
+          "projector_distance": 1.8203151513541664
+        },
+        "left_core_right_active_weight": 1.000230505130723
+      }
+    },
+    "pyscf-4": {
+      "historical_high": {
+        "core": {
+          "max_angle_degrees": 89.63072922718744,
+          "projector_distance": 1.4172929512012253
+        },
+        "active": {
+          "max_angle_degrees": 89.97976800247649,
+          "projector_distance": 2.4518107520928347
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 89.9797639469242,
+          "projector_distance": 2.002104964144229
+        },
+        "left_core_right_active_weight": 1.0031197156642069
+      },
+      "pyscf_low": {
+        "core": {
+          "max_angle_degrees": 87.43114537825494,
+          "projector_distance": 1.417146443719362
+        },
+        "active": {
+          "max_angle_degrees": 88.15540640016008,
+          "projector_distance": 2.3041998605722416
+        },
+        "core_plus_active": {
+          "max_angle_degrees": 88.15548145560724,
+          "projector_distance": 1.8203829821621977
+        },
+        "left_core_right_active_weight": 1.0000949297783028
+      }
+    }
+  },
+  "note": "Fe d projector includes all Cartesian Fe d AO functions, not an atomic charge or a pure Fe 3d/4d occupation.",
+  "active_principal_modes": {
+    "1": {
+      "angles_degrees": [
+        0.5639801888012278,
+        1.212127129796407,
+        1.8154799877331393,
+        1.9285339003563178,
+        2.0234904997314316,
+        2.1588905866452333,
+        2.92134692183273,
+        3.40730962585232,
+        11.881625195006805,
+        13.90801361922733,
+        21.94436505706039
+      ],
+      "neo_occupations": [
+        1.9159532897449907,
+        1.9300651274788203,
+        1.9814639318968843,
+        0.0002849031046071748,
+        1.0465199854009406,
+        0.9445374515898801,
+        0.08214774212934516,
+        0.06833926568886584,
+        0.009303918180743309,
+        0.00632891491593232,
+        0.015057780140154157
+      ],
+      "pyscf_occupations": [
+        1.916178535416389,
+        1.9323879983241123,
+        1.9517070398814635,
+        0.00022135268457303817,
+        1.011042440784228,
+        0.9132114085715136,
+        0.08280934834191592,
+        0.06718114100716996,
+        0.00981639273116588,
+        0.025726944212842336,
+        0.08971739804475956
+      ],
+      "neo_fe_d_weights": [
+        1.1336355773908353e-05,
+        9.014204989571586e-05,
+        0.9955394056081928,
+        0.9805405523713281,
+        0.9094048884953657,
+        0.9235536546431495,
+        0.030144591058005342,
+        0.14135947439758562,
+        0.9268799446654621,
+        0.9692010214354023,
+        0.9899248391699454
+      ],
+      "pyscf_fe_d_weights": [
+        1.1375914252545696e-05,
+        8.9960765364156e-05,
+        0.9921486436520458,
+        0.9839229634881707,
+        0.910453211704706,
+        0.9125304401955162,
+        0.03043527129231866,
+        0.1415057229870895,
+        0.9637545470475949,
+        0.9101987733999587,
+        0.967140119984166
+      ]
+    },
+    "4": {
+      "angles_degrees": [
+        0.4035181277812188,
+        0.9836563954291535,
+        1.784556031147859,
+        1.9255968662950058,
+        2.432785475448509,
+        2.7127152474878247,
+        2.9716434461656838,
+        9.083119956105275,
+        10.753593365729332,
+        11.537130960248307,
+        89.9568596178408
+      ],
+      "neo_occupations": [
+        1.916134952193996,
+        1.931616837396525,
+        1.9686332780123619,
+        0.026478032402991365,
+        0.08150751670660193,
+        1.8074343442103213,
+        0.2060575771894625,
+        0.013726476073045933,
+        0.01083714333395201,
+        0.037416292844930824,
+        0.00015878596145670474
+      ],
+      "pyscf_occupations": [
+        1.9166289327810175,
+        1.9340041889633914,
+        1.9440012664329493,
+        0.025341050158681204,
+        0.08143676166957371,
+        1.7377289324422638,
+        0.20004399004836246,
+        0.030928063885896858,
+        0.011110682286890834,
+        0.11819449096115667,
+        0.0005816403699960106
+      ],
+      "neo_fe_d_weights": [
+        6.460651773513999e-06,
+        1.7187343003184337e-05,
+        0.9926507876987215,
+        0.9067060762522295,
+        0.02216338200323305,
+        0.9398781910181392,
+        0.11916763423448859,
+        0.9359786553119696,
+        0.9301690591885782,
+        0.986015969295817,
+        0.9867390117933528
+      ],
+      "pyscf_fe_d_weights": [
+        6.444989769034594e-06,
+        1.696490301910151e-05,
+        0.988187409444729,
+        0.9014995401439152,
+        0.022195394262880228,
+        0.9324454818363631,
+        0.11570528618685386,
+        0.8967204872839245,
+        0.9566690704691031,
+        0.9740795380994728,
+        6.029932153825907e-07
+      ]
+    }
+  },
+  "physical_density_comparison": {
+    "1": {
+      "frobenius_difference": 0.12441713174398072,
+      "neo_electron_trace": 186.00000086254056,
+      "neo_printed_no_gram_error": 2.611274553940473e-06,
+      "neo_printed_active_occupations": [
+        1.981522,
+        1.977329,
+        1.930132,
+        1.915985,
+        0.082126,
+        0.072549,
+        0.015046,
+        0.00951,
+        0.009286,
+        0.006349,
+        0.000165
+      ],
+      "note": "NEO natural-orbital coefficients and occupations are rounded to six decimals; this is not a derivative accuracy test."
+    },
+    "4": {
+      "frobenius_difference": 0.1659375159531786,
+      "neo_electron_trace": 186.0000138883568,
+      "neo_printed_no_gram_error": 3.333561126804309e-06,
+      "neo_printed_active_occupations": [
+        1.970016,
+        1.958534,
+        1.931646,
+        1.916137,
+        0.081836,
+        0.071766,
+        0.037056,
+        0.013572,
+        0.009663,
+        0.009616,
+        0.000157
+      ],
+      "note": "NEO natural-orbital coefficients and occupations are rounded to six decimals; this is not a derivative accuracy test."
+    }
+  },
+  "pyscf_active_occupations": {
+    "1": [
+      1.951760226450633,
+      1.932460542876633,
+      1.916212981348769,
+      1.9108386652733687,
+      0.09702683105775543,
+      0.07546873779519414,
+      0.07123778512860786,
+      0.02574649845591872,
+      0.009802829337740333,
+      0.009343114201624678,
+      0.00010178807386208314
+    ],
+    "2": [
+      1.9454538806231567,
+      1.9340300537089217,
+      1.91653699532998,
+      1.8870007966754279,
+      0.11936475058827198,
+      0.07685384672112025,
+      0.07022358468638241,
+      0.030870045424346442,
+      0.009938362398916082,
+      0.009395906859989037,
+      0.0003317769835977913
+    ],
+    "3": [
+      1.9454918637307321,
+      1.9340371944046906,
+      1.9165922048858615,
+      1.8856667828353146,
+      0.12076784320009096,
+      0.07686177005264488,
+      0.07020288055404138,
+      0.030509809859760834,
+      0.009920335540500338,
+      0.009388501901229413,
+      0.0005608130352562579
+    ],
+    "4": [
+      1.9453311306712644,
+      1.9340424487541406,
+      1.9166305022096601,
+      1.8835068805052742,
+      0.12271096706067057,
+      0.07688087011248895,
+      0.07020230512429748,
+      0.030785095132582974,
+      0.009929440737427395,
+      0.009398719727345734,
+      0.000581639964889013
+    ]
+  },
+  "coupled_newton_control": {
+    "energy": -2244.720783342431,
+    "from_initial": {
+      "core": {
+        "max_angle_degrees": 5.193149150420706,
+        "projector_distance": 0.19230037406149153
+      },
+      "active": {
+        "max_angle_degrees": 37.62301298815898,
+        "projector_distance": 1.1132640321577296
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 37.62299869138268,
+        "projector_distance": 1.0970316888018001
+      },
+      "left_core_right_active_weight": 0.01821269163272253
+    },
+    "vs_neo_first": {
+      "core": {
+        "max_angle_degrees": 2.6531199134688292,
+        "projector_distance": 0.09486424573567383
+      },
+      "active": {
+        "max_angle_degrees": 18.039130931517214,
+        "projector_distance": 0.6361501486846972
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 18.039124388301293,
+        "projector_distance": 0.6293072305564994
+      },
+      "left_core_right_active_weight": 0.004414863943890969
+    },
+    "vs_default_ah_first": {
+      "core": {
+        "max_angle_degrees": 0.8387132064396619,
+        "projector_distance": 0.030297056141267334
+      },
+      "active": {
+        "max_angle_degrees": 6.994704696525823,
+        "projector_distance": 0.2076325433860831
+      },
+      "core_plus_active": {
+        "max_angle_degrees": 6.99463580417683,
+        "projector_distance": 0.20551156944422347
+      },
+      "left_core_right_active_weight": 0.00044840455567237455
+    },
+    "fe_d_projector_weight": 6.810468857547129,
+    "active_occupations": [
+      1.9586707195480877,
+      1.9320184860154033,
+      1.9305910295613853,
+      1.9158269571379258,
+      0.08528632664992072,
+      0.07173507229907702,
+      0.06690967416937811,
+      0.019158386441133816,
+      0.01007557247569351,
+      0.009613688710296263,
+      0.00011408699127601125
+    ]
+  }
+}
