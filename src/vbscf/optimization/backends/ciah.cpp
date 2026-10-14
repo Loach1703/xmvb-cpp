@@ -15,6 +15,7 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 #include "vbscf/diagnostics/orbitals/ciah_keyframe.hpp"
+#include "vbscf/diagnostics/orbitals/step_geometry.hpp"
 #include "vbscf/diagnostics/performance/phases.hpp"
 #include "vbscf/optimization/driver/options.hpp"
 #include "vbscf/optimization/driver/result.hpp"
@@ -79,6 +80,7 @@ bool build_ciah_macro_step(
   const Eigen::Index no = chart.reduced_size();
   const Eigen::Index ns = use_structure_response ? structure.tangent_size() : 0;
   const Eigen::Index dimension = no + ns;
+  const bool step_audit = diagnostics::orbital_step_audit_enabled();
   std::unique_ptr<CiTransport> transport;
   if (ns) transport = std::make_unique<CiTransport>(
       orbitals, layout, chart, *context, hessian.structure_action(), structure);
@@ -323,6 +325,13 @@ bool build_ciah_macro_step(
       step *= step_scale;
       image *= step_scale;
     }
+    if (step_audit) {
+      diagnostics::audit_orbital_step(
+          orbitals, chart, step.head(no), "micro_origin", micro_steps + 1);
+      diagnostics::audit_orbital_step(
+          orbitals, chart, step.head(no), "micro_increment", micro_steps + 1,
+          displacement.head(no));
+    }
     if (!audited_origin_step && displacement.isZero() &&
         diagnostics::neo_trace_enabled() && diagnostics::neo_candidate_audit_enabled()) {
       // Compare the complete derivative in the immutable origin chart. These
@@ -425,6 +434,8 @@ bool build_ciah_macro_step(
     const double interval = std::max<double>(keyframe_interval,
         keyframe_interval - std::log(length + 1.0e-7));
     if (since_keyframe >= interval || predicted_norm < keyframe_norm / gradient_trust) {
+      if (step_audit) diagnostics::audit_orbital_step(
+          orbitals, chart, displacement.head(no), "keyframe", micro_steps);
       const Keyframe exact = evaluate_keyframe(displacement);
       if (ns && !audited_structure_path &&
           diagnostics::neo_trace_context.keyframe == 1 &&
@@ -619,6 +630,8 @@ bool build_ciah_macro_step(
   double accepted_prediction = 0.0;
   while (true) {
     diagnostics::ScopedPhase trial_phase(diagnostics::Phase::CiahTrial, true);
+    if (step_audit) diagnostics::audit_orbital_step(
+        orbitals, chart, scale * displacement.head(no), "macro_trial", micro_steps);
     accepted->trial = objective->evaluate_trial_energy_with_structure_guess(
         accepted->parameters, coefficients(scale * displacement));
     // Keyframe refreshes both the gradient and the energy anchor. Testing the
@@ -690,6 +703,8 @@ bool build_ciah_macro_step(
   displacement *= scale;
   hessian_displacement *= scale;
   last_step *= scale;
+  if (step_audit) diagnostics::audit_orbital_step(
+      orbitals, chart, displacement.head(no), "macro_accepted", micro_steps);
   if (diagnostics::neo_event_trace_enabled()) {
     // r = g0 + H0*p is the unshifted frozen Newton residual of the actual
     // accepted displacement. It reuses accumulated images, adding no HVP.

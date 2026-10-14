@@ -19,6 +19,7 @@ set(_xmvb_vbscf_unit_targets
   test_representation_overlap
   test_overlap_pullback
   test_selected_ci_transport
+  test_orbital_step_geometry
   test_curvature_decomposition
   test_davidson
   test_eigen_response
@@ -58,6 +59,7 @@ if (BUILD_TESTING)
   add_test(NAME representation_overlap COMMAND test_representation_overlap)
   add_test(NAME overlap_pullback COMMAND test_overlap_pullback)
   add_test(NAME selected_ci_transport COMMAND test_selected_ci_transport)
+  add_test(NAME orbital_step_geometry COMMAND test_orbital_step_geometry)
   add_test(NAME spinor_strings COMMAND test_spinor_strings)
   add_test(NAME spinor_projection COMMAND test_spinor_projection)
   set_tests_properties(spinor_strings spinor_projection PROPERTIES

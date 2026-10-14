@@ -125,6 +125,7 @@ set(XMVB_VBSCF_DERIVATIVE_SOURCES
 set(XMVB_VBSCF_DIAGNOSTIC_SOURCES
   vbscf/diagnostics/orbitals/chart_audit.cpp
   vbscf/diagnostics/orbitals/ciah_keyframe.cpp
+  vbscf/diagnostics/orbitals/step_geometry.cpp
 )
 
 set(XMVB_VBSCF_OPTIMIZATION_SOURCES

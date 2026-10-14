@@ -645,6 +645,104 @@ Artifacts: `transport-build-1254176`, `transport-regression-1254179`,
 `porphine-transport-converge.sbatch`. The theoretical derivation remains in
 the local, ignored `article/finite_ci_transport.md`.
 
+## Actual raw orbital angles and radial components (2026-10-14)
+
+This is a read-only geometry diagnostic, not an exponential-update experiment.
+The raw update, finite CI transport, AH policy, Hessian, preconditioner, and
+accuracy criteria are unchanged. The existing long-run frozen binaries are
+untouched. Build 1254268 passes the geometry unit test, CIAH, and selected-space
+CI transport. Geometry logging is default-off and enabled only by
+`XMVB_NEO_ORBITAL_STEP_AUDIT=1` with scalar trace. No additional electronic
+energy/gradient/HVP is evaluated. The AO overlap is borrowed and AO vectors
+are reused serially; no per-thread metric matrix is created.
+
+For each occupied raw orbital, the recorded definitions are
+
+$$
+n_i=\sqrt{b_i^TSb_i},\quad x_i=b_i/n_i,\quad
+d_i=\delta b_i/n_i,\quad \alpha_i=x_i^TSd_i,\quad
+v_i=d_i-\alpha_i x_i,\quad \theta_i=\sqrt{v_i^TSv_i}.
+$$
+
+The directly normalized raw endpoint has angle
+
+$$
+\phi_i=\operatorname{atan2}(\theta_i,1+\alpha_i),\qquad
+\frac{\|b_i+\delta b_i\|_S}{n_i}
+=\sqrt{(1+\alpha_i)^2+\theta_i^2}.
+$$
+
+All angles are radians **before core projection**. They are not active-space
+principal angles or the full AH metric norm. `micro_origin` measures the clipped
+AH increment at the macro origin; `micro_increment` measures that same increment
+at the current accumulated raw coefficients. `keyframe`, `macro_trial`, and
+`macro_accepted` measure cumulative displacements from the immutable macro origin.
+Trial and keyframe samples may subsequently be rejected or shortened.
+
+Array 1254271 uses 32 cores on Hanhai22. FeCl2 is cheap enough to record to
+convergence; porphine states are intentionally capped at two macros. Statistics
+below use **accepted macro steps and active orbitals only**. The weighted radial
+fraction is $\sqrt{\sum\alpha_i^2/\sum(\alpha_i^2+\theta_i^2)}$, summed over these
+samples. It is an AO-normalized displacement diagnostic, not a physical norm.
+
+| Case / scope | Samples | Max abs(alpha) | theta p95 | Max theta | Weighted radial fraction |
+|---|---:|---:|---:|---:|---:|
+| FeCl2, 17 macros | 136 | 0.150622 | 0.125087 | 0.269591 | 35.294% |
+| Porphine singlet, first 2 macros | 22 | 0.565578 | 0.831260 | 1.206744 | 29.172% |
+| Porphine triplet, first 2 macros | 22 | 0.977439 | 1.290013 | 4.767531 | 23.172% |
+
+Concrete same-orbital accepted examples (orbital indices are one-based):
+
+| Case | Macro | Orbital | alpha | theta | Actual angle phi |
+|---|---:|---:|---:|---:|---:|
+| FeCl2 | 10 | 33 | 0.126474 | 0.197697 | 0.173732 |
+| Porphine singlet | 2 | 98 | -0.565578 | 0.464440 | 0.818782 |
+| Porphine triplet | 2 | 98 | -0.763049 | 0.598626 | 1.193894 |
+| Porphine triplet | 2 | 100 | -0.046946 | 4.767531 | 1.373492 |
+
+The largest porphine angles are not small perturbations of normalized additive
+steps. In particular, passing theta=4.77 directly to sine/cosine is not a small
+retraction correction. Negative alpha can also enlarge the actual normalized
+angle: the triplet orbital 98 turns by 1.19 radians despite theta=0.60.
+One rejected/shortened singlet keyframe has alpha=-1.28004 and phi=1.81987;
+the normalization hemisphere can change without reaching a zero vector.
+
+These data disprove the assumption of uniformly S-tangent raw lifts and small
+per-orbital angles on these OEO trajectories. Nonzero alpha is **not** an extra
+independent physical degree of freedom or, by itself, a quotient-rank bug.
+The chart deliberately retains a non-spherical raw representative for full OEO;
+its normalization eliminates the radial component to first order, but it changes
+the finite path. Raw angles can also include removable inter-orbital/core gauge
+motion. The frame-component cap does not bound these raw AO-sphere lengths.
+
+Do not directly replace the update with exp(v) at the current numerical step.
+The next relevant distinction is raw representative motion versus physical
+subspace motion after core and active-gauge projection, and the relation between
+the current horizontal lift and the step units. Any exponential test must account
+for the changed second derivative when alpha is nonzero and retain the selected
+CI transport pullback; no new empirical angular clipping is justified here.
+
+Resource totals below include scalar/geometry logging, so are not performance
+improvement claims:
+
+| Case | Macros | HVP | Last energy (Eh) | Wall (s) | Peak RSS (GiB) |
+|---|---:|---:|---:|---:|---:|
+| FeCl2, converged | 17 | 322 | -2181.624464859829 | 10.02 | 0.481701 |
+| Porphine singlet, short cap | 2 | 19 | -2244.7225280821 | 175.42 | 39.517925 |
+| Porphine triplet, short cap | 2 | 26 | -2244.7596897644 | 167.20 | 39.533016 |
+
+FeCl2 energy differs by +7.969e-9 Eh from completed native run 1254179. Its
+17 versus 26 macros is not credited to a new optimizer: there is no optimizer
+change. The first four energy rows agree to approximately 8e-9 Eh; the full
+trajectory is not bitwise identical across nodes/log modes. The porphine cap
+exits 2 intentionally and must not be labeled convergence.
+
+Artifacts: `step-geometry-build-1254268`, `step-geometry-1254271`, build/run
+wrappers, and `summarize_step_geometry.py`. The script exports each orbital,
+macro, micro, role, stage and raw values with source-line references, plus
+accepted-only CSV and aggregate CSV/JSON. Original logs remain available;
+compressed logs are retained as repository evidence.
+
 ## Artifacts
 
 - `porphine-terminal-1253506/cpp/audit.out`: endpoint chart and coupled HVP audit.
