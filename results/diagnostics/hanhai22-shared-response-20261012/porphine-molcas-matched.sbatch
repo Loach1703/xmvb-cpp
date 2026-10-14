@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=porphine-molcas-singlet
+#SBATCH --job-name=porphine-molcas
 #SBATCH --partition=CPU-192C768GB
 #SBATCH --qos=qos_cpu_192c768gb
 #SBATCH --account=xiatao
@@ -8,14 +8,19 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=192G
 #SBATCH --time=15-00:00:00
-#SBATCH --output=porphine-molcas-singlet-%j.out
-#SBATCH --error=porphine-molcas-singlet-%j.err
+#SBATCH --output=porphine-molcas-%j.out
+#SBATCH --error=porphine-molcas-%j.err
 set -eo pipefail
+state="${1:?Specify singlet or triplet}"
+case "$state" in
+  singlet|triplet) ;;
+  *) echo "Invalid spin state: $state" >&2; exit 1 ;;
+esac
 . /etc/profile
 module purge
 module load gcc/14.1.0 mkl/2024.1 anaconda/3/22.05
 root="$SLURM_SUBMIT_DIR"
-run="$root/porphine-molcas-singlet-$SLURM_JOB_ID"
+run="$root/porphine-molcas-$state-$SLURM_JOB_ID"
 mkdir -p "$run"
 cd "$run"
 export PYTHONPATH="$root/porphine-reference-audit-1247977/python" PYTHONNOUSERSITE=1
@@ -24,22 +29,23 @@ export LD_LIBRARY_PATH="/gpfs/opt/gcc/14.1.0/lib64:/home/guqqgroup/xiatao/softwa
 export MOLCAS_NPROCS=1 MOLCAS_MEM=120000 MOLCAS_THREADS=32
 export MOLCAS_PROJECT=setup MOLCAS_KEEP_WORKDIR=YES
 export MOLCAS_WORKDIR
-MOLCAS_WORKDIR=$(mktemp -d /tmp/porphine-molcas-singlet.XXXXXX)
+MOLCAS_WORKDIR=$(mktemp -d "/tmp/porphine-molcas-$state.XXXXXX")
 printf '%s\n' "$MOLCAS_WORKDIR" > scratch-path.txt
 export OMP_NUM_THREADS=32 OMP_PROC_BIND=false OMP_MAX_ACTIVE_LEVELS=1
 unset OMP_PLACES GOMP_CPU_AFFINITY
 export MKL_NUM_THREADS=32 MKL_DYNAMIC=false OPENBLAS_NUM_THREADS=1
 sha256sum "$MOLCAS/bin/rasscf.exe" "$MOLCAS/bin/seward.exe" \
-  "$root/porphine-molcas-singlet.py" "$root/inputs/singlet/input.xmi" > hashes.txt
+  "$root/porphine-molcas-matched.py" "$root/porphine-cross-restart.py" \
+  "$root/inputs/$state/input.xmi" "$root/porphine-reference.chk" > hashes.txt
 hostname > node.txt
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores \
-  python3 "$root/porphine-molcas-singlet.py" "$root" prepare > prepare.out 2> prepare.err
+  python3 "$root/porphine-molcas-matched.py" "$root" prepare "$state" > prepare.out 2> prepare.err
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores \
   /usr/bin/time -v -o setup.time python3 "$MOLCAS/pymolcas" setup.input > setup.out 2> setup.err
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores \
-  python3 "$root/porphine-cross-restart.py" "$root" export-frame converge original singlet > export.out 2> export.err
+  python3 "$root/porphine-cross-restart.py" "$root" export-frame converge original "$state" > export.out 2> export.err
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores \
-  python3 "$root/porphine-molcas-singlet.py" "$root" convert > conversion.out 2> conversion.err
+  python3 "$root/porphine-molcas-matched.py" "$root" convert "$state" > conversion.out 2> conversion.err
 sha256sum XMVBREF initial.RasOrb setup.input optimize.input >> hashes.txt
 status=0
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores \

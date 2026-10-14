@@ -10,11 +10,17 @@ import h5py
 import numpy as np
 from pyscf import scf
 
-root, stage = Path(sys.argv[1]), sys.argv[2]
+root, stage, state = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+assert state in ("singlet", "triplet"), state
+spin = 0 if state == "singlet" else 2
+multiplicity = spin + 1
 mol, _ = scf.chkfile.load_scf(str(root / "porphine-reference.chk"))
-mol.spin = 0
+mol.spin = spin
 geometry = []
-for line in re.split(r"\$GEO\b", (root / "inputs/singlet/input.xmi").read_text(), flags=re.I)[1].splitlines():
+deck = root / "inputs" / state / "input.xmi"
+deck_text = deck.read_text()
+assert int(re.search(r"\bnmul\s*=\s*(\d+)", deck_text, re.I)[1]) == multiplicity
+for line in re.split(r"\$GEO\b", deck_text, flags=re.I)[1].splitlines():
     if line.strip().upper() == "$END":
         break
     fields = line.split()
@@ -58,7 +64,7 @@ if stage == "prepare":
             # fields fit in 126 columns without truncating the last contraction.
             basis += ["".join(f"{x:20.12E} " for x in row) for row in matrix]
     Path("XMVBREF").write_text("\n".join(basis)+"\n")
-    lines = ["&GATEWAY", "Title = Fe porphine singlet, shared original guess",
+    lines = ["&GATEWAY", f"Title = Fe porphine {state}, shared original guess",
              "BASDIR = $CurrDir", "NOCD"]
     for atom in range(mol.natm):
         symbol = mol.atom_pure_symbol(atom)
@@ -69,10 +75,10 @@ if stage == "prepare":
     Path("setup.input").write_text(gateway+"&SEWARD\nONEONLY\n&GUESSORB\n")
     # Keep the same Project/scratch; SEWARD replaces one-electron-only data
     # with conventional four-center integrals before RASSCF consumes them.
-    rasscf = """&RASSCF
-Title = Fe porphine CAS(8,11) singlet from original shared guess
+    rasscf = f"""&RASSCF
+Title = Fe porphine CAS(8,11) {state} from original shared guess
 FileOrb = $CurrDir/initial.RasOrb
-Spin = 1
+Spin = {multiplicity}
 Charge = 0
 Nactel = 8 0 0
 Inactive = 89
@@ -85,7 +91,7 @@ QUNE
 """
     Path("optimize.input").write_text("&SEWARD\n"+rasscf)
     print(json.dumps(dict(n_basis=469, inactive=89, ncas=11, nelecas=8,
-        multiplicity=1, cartesian=True, ecp=False, density_fitting=False,
+        multiplicity=multiplicity, cartesian=True, ecp=False, density_fitting=False,
         basis_labels=labels)), flush=True)
     sys.exit(0)
 if stage != "convert":
@@ -161,20 +167,21 @@ mo = np.load("shared-mo.npy")
 converted = mo[mapping,:]*(signs*dp[mapping]/dm)[:,None]
 gram_error = float(np.max(np.abs(converted.T@sm@converted-np.eye(n))))
 assert gram_error < 1e-8, gram_error
-lines = ["#INPORB 2.2", "#INFO", "* Same original singlet orbitals; matched contractions",
+lines = ["#INPORB 2.2", "#INFO", f"* Same original {state} orbitals; matched contractions",
          "       0       1       0",f"{n:8d}",f"{n:8d}","#ORB"]
 for orbital in range(n):
     lines.append(f"* ORBITAL    1 {orbital+1:5d}")
     for first in range(0,n,5):
         lines.append("".join(f" {x:21.14E}" for x in converted[first:first+5,orbital]))
-occupations = [2.]*89+[2.]*4+[0.]*(n-93)
+n_alpha, n_beta = (8+spin)//2, (8-spin)//2
+occupations = [2.]*89+[2.]*n_beta+[1.]*spin+[0.]*(n-89-n_alpha)
 assert sum(occupations) == 186 and len(occupations) == n
 lines += ["#OCC", "* OCCUPATION NUMBERS"]
 for first in range(0,n,5):
     lines.append("".join(f" {x:21.14E}" for x in occupations[first:first+5]))
 Path("initial.RasOrb").write_text("\n".join(lines)+"\n")
 report = dict(normalized_overlap_error=overlap_error, orbital_gram_error=gram_error,
-    n_basis=n,inactive=89,ncas=11,nelecas=8,multiplicity=1,ao_permutation=mapping,
-    source="Original singlet GUS; no orbital optimization in conversion")
+    n_basis=n,inactive=89,ncas=11,nelecas=8,multiplicity=multiplicity,ao_permutation=mapping,
+    source=f"Original {state} GUS; no orbital optimization in conversion")
 Path("conversion.json").write_text(json.dumps(report,indent=2)+"\n")
 print(json.dumps(report),flush=True)
