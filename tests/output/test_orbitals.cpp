@@ -2,6 +2,7 @@
 #include "guess/initial.hpp"
 
 #include <filesystem>
+#include <cmath>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -23,6 +24,9 @@ int main() {
   for (std::string line; std::getline(stream, line);) {
     if (line.find('$') != std::string::npos)
       throw std::runtime_error("unexpected GUS delimiter");
+    if (!line.empty() && line.front() != '#' &&
+        line.find_first_of("eEdD") != std::string::npos)
+      throw std::runtime_error("unexpected scientific notation");
     lines.push_back(line);
   }
   auto restored = input;
@@ -30,7 +34,8 @@ int main() {
   // GUESS=READ uses the production GUS parser, including sparse AO indices.
   xmvb::vb::build_initial_orbital_guess(
       "", 2, {}, {}, nullptr, &lines, &restored);
-  if (restored.orbital_value_table != input.orbital_value_table)
-    throw std::runtime_error("GUS orbital round trip changed coefficients");
+  for (std::size_t i = 0; i < input.orbital_value_table.size(); ++i)
+    if (std::abs(restored.orbital_value_table[i] - input.orbital_value_table[i]) > 5.1e-11)
+      throw std::runtime_error("GUS orbital round trip exceeds decimal rounding");
   std::filesystem::remove(path);
 }
