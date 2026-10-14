@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=porphine-screened-singlet
+#SBATCH --job-name=porphine-screened
 #SBATCH --partition=CPU-192C768GB
 #SBATCH --qos=qos_cpu_192c768gb
 #SBATCH --account=xiatao
@@ -11,13 +11,18 @@
 #SBATCH --output=porphine-screened-converge-%j.out
 #SBATCH --error=porphine-screened-converge-%j.err
 set -eo pipefail
+state="${1:?Specify singlet or triplet}"
+case "$state" in
+  singlet|triplet) ;;
+  *) echo "Invalid spin state: $state" >&2; exit 1 ;;
+esac
 . /etc/profile
 module purge
 module load gcc/14.1.0
 root="$SLURM_SUBMIT_DIR"
 run="$root/porphine-screened-converge-$SLURM_JOB_ID"
 mkdir -p "$run"
-cp "$root/inputs/singlet/input.xmi" "$root/inputs/singlet/cc-pvdz.gbs" "$run/"
+cp "$root/inputs/$state/input.xmi" "$root/inputs/$state/cc-pvdz.gbs" "$run/"
 cd "$run"
 export LC_ALL=C OMP_NUM_THREADS=32 OMP_PLACES=cores OMP_PROC_BIND=close OMP_MAX_ACTIVE_LEVELS=1
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
