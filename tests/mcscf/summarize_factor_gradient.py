@@ -75,22 +75,30 @@ def scf(artifact, baseline, output):
 def generators(artifacts, output):
     rows = []
     for artifact in artifacts:
-        for n in (12, 14):
-            native = values(artifact / f"{n}-factor-generator.out")
-            reference = values(artifact / f"{n}-factor-generator-reference.out")
+        for n in (12, 14, 16):
+            native_path = artifact / f"{n}-factor-generator.out"
+            if not native_path.exists():
+                continue
+            native = values(native_path)
+            reference_path = artifact / f"{n}-factor-generator-reference.out"
+            reference = values(reference_path) if reference_path.exists() else {}
+            checked = int(reference.get("reference_checked",0))
+            def number(key):
+                return float(reference[key]) if checked else None
             rows.append(dict(
                 run=artifact.name, orbitals=n, node=(artifact / "node.txt").read_text().strip(),
+                reference_checked=checked,
                 generator_seconds=float(native["warm_generator_seconds"]),
                 residual_seconds=float(native["warm_residual_seconds"]),
                 rss_mib=float(native["native_max_rss_kib"])/1024,
-                paired_generator_seconds=float(reference["warm_generator_seconds"]),
-                paired_residual_seconds=float(reference["warm_residual_seconds"]),
-                reference_generator_seconds=float(reference["generator_reference_seconds"]),
-                reference_sigma_seconds=float(reference["sigma_reference_seconds"]),
-                reference_cached_residual_seconds=float(reference["residual_generator_reference_seconds"]),
-                reference_residual_total_seconds=float(reference["residual_total_reference_seconds"]),
-                generator_error=float(reference["generator_error"]),
-                residual_error=float(reference["residual_error"])))
+                paired_generator_seconds=number("warm_generator_seconds"),
+                paired_residual_seconds=number("warm_residual_seconds"),
+                reference_generator_seconds=number("generator_reference_seconds"),
+                reference_sigma_seconds=number("sigma_reference_seconds"),
+                reference_cached_residual_seconds=number("residual_generator_reference_seconds"),
+                reference_residual_total_seconds=number("residual_total_reference_seconds"),
+                generator_error=number("generator_error"),
+                residual_error=number("residual_error")))
     save(output, rows)
 
 

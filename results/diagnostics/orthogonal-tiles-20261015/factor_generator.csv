@@ -1,3 +1,4 @@
-run,orbitals,node,generator_seconds,residual_seconds,rss_mib,paired_generator_seconds,paired_residual_seconds,reference_generator_seconds,reference_sigma_seconds,reference_cached_residual_seconds,reference_residual_total_seconds,generator_error,residual_error
-factor-generator-1260854,12,anode26,0.00241894,0.054376284,53.77734375,0.00231022,0.06452707,0.007318399,0.090703366,0.021349947,0.11205331299999999,4.519850785624352e-14,1.588886884188613e-14
-factor-generator-1260854,14,anode26,0.016654167,0.604233734,61.6640625,0.018431299,0.61957112,0.14598052,1.28831196,0.72985792,2.01816988,3.2185094477562437e-13,1.9982722979551756e-13
+run,orbitals,node,reference_checked,generator_seconds,residual_seconds,rss_mib,paired_generator_seconds,paired_residual_seconds,reference_generator_seconds,reference_sigma_seconds,reference_cached_residual_seconds,reference_residual_total_seconds,generator_error,residual_error
+factor-generator-1260854,12,anode26,1,0.00241894,0.054376284,53.77734375,0.00231022,0.06452707,0.007318399,0.090703366,0.021349947,0.11205331299999999,4.519850785624352e-14,1.588886884188613e-14
+factor-generator-1260854,14,anode26,1,0.016654167,0.604233734,61.6640625,0.018431299,0.61957112,0.14598052,1.28831196,0.72985792,2.01816988,3.2185094477562437e-13,1.9982722979551756e-13
+factor-generator-1260873,16,anode26,0,0.151947647,174.37051552,118.796875,,,,,,,,

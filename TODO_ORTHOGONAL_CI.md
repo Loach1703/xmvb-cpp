@@ -118,15 +118,18 @@ silently symmetrize that adjoint when sharing the channel implementation.
 
 ## Required numerical and resource evidence
 
-Immediate larger-scale qualification: native generator job1260873 is CAS16/16
+Immediate larger-scale qualification: completed native job1260873 is CAS16/16
 with256 physical bra and128 ket factors. The present residual planner chooses
 `left_tile=1,right_tile=1,channel_tile=105` at64 MiB. Two channel panels cause
 `128 * (2+2) * 256 = 131072` bra-source loads. A feasible resident-bra point
 exists at `left_tile=256,right_tile=1,channel_tile=20`, with the same budget.
 Do not assume the larger channel tile is optimal. Joint source/channel planning
 must count exterior/generator regeneration, repeated spin-link traversals and
-repeated output updates across bra panels. Preserve the running job and collect
-its actual time/RSS; do not rerun historical binaries or increase the budget.
+repeated output updates across bra panels. Native warm generator/residual times
+are0.15195/174.37052 s with118.80 MiB RSS. This is a serious residual-scheduling
+regression despite bounded memory. Use these saved data, not a rerun of this
+candidate; do not increase the budget. No16/16 full-product accuracy comparison
+was run, so its reference/error fields remain unverified.
 
 - Exact source reconstruction, both spin-exchange parities, mixed parity,
   unequal spin lists, ionic diagonal support and multiple right-hand sides.

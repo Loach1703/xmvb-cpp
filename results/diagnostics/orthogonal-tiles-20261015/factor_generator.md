@@ -105,14 +105,19 @@ broad-support cases in single native runs. Old results come from CSV.
 
 Job1260873 submits a16/16 single-covalent native kernel, with128 representative
 ket sources,256 physical bra sources and12870 strings per spin. It does not
-construct a full12870-by-12870 reference. Its timing/RSS must be collected
-separately;12/14 timings are not evidence of16/16 performance.
+construct a full12870-by-12870 reference. The job completed: warm ordinary
+generator0.151948 s, warm residual generator174.370516 s, native process
+RSS118.80 MiB. The whole native process took349.58 s for cold and warm calls,
+with797% CPU accounting. These are not complete-SCF times. No16/16 numerical
+reference was evaluated; blank CSV error fields mean unverified, not zero.
 At the64 MiB budget the present planner selects source widths1/1 and channel
 width105. Its two channel panels imply131072 bra-source loads. This is a
 code/operation-count diagnosis, not a measured hotspot percentage. A candidate
 with full256-source bra residency and channel width20 fits the same budget;
 joint planning must weigh the avoided source generation/output updates against
-the extra channel traversals. The running native job is not restarted.
+the extra channel traversals. Use the saved native result; do not rerun this
+candidate. The residual time is unacceptable and joint tiling takes priority
+before extrapolating the smaller-case speedups or migrating more consumers.
 
 Next required work is the complete accepted-state/HVP consumer migration,
 including fused integral/generator moments and exact structure images without
