@@ -36,6 +36,10 @@ public:
     return true;
   }
 
+  std::size_t dynamic_bytes() const noexcept {
+    return (alpha_.capacity()+beta_.capacity()+lengths_.capacity())*sizeof(std::uint64_t);
+  }
+
 private:
   static std::vector<std::uint64_t> prefixes(
       const std::vector<std::uint64_t>& masks, int n_orbitals) {

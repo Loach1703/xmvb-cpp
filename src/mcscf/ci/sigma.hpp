@@ -13,7 +13,7 @@
 
 namespace xmvb::mcscf {
 
-class CovalentSupport;
+class ProductSupport;
 
 /** @brief Integral adjoint of one orthonormal direct-CI bilinear form. */
 struct DirectCiIntegralAdjoint {
@@ -71,14 +71,14 @@ public:
    * callback may alias the two temporary slabs across calls. Shared alpha
    * excitation halos and worker scatter/reduction tiles are sized together
    * under a workspace target; workers never copy the complete carrier.
-   * With covalent support, input/output are restricted to its exact support
+   * With product support, input/output are restricted to its exact support
    * and the intermediate uses its one-generator closure, not that support.
    */
   void apply_tiled(
       int block_width,
       const std::function<void(int, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_column,
       const std::function<void(int, const std::vector<int>&, const Eigen::Ref<const Eigen::MatrixXd>&)>& add_column,
-      const CovalentSupport* support = nullptr) const;
+      const ProductSupport* support = nullptr) const;
 
   /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
    * Uses occupation lists and the retained two-electron kernel, not sigma

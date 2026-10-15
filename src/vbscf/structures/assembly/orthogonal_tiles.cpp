@@ -5,7 +5,7 @@
 #include <unordered_map>
 
 #include "core/openmp.hpp"
-#include "mcscf/ci/covalent_support.hpp"
+#include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
@@ -108,18 +108,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
     return beta_transform.row_block(first, std::min(extent, n_unique_beta_ - first));
   };
 
-  bool covalent = alpha_transform.n_electrons() + beta_transform.n_electrons() ==
-      alpha_transform.n_orbitals();
-  const auto full_mask = (std::uint64_t{1} << alpha_transform.n_orbitals()) - 1;
-  for (const auto product : spin_products_) {
-    const auto a = alpha_transform.occupations()[product / n_unique_beta_];
-    const auto b = beta_transform.occupations()[product % n_unique_beta_];
-    covalent = covalent && (a & b) == 0 && (a | b) == full_mask;
-  }
-  std::unique_ptr<mcscf::CovalentSupport> support;
-  if (covalent)
-    support = std::make_unique<mcscf::CovalentSupport>(alpha_transform.n_orbitals(),
-        alpha_transform.occupations(), beta_transform.occupations());
+  const auto* support=product_support_.get();
 
   for (int vector_begin = 0; vector_begin < vectors.cols(); vector_begin += batch_width) {
     const int width = std::min<int>(batch_width, vectors.cols() - vector_begin);
@@ -140,7 +129,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
       // C^T (T_alpha^T image T_beta): only touched original spin products
       // are sampled. This is exact for any selected structure subspace.
       if (support)
-        alpha_transform.apply_covalent_left(&image, *support,
+        alpha_transform.apply_supported_left(&image, *support,
             panel * extent, rows.rows(), true);
       else alpha_transform.apply_adjoint_left(&image);
 #pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
@@ -192,7 +181,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
         }
       }
       if (support)
-        alpha_transform.apply_covalent_left(&values, *support,
+        alpha_transform.apply_supported_left(&values, *support,
             panel * extent, rows.rows());
       else alpha_transform.apply_left(&values);
       if (!overlap_consumed[panel]) {
@@ -235,7 +224,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
           for (int vector = 0; vector < width; ++vector)
             for (int row = 0; row < static_cast<int>(alpha_rows.size()); ++row)
               panel(alpha_rows[row], vector * panel_width + beta % extent) += column(row, vector);
-        }, support.get());
+        }, support);
     output.finish();
     contract();
   }

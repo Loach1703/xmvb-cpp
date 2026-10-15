@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
 #include "core/openmp.hpp"
+#include "mcscf/ci/strings.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/determinants/pairs/accepted_tile.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
@@ -743,30 +745,10 @@ std::size_t estimate_same_spin_pair_cache_bytes(
        per_pair_int_count * sizeof(int));
 }
 
-SameSpinPairCacheContext build_same_spin_pair_topology(
-    const std::vector<std::vector<int>>& alpha_det,
-    const std::vector<std::vector<int>>& beta_det,
-    int n_orbitals) {
-  if (alpha_det.size() != beta_det.size()) {
-    throw std::invalid_argument("alpha_det and beta_det must have the same size");
-  }
+namespace {
 
-  SameSpinPairCacheContext context;
-  context.alpha_reuse_table = build_spin_determinant_reuse_table(alpha_det);
-  context.close_shell_diagonal_reuses_same_spin_pair_cache =
-      can_reuse_close_shell_same_spin_pair_cache(alpha_det, beta_det);
-  context.beta_reuses_alpha_pair_cache =
-      context.close_shell_diagonal_reuses_same_spin_pair_cache ||
-      try_build_reuse_table_in_reference_basis(
-          beta_det,
-          context.alpha_reuse_table,
-          &context.beta_reuse_table);
-  if (context.close_shell_diagonal_reuses_same_spin_pair_cache) {
-    context.beta_reuse_table = context.alpha_reuse_table;
-  } else if (!context.beta_reuses_alpha_pair_cache) {
-    context.beta_reuse_table = build_spin_determinant_reuse_table(beta_det);
-  }
-
+SameSpinPairCacheContext finalize_spin_topology(
+    SameSpinPairCacheContext context, int n_orbitals) {
   context.alpha_pair_provider = std::make_shared<const AcceptedPairTileProvider>(
       context.alpha_reuse_table.unique_determinants,
       n_orbitals);
@@ -793,6 +775,111 @@ SameSpinPairCacheContext build_same_spin_pair_topology(
   context.n_unique_alpha = static_cast<int>(n_alpha);
   context.n_unique_beta = static_cast<int>(n_beta);
   return context;
+}
+
+std::uint64_t checked_spin_mask(const std::vector<int>& occupied,
+                                int n_orbitals, int n_electrons) {
+  if (static_cast<int>(occupied.size()) != n_electrons)
+    throw std::invalid_argument("spin determinants have inconsistent electron counts");
+  std::uint64_t mask = 0;
+  int previous = -1;
+  for (const int orbital : occupied) {
+    if (orbital <= previous || orbital < 0 || orbital >= n_orbitals)
+      throw std::invalid_argument("spin determinant occupation is invalid");
+    mask |= std::uint64_t{1} << orbital;
+    previous = orbital;
+  }
+  return mask;
+}
+
+SpinDeterminantReuseTable complete_spin_reuse_table(
+    const std::vector<std::vector<int>>& determinants, int n_orbitals) {
+  if (determinants.empty())
+    throw std::invalid_argument("orthogonal spin topology requires determinants");
+  const int n_electrons = static_cast<int>(determinants.front().size());
+  SpinDeterminantReuseTable table =
+      build_spin_determinant_reuse_table(determinants);
+  for (const auto& determinant : determinants)
+    checked_spin_mask(determinant, n_orbitals, n_electrons);
+  if (table.unique_determinants.size() ==
+      mcscf::string_count(n_orbitals, n_electrons))
+    return table;
+
+  const mcscf::SpinStrings full_strings(n_orbitals, n_electrons);
+  table.unique_determinants = full_strings.occupations();
+  for (std::size_t i = 0; i < determinants.size(); ++i)
+    table.determinant_to_unique_id[i] = full_strings.index(
+        checked_spin_mask(determinants[i], n_orbitals, n_electrons));
+  return table;
+}
+
+SpinDeterminantReuseTable map_spin_reuse_table_to_complete_basis(
+    const std::vector<std::vector<int>>& determinants,
+    const SpinDeterminantReuseTable& reference) {
+  std::unordered_map<std::vector<int>, int, SpinDeterminantHasher> indices;
+  indices.reserve(reference.unique_determinants.size());
+  for (int i = 0; i < static_cast<int>(reference.unique_determinants.size()); ++i)
+    indices.emplace(reference.unique_determinants[i], i);
+
+  SpinDeterminantReuseTable table;
+  table.unique_determinants = reference.unique_determinants;
+  table.determinant_to_unique_id.reserve(determinants.size());
+  for (const auto& determinant : determinants) {
+    const auto found = indices.find(determinant);
+    if (found == indices.end())
+      throw std::invalid_argument("spin determinant is outside complete basis");
+    table.determinant_to_unique_id.push_back(found->second);
+  }
+  return table;
+}
+
+}  // namespace
+
+SameSpinPairCacheContext build_same_spin_pair_topology(
+    const std::vector<std::vector<int>>& alpha_det,
+    const std::vector<std::vector<int>>& beta_det,
+    int n_orbitals) {
+  if (alpha_det.size() != beta_det.size()) {
+    throw std::invalid_argument("alpha_det and beta_det must have the same size");
+  }
+
+  SameSpinPairCacheContext context;
+  context.alpha_reuse_table = build_spin_determinant_reuse_table(alpha_det);
+  context.close_shell_diagonal_reuses_same_spin_pair_cache =
+      can_reuse_close_shell_same_spin_pair_cache(alpha_det, beta_det);
+  context.beta_reuses_alpha_pair_cache =
+      context.close_shell_diagonal_reuses_same_spin_pair_cache ||
+      try_build_reuse_table_in_reference_basis(
+          beta_det,
+          context.alpha_reuse_table,
+          &context.beta_reuse_table);
+  if (context.close_shell_diagonal_reuses_same_spin_pair_cache) {
+    context.beta_reuse_table = context.alpha_reuse_table;
+  } else if (!context.beta_reuses_alpha_pair_cache) {
+    context.beta_reuse_table = build_spin_determinant_reuse_table(beta_det);
+  }
+  return finalize_spin_topology(std::move(context), n_orbitals);
+}
+
+SameSpinPairCacheContext build_orthogonal_spin_topology(
+    const std::vector<std::vector<int>>& alpha_det,
+    const std::vector<std::vector<int>>& beta_det,
+    int n_orbitals) {
+  if (alpha_det.size() != beta_det.size())
+    throw std::invalid_argument("alpha_det and beta_det must have the same size");
+  if (n_orbitals < 1 || n_orbitals > 63)
+    throw std::invalid_argument("invalid orthogonal spin orbital count");
+
+  SameSpinPairCacheContext context;
+  context.alpha_reuse_table = complete_spin_reuse_table(alpha_det, n_orbitals);
+  context.close_shell_diagonal_reuses_same_spin_pair_cache =
+      can_reuse_close_shell_same_spin_pair_cache(alpha_det, beta_det);
+  context.beta_reuses_alpha_pair_cache =
+      alpha_det.front().size() == beta_det.front().size();
+  context.beta_reuse_table = context.beta_reuses_alpha_pair_cache
+      ? map_spin_reuse_table_to_complete_basis(beta_det, context.alpha_reuse_table)
+      : complete_spin_reuse_table(beta_det, n_orbitals);
+  return finalize_spin_topology(std::move(context), n_orbitals);
 }
 
 SameSpinPairCacheContext build_same_spin_pair_cache_context(

@@ -6,7 +6,7 @@
 
 #include <Eigen/Core>
 
-namespace xmvb::mcscf { class CovalentSupport; }
+namespace xmvb::mcscf { class ProductSupport; }
 
 namespace xmvb::vb {
 
@@ -37,12 +37,12 @@ public:
   void apply_right_block(Eigen::Ref<Eigen::MatrixXd> coefficients) const;
   /** @brief Applies the transpose exterior transform to matrix rows. */
   void apply_adjoint_left(Eigen::MatrixXd* coefficients) const;
-  /** @brief Left transform within exact covalent support, with ordered beta columns.
-   * For the adjoint this discards only paths that cannot return to a covalent
+  /** @brief Left transform within exact selected support, with ordered beta columns.
+   * For the adjoint this discards only paths that cannot return to a selected
    * input under the remaining upper-triangular beta adjoint.
    */
-  void apply_covalent_left(Eigen::MatrixXd* coefficients,
-      const mcscf::CovalentSupport& support, int beta_begin, int beta_count,
+  void apply_supported_left(Eigen::MatrixXd* coefficients,
+      const mcscf::ProductSupport& support, int beta_begin, int beta_count,
       bool adjoint = false) const;
   /** @brief Applies the transpose exterior transform to matrix columns. */
   void apply_adjoint_right(Eigen::MatrixXd* coefficients) const;

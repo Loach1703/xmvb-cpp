@@ -14,7 +14,7 @@
 #include "vbscf/structures/assembly/connection.hpp"
 #include "vbscf/structures/expansion/types.hpp"
 
-namespace xmvb::mcscf { class DirectCiSigmaAction; }
+namespace xmvb::mcscf { class DirectCiSigmaAction; class ProductSupport; }
 
 namespace xmvb::vb {
 
@@ -355,6 +355,7 @@ private:
   int n_unique_alpha_ = 0;
   int n_unique_beta_ = 0;
   std::unique_ptr<OrthogonalDirectCiData> direct_ci_;
+  std::unique_ptr<const mcscf::ProductSupport> product_support_;
   std::unique_ptr<TiledPairData> tiled_pairs_;
 };
 

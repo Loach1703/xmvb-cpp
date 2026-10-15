@@ -1182,6 +1182,7 @@ StructureAccumulationResult build_tiled_matrix_form_structure_matrices(
 template <typename TwoElectronInput>
 std::vector<ForwardSpinPairEntry> build_unique_spin_self_entries(
     const std::vector<std::vector<int>>& unique_spin_determinants,
+    const std::vector<unsigned char>& touched,
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
@@ -1209,7 +1210,7 @@ std::vector<ForwardSpinPairEntry> build_unique_spin_self_entries(
     for (int unique_index = 0;
          unique_index < static_cast<int>(entries.size());
          ++unique_index) {
-      if (failed.load(std::memory_order_relaxed)) {
+      if (!touched[unique_index] || failed.load(std::memory_order_relaxed)) {
         continue;
       }
       try {
@@ -1470,9 +1471,22 @@ StructureDiagonal build_determinant_diagonal_jacobi_preconditioner(
   const bool project_alpha = shared_spin_entries ||
       alpha_reuse_table.unique_determinants.size() <=
           beta_reuse_table.unique_determinants.size();
+  // Completing the ambient indices must not evaluate added zero-support
+  // strings in the Davidson diagonal. Only original expansion rows matter.
+  std::vector<unsigned char> alpha_touched(alpha_reuse_table.unique_determinants.size(),0);
+  std::vector<unsigned char> beta_touched(beta_reuse_table.unique_determinants.size(),0);
+  for (std::size_t d=0; d<determinant_to_structure_terms.size(); ++d) {
+    if (determinant_to_structure_terms[d].empty()) continue;
+    alpha_touched[alpha_reuse_table.determinant_to_unique_id[d]]=1;
+    beta_touched[beta_reuse_table.determinant_to_unique_id[d]]=1;
+  }
+  if (shared_spin_entries)
+    for (std::size_t i=0; i<alpha_touched.size(); ++i)
+      alpha_touched[i] |= beta_touched[i];
   std::vector<ForwardSpinPairEntry> alpha_entries =
       build_unique_spin_self_entries(
           alpha_reuse_table.unique_determinants,
+          alpha_touched,
           ovlp_act,
           h1e_act,
           n_orbitals,
@@ -1483,6 +1497,7 @@ StructureDiagonal build_determinant_diagonal_jacobi_preconditioner(
   if (!shared_spin_entries) {
     beta_entries = build_unique_spin_self_entries(
         beta_reuse_table.unique_determinants,
+        beta_touched,
         ovlp_act,
         h1e_act,
         n_orbitals,

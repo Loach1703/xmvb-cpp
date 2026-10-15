@@ -183,6 +183,19 @@ SameSpinPairCacheContext build_same_spin_pair_topology(
     int n_orbitals);
 
 /**
+ * @brief Completes each fixed-spin string space for orthogonal direct CI.
+ *
+ * Only the per-spin string tables and original determinant maps are completed;
+ * the supplied determinant and structure lists are not enlarged. Ordered
+ * same-spin pair arrays remain empty. An already complete alpha table keeps
+ * its original ordering; equal-electron beta strings use that shared basis.
+ */
+SameSpinPairCacheContext build_orthogonal_spin_topology(
+    const std::vector<std::vector<int>>& alpha_det,
+    const std::vector<std::vector<int>>& beta_det,
+    int n_orbitals);
+
+/**
  * @brief Builds ordered alpha/beta same-spin caches for one determinant expansion.
  */
 SameSpinPairCacheContext build_same_spin_pair_cache_context(

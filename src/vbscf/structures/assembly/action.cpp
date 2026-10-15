@@ -14,6 +14,7 @@
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
 #include "mcscf/ci/planner.hpp"
+#include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma.hpp"
 
 namespace xmvb::vb {
@@ -692,6 +693,18 @@ StructureAction::StructureAction(
        ++term_index) {
     const int structure = spin_terms_[term_index].structure;
     structure_term_indices_[next_structure_term[structure]++] = term_index;
+  }
+
+  if (direct_ci_) {
+    std::vector<int> touched;
+    touched.reserve(spin_products_.size());
+    for (std::size_t group=0; group<spin_products_.size(); ++group)
+      if (spin_term_offsets_[group] != spin_term_offsets_[group+1])
+        touched.push_back(spin_products_[group]);
+    auto support = std::make_unique<mcscf::ProductSupport>(n_active_orbitals,
+        direct_ci_->alpha_transform.occupations(),
+        direct_ci_->beta_transform().occupations(), touched);
+    if (!support->full()) product_support_=std::move(support);
   }
 
   if (mode == StructureActionMode::ActionOnly) return;
@@ -1909,6 +1922,7 @@ StructureActionStorage StructureAction::storage() const noexcept {
   result.orthogonal_direct_ci = direct_ci_ != nullptr;
   if (direct_ci_) {
     result.direct_ci_bytes = direct_ci_->dynamic_bytes();
+    if (product_support_) result.direct_ci_bytes += product_support_->dynamic_bytes();
   }
   if (tiled_pairs_) {
     result.factor_bytes += tiled_pairs_->dynamic_bytes();

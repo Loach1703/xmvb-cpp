@@ -1,0 +1,14 @@
+case=CAS(12,12)_selected
+structures=132
+products=924
+terms=8448
+support0_products=226512
+support1_products=608751
+paths_build_seconds=0.00012099000000000001
+paths_support_seconds=0.017426799999999999
+paths_halo_seconds=0.164182156
+paths_support_prefixes=671533
+paths_halo_prefixes=1702803
+paths_halo_word_updates=77349690
+paths_metadata_bytes=37440
+paths_workspace_bytes=4680

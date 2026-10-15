@@ -8,7 +8,7 @@
 #include "core/openmp.hpp"
 #include "core/pair_index.hpp"
 #include "core/timing.hpp"
-#include "mcscf/ci/covalent_support.hpp"
+#include "mcscf/ci/product_support.hpp"
 
 namespace xmvb::mcscf {
 
@@ -16,7 +16,7 @@ void DirectCiSigmaAction::apply_tiled(
     int block_width,
     const std::function<void(int, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_column,
     const std::function<void(int, const std::vector<int>&, const Eigen::Ref<const Eigen::MatrixXd>&)>& add_column,
-    const CovalentSupport* support) const {
+    const ProductSupport* support) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiSigma);
   if (block_width <= 0 || !read_column || !add_column ||
       static_cast<Eigen::Index>(block_width) >

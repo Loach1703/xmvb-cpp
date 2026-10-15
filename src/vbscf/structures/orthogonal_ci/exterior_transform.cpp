@@ -12,7 +12,7 @@
 
 #include "core/openmp.hpp"
 #include "core/timing.hpp"
-#include "mcscf/ci/covalent_support.hpp"
+#include "mcscf/ci/product_support.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -232,9 +232,10 @@ void ExteriorOrbitalTransform::apply_adjoint_left(
   transform_left(*coefficients, true, false);
 }
 
-void ExteriorOrbitalTransform::apply_covalent_left(
-    Eigen::MatrixXd* coefficients, const mcscf::CovalentSupport& support,
+void ExteriorOrbitalTransform::apply_supported_left(
+    Eigen::MatrixXd* coefficients, const mcscf::ProductSupport& support,
     int beta_begin, int beta_count, bool adjoint) const {
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiTransformLeft);
   validate_left(*coefficients);
   const int workers = bounded_openmp_thread_count(
       coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients->size()),
