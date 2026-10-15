@@ -153,41 +153,6 @@ Eigen::MatrixXd column_of(const StructureAction& action,
   return action.expand_structure_tile(coeff, 0, alpha_size, beta, 1);
 }
 
-Eigen::MatrixXd carrier_image(const StructureAction& action,
-                              const ExteriorOrbitalTransform& alpha,
-                              const ExteriorOrbitalTransform& beta,
-                              const Eigen::MatrixXd& coeff,
-                              const ExteriorTransformDirection* da = nullptr,
-                              const ExteriorTransformDirection* db = nullptr,
-                              Eigen::MatrixXd* derivative = nullptr) {
-  Eigen::MatrixXd image = action.expand_structure_block(coeff);
-  if (derivative != nullptr) {
-    *derivative = Eigen::MatrixXd::Zero(image.rows(), image.cols());
-    alpha.apply_directional_left(*da, &image, derivative);
-    beta.apply_directional_right(*db, &image, derivative);
-  } else {
-    alpha.apply_left(&image);
-    beta.apply_right(&image);
-  }
-  return image;
-}
-
-Eigen::MatrixXd carrier_adjoint(
-    const StructureAction& action, const ExteriorOrbitalTransform& alpha,
-    const ExteriorOrbitalTransform& beta, Eigen::MatrixXd image,
-    const ExteriorTransformDirection* da = nullptr,
-    const ExteriorTransformDirection* db = nullptr,
-    Eigen::MatrixXd* derivative = nullptr) {
-  if (derivative != nullptr) {
-    alpha.apply_directional_adjoint_left(*da, &image, derivative);
-    beta.apply_directional_adjoint_right(*db, &image, derivative);
-  } else {
-    alpha.apply_adjoint_left(&image);
-    beta.apply_adjoint_right(&image);
-  }
-  return action.contract_spin_product_block(image);
-}
-
 Eigen::MatrixXd apply_pair_kernel(
     const StructureAction& action, const Strings& alpha, const Strings& beta,
     const Eigen::MatrixXd& kernel,
@@ -223,12 +188,6 @@ Eigen::MatrixXd apply_pair_kernel(
     result.col(col) = one_result;
   }
   return result;
-}
-
-Eigen::MatrixXd chart_inverse_transpose(
-    const Eigen::Ref<const Eigen::MatrixXd>& r) {
-  return r.template triangularView<Eigen::Upper>()
-      .solve(Eigen::MatrixXd::Identity(r.rows(), r.cols())).transpose();
 }
 
 }  // namespace
@@ -272,15 +231,8 @@ Eigen::MatrixXd RepresentationOverlap::PreparedMetric::operator()(
   if (!alpha_transform_)
     return apply_pair_kernel(*action_, *alpha_, *beta_, kernel_, coeff);
 
-  Eigen::MatrixXd result(action_->n_structures(), coeff.cols());
-  for (int col = 0; col < coeff.cols(); ++col) {
-    Eigen::MatrixXd one = coeff.col(col);
-    Eigen::MatrixXd image = carrier_image(
-        *action_, *alpha_transform_, *beta_transform_, one);
-    result.col(col) = carrier_adjoint(
-        *action_, *alpha_transform_, *beta_transform_, std::move(image));
-  }
-  return result;
+  return action_->cross_overlap(coeff, *alpha_transform_, *beta_transform_,
+                                *alpha_transform_, *beta_transform_);
 }
 
 RepresentationOverlap::PreparedMetric RepresentationOverlap::prepare_metric(
@@ -301,12 +253,7 @@ Eigen::MatrixXd RepresentationOverlap::apply(
   if (complete_carrier_) {
     ExteriorOrbitalTransform la(alpha_, left_upper), lb(beta_, left_upper);
     ExteriorOrbitalTransform ra(alpha_, right_upper), rb(beta_, right_upper);
-    for (int col = 0; col < coeff.cols(); ++col) {
-      Eigen::MatrixXd x = coeff.col(col);
-      Eigen::MatrixXd y = carrier_image(*action_, ra, rb, x);
-      result.col(col) = carrier_adjoint(*action_, la, lb, std::move(y));
-    }
-    return result;
+    return action_->cross_overlap(coeff, la, lb, ra, rb);
   }
   return apply_pair_kernel(*action_, alpha_, beta_,
                            left_upper.transpose() * right_upper, coeff);
@@ -334,18 +281,7 @@ Eigen::MatrixXd RepresentationOverlap::apply_direction(
     const auto dlb = lb.direction(delta_left_upper);
     const auto dra = ra.direction(delta_right_upper);
     const auto drb = rb.direction(delta_right_upper);
-    for (int col = 0; col < coeff.cols(); ++col) {
-      Eigen::MatrixXd one = coeff.col(col);
-      Eigen::MatrixXd dy;
-      Eigen::MatrixXd y = carrier_image(*action_, ra, rb, one,
-                                        &dra, &drb, &dy);
-      // Differentiate F_left^T y: its seed derivative is dy.
-      Eigen::MatrixXd seed_direction = std::move(dy);
-      carrier_adjoint(*action_, la, lb,
-          std::move(y), &dla, &dlb, &seed_direction);
-      result.col(col) = action_->contract_spin_product_block(seed_direction);
-    }
-    return result;
+    return action_->cross_overlap(coeff, la, lb, ra, rb, &dla, &dlb, &dra, &drb);
   }
   const Eigen::MatrixXd k = left_upper.transpose() * right_upper;
   const Eigen::MatrixXd dk = delta_left_upper.transpose() * right_upper +
@@ -405,12 +341,7 @@ UpperPair RepresentationOverlap::adjoint(
   if (complete_carrier_) {
     ExteriorOrbitalTransform la(alpha_, left_upper), lb(beta_, left_upper);
     ExteriorOrbitalTransform ra(alpha_, right_upper), rb(beta_, right_upper);
-    const Eigen::MatrixXd yl = carrier_image(*action_, la, lb, left);
-    const Eigen::MatrixXd yr = carrier_image(*action_, ra, rb, right);
-    const Eigen::MatrixXd ml = action_->carrier_generator_adjoint(yr, yl);
-    const Eigen::MatrixXd mr = action_->carrier_generator_adjoint(yl, yr);
-    return {upper_part(ml * chart_inverse_transpose(left_upper)),
-            upper_part(mr * chart_inverse_transpose(right_upper))};
+    return action_->cross_overlap_adjoint(left_coeff, right_coeff, la, lb, ra, rb);
   }
   const Eigen::MatrixXd k = left_upper.transpose() * right_upper;
   Eigen::MatrixXd g = Eigen::MatrixXd::Zero(n_active_, n_active_);
@@ -469,27 +400,8 @@ UpperPair RepresentationOverlap::adjoint_direction(
   if (complete_carrier_) {
     ExteriorOrbitalTransform la(alpha_, left_upper), lb(beta_, left_upper);
     ExteriorOrbitalTransform ra(alpha_, right_upper), rb(beta_, right_upper);
-    const auto dla = la.direction(delta_left_upper);
-    const auto dlb = lb.direction(delta_left_upper);
-    const auto dra = ra.direction(delta_right_upper);
-    const auto drb = rb.direction(delta_right_upper);
-    Eigen::MatrixXd dyl, dyr;
-    const Eigen::MatrixXd yl = carrier_image(*action_, la, lb, left,
-                                             &dla, &dlb, &dyl);
-    const Eigen::MatrixXd yr = carrier_image(*action_, ra, rb, right,
-                                             &dra, &drb, &dyr);
-    const Eigen::MatrixXd ml = action_->carrier_generator_adjoint(yr, yl);
-    const Eigen::MatrixXd mr = action_->carrier_generator_adjoint(yl, yr);
-    const Eigen::MatrixXd dml =
-        action_->carrier_generator_adjoint(dyr, yl) +
-        action_->carrier_generator_adjoint(yr, dyl);
-    const Eigen::MatrixXd dmr =
-        action_->carrier_generator_adjoint(dyl, yr) +
-        action_->carrier_generator_adjoint(yl, dyr);
-    const Eigen::MatrixXd il = chart_inverse_transpose(left_upper);
-    const Eigen::MatrixXd ir = chart_inverse_transpose(right_upper);
-    return {upper_part(dml * il - ml * il * delta_left_upper.transpose() * il),
-            upper_part(dmr * ir - mr * ir * delta_right_upper.transpose() * ir)};
+    const Eigen::MatrixXd dl = delta_left_upper, dr = delta_right_upper;
+    return action_->cross_overlap_adjoint(left_coeff, right_coeff, la, lb, ra, rb, &dl, &dr);
   }
   const Eigen::MatrixXd k = left_upper.transpose() * right_upper;
   const Eigen::MatrixXd dk = delta_left_upper.transpose() * right_upper +

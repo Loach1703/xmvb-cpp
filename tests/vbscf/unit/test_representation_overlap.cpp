@@ -13,6 +13,7 @@
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
+#include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
 namespace {
 
@@ -80,7 +81,8 @@ StructureAction make_action(
       determinant_alpha.push_back(alpha[a]);
       determinant_beta.push_back(beta[b]);
       for (int structure = 0; structure < 3; ++structure) {
-        terms[product].push_back({structure, w(product, structure)});
+        if (w(product, structure) != 0.0)
+          terms[product].push_back({structure, w(product, structure)});
       }
     }
   }
@@ -151,8 +153,17 @@ Eigen::MatrixXd reference_cross(
 
 void check_case(const std::vector<std::vector<int>>& alpha,
                 const std::vector<std::vector<int>>& beta,
-                bool full_ambient) {
-  const Eigen::MatrixXd w = selected_expansion(alpha.size(), beta.size());
+                bool full_ambient, bool sparse = false) {
+  Eigen::MatrixXd w = selected_expansion(alpha.size(), beta.size());
+  if (sparse) {
+    w.setZero();
+    // Arbitrary three structures with strictly restricted carrier support.
+    // Never seed the highest product, which would make the support full.
+    w(0, 0) = 1.0;
+    w(1, 1) = -0.7;
+    w(beta.size(), 1) = 0.2;
+    w(beta.size() + 1, 2) = 0.9;
+  }
   const auto action = make_action(alpha, beta, w);
   const RepresentationOverlap overlap(action, alpha, beta, 4);
   const Eigen::MatrixXd left = upper(0.04, 0.29);
@@ -213,6 +224,32 @@ void check_case(const std::vector<std::vector<int>>& alpha,
   require(relative_error(analytic_action_direction,
                          finite_action_direction) < 2e-8,
           "cross-Gram directional block action fails finite differences");
+
+  if (full_ambient) {
+    ExteriorOrbitalTransform la(alpha, left), lb(beta, left);
+    ExteriorOrbitalTransform ra(alpha, right), rb(beta, right);
+    const auto dla = la.direction(dl), dlb = lb.direction(dl);
+    const auto dra = ra.direction(dr), drb = rb.direction(dr);
+    const std::size_t one_column = 8 * sizeof(double) * (alpha.size() + beta.size());
+    require(relative_error(action.cross_overlap(block, la, lb, ra, rb,
+        nullptr, nullptr, nullptr, nullptr, one_column), reference * block) < 2e-12,
+        "bounded cross-Gram panels differ from independent minors");
+    require(relative_error(action.cross_overlap(block, la, lb, ra, rb,
+        &dla, &dlb, &dra, &drb, one_column), analytic_action_direction) < 2e-12,
+        "one-column derivative panels differ from wide panels");
+    const auto tiled = action.cross_overlap_adjoint(x, y, la, lb, ra, rb,
+        nullptr, nullptr, 2 * one_column);
+    const auto wide = overlap.adjoint(left, right, x, y);
+    require(relative_error(tiled.left, wide.left) < 2e-12 &&
+        relative_error(tiled.right, wide.right) < 2e-12,
+        "one-column adjoint differs from wide panels");
+    const auto dtiled = action.cross_overlap_adjoint(x, y, la, lb, ra, rb,
+        &dl, &dr, 2 * one_column);
+    const auto dwide = overlap.adjoint_direction(left, right, dl, dr, x, y);
+    require(relative_error(dtiled.left, dwide.left) < 2e-12 &&
+        relative_error(dtiled.right, dwide.right) < 2e-12,
+        "one-column adjoint derivative differs from wide panels");
+  }
 
   const UpperPair adjoint = overlap.adjoint(left, right, x, y);
   const double adjoint_dot = dot(adjoint.left, dl) + dot(adjoint.right, dr);
@@ -280,6 +317,8 @@ int main() {
         {0}, {1}, {2}, {3}};
     check_case(full_alpha, full_beta, true);
     check_case(full_beta, full_beta, true);
+    check_case(full_alpha, full_beta, true, true);
+    check_case(full_beta, full_beta, true, true);
     check_case({{0, 1}, {0, 2}, {1, 3}}, {{0}, {2}, {3}}, false);
     std::cout << "Selected-space representation cross-Gram and derivatives: passed\n";
     return 0;

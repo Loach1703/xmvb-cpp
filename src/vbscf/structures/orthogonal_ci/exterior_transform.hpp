@@ -43,7 +43,9 @@ public:
    */
   void apply_supported_left(Eigen::MatrixXd* coefficients,
       const mcscf::ProductSupport& support, int beta_begin, int beta_count,
-      bool adjoint = false) const;
+      bool adjoint = false,
+      const ExteriorTransformDirection* direction = nullptr,
+      Eigen::MatrixXd* derivative = nullptr) const;
   /** @brief Applies the transpose exterior transform to matrix columns. */
   void apply_adjoint_right(Eigen::MatrixXd* coefficients) const;
   /** @brief Applies the transpose transform to a mutable matrix block in place. */
@@ -92,6 +94,19 @@ public:
 
   int dimension() const noexcept { return static_cast<int>(masks_.size()); }
   int n_orbitals() const noexcept { return n_orbitals_; }
+  /** @brief Upper-chart pullback of a one-body generator contraction.
+   * For left action, delta Y = E(delta R R^-1) Y; for right action,
+   * delta Y = Y E(R^-1 delta R). Both inputs may be bounded row/column panels.
+   * With all three tangent arguments, returns the derivative of this pullback.
+   * A right-action seed mask omits columns known structurally zero (including
+   * their tangents), without inspecting or thresholding numerical amplitudes.
+   */
+  Eigen::MatrixXd generator_pullback(const Eigen::MatrixXd& seed,
+      const Eigen::MatrixXd& image, bool right_action,
+      const Eigen::MatrixXd* delta_seed = nullptr,
+      const Eigen::MatrixXd* delta_image = nullptr,
+      const Eigen::MatrixXd* delta_upper = nullptr,
+      const std::vector<std::uint8_t>* seed_columns = nullptr) const;
   int n_electrons() const noexcept { return n_electrons_; }
   /** @brief Spin-string occupations in the transform's immutable ordering. */
   const std::vector<std::uint64_t>& occupations() const noexcept { return masks_; }

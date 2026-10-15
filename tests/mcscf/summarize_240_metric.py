@@ -52,7 +52,7 @@ def main():
     args = parser.parse_args()
     rows = [row for root in args.runs for row in summarize(root)]
     if rows:
-        writer = csv.DictWriter(sys.stdout, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(sys.stdout, fieldnames=list(rows[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 

@@ -234,9 +234,16 @@ void ExteriorOrbitalTransform::apply_adjoint_left(
 
 void ExteriorOrbitalTransform::apply_supported_left(
     Eigen::MatrixXd* coefficients, const mcscf::ProductSupport& support,
-    int beta_begin, int beta_count, bool adjoint) const {
+    int beta_begin, int beta_count, bool adjoint,
+    const ExteriorTransformDirection* direction, Eigen::MatrixXd* derivative) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiTransformLeft);
   validate_left(*coefficients);
+  if ((direction == nullptr) != (derivative == nullptr) ||
+      (derivative && (derivative->rows() != coefficients->rows() ||
+       derivative->cols() != coefficients->cols() ||
+       direction->determinant_scales.size() != dimension() ||
+       direction->shear_coefficients.size() != shears_.size())))
+    throw std::invalid_argument("invalid supported exterior derivative");
   const int workers = bounded_openmp_thread_count(
       coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients->size()),
       coefficients->cols());
@@ -247,6 +254,7 @@ void ExteriorOrbitalTransform::apply_supported_left(
 #pragma omp for schedule(static)
     for (Eigen::Index column = 0; column < coefficients->cols(); ++column) {
       auto values = coefficients->col(column);
+      double* tangent = derivative ? derivative->col(column).data() : nullptr;
       const int beta = beta_begin + column % beta_count;
       std::fill(allowed.begin(), allowed.end(), 0);
       auto paths = support.column(beta, 0);
@@ -254,21 +262,35 @@ void ExteriorOrbitalTransform::apply_supported_left(
       bool in_support;
       while (paths.next(alpha_index, beta_index, in_support)) allowed[alpha_index] = 1;
       for (int alpha = 0; alpha < dimension(); ++alpha) {
-        if (!allowed[alpha]) values[alpha] = 0.0;
-        else if (!adjoint) values[alpha] *= determinant_scales_[alpha];
+        if (!allowed[alpha]) {
+          values[alpha] = 0.0;
+          if (tangent) tangent[alpha] = 0.0;
+        } else if (!adjoint) {
+          if (tangent) tangent[alpha] = determinant_scales_[alpha] * tangent[alpha] +
+              direction->determinant_scales[alpha] * values[alpha];
+          values[alpha] *= determinant_scales_[alpha];
+        }
       }
       for (int index = 0; index < n_shears; ++index) {
-        const Shear& shear = shears_[adjoint ? n_shears - 1 - index : index];
+        const int shear_index = adjoint ? n_shears - 1 - index : index;
+        const Shear& shear = shears_[shear_index];
         for (const auto& pair : shear.pairs) {
           if (!allowed[pair.source] || !allowed[pair.target]) continue;
           const int target = adjoint ? pair.source : pair.target;
           const int source = adjoint ? pair.target : pair.source;
+          if (tangent) tangent[target] += pair.sign *
+              (direction->shear_coefficients[shear_index] * values[source] +
+               shear.coefficient * tangent[source]);
           values[target] += shear.coefficient * pair.sign * values[source];
         }
       }
       if (adjoint)
         for (int alpha = 0; alpha < dimension(); ++alpha)
-          if (allowed[alpha]) values[alpha] *= determinant_scales_[alpha];
+          if (allowed[alpha]) {
+            if (tangent) tangent[alpha] = determinant_scales_[alpha] * tangent[alpha] +
+                direction->determinant_scales[alpha] * values[alpha];
+            values[alpha] *= determinant_scales_[alpha];
+          }
     }
   }
 }
@@ -667,6 +689,65 @@ std::size_t ExteriorOrbitalTransform::shear_pair_count() const noexcept {
     count += shear.pairs.size();
   }
   return count;
+}
+
+Eigen::MatrixXd ExteriorOrbitalTransform::generator_pullback(
+    const Eigen::MatrixXd& seed, const Eigen::MatrixXd& image, bool right_action,
+    const Eigen::MatrixXd* delta_seed, const Eigen::MatrixXd* delta_image,
+    const Eigen::MatrixXd* delta_upper,
+    const std::vector<std::uint8_t>* seed_columns) const {
+  const bool directional = delta_upper != nullptr;
+  if (seed.rows() != image.rows() || seed.cols() != image.cols() ||
+      (right_action ? image.cols() : image.rows()) != dimension() ||
+      directional != (delta_seed != nullptr) || directional != (delta_image != nullptr) ||
+      (seed_columns && (!right_action || seed_columns->size() != masks_.size())))
+    throw std::invalid_argument("invalid generator pullback panels");
+  Eigen::MatrixXd g = Eigen::MatrixXd::Zero(n_orbitals_, n_orbitals_);
+  Eigen::MatrixXd dg = g;
+  const auto contract = [&](int target, int source, bool tangent) -> double {
+    if (right_action) {
+      if (tangent) return delta_seed->col(source).dot(image.col(target)) +
+          seed.col(source).dot(delta_image->col(target));
+      return seed.col(source).dot(image.col(target));
+    }
+    if (tangent) return delta_seed->row(target).dot(image.row(source)) +
+        seed.row(target).dot(delta_image->row(source));
+    return seed.row(target).dot(image.row(source));
+  };
+  for (int string = 0; string < dimension(); ++string) {
+    if (seed_columns && !(*seed_columns)[string]) continue;
+    const double value = contract(string, string, false);
+    const double derivative = directional ? contract(string, string, true) : 0.0;
+    for (int orbital = 0; orbital < n_orbitals_; ++orbital)
+      if ((masks_[string] >> orbital) & 1) {
+        g(orbital, orbital) += value;
+        dg(orbital, orbital) += derivative;
+      }
+  }
+  // The shear topology contains every upper one-body excitation exactly once.
+  // No lower generator can contribute to an upper-triangular chart derivative.
+  int shear = 0;
+  for (int removed = 1; removed < n_orbitals_; ++removed)
+    for (int inserted = removed - 1; inserted >= 0; --inserted, ++shear)
+      for (const auto& pair : shears_[shear].pairs) {
+        if (seed_columns && !(*seed_columns)[pair.source]) continue;
+        g(inserted, removed) += pair.sign * contract(pair.target, pair.source, false);
+        if (directional)
+          dg(inserted, removed) += pair.sign * contract(pair.target, pair.source, true);
+      }
+  const Eigen::MatrixXd inverse = orbital_transform_.triangularView<Eigen::Upper>()
+      .solve(Eigen::MatrixXd::Identity(n_orbitals_, n_orbitals_)).transpose();
+  Eigen::MatrixXd result;
+  if (directional) {
+    const Eigen::MatrixXd di = -inverse * delta_upper->transpose() * inverse;
+    if (right_action) result = di * g + inverse * dg;
+    else result = dg * inverse + g * di;
+  } else {
+    if (right_action) result = inverse * g;
+    else result = g * inverse;
+  }
+  result.triangularView<Eigen::StrictlyLower>().setZero();
+  return result;
 }
 
 std::size_t ExteriorOrbitalTransform::dynamic_bytes() const noexcept {

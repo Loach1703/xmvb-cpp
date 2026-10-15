@@ -20,6 +20,7 @@
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
+#include "vbscf/structures/overlap/representation.hpp"
 #include "mcscf/ci/product_paths.hpp"
 
 namespace {
@@ -787,7 +788,8 @@ void check_covalent_subset(int selected_count, bool add_ionic) {
           "selected covalent overlap action differs from reference");
 }
 
-void benchmark_selected12(int selected_count, bool compare_reference, bool paths_only = false) {
+void benchmark_selected12(int selected_count, bool compare_reference,
+                          bool paths_only = false, bool gram_only = false) {
   require(selected_count == 1 || selected_count == 3 ||
           selected_count == 20 || selected_count == 132,
           "selected12 count must be 1, 3, 20, or 132");
@@ -865,6 +867,51 @@ void benchmark_selected12(int selected_count, bool compare_reference, bool paths
           "selected12 did not retain direct CI");
 
   const Eigen::MatrixXd vectors = test_vectors(selected_count, 1);
+  if (gram_only) {
+    const xmvb::vb::RepresentationOverlap overlap(action, fixture.alpha, fixture.beta, 12);
+    Eigen::MatrixXd left = Eigen::MatrixXd::Identity(12, 12), right = left;
+    Eigen::MatrixXd dl = Eigen::MatrixXd::Zero(12, 12), dr = dl;
+    for (int i = 0; i < 12; ++i)
+      for (int j = i; j < 12; ++j) {
+        left(i, j) += 0.02 * std::sin(i + 2 * j + 1.0);
+        right(i, j) += 0.03 * std::cos(2 * i + j + 1.0);
+        dl(i, j) = 0.01 * std::cos(i + j + 0.5);
+        dr(i, j) = 0.01 * std::sin(i + j + 0.5);
+      }
+    const Eigen::VectorXd v = vectors.col(0);
+    const auto begin = Clock::now();
+    const auto value = overlap.apply(left, right, vectors);
+    const auto value_end = Clock::now();
+    const auto tangent = overlap.apply_direction(left, right, dl, dr, vectors);
+    const auto tangent_end = Clock::now();
+    const auto gradient = overlap.adjoint(left, right, v, v);
+    const auto gradient_end = Clock::now();
+    const auto curvature = overlap.adjoint_direction(left, right, dl, dr, v, v);
+    const auto curvature_end = Clock::now();
+    constexpr double h = 1e-6;
+    const auto plus = overlap.adjoint(left + h * dl, right + h * dr, v, v);
+    const auto minus = overlap.adjoint(left - h * dl, right - h * dr, v, v);
+    const double dual = (gradient.left.array() * dl.array()).sum() +
+                        (gradient.right.array() * dr.array()).sum();
+    const double dual_error = std::abs(dual - v.dot(tangent.col(0))) /
+                             std::max(1.0, std::abs(dual));
+    const double curvature_error = std::max(
+        (curvature.left - (plus.left - minus.left) / (2 * h)).norm(),
+        (curvature.right - (plus.right - minus.right) / (2 * h)).norm()) /
+        std::max({1.0, curvature.left.norm(), curvature.right.norm()});
+    require(value.allFinite() && dual_error < 2e-10 && curvature_error < 2e-7,
+            "CAS(12,12) selected Gram derivative validation failed");
+    rusage usage{};
+    require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
+    std::cout << "gram_action_seconds=" << seconds(begin, value_end) << '\n'
+              << "gram_tangent_seconds=" << seconds(value_end, tangent_end) << '\n'
+              << "gram_adjoint_seconds=" << seconds(tangent_end, gradient_end) << '\n'
+              << "gram_curvature_seconds=" << seconds(gradient_end, curvature_end) << '\n'
+              << "gram_duality_error=" << dual_error << '\n'
+              << "gram_curvature_fd_error=" << curvature_error << '\n'
+              << "max_rss_kib=" << usage.ru_maxrss << '\n';
+    return;
+  }
   const auto start = Clock::now();
   const auto actual = action.apply(vectors);
   const auto cold = Clock::now();
@@ -1000,6 +1047,8 @@ int main(int argc, char** argv) {
       benchmark_selected12(std::stoi(argv[2]), true);
     } else if (argc == 3 && std::string(argv[1]) == "--paths12") {
       benchmark_selected12(std::stoi(argv[2]), false, true);
+    } else if (argc == 3 && std::string(argv[1]) == "--gram12") {
+      benchmark_selected12(std::stoi(argv[2]), false, false, true);
     } else if (argc == 1) {
       check_rumer_case(4);
       check_rumer_case(6);
@@ -1020,7 +1069,7 @@ int main(int argc, char** argv) {
     } else {
       throw std::invalid_argument(
           "usage: test_structure_tiles [--benchmark12|--benchmark12-no-reference|"
-          "--selected12 N|--selected12-parity N|--paths12 N]");
+          "--selected12 N|--selected12-parity N|--paths12 N|--gram12 N]");
     }
     return 0;
   } catch (const std::exception& error) {

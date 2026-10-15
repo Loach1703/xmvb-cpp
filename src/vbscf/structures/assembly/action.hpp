@@ -19,9 +19,11 @@ namespace xmvb::mcscf { class DirectCiSigmaAction; class ProductSupport; }
 namespace xmvb::vb {
 
 class ExteriorOrbitalTransform;
+struct ExteriorTransformDirection;
 
 class StructureMetricInverse;
 class RestrictedMetricInverse;
+struct UpperPair;
 
 /** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
 enum class StructureActionMode { Davidson, ActionOnly };
@@ -302,6 +304,33 @@ public:
    */
   Eigen::MatrixXd contract_spin_product_block(
       const Eigen::Ref<const Eigen::MatrixXd>& spin_images) const;
+
+  /** @brief Selected cross Gram action, streamed through reachable beta panels.
+   * Computes F_left^T F_right V without a full product-grid coefficient array.
+   * If all four directions are supplied, returns its directional derivative.
+   * The workspace budget controls panel/RHS batching, never the physical space.
+   */
+  Eigen::MatrixXd cross_overlap(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const ExteriorOrbitalTransform& left_alpha,
+      const ExteriorOrbitalTransform& left_beta,
+      const ExteriorOrbitalTransform& right_alpha,
+      const ExteriorOrbitalTransform& right_beta,
+      const ExteriorTransformDirection* delta_left_alpha = nullptr,
+      const ExteriorTransformDirection* delta_left_beta = nullptr,
+      const ExteriorTransformDirection* delta_right_alpha = nullptr,
+      const ExteriorTransformDirection* delta_right_beta = nullptr,
+      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
+
+  /** @brief Tile pullback of left^T F(left_chart)^T F(right_chart) right.
+   * Optional chart directions request the derivative of the pullback.
+   */
+  UpperPair cross_overlap_adjoint(const Eigen::VectorXd& left,
+      const Eigen::VectorXd& right, const ExteriorOrbitalTransform& la,
+      const ExteriorOrbitalTransform& lb, const ExteriorOrbitalTransform& ra,
+      const ExteriorOrbitalTransform& rb, const Eigen::MatrixXd* delta_left = nullptr,
+      const Eigen::MatrixXd* delta_right = nullptr,
+      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
 
   /**
    * @brief Contracts one rectangular unique-string-product image tile.
