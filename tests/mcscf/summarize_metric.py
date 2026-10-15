@@ -48,8 +48,18 @@ def accepted(artifact):
 
 
 def hvp(artifact):
+    text = (artifact / "accepted-hvp16.err").read_text()
+    entries = re.findall(r"^XMVB_FACTOR_ADJOINT,([^\n]+)", text, re.M)
+    # This fixture evaluates one accepted gradient, one HVP and two difference
+    # gradients. Only the second integral adjoint belongs to the HVP.
+    if entries and len(entries) != 4:
+        raise ValueError(f"{artifact}: expected four integral-adjoint records")
+    adjoint = dict(item.split("=", 1) for item in entries[1].split(",")) if entries else {}
+    fields = ("bra", "ket", "left_tile", "right_tile", "channel_tile",
+              "workspace_bytes", "source_loads", "load", "scatter", "covectors", "gram")
     return dict(run=artifact.name, kind="synthetic_production_hvp",
-                **values(artifact / "accepted-hvp16.out"))
+                **values(artifact / "accepted-hvp16.out"),
+                **{f"integral_{key}": adjoint.get(key) for key in fields})
 
 
 if __name__ == "__main__":

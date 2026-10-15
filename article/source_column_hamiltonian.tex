@@ -741,6 +741,26 @@ $r_\delta$ includes both orbital terms and any structure response, including
 the physical parity reconstruction when required. It must not be estimated
 from the accepted source count alone.
 
+There are two exact placements of a certified exchange-parity projector
+$P_\eta$. If $Z$ is the accepted representative and $\delta Z$ its tangent,
+self-adjointness and $[P_\eta,\delta\mathcal H]=0$ give
+\begin{equation}\label{eq:tangent-parity-order}
+ \ip{P_\eta\delta Z}{\delta\mathcal H Z}
+ =\ip{P_\eta Z}{\delta\mathcal H\delta Z}.
+\end{equation}
+For an accepted representative with $r$ factors and a merged tangent with
+$2r$ factors, the two source-count pairs are $(4r,r)$ and $(2r,2r)$.
+Both have the same source-pair moment count. The first has less leading
+channel-Gram arithmetic, but can repeatedly regenerate its larger directional
+bra when it does not fit the common workspace. The second can keep the
+accepted bra resident without enlarging that workspace. Compare the full
+scalar-work estimate, including the actual planned provider loads, channel
+traversals and Gram work, rather than selecting solely by the smaller ket.
+The projector placement changes only contraction order, never the selected
+VB space or an accuracy criterion. Equation~\eqref{eq:tangent-parity-order}
+applies to the symmetric integral adjoint; it does not permit moving a
+Hamiltonian through the oriented generator in a residual adjoint.
+
 Equation~\eqref{eq:factor-adjoint-tangent} is the integral part of the HVP,
 not its complete orbital pullback. The derivative of the exterior-map
 adjoint, the full carrier residual, and the state-average gauge terms remain

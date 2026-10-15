@@ -1495,11 +1495,17 @@ mcscf::DirectCiIntegralAdjoint StructureAction::source_integral_direction(
   if (coefficient_response != nullptr) {
     response_values = expand_support(coefficient_response->col(index));
   }
-  return mcscf::factor_integral_adjoint(
-      direct_ci_->sigma, sources_->tangent_source(spin_products_,values,
-          coefficient_response ? &response_values : nullptr,
-          direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,
-          orbital_direction ? &relative_direction : nullptr,true), ket);
+  const auto direction = sources_->tangent_source(spin_products_,values,
+      coefficient_response ? &response_values : nullptr,
+      direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,
+      orbital_direction ? &relative_direction : nullptr);
+  const auto physical_direction = sources_->tangent_source(spin_products_,values,
+      coefficient_response ? &response_values : nullptr,
+      direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,
+      orbital_direction ? &relative_direction : nullptr,true);
+  const auto physical = sources_->orthogonal_source(spin_products_,values,
+      direct_ci_->alpha_transform,direct_ci_->beta_transform(),true);
+  return sources_->integral_tangent(direct_ci_->sigma,ket,physical,direction,physical_direction);
 }
 
 StructureAdjointState StructureAction::prepare_active_adjoint(

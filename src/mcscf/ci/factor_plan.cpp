@@ -78,4 +78,18 @@ FactorPanels plan_factor_panels(const DirectCiSigmaAction& sigma,
   return best;
 }
 
+long double factor_integral_work(const DirectCiSigmaAction& sigma,
+    const SpinFactorSource& left, const SpinFactorSource& right,
+    std::size_t workspace_bytes) {
+  if (!left.count || !right.count) return 0;
+  const auto& bra = left.count >= right.count ? left : right;
+  const auto& ket = left.count >= right.count ? right : left;
+  const auto plan = plan_factor_panels(sigma,bra,ket,workspace_bytes,FactorContraction::Integral);
+  const long double rows = static_cast<long double>(left.n_alpha)+left.n_beta;
+  const long double d = sigma.channel_kernel().rows();
+  // These leading terms do not depend on tile widths, and were deliberately
+  // omitted from plan_factor_panels(). They do depend on the bilinear order.
+  return plan.work+2*rows*ket.count*d*d+4*rows*bra.count*ket.count*(d+1);
+}
+
 } // namespace xmvb::mcscf::detail

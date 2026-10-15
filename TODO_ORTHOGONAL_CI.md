@@ -153,11 +153,27 @@ full `U * r` factors when a broad support makes those product-sized.
    and155.94 MiB RSS, but costs154.54 s versus saved153.49 s: the exact2r
    simplification is not an end-to-end speedup. Its55.01 s selected direction
    and99.53 s backward phase identify where further work is needed.
-   Next investigate equivalent parity placements in the symmetric integral
-   adjoint: a physical directional bra may force regeneration whereas an
-   accepted physical bra can remain resident. Also derive direct accepted
-   adjoint reuse for the known within-state normalization response; do not
-   detect that response by a numerical amplitude threshold.
+   The equivalent parity-placement order is now implemented. Existing phase
+   capture1261387 identified106496 planned directional-bra column loads and
+   52.96 s provider generation. New job1261411 keeps the accepted physical bra
+   resident under the same64 MiB cap:256 planned loads and0.65 s generation.
+   The complete production HVP drops from155.80 to100.29 s, with155.39 MiB RSS
+   and unchanged1.73e-9 difference error. No oriented residual adjoint is swapped.
+   Jobs1261395/1261413 pass9 focused tests and9 full240 regressions.
+   FeCl2 control1261419 reaches the correct energy, but needs16/271 steps/HVP
+   versus12/211 at older metric checkpoint1261264. Do not claim universal
+   end-to-end improvement; this unequal-spin control has no common exchange
+   quotient, so keep its trajectory change separate from the new parity order.
+   Next derive direct accepted-adjoint reuse for the known within-state
+   normalization response, using its upstream algebraic frame rather than a
+   numerical amplitude threshold. Broad product-order streaming remains open.
+   For a single root with known Q_g=aC, the coefficient-only integral and
+   residual-generator adjoint derivatives equal2a times their accepted values.
+   Reuse the accepted active-integral adjoints, not the total orbital gradient
+   (which also contains inactive-only terms). Keep the gauge multiplier and
+   orbital-map derivatives separate. Obtain a from the core coupling's small
+   selected-frame solve, never by testing whether numerical vectors are parallel.
+   Weighted multistate totals alone do not contain all cross-state adjoints.
 6. [ ] Remove obsolete full-product production consumers after migration.
    Explicit full-carrier arrays remain only as independent small-system test
    oracles; broad-support production uses generated product tiles, not a dense

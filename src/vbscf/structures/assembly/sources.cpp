@@ -1,8 +1,12 @@
 #include "vbscf/structures/assembly/sources.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
+
+#include "core/timing.hpp"
+#include "mcscf/ci/factors_internal.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -254,6 +258,24 @@ mcscf::SpinFactorSource SpinSources::tangent_source(const std::vector<int>& prod
         }
       },std::max(base.workspace_rows,static_cast<std::size_t>(std::max(base.n_alpha,base.n_beta))),
       1.5L*base.load_work+sigma.spin_link_count()+base.n_alpha+base.n_beta};
+}
+
+mcscf::DirectCiIntegralAdjoint SpinSources::integral_tangent(
+    const mcscf::DirectCiSigmaAction& sigma, const mcscf::SpinFactorSource& state,
+    const mcscf::SpinFactorSource& physical_state, const mcscf::SpinFactorSource& direction,
+    const mcscf::SpinFactorSource& physical_direction) const {
+  if (parity_) {
+    const auto directional_bra = mcscf::detail::factor_integral_work(
+        sigma,physical_direction,state,mcscf::kFactorWorkspaceBytes);
+    const auto accepted_bra = mcscf::detail::factor_integral_work(
+        sigma,physical_state,direction,mcscf::kFactorWorkspaceBytes);
+    if (profiling::phase_totals().enabled)
+      std::fprintf(stderr,"XMVB_TANGENT_ORDER,directional_bra_work=%.0Lf,accepted_bra_work=%.0Lf,accepted_bra=%d\n",
+          directional_bra,accepted_bra,accepted_bra < directional_bra);
+    if (accepted_bra < directional_bra)
+      return mcscf::factor_integral_adjoint(sigma,physical_state,direction);
+  }
+  return mcscf::factor_integral_adjoint(sigma,physical_direction,state);
 }
 
 } // namespace xmvb::vb

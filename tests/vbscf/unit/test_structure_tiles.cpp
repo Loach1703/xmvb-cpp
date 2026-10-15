@@ -501,6 +501,35 @@ void check_source_tangents() {
                     "merged tangent changed an oriented generator, coefficient response or parity sign");
         }
       }
+      const auto y = plan.orthogonal_source(products,c,ta,tb);
+      const auto physical_y = plan.orthogonal_source(products,c,ta,tb,true);
+      for (const int mode : {0,1,2}) {
+        const auto dy = plan.tangent_source(products,c,mode == 0 ? nullptr : &q,
+            ta,tb,sigma,mode == 1 ? nullptr : &generator);
+        const auto physical_dy = plan.tangent_source(products,c,mode == 0 ? nullptr : &q,
+            ta,tb,sigma,mode == 1 ? nullptr : &generator,true);
+        const auto expected = sigma.integral_adjoint(reconstruct(physical_dy,3),reconstruct(y,3));
+        const auto check = [&](const xmvb::mcscf::DirectCiIntegralAdjoint& actual) {
+          require((actual.one_electron-expected.one_electron).norm() < 3e-11 &&
+                  (actual.pair_kernel-expected.pair_kernel).norm() < 3e-11,
+                  "integral tangent projector placement changed the functional");
+        };
+        check(plan.integral_tangent(sigma,y,physical_y,dy,physical_dy));
+        if (parity) {
+          check(xmvb::mcscf::factor_integral_adjoint(sigma,physical_y,dy));
+          // Mock an expensive physical directional loader to exercise the
+          // alternative exact schedule without a large test allocation.
+          int loads = 0;
+          auto expensive = physical_dy;
+          expensive.load_work = 1e18L;
+          expensive.load = [physical_dy,&loads](int first,int count,
+              Eigen::Ref<Eigen::MatrixXd> a,Eigen::Ref<Eigen::MatrixXd> b) {
+            ++loads; physical_dy.load(first,count,a,b);
+          };
+          check(plan.integral_tangent(sigma,y,physical_y,dy,expensive));
+          require(loads == 0,"integral planner regenerated an explicitly expensive equivalent bra");
+        }
+      }
     }
   }
 }

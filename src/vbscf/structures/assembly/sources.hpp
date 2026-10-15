@@ -59,6 +59,14 @@ struct SpinSources {
       const mcscf::DirectCiSigmaAction& sigma, const Eigen::MatrixXd* generator,
       bool physical = false) const;
 
+  /** @brief Exact integral tangent with work-planned exchange-projector placement.
+   * The two physical sources are the certified projections of their respective
+   * representatives. This identity is not valid for an oriented residual VJP.
+   */
+  mcscf::DirectCiIntegralAdjoint integral_tangent(const mcscf::DirectCiSigmaAction& sigma,
+      const mcscf::SpinFactorSource& state, const mcscf::SpinFactorSource& physical_state,
+      const mcscf::SpinFactorSource& direction, const mcscf::SpinFactorSource& physical_direction) const;
+
   std::size_t dynamic_bytes() const noexcept {
     std::size_t bytes = (columns.capacity() + alpha_rows.capacity() + alpha_offsets.capacity() +
         offsets.capacity() + groups.capacity()) * sizeof(int) +

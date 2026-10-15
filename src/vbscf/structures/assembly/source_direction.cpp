@@ -124,7 +124,7 @@ StructureActiveIntegralAdjoint StructureAction::source_adjoint_direction(
           alpha,beta,sigma,moving ? &generator : nullptr);
       const auto physical_dy = sources_->tangent_source(spin_products_,values,q_values,
           alpha,beta,sigma,moving ? &generator : nullptr,true);
-      const auto adjoint = mcscf::factor_integral_adjoint(sigma,physical_dy,y);
+      const auto adjoint = sources_->integral_tangent(sigma,y,physical,dy,physical_dy);
       one.noalias() += 2*weight*adjoint.one_electron;
       pair.noalias() += 2*weight*adjoint.pair_kernel;
       if (!reuse) {
