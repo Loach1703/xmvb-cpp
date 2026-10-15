@@ -1663,12 +1663,12 @@ StructureAction::active_integral_adjoint_direction(
       state.structure_coefficients.cols() != static_cast<Eigen::Index>(n_states) ||
       (!state.source_factors && (state.orthogonal_coefficients.size() != n_states ||
        state.residuals.size() != n_states)) ||
-      include_state_response != (directional_state_multipliers != nullptr) ||
       (include_state_response &&
        (coefficient_response->rows() != n_structures_ ||
         coefficient_response->cols() != static_cast<Eigen::Index>(n_states) ||
-        !coefficient_response->allFinite() ||
-        directional_state_multipliers->rows() !=
+        !coefficient_response->allFinite())) ||
+      (directional_state_multipliers &&
+       (directional_state_multipliers->rows() !=
             static_cast<Eigen::Index>(n_states) ||
         directional_state_multipliers->cols() !=
             static_cast<Eigen::Index>(n_states) ||
@@ -1812,7 +1812,7 @@ StructureAction::active_integral_adjoint_direction(
     Eigen::MatrixXd directional_residual =
         directional_sigma -
         state.energies[state_index] * directional_orthogonal_coefficients;
-    if (include_state_response) {
+    if (directional_state_multipliers != nullptr) {
       for (std::size_t coupled_state = 0;
            coupled_state < n_states;
            ++coupled_state) {

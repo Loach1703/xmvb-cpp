@@ -1,0 +1,2 @@
+run,reason,application_exit,accepted_steps,recorded_orbital_hvp,initial_energy_Eh,final_energy_Eh,scf_seconds,total_seconds,rss_mib,raw_orbitals_saved
+FeCl2,neo_projected_gradient_tolerance,0,13,235,-2181.617631912267,-2181.624464864478,10.24147,10.834152,421.703125,False

@@ -1656,18 +1656,15 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
       0.5 * (metric_derivative + metric_derivative.transpose()).eval();
   data.gauge_target = -0.5 * metric_derivative;
 
-  const Eigen::MatrixXd internal_coefficients =
+  data.gauge_frame =
       data.metric.partialPivLu().solve(data.gauge_target);
-  if (!internal_coefficients.allFinite()) {
+  if (!data.gauge_frame.allFinite()) {
     throw std::runtime_error(
         "equal-weight coupling gauge coefficients are not finite");
   }
-  data.gauge_coefficient_response =
-      selected_eigenvectors * internal_coefficients;
-
   const Eigen::MatrixXd energy_commutator =
-      selected_eigenvalues.asDiagonal() * internal_coefficients -
-      internal_coefficients * selected_eigenvalues.asDiagonal();
+      selected_eigenvalues.asDiagonal() * data.gauge_frame -
+      data.gauge_frame * selected_eigenvalues.asDiagonal();
   if (!horizontal_forcing) {
     // Only selected-space projections are needed by the normalization gauge.
     // Keep the accepted Ritz residual; do not form or project a full RHS.
@@ -1676,7 +1673,7 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
         metric_derivative * selected_eigenvalues.asDiagonal() +
         data.metric * energy_commutator +
         (selected_eigenvectors.transpose() * selected_residuals) *
-            internal_coefficients);
+            data.gauge_frame);
     if (!data.gauge_selected_matrix_response.allFinite()) {
       throw std::runtime_error("equal-weight coupling gauge multiplier is not finite");
     }
@@ -1686,7 +1683,7 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
       delta_overlap_selected * selected_eigenvalues.asDiagonal();
   const Eigen::MatrixXd gauge_shifted_image =
       overlap_selected * energy_commutator +
-      selected_residuals * internal_coefficients;
+      selected_residuals * data.gauge_frame;
   const Eigen::MatrixXd gauge_adjusted_forcing =
       data.forcing + gauge_shifted_image;
   data.gauge_selected_matrix_response = data.metric.partialPivLu().solve(

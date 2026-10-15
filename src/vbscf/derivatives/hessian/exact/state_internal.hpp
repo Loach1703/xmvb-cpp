@@ -109,6 +109,7 @@ private:
 
   struct ApplyTimingTotals {
     std::size_t apply_count = 0;
+    std::size_t normalization_adjoint_reuses = 0;
     std::size_t batch_apply_count = 0;
     std::size_t orbital_coupling_batch_count = 0;
     std::size_t orbital_coupling_batch_chunk_count = 0;

@@ -91,7 +91,10 @@ void benchmark_accepted_state16(bool check_hvp = false) {
               << "\nhvp_active_backward_seconds=" << stages.outer_response_active_gradient_wall_time_seconds
               << "\nhvp_response_pullback_seconds=" << stages.outer_response_orbital_pullback_wall_time_seconds
               << "\nhvp_raw_response_rebuild_seconds=" << stages.outer_response_selected_state_rebuild_wall_time_seconds
+              << "\nnormalization_adjoint_reuses=" << stages.normalization_adjoint_reuses
               << '\n' << std::flush;
+    require(stages.normalization_adjoint_reuses == 1,
+            "production HVP did not reuse the known normalization response");
     require(stages.outer_response_selected_state_rebuild_wall_time_seconds == 0,
             "production direct-CI HVP rebuilt a raw product response bundle");
     require(image.orbital_hessian.allFinite() && image.scaled_structure_forcing.allFinite(),
@@ -130,6 +133,54 @@ void benchmark_accepted_state16(bool check_hvp = false) {
             << "\nhvp_fd_error=" << hvp_fd_error
             << "\ntotal_seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()
             << "\nrss_mib=" << usage.ru_maxrss/1024.0 << '\n';
+}
+
+/** @brief Scalar/batched coupled orbital actions reuse a known state frame. */
+void check_frame_hvp(const xmvb::vb::VbScfInput& input, int n_states) {
+  const xmvb::vb::OrbitalGradientEvaluator evaluator;
+  std::vector<int> states{0};
+  if (n_states == 2) states.push_back(input.structure_data.n_structures-1);
+  const std::vector<double> weights(n_states,1.0/n_states);
+  const auto accepted = evaluator.evaluate(input,states,weights,0.4);
+  const auto& orbitals = input.orbital_preparation_input;
+  const xmvb::vb::SparseParameterLayout layout(orbitals);
+  const auto& prepared = accepted.orbital_preparation_result;
+  const xmvb::vb::OrbitalChart chart(orbitals,layout,
+      prepared.auxiliary_orbital_matrix.leftCols(orbitals.n_orbitals),
+      prepared.physical_orbital_frame.normalized_orbital_matrix,
+      nullptr,false,false,nullptr,xmvb::vb::OrbitalChart::Coordinates::Unwhitened);
+  Eigen::MatrixXd directions(chart.reduced_size(),2);
+  for (int i = 0; i < directions.rows(); ++i) {
+    directions(i,0) = std::sin(0.3*(i+1));
+    directions(i,1) = std::cos(0.7*(i+1));
+  }
+  directions.colwise().normalize();
+  const xmvb::vb::ExactHvpOperator hessian(accepted.second_order_context,&input,layout,&chart);
+  const auto block = hessian.apply_orbital_coupling_batch(directions);
+  const auto scalar = hessian.apply_orbital_coupling(directions.col(0));
+  const auto orbital = hessian.apply_orbital(directions.col(0));
+  require((block.orbital_hessian.col(0)-scalar.orbital_hessian).norm() < 3e-11 &&
+          (orbital-scalar.orbital_hessian).norm() < 3e-11 &&
+          (block.scaled_structure_forcing[0]-scalar.scaled_structure_forcing).norm() < 3e-11,
+          "normalization reuse differs between scalar and batched HVPs");
+  const auto reuses = hessian.diagnostics().normalization_adjoint_reuses;
+  require(n_states == 1 ? reuses >= 4 : reuses == 0,
+          "scalar/batched state-frame reuse used the wrong root multiplicity");
+  require(std::abs(directions.col(0).dot(block.orbital_hessian.col(1))-
+                   directions.col(1).dot(block.orbital_hessian.col(0))) < 3e-10,
+          "normalization reuse changed orbital Hessian symmetry");
+  const auto& coefficients = accepted.second_order_context->selected_state_eigenvectors;
+  const Eigen::VectorXd origin = layout.pack(orbitals), tangent = chart.expand_step(directions.col(0));
+  const auto shifted = [&](double scale) -> Eigen::VectorXd {
+    auto moved = input;
+    layout.unpack(origin+scale*tangent,&moved.orbital_preparation_input);
+    const auto value = evaluator.evaluate_fixed_structure(moved,states,weights,0.4,coefficients);
+    return chart.project_reduced_gradient(layout.gather_from_full(value.gradient.sparse_orbital_energy_gradient));
+  };
+  constexpr double step = 1e-5;
+  const Eigen::VectorXd plus = shifted(step),minus = shifted(-step);
+  require(((plus-minus)/(2*step)-scalar.orbital_hessian).norm() < 2e-7,
+          "normalization-reused orbital block differs from the fixed-state gradient derivative");
 }
 
 /** @brief Nonstationary fixed-state derivatives without any CI eigensolve. */
@@ -182,6 +233,17 @@ void check_keyframe(bool complete_carrier) {
   require(accepted.structure_action && accepted.structure_action->supports_integral_direction() &&
               accepted.selected_state_matrices.states.empty(),
           "direct-CI accepted point retained unused raw product states");
+  check_frame_hvp(input,1);
+  check_frame_hvp(input,2);
+  auto with_inactive = input;
+  auto& occupied = with_inactive.orbital_preparation_input;
+  occupied.n_orbitals = 3;
+  occupied.n_total_electrons = 4;
+  occupied.orbital_value_table.insert(occupied.orbital_value_table.begin(),{0.0,0.0,1.0});
+  occupied.orbital_basis_index_table.insert(occupied.orbital_basis_index_table.begin(),{1,2,3});
+  occupied.orbital_basis_counts.insert(occupied.orbital_basis_counts.begin(),3);
+  check_frame_hvp(with_inactive,1);
+  check_frame_hvp(with_inactive,2);
   const auto evaluate = [&](const Eigen::MatrixXd& coefficients) {
     return evaluator.evaluate_fixed_structure(input, states, weights, 0.4, coefficients);
   };

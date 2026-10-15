@@ -852,6 +852,53 @@ without $\Ha$, the channel sweep and residual outputs are absent, giving
 $(U_\alpha+U_\beta)(s_\ell+2s_r)+s_\ell s_r$ plus the same loading
 and reduction terms. No per-worker spin/product array is allocated.
 
+\subsection{Reuse of the normalization response}
+
+Let $C$ contain the selected structure coefficients and $M$ be the
+structure-overlap matrix. The solve-free normalization response has the
+known internal state frame
+\begin{equation}
+ M_C=C\Tr MC,\qquad K_g=-\tfrac12 C\Tr\delta M C,\qquad
+ A_g=M_C^{-1}K_g,\qquad Q_g=C A_g.
+ \label{eq:gauge-frame}
+\end{equation}
+Retain $A_g$ from the small selected-frame solve rather than infer it from
+the expanded numerical vectors $Q_g$. This identity requires no closure of
+the selected VB space under an orbital transformation.
+
+For a single selected root,
+\begin{equation}
+ a=-\frac12\frac{C\Tr\delta M C}{C\Tr MC},\qquad Q_g=aC.
+\end{equation}
+At fixed accepted active-space eigenvalue $\epsilon$, the integral adjoint and the
+residual-generator adjoint are quadratic in $C$. Therefore their
+coefficient-only directional derivatives are
+\begin{align}
+ \delta_C\mathcal J(Y,Y)&=2a\,\mathcal J(Y,Y),\\
+ \delta_C\mathcal D((\mathcal H-\epsilon)Y,Y)
+ &=2a\,\mathcal D((\mathcal H-\epsilon)Y,Y).
+ \label{eq:gauge-adjoint-reuse}
+\end{align}
+These identities do not assume that the full-carrier Ritz residual vanishes.
+Since the accepted orbital-map pullback is linear in these adjoints, their
+coefficient response is also $2a$ times the already retained active-integral
+adjoint. No new spin-source generation, Hamiltonian action or integral
+contraction is required for this part of the response.
+Given the already computed frame $a$, the reuse costs $O(d^2+n^2)$ scalar
+work in the current active-integral representation, with no extra array
+beyond the existing directional adjoint; $n$ is the active orbital count
+and $d=n(n+1)/2$. This removes the carrier dimensions and source rank from
+the coefficient-scaling update, not from the rest of the orbital HVP.
+
+The selected-state multiplier contribution remains separate, as does the
+directional derivative of the orbital-map pullback. Neither is removed by
+Eq.~\eqref{eq:gauge-adjoint-reuse}. The reused quantity is the accepted
+\emph{active-integral} adjoint, not the total orbital gradient, which also
+contains inactive-only contributions. For multiple states, retain the full
+matrix $A_g$; the weighted diagonal adjoint totals alone do not contain
+the required cross-state adjoints. The general coefficient-response
+contraction remains necessary until those transition adjoints are available.
+
 \subsection{Selected-structure response without a response carrier}\label{sec:factor-response}
 
 At a fixed orbital point let $Y_i=\Ta\Wa\vv C_i$ and

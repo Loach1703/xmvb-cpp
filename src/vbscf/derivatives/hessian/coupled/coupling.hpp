@@ -16,13 +16,14 @@ namespace xmvb::vb {
  * @brief VBSCF-scaled structure coupling for one orbital direction.
  *
  * `horizontal_forcing` is @f$Bp@f$ in coordinates
- * @f$z_s=\sqrt{2w_s}q_s@f$. The gauge coefficient response is unscaled because
- * it is consumed by the existing selected-state adjoint. The accompanying
+ * @f$z_s=\sqrt{2w_s}q_s@f$. The gauge frame is unscaled and retained without
+ * expanding C A_g into structure coefficients. The accompanying
  * multiplier already has the adjoint sign convention, namely @f$-M_g@f$.
  */
 struct ScaledStructureCoupling {
   StructureTangent horizontal_forcing;
-  Eigen::MatrixXd gauge_coefficient_response;
+  /** Known internal frame A_g in Q_g=C A_g; never inferred from Q_g. */
+  Eigen::MatrixXd gauge_frame;
   Eigen::MatrixXd gauge_adjoint_multipliers;
 };
 

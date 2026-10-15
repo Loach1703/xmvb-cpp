@@ -225,6 +225,7 @@ public:
    * `coefficient_response` contains columns in this action's selected
    * structure space. Orbital representation directions,
    * which need not remain on that support, are supplied separately.
+   * Coefficient and multiplier directions are independent; either may be null.
    */
   StructureActiveIntegralAdjoint active_integral_adjoint_direction(
       const StructureAdjointState& state,

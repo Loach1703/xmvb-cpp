@@ -174,6 +174,17 @@ full `U * r` factors when a broad support makes those product-sized.
    orbital-map derivatives separate. Obtain a from the core coupling's small
    selected-frame solve, never by testing whether numerical vectors are parallel.
    Weighted multistate totals alone do not contain all cross-state adjoints.
+   Completed: retain the upstream small gauge frame instead of eagerly forming
+   its full coefficient response. Single-root direct-CI HVPs reuse exactly 2a
+   times the accepted active-integral adjoints. Multiplier/map derivatives and
+   general multistate frames remain. Jobs1261467/1261483 pass11 focused tests,
+   9 complete 240 optimizations and scalar/batch fixed-CI HVP differences with
+   inactive orbitals and1/2 roots. Native CAS16/16 probe1261462 reduces HVP
+   100.29 ->76.26 s versus saved1261411, at155.11 MiB peak RSS and1.73e-9
+   difference error, removing both extra normalization residual-generator
+   sweeps. FeCl2 control1261472 reaches-2181.624464864478 Eh in13 steps/235 HVP;
+   the older12-step/211-HVP correct checkpoint remains a performance target.
+   See `normalization_reuse.md` and the automatically parsed CSV tables.
 6. [ ] Remove obsolete full-product production consumers after migration.
    Explicit full-carrier arrays remain only as independent small-system test
    oracles; broad-support production uses generated product tiles, not a dense

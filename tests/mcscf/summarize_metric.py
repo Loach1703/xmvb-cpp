@@ -57,8 +57,14 @@ def hvp(artifact):
     adjoint = dict(item.split("=", 1) for item in entries[1].split(",")) if entries else {}
     fields = ("bra", "ket", "left_tile", "right_tile", "channel_tile",
               "workspace_bytes", "source_loads", "load", "scatter", "covectors", "gram")
+    data = values(artifact / "accepted-hvp16.out")
+    reuses = data.pop("normalization_adjoint_reuses", None)
+    residuals = re.findall(r"^XMVB_FACTOR_GENERATOR,hamiltonian=1,", text, re.M)
+    if entries and len(residuals) < 3:
+        raise ValueError(f"{artifact}: missing accepted/difference residual sweeps")
     return dict(run=artifact.name, kind="synthetic_production_hvp",
-                **values(artifact / "accepted-hvp16.out"),
+                **data, normalization_adjoint_reuses=reuses,
+                hvp_residual_generator_sweeps=len(residuals)-3 if entries else None,
                 **{f"integral_{key}": adjoint.get(key) for key in fields})
 
 

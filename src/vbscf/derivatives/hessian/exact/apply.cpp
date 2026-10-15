@@ -116,6 +116,11 @@ ActiveSpaceGradientDirection make_active_gradient_direction(
   return result;
 }
 
+/** @brief Add a known quadratic coefficient scaling without another pullback. */
+void add_scaled(std::vector<double>& target, const std::vector<double>& source, double scale) {
+  for (std::size_t i = 0; i < target.size(); ++i) target[i] += scale*source[i];
+}
+
 }  // namespace
 
 Eigen::VectorXd ExactHvpOperator::apply_reduced(
@@ -727,12 +732,17 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       state_multipliers = gauge_coupling->gauge_adjoint_multipliers;
     }
 
+    const bool reuse_normalization = direct_active_gradient && gauge_coupling != nullptr &&
+        gauge_coupling->gauge_frame.rows() == 1;
+    Eigen::MatrixXd frame_response;
     const Eigen::MatrixXd* coefficient_response = nullptr;
     if (directional_selected_state_response != nullptr) {
       coefficient_response = &directional_selected_state_response
                                   ->delta_selected_eigenvector_matrix;
-    } else if (gauge_coupling != nullptr) {
-      coefficient_response = &gauge_coupling->gauge_coefficient_response;
+    } else if (gauge_coupling != nullptr && !reuse_normalization) {
+      frame_response.noalias() = accepted_point_context_->selected_state_eigenvectors*
+          gauge_coupling->gauge_frame;
+      coefficient_response = &frame_response;
     }
 
     std::optional<SelectedStateDeterminantMatrices> directional_selected_states;
@@ -800,13 +810,25 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           accepted_structure_action->active_integral_adjoint_direction(
               *accepted_point_context_->structure_adjoint_state,
               coefficient_response,
-              coefficient_response ? &state_multipliers : nullptr,
+              state_multipliers.size() ? &state_multipliers : nullptr,
               active_space_integral_direction.overlap,
               active_space_integral_direction.one_electron,
               active_space_integral_direction.packed_two_electron,
               direct_ci_direction,
               components.local_active_response),
           n_active_orbitals);
+      if (reuse_normalization) {
+        // Q_g=aC changes every fixed-energy active adjoint by exactly 2a.
+        // The multiplier and the orbital-map derivative were kept above.
+        const double scale = 2*gauge_coupling->gauge_frame(0,0);
+        add_scaled(directional_active_space_gradient.active_orbital_overlap_gradient,
+            accepted_point_context_->active_orbital_overlap_gradient,scale);
+        add_scaled(directional_active_space_gradient.active_one_electron_gradient,
+            accepted_point_context_->active_one_electron_gradient,scale);
+        add_scaled(directional_active_space_gradient.packed_active_two_electron_gradient,
+            accepted_point_context_->packed_active_two_electron_gradient,scale);
+        ++apply_timing_totals_.normalization_adjoint_reuses;
+      }
       const double direct_seconds = detail::exact_hvp_elapsed_seconds(
           active_gradient_start_time);
       if (components.local_active_response) {

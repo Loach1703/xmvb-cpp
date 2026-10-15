@@ -284,6 +284,7 @@ ExactHvpOperator::State::diagnostics() const {
   info.batch_apply_count = apply_timing_totals_.batch_apply_count;
   info.orbital_coupling_batch_count =
       apply_timing_totals_.orbital_coupling_batch_count;
+  info.normalization_adjoint_reuses = apply_timing_totals_.normalization_adjoint_reuses;
   info.orbital_coupling_batch_chunk_count =
       apply_timing_totals_.orbital_coupling_batch_chunk_count;
   info.max_orbital_coupling_batch_width =

@@ -653,6 +653,19 @@ void check_factor_structure_response(int parity, bool unequal = false) {
       (actual.one_electron-reference.one_electron).norm() < 2e-11 &&
       (actual.pair_kernel-reference.pair_kernel).norm() < 2e-11,
       "source structure response lost residual ordering, parity or multistate gauge");
+  // Coefficients and multipliers are independent linear directions, including
+  // off-diagonal state-average multipliers and nonstationary carrier residuals.
+  const xmvb::vb::StructureAdjointState* variants[] = {&sparse,&dense};
+  for (const auto* state : variants) {
+    const auto only_q = action.active_integral_adjoint_direction(*state,&q,nullptr,
+        {},{},{},nullptr,false);
+    const auto only_mu = action.active_integral_adjoint_direction(*state,nullptr,&mu,
+        {},{},{},nullptr,false);
+    require((only_q.overlap+only_mu.overlap-reference.overlap).norm() < 3e-11 &&
+            (only_q.one_electron+only_mu.one_electron-reference.one_electron).norm() < 3e-11 &&
+            (only_q.pair_kernel+only_mu.pair_kernel-reference.pair_kernel).norm() < 3e-11,
+            "independent coefficient/multiplier directions changed a state-average adjoint");
+  }
   const auto zero = action.apply_response(sparse,Eigen::MatrixXd::Zero(2,2));
   require(zero.images.hamiltonian.isZero(0) && zero.images.overlap.isZero(0) &&
       zero.generator.isZero(0) && zero.one_electron.isZero(0) && zero.pair_kernel.isZero(0),
@@ -682,6 +695,23 @@ void check_factor_structure_response(int parity, bool unequal = false) {
       (source_hvp.one_electron-product_hvp.one_electron).norm() < 2e-11 &&
       (source_hvp.pair_kernel-product_hvp.pair_kernel).norm() < 2e-11,
       "source HVP lost a left/right representation, delta-H or gauge term");
+  const Eigen::MatrixXd single_c = c.leftCols(1), scaling_q = 0.17*single_c;
+  const Eigen::MatrixXd single_mu = Eigen::MatrixXd::Constant(1,1,0.02);
+  const auto single = action.prepare_active_adjoint(single_c,{1.0},{-1.1});
+  const auto single_dense = explicit_product_state(fixture,cache,action,single);
+  for (const auto* state : {&single,&single_dense}) {
+    const auto base = action.active_integral_adjoint(*state);
+    for (const bool integral_response : {false,true}) {
+      const auto full = action.active_integral_adjoint_direction(*state,&scaling_q,&single_mu,
+          overlap,one,two,nullptr,integral_response);
+      const auto reused = action.active_integral_adjoint_direction(*state,nullptr,&single_mu,
+          overlap,one,two,nullptr,integral_response);
+      require((reused.overlap+0.34*base.overlap-full.overlap).norm() < 3e-11 &&
+              (reused.one_electron+0.34*base.one_electron-full.one_electron).norm() < 3e-11 &&
+              (reused.pair_kernel+0.34*base.pair_kernel-full.pair_kernel).norm() < 3e-11,
+              "known coefficient scaling cannot be reused from accepted active adjoints");
+    }
+  }
 }
 
 /** @brief Production accepted gradient keeps the nonstationary carrier term. */

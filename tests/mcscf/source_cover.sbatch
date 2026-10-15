@@ -29,7 +29,7 @@ env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|SLURM_CPUS_PER_TASK=)' > "$art
 cmake -S "$source_dir" -B "$source_dir/build" > "$artifact/configure.log" 2>&1
 cmake --build "$source_dir/build" --target test_ci_factors test_structure_tiles test_orthogonal_direct_ci \
  test_coupled_structure test_product_frontier test_representation_overlap test_ci_transport \
- test_selected_ci_transport test_restricted_metric -j8 > "$artifact/build.log" 2>&1
+ test_selected_ci_transport test_restricted_metric test_eigen_response test_keyframe -j8 > "$artifact/build.log" 2>&1
 cp "$source_dir/build/CMakeCache.txt" "$artifact/"
 sha256sum "$source_dir/build/src/test_structure_tiles" > "$artifact/binary.sha256"
 sha256sum "$source_dir/build/src/test_ci_factors" >> "$artifact/binary.sha256"
@@ -39,10 +39,14 @@ sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_response.cpp,sourc
 sha256sum "$source_dir/src/vbscf/derivatives/gradient/active_space/evaluator.cpp" \
  "$source_dir/src/vbscf/derivatives/hessian/exact/apply.cpp" \
  "$source_dir/src/vbscf/determinants/pairs/same_spin_cache.cpp" >> "$artifact/sources.sha256"
+sha256sum "$source_dir/src/core/"{eigen_response.cpp,eigen_response.hpp} \
+ "$source_dir/src/vbscf/derivatives/hessian/coupled/"{coupling.cpp,coupling.hpp} \
+ "$source_dir/src/vbscf/derivatives/hessian/exact/"{operator.cpp,operator.hpp,state_internal.hpp} \
+ "$source_dir/tests/vbscf/unit/test_keyframe.cpp" >> "$artifact/sources.sha256"
 sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,factors_internal.hpp,factor_generator.cpp,factor_plan.cpp,sigma.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" \
- -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric)$' \
+ -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric|eigen_response|keyframe)$' \
  --output-on-failure > "$artifact/ctest.out" 2>&1
 [[ ${1:-} == --tests-only ]] && exit 0
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \

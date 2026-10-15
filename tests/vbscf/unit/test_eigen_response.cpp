@@ -1233,8 +1233,10 @@ bool test_orbital_gauge_projection() {
   const auto orbital = xmvb::core::prepare_equal_weight_generalized_eigen_coupling(
       energies, states, overlap, residual, dh, dm, false);
   const double error =
-      (full.gauge_coefficient_response - orbital.gauge_coefficient_response).norm() +
-      (full.gauge_selected_matrix_response - orbital.gauge_selected_matrix_response).norm();
+      (full.gauge_selected_matrix_response - orbital.gauge_selected_matrix_response).norm() +
+      (full.metric*full.gauge_frame-full.gauge_target).norm() +
+      (states.transpose()*m*states*full.gauge_frame-full.gauge_target).norm() +
+      (full.gauge_frame-orbital.gauge_frame).norm();
   const bool passed = error < 1.0e-12 && residual.norm() > 1.0e-4 &&
       orbital.forcing.size() == 0 && orbital.horizontal_forcing.size() == 0;
   std::cout << "orbital_gauge_projection error=" << error

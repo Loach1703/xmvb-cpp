@@ -175,7 +175,8 @@ struct EqualWeightEigenCoupling {
   Eigen::MatrixXd metric;
   Eigen::MatrixXd forcing;
   Eigen::MatrixXd gauge_target;
-  Eigen::MatrixXd gauge_coefficient_response;
+  /** Internal selected-state frame A_g, with gauge response C A_g. */
+  Eigen::MatrixXd gauge_frame;
   Eigen::MatrixXd gauge_selected_matrix_response;
   Eigen::MatrixXd horizontal_forcing;
 };
