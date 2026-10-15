@@ -5,6 +5,7 @@
 #include <unordered_map>
 
 #include "core/openmp.hpp"
+#include "mcscf/ci/covalent_support.hpp"
 #include "mcscf/ci/sigma.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
@@ -107,34 +108,66 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
     return beta_transform.row_block(first, std::min(extent, n_unique_beta_ - first));
   };
 
+  bool covalent = alpha_transform.n_electrons() + beta_transform.n_electrons() ==
+      alpha_transform.n_orbitals();
+  const auto full_mask = (std::uint64_t{1} << alpha_transform.n_orbitals()) - 1;
+  for (const auto product : spin_products_) {
+    const auto a = alpha_transform.occupations()[product / n_unique_beta_];
+    const auto b = beta_transform.occupations()[product % n_unique_beta_];
+    covalent = covalent && (a & b) == 0 && (a | b) == full_mask;
+  }
+  std::unique_ptr<mcscf::CovalentSupport> support;
+  if (covalent)
+    support = std::make_unique<mcscf::CovalentSupport>(alpha_transform.n_orbitals(),
+        alpha_transform.occupations(), beta_transform.occupations());
+
   for (int vector_begin = 0; vector_begin < vectors.cols(); vector_begin += batch_width) {
     const int width = std::min<int>(batch_width, vectors.cols() - vector_begin);
-    const auto project = [&](const Eigen::MatrixXd& rows, Eigen::MatrixXd& image,
-                             Eigen::MatrixXd& target) {
+    // Expand once per RHS, not once per beta panel. For a covalent space
+    // these groups are exactly (A, complement(A)): only O(U) coefficients.
+    Eigen::MatrixXd coefficients = Eigen::MatrixXd::Zero(spin_products_.size(), width);
+#pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
+    for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group)
+      for (int vector = 0; vector < width; ++vector)
+        for (std::size_t term = spin_term_offsets_[group];
+             term < spin_term_offsets_[group + 1]; ++term)
+          coefficients(group, vector) += spin_terms_[term].coefficient *
+              vectors(spin_terms_[term].structure, vector_begin + vector);
+    Eigen::MatrixXd h_products = Eigen::MatrixXd::Zero(spin_products_.size(), width);
+    Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(spin_products_.size(), width);
+    const auto project = [&](int panel, const Eigen::MatrixXd& rows,
+                             Eigen::MatrixXd& image, Eigen::MatrixXd& target) {
       // C^T (T_alpha^T image T_beta): only touched original spin products
       // are sampled. This is exact for any selected structure subspace.
-      alpha_transform.apply_adjoint_left(&image);
-      Eigen::MatrixXd products(spin_products_.size(), width);
+      if (support)
+        alpha_transform.apply_covalent_left(&image, *support,
+            panel * extent, rows.rows(), true);
+      else alpha_transform.apply_adjoint_left(&image);
 #pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
       for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group) {
         const int alpha = spin_products_[group] / n_unique_beta_;
         const int beta = spin_products_[group] % n_unique_beta_;
         for (int vector = 0; vector < width; ++vector)
-          products(group, vector) = image.row(alpha)
+          target(group, vector) += image.row(alpha)
               .segment(vector * rows.rows(), rows.rows()).dot(rows.col(beta));
       }
+    };
+    const auto contract = [&]() {
+      // Apply P^T only after all panels have contributed to each spin pair.
 #pragma omp parallel for schedule(static) if(n_structures_ > 32)
       for (int structure = 0; structure < n_structures_; ++structure) {
         for (int vector = 0; vector < width; ++vector) {
-          double value = 0.0;
+          double h = 0.0, m = 0.0;
           for (std::size_t offset = structure_term_offsets_[structure];
                offset < structure_term_offsets_[structure + 1]; ++offset) {
             const auto& term = spin_terms_[structure_term_indices_[offset]];
             const auto group = std::lower_bound(spin_products_.begin(),
                 spin_products_.end(), term.spin_product) - spin_products_.begin();
-            value += term.coefficient * products(group, vector);
+            h += term.coefficient * h_products(group, vector);
+            m += term.coefficient * m_products(group, vector);
           }
-          target(structure, vector_begin + vector) += value;
+          result.hamiltonian(structure, vector_begin + vector) = h;
+          result.overlap(structure, vector_begin + vector) = m;
         }
       }
     };
@@ -153,26 +186,25 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
         for (; group != spin_products_.end() && *group < first + n_unique_beta_; ++group) {
           const auto id = static_cast<std::size_t>(group - spin_products_.begin());
           for (int vector = 0; vector < width; ++vector) {
-            double coefficient = 0.0;
-            for (std::size_t term = spin_term_offsets_[id];
-                 term < spin_term_offsets_[id + 1]; ++term)
-              coefficient += spin_terms_[term].coefficient *
-                  vectors(spin_terms_[term].structure, vector_begin + vector);
             values.row(alpha).segment(vector * rows.rows(), rows.rows()).noalias() +=
-                coefficient * rows.col(*group - first).transpose();
+                coefficients(id, vector) * rows.col(*group - first).transpose();
           }
         }
       }
-      alpha_transform.apply_left(&values);
+      if (support)
+        alpha_transform.apply_covalent_left(&values, *support,
+            panel * extent, rows.rows());
+      else alpha_transform.apply_left(&values);
       if (!overlap_consumed[panel]) {
         Eigen::MatrixXd overlap = values;
-        project(rows, overlap, result.overlap);
+        project(panel, rows, overlap, m_products);
         overlap_consumed[panel] = true;
       }
       return values;
     });
     if (overlap_only) {
       for (int panel = 0; panel < count; ++panel) input.get(panel);
+      contract();
       continue;
     }
     // Prepare resident panels while outside the persistent sigma team, so
@@ -187,7 +219,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
         },
         [&](int panel, Eigen::MatrixXd& image) {
           const auto rows = beta_rows(panel);
-          project(*rows, image, result.hamiltonian);
+          project(panel, *rows, image, h_products);
         });
     sigma.apply_tiled(width,
         [&](int beta, const std::vector<int>& alpha_rows, Eigen::Ref<Eigen::MatrixXd> column) {
@@ -203,8 +235,9 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
           for (int vector = 0; vector < width; ++vector)
             for (int row = 0; row < static_cast<int>(alpha_rows.size()); ++row)
               panel(alpha_rows[row], vector * panel_width + beta % extent) += column(row, vector);
-        });
+        }, support.get());
     output.finish();
+    contract();
   }
   return result;
 }

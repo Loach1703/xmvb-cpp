@@ -12,6 +12,7 @@
 
 #include "core/openmp.hpp"
 #include "core/timing.hpp"
+#include "mcscf/ci/covalent_support.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -229,6 +230,42 @@ void ExteriorOrbitalTransform::apply_adjoint_left(
   }
   validate_left(*coefficients);
   transform_left(*coefficients, true, false);
+}
+
+void ExteriorOrbitalTransform::apply_covalent_left(
+    Eigen::MatrixXd* coefficients, const mcscf::CovalentSupport& support,
+    int beta_begin, int beta_count, bool adjoint) const {
+  validate_left(*coefficients);
+  const int workers = bounded_openmp_thread_count(
+      coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients->size()),
+      coefficients->cols());
+  const int n_shears = static_cast<int>(shears_.size());
+#pragma omp parallel if(workers > 1) num_threads(workers)
+  {
+    std::vector<std::uint8_t> allowed(dimension());
+#pragma omp for schedule(static)
+    for (Eigen::Index column = 0; column < coefficients->cols(); ++column) {
+      auto values = coefficients->col(column);
+      const int beta = beta_begin + column % beta_count;
+      for (int alpha = 0; alpha < dimension(); ++alpha) {
+        allowed[alpha] = support.contains(alpha, beta);
+        if (!allowed[alpha]) values[alpha] = 0.0;
+        else if (!adjoint) values[alpha] *= determinant_scales_[alpha];
+      }
+      for (int index = 0; index < n_shears; ++index) {
+        const Shear& shear = shears_[adjoint ? n_shears - 1 - index : index];
+        for (const auto& pair : shear.pairs) {
+          if (!allowed[pair.source] || !allowed[pair.target]) continue;
+          const int target = adjoint ? pair.source : pair.target;
+          const int source = adjoint ? pair.target : pair.source;
+          values[target] += shear.coefficient * pair.sign * values[source];
+        }
+      }
+      if (adjoint)
+        for (int alpha = 0; alpha < dimension(); ++alpha)
+          if (allowed[alpha]) values[alpha] *= determinant_scales_[alpha];
+    }
+  }
 }
 
 void ExteriorOrbitalTransform::apply_adjoint_right(

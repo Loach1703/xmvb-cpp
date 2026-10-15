@@ -15,6 +15,7 @@
 
 #include "core/pair_index.hpp"
 #include "mcscf/ci/sigma.hpp"
+#include "mcscf/ci/covalent_support.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
@@ -431,6 +432,95 @@ void check_sigma_columns(const Fixture& fixture, int width) {
   }
 }
 
+void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width) {
+  const auto fixture = make_fixture(n, n_alpha, n_beta_electrons);
+  const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap, fixture.one_electron, fixture.two_electron, n);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(fixture.alpha, fixture.beta, integrals);
+  std::vector<std::uint64_t> alpha, beta;
+  for (const auto& occupied : fixture.alpha) alpha.push_back(occupation_mask(occupied));
+  for (const auto& occupied : fixture.beta) beta.push_back(occupation_mask(occupied));
+  const xmvb::mcscf::CovalentSupport support(n, alpha, beta);
+  const int na = static_cast<int>(alpha.size()), nb = static_cast<int>(beta.size());
+  Eigen::MatrixXd carrier = Eigen::MatrixXd::Zero(na, width * nb);
+  for (int a = 0; a < na; ++a)
+    for (int b = 0; b < nb; ++b) {
+      // Independently enumerate all one-electron neighbors to certify that
+      // prefix deficit <=1 is the closure, not just an assumed input mask.
+      bool reachable = support.contains(a, b);
+      for (int other = 0; other < na; ++other)
+        if (__builtin_popcountll(alpha[a] ^ alpha[other]) == 2)
+          reachable = reachable || support.contains(other, b);
+      for (int other = 0; other < nb; ++other)
+        if (__builtin_popcountll(beta[b] ^ beta[other]) == 2)
+          reachable = reachable || support.contains(a, other);
+      require(reachable == support.contains(a, b, 1), "one-generator closure is incorrect");
+      if (support.contains(a, b))
+        for (int v = 0; v < width; ++v)
+          carrier(a, v * nb + b) = std::sin(0.17 * (a + 1) * (b + v + 2));
+    }
+  Eigen::MatrixXd actual = Eigen::MatrixXd::Zero(na, width * nb);
+  sigma.apply_tiled(width,
+      [&](int b, const std::vector<int>& rows, Eigen::Ref<Eigen::MatrixXd> values) {
+        for (int v = 0; v < width; ++v)
+          for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+            values(i, v) = carrier(rows[i], v * nb + b);
+      },
+      [&](int b, const std::vector<int>& rows, const Eigen::Ref<const Eigen::MatrixXd>& values) {
+        for (int v = 0; v < width; ++v)
+          for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
+            require(support.contains(rows[i], b), "sigma wrote outside the output support");
+            actual(rows[i], v * nb + b) += values(i, v);
+          }
+      }, &support);
+  auto expected = sigma.apply(carrier);
+  for (int a = 0; a < na; ++a)
+    for (int b = 0; b < nb; ++b)
+      if (!support.contains(a, b))
+        for (int v = 0; v < width; ++v) expected(a, v * nb + b) = 0;
+  require((actual - expected).norm() <= 2e-11 * std::max(1.0, expected.norm()),
+          "support/closure sigma differs from independently projected full sigma");
+  Eigen::MatrixXd generator = Eigen::MatrixXd::Ones(n, n);
+  const auto one_body = sigma.apply_one_body_generator(carrier, generator);
+  double outside_input = 0.0;
+  for (int a = 0; a < na; ++a)
+    for (int b = 0; b < nb; ++b)
+      if (!support.contains(a, b)) outside_input += one_body(a, b) * one_body(a, b);
+  require(outside_input > 1e-10, "fixture does not exercise intermediate-only support");
+}
+
+void check_covalent_subset() {
+  const auto fixture = make_fixture(8, 4, 4);
+  const auto pairings = rumer_pairings(0, 8);
+  const auto expansion = covalent_rumer_terms(8, fixture.alpha, fixture.beta,
+      {pairings[0], pairings[5], pairings[13]});
+  // Complete ambient string sets with empty coefficients, not extra structures.
+  // The three selected structures themselves need not be closed under T.
+  Terms terms(fixture.alpha.size());
+  Strings product_alpha = fixture.alpha, product_beta;
+  for (int a = 0; a < static_cast<int>(fixture.alpha.size()); ++a) {
+    const int mask = occupation_mask(fixture.alpha[a]);
+    const auto b = std::find_if(fixture.beta.begin(), fixture.beta.end(),
+        [&](const auto& occupied) { return occupation_mask(occupied) == (255 ^ mask); });
+    product_beta.push_back(*b);
+    for (int product = 0; product < static_cast<int>(expansion.terms.size()); ++product)
+      if (occupation_mask(expansion.product_alpha[product]) == mask)
+        terms[a] = expansion.terms[product];
+  }
+  const auto cache = topology(fixture, product_alpha, product_beta);
+  const xmvb::vb::StructureAction action(terms, 3, cache,
+      fixture.overlap, fixture.one_electron, fixture.two_electron, 8, nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  require(action.storage().orthogonal_direct_ci, "selected covalent fixture missed direct CI");
+  const auto vectors = test_vectors(3, 2);
+  const auto expected = reference_images(fixture, terms, product_alpha, product_beta, vectors);
+  check_images(action.apply(vectors), expected);
+  check_images(action.apply_streamed(vectors, 512), expected);
+  require((action.apply_overlap(vectors) - expected.overlap).norm() <=
+              2e-11 * std::max(1.0, expected.overlap.norm()),
+          "selected covalent overlap action differs from reference");
+}
+
 void benchmark12(bool compare_reference) {
   const auto start = Clock::now();
   const Fixture fixture = make_fixture(12, 6, 6);
@@ -475,6 +565,18 @@ void benchmark12(bool compare_reference) {
       vectors.col(0).dot(actual.hamiltonian.col(0)) / denominator;
   require(std::isfinite(energy), "CAS(12,12) Rayleigh energy is nonfinite");
   rusage usage{};
+  std::vector<std::uint64_t> alpha_masks, beta_masks;
+  for (const auto& a : fixture.alpha) alpha_masks.push_back(occupation_mask(a));
+  for (const auto& b : fixture.beta) beta_masks.push_back(occupation_mask(b));
+  const xmvb::mcscf::CovalentSupport support(12, alpha_masks, beta_masks);
+  std::size_t supported = 0, closure = 0;
+  for (int a = 0; a < 924; ++a)
+    for (int b = 0; b < 924; ++b) {
+      supported += support.contains(a, b);
+      closure += support.contains(a, b, 1);
+    }
+  require(supported == 226512 && closure == 608751,
+          "CAS(12,12) support/closure count differs from the reflection formula");
   require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
   const auto seconds = [](Clock::time_point a, Clock::time_point b) {
     return std::chrono::duration<double>(b - a).count();
@@ -482,6 +584,8 @@ void benchmark12(bool compare_reference) {
   std::cout << std::setprecision(17)
             << "case=CAS(12,12)_fixed_orbital_covalent_kernel\n"
             << "alpha_strings=924 beta_strings=924 structures=132 products=924 terms=8448\n"
+            << "supported_products=" << supported << '\n'
+            << "generator_closure_products=" << closure << '\n'
             << "prepare_seconds=" << seconds(start, prepared) << '\n'
             << "construct_seconds=" << seconds(prepared, constructed) << '\n'
             << "apply_seconds=" << seconds(constructed, applied) << '\n'
@@ -514,6 +618,10 @@ int main(int argc, char** argv) {
       check_complete_unequal_spin_case();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
       check_sigma_columns(make_fixture(10, 5, 4), 2);
+      check_supported_sigma(4, 2, 2, 2);
+      check_supported_sigma(5, 3, 2, 3);
+      check_supported_sigma(6, 3, 3, 1);
+      check_covalent_subset();
       std::cout << "structure tiles: PASS\n";
     } else {
       throw std::invalid_argument(

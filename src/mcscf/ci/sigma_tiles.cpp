@@ -8,13 +8,15 @@
 #include "core/openmp.hpp"
 #include "core/pair_index.hpp"
 #include "core/timing.hpp"
+#include "mcscf/ci/covalent_support.hpp"
 
 namespace xmvb::mcscf {
 
 void DirectCiSigmaAction::apply_tiled(
     int block_width,
     const std::function<void(int, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_column,
-    const std::function<void(int, const std::vector<int>&, const Eigen::Ref<const Eigen::MatrixXd>&)>& add_column) const {
+    const std::function<void(int, const std::vector<int>&, const Eigen::Ref<const Eigen::MatrixXd>&)>& add_column,
+    const CovalentSupport* support) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiSigma);
   if (block_width <= 0 || !read_column || !add_column ||
       static_cast<Eigen::Index>(block_width) >
@@ -65,7 +67,7 @@ void DirectCiSigmaAction::apply_tiled(
       collect_halo(first, std::min(alpha_extent, n_alpha_ - first));
       maximum_halo = std::max(maximum_halo, halo.size());
     }
-    shared_bytes = bounded_product(2 * sizeof(double), bounded_product(
+    shared_bytes = bounded_product(2 * sizeof(double) + (support ? 1 : 0), bounded_product(
         bounded_product(maximum_halo, static_cast<std::size_t>(block_width)),
         static_cast<std::size_t>(n_beta_) + 1));
     worker_bytes = bounded_product(
@@ -90,6 +92,10 @@ void DirectCiSigmaAction::apply_tiled(
   const int maximum_rows = alpha_extent * block_width;
   Eigen::MatrixXd input(maximum_halo, halo_columns), output(maximum_halo, halo_columns);
   Eigen::MatrixXd source_column(maximum_halo, block_width), output_column(maximum_halo, block_width);
+  // This is a bounded halo tile, not a retained U_alpha*U_beta mask.
+  std::vector<std::uint8_t> allowed(support ? maximum_halo * n_beta_ : 0);
+  std::vector<int> column_rows;
+  column_rows.reserve(maximum_halo);
   std::vector<Eigen::MatrixXd> intermediates(n_threads), transformed_tiles(n_threads), reductions(n_threads);
   std::vector<double*> partial_sigma(n_threads);
   // Allocate once before entering OpenMP, so allocation failures propagate
@@ -111,6 +117,8 @@ void DirectCiSigmaAction::apply_tiled(
     Eigen::MatrixXd intermediate = std::move(intermediates[thread]);
     Eigen::MatrixXd transformed = std::move(transformed_tiles[thread]);
     Eigen::MatrixXd beta_reduction = std::move(reductions[thread]);
+    std::vector<int> active_alpha;
+    active_alpha.reserve(alpha_extent);
     for (int alpha_begin = 0; alpha_begin < n_alpha_; alpha_begin += alpha_extent) {
       const int alpha_count = std::min(alpha_extent, n_alpha_ - alpha_begin);
       const int active_rows = alpha_count * block_width;
@@ -119,11 +127,41 @@ void DirectCiSigmaAction::apply_tiled(
         try {
           collect_halo(alpha_begin, alpha_count);
           output.topRows(halo.size()).setZero();
+        } catch (...) { failure = std::current_exception(); }
+      }
+      if (failure) break;
+      // Prefix tests are tile metadata, shared by both gather and adjoint.
+      // Do not serialize this exact integer classification in the callbacks.
+#pragma omp for schedule(static)
+      for (int beta = 0; beta < n_beta_; ++beta)
+        if (support)
+          for (int local = 0; local < static_cast<int>(halo.size()); ++local)
+            allowed[static_cast<std::size_t>(beta) * maximum_halo + local] =
+                support->contains(halo[local], beta);
+#pragma omp single
+      {
+        try {
           for (int beta = 0; beta < n_beta_; ++beta) {
-            read_column(beta, halo, source_column.topRows(halo.size()));
-            for (int block = 0; block < block_width; ++block)
-              input.col(static_cast<Eigen::Index>(block) * n_beta_ + beta)
-                  .head(halo.size()) = source_column.col(block).head(halo.size());
+            if (!support) {
+              read_column(beta, halo, source_column.topRows(halo.size()));
+              for (int block = 0; block < block_width; ++block)
+                input.col(static_cast<Eigen::Index>(block) * n_beta_ + beta)
+                    .head(halo.size()) = source_column.col(block).head(halo.size());
+              continue;
+            }
+            column_rows.clear();
+            for (int local = 0; local < static_cast<int>(halo.size()); ++local) {
+              if (allowed[static_cast<std::size_t>(beta) * maximum_halo + local])
+                column_rows.push_back(halo[local]);
+            }
+            if (!column_rows.empty())
+              read_column(beta, column_rows, source_column.topRows(column_rows.size()));
+            for (int block = 0; block < block_width; ++block) {
+              auto column = input.col(static_cast<Eigen::Index>(block) * n_beta_ + beta);
+              column.head(halo.size()).setZero();
+              for (int row = 0; row < static_cast<int>(column_rows.size()); ++row)
+                column[halo_index[column_rows[row]]] = source_column(row, block);
+            }
           }
           xmvb::profiling::record_matrix_shape(xmvb::profiling::Phase::CiSigma,
               active_rows, team_size);
@@ -134,14 +172,28 @@ void DirectCiSigmaAction::apply_tiled(
 
 #pragma omp for schedule(static)
       for (int beta_target = 0; beta_target < n_beta_; ++beta_target) {
-        intermediate.topRows(active_rows).setZero();
+        active_alpha.clear();
+        for (int local = 0; local < alpha_count; ++local)
+          if (!support || support->contains(alpha_begin + local, beta_target, 1))
+            active_alpha.push_back(local);
+        const int n_active = static_cast<int>(active_alpha.size());
+        if (n_active == 0) continue;
+        const int kernel_rows = n_active * block_width;
+        intermediate.topRows(kernel_rows).setZero();
         const auto add_beta_source = [&](int beta_source, int pair, double sign) {
           for (int block = 0; block < block_width; ++block) {
             const Eigen::Index column =
                 static_cast<Eigen::Index>(block) * n_beta_ + beta_source;
-            const int row_base = block * alpha_count;
-            intermediate.col(pair).segment(row_base, alpha_count).noalias() +=
-                sign * input.col(column).segment(halo_index[alpha_begin], alpha_count);
+            const int row_base = block * n_active;
+            if (!support) {
+              intermediate.col(pair).segment(row_base, alpha_count).noalias() +=
+                  sign * input.col(column).segment(halo_index[alpha_begin], alpha_count);
+            } else {
+#pragma omp simd
+              for (int local = 0; local < n_active; ++local)
+                intermediate(row_base + local, pair) += sign *
+                    input(halo_index[alpha_begin] + active_alpha[local], column);
+            }
           }
         };
         for (const int occupied : beta_graph.occupied[beta_target])
@@ -153,11 +205,13 @@ void DirectCiSigmaAction::apply_tiled(
           add_beta_source(beta_links.sources[link], beta_links.pairs[link],
                           beta_links.signs[link]);
 
-        for (int local_alpha = 0; local_alpha < alpha_count; ++local_alpha) {
-          const int alpha_target = alpha_begin + local_alpha;
+        for (int local_alpha = 0; local_alpha < n_active; ++local_alpha) {
+          const int alpha_target = alpha_begin + active_alpha[local_alpha];
           const auto add_alpha_source = [&](int alpha_source, int pair, double sign) {
+            if (support && !allowed[static_cast<std::size_t>(beta_target) * maximum_halo +
+                                    halo_index[alpha_source]]) return;
             for (int block = 0; block < block_width; ++block) {
-              intermediate(block * alpha_count + local_alpha, pair) +=
+              intermediate(block * n_active + local_alpha, pair) +=
                   sign * input(halo_index[alpha_source],
                       static_cast<Eigen::Index>(block) * n_beta_ + beta_target);
             }
@@ -172,19 +226,21 @@ void DirectCiSigmaAction::apply_tiled(
                              alpha_links.signs[link]);
         }
 
-        transformed.topRows(active_rows).noalias() =
-            intermediate.topRows(active_rows) *
+        transformed.topRows(kernel_rows).noalias() =
+            intermediate.topRows(kernel_rows) *
             hamiltonian_pair_kernel_.transpose();
 
         // Alpha adjoint writes only this beta_target column, owned by the
         // current worker. Beta adjoint uses a thread-private reduction.
-        for (int local_alpha = 0; local_alpha < alpha_count; ++local_alpha) {
-          const int alpha_target = alpha_begin + local_alpha;
+        for (int local_alpha = 0; local_alpha < n_active; ++local_alpha) {
+          const int alpha_target = alpha_begin + active_alpha[local_alpha];
           const auto add_alpha_image = [&](int alpha_source, int pair, double sign) {
             const int row = halo_index[alpha_source];
+            if (support && !allowed[static_cast<std::size_t>(beta_target) * maximum_halo + row])
+              return;
             for (int block = 0; block < block_width; ++block)
               output(row, static_cast<Eigen::Index>(block) * n_beta_ + beta_target) +=
-                  sign * transformed(block * alpha_count + local_alpha, pair);
+                  sign * transformed(block * n_active + local_alpha, pair);
           };
           for (const int occupied : alpha_->occupied[alpha_target])
             add_alpha_image(alpha_target,
@@ -199,6 +255,20 @@ void DirectCiSigmaAction::apply_tiled(
         const auto add_beta_image = [&](int beta_source, int pair, double sign) {
           const double* source = transformed.col(pair).data();
           double* target = beta_reduction.col(beta_source).data();
+          if (support) {
+            const auto* present = allowed.data() +
+                static_cast<std::size_t>(beta_source) * maximum_halo + halo_index[alpha_begin];
+            for (int block = 0; block < block_width; ++block) {
+#pragma omp simd
+              for (int local = 0; local < n_active; ++local) {
+                const int alpha = active_alpha[local];
+                if (present[alpha])
+                  target[block * alpha_count + alpha] +=
+                      sign * source[block * n_active + local];
+              }
+            }
+            return;
+          }
 #pragma omp simd
           for (int row = 0; row < active_rows; ++row)
             target[row] += sign * source[row];
@@ -233,10 +303,23 @@ void DirectCiSigmaAction::apply_tiled(
       {
         try {
           for (int beta = 0; beta < n_beta_; ++beta) {
+            if (!support) {
+              for (int block = 0; block < block_width; ++block)
+                output_column.col(block).head(halo.size()) =
+                    output.col(static_cast<Eigen::Index>(block) * n_beta_ + beta).head(halo.size());
+              add_column(beta, halo, output_column.topRows(halo.size()));
+              continue;
+            }
+            column_rows.clear();
+            for (int local = 0; local < static_cast<int>(halo.size()); ++local)
+              if (allowed[static_cast<std::size_t>(beta) * maximum_halo + local])
+                column_rows.push_back(halo[local]);
+            if (column_rows.empty()) continue;
             for (int block = 0; block < block_width; ++block)
-              output_column.col(block).head(halo.size()) =
-                  output.col(static_cast<Eigen::Index>(block) * n_beta_ + beta).head(halo.size());
-            add_column(beta, halo, output_column.topRows(halo.size()));
+              for (int row = 0; row < static_cast<int>(column_rows.size()); ++row)
+                output_column(row, block) = output(halo_index[column_rows[row]],
+                    static_cast<Eigen::Index>(block) * n_beta_ + beta);
+            add_column(beta, column_rows, output_column.topRows(column_rows.size()));
           }
         } catch (...) { failure = std::current_exception(); }
       }

@@ -6,6 +6,8 @@
 
 #include <Eigen/Core>
 
+namespace xmvb::mcscf { class CovalentSupport; }
+
 namespace xmvb::vb {
 
 /** @brief First derivative of one retained exterior-power transform. */
@@ -35,6 +37,13 @@ public:
   void apply_right_block(Eigen::Ref<Eigen::MatrixXd> coefficients) const;
   /** @brief Applies the transpose exterior transform to matrix rows. */
   void apply_adjoint_left(Eigen::MatrixXd* coefficients) const;
+  /** @brief Left transform within exact covalent support, with ordered beta columns.
+   * For the adjoint this discards only paths that cannot return to a covalent
+   * input under the remaining upper-triangular beta adjoint.
+   */
+  void apply_covalent_left(Eigen::MatrixXd* coefficients,
+      const mcscf::CovalentSupport& support, int beta_begin, int beta_count,
+      bool adjoint = false) const;
   /** @brief Applies the transpose exterior transform to matrix columns. */
   void apply_adjoint_right(Eigen::MatrixXd* coefficients) const;
   /** @brief Applies the transpose transform to a mutable matrix block in place. */
@@ -84,6 +93,8 @@ public:
   int dimension() const noexcept { return static_cast<int>(masks_.size()); }
   int n_orbitals() const noexcept { return n_orbitals_; }
   int n_electrons() const noexcept { return n_electrons_; }
+  /** @brief Spin-string occupations in the transform's immutable ordering. */
+  const std::vector<std::uint64_t>& occupations() const noexcept { return masks_; }
   std::size_t shear_pair_count() const noexcept;
   std::size_t dynamic_bytes() const noexcept;
 
