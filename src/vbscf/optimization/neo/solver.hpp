@@ -9,15 +9,18 @@ namespace xmvb::vb {
 /** @brief Termination state of a matrix-free NEO microiteration. */
 enum class NeoStopReason {
   Converged,
+  /** Approximate candidate requiring nonlinear keyframe validation. */
+  TrialReady,
   SubspaceLimit,
   NumericalFailure,
+  NegativeCurvature,
 };
 
 /** @brief Accuracy and trust-region controls for a NEO microproblem. */
 struct NeoOptions {
   /** Radius measured in the physical coordinate metric. */
   double trust_radius = 1.0;
-  /** Relative tolerance for the scale-aware Euclidean KKT residual. */
+  /** Relative tolerance for the physical dual-norm KKT residual. */
   double relative_residual_tolerance = 1.0e-8;
   /** Absolute tolerance for the explicit KKT residual. */
   double absolute_residual_tolerance = 0.0;
@@ -35,24 +38,38 @@ struct NeoOptions {
    * converged only oversolves a stale quadratic model.
    */
   bool require_curvature_certificate = true;
+  /**
+   * Stop with a negative-curvature witness for an exactly zero gradient,
+   * once its directly evaluated Rayleigh quotient clears the numerical error
+   * margin. No extremal-eigenvector or nonlinear-step convergence is implied.
+   */
+  bool stop_on_negative_curvature = false;
 };
 
-/** @brief Step and explicit optimality certificate returned by NEO. */
+/** @brief Step, spectral witness, and optimality diagnostics returned by NEO. */
 struct NeoResult {
   Eigen::VectorXd step;
   Eigen::VectorXd hessian_step;
   Eigen::VectorXd metric_step;
   Eigen::VectorXd kkt_residual;
+  /** Lowest Ritz direction, normalized in the problem's supplied metric. */
+  Eigen::VectorXd minimum_curvature_direction;
+  /** Matrix-free Hessian action on `minimum_curvature_direction`. */
+  Eigen::VectorXd minimum_curvature_hessian_image;
+  /** Matrix-free metric action on `minimum_curvature_direction`. */
+  Eigen::VectorXd minimum_curvature_metric_image;
+  /** Direct Rayleigh quotient of `minimum_curvature_direction`. */
+  double minimum_curvature_value = 0.0;
   /** `[beta, y]` in the scaled augmented-Hessian equation. */
   Eigen::VectorXd augmented_eigenvector;
   double shift = 0.0;
   double predicted_reduction = 0.0;
   double step_norm = 0.0;
-  /** Euclidean norm of `gradient + H * step + shift * M * step`. */
+  /** Physical dual norm of `gradient + H * step + shift * M * step`. */
   double residual_norm = 0.0;
-  /** Scale-aware Euclidean accuracy requested for `residual_norm`. */
+  /** Absolute plus gradient-relative dual-norm accuracy for `residual_norm`. */
   double residual_target = 0.0;
-  /** Full-space residual of the lowest generalized-Hessian Ritz pair. */
+  /** Euclidean spectral residual of the lowest generalized-Hessian Ritz pair. */
   double curvature_residual_norm = 0.0;
   /** Requested accuracy for `curvature_residual_norm`. */
   double curvature_residual_target = 0.0;
@@ -84,17 +101,27 @@ struct NeoResult {
  * The method builds a Euclidean-orthonormal action subspace, whitens its small
  * projected physical metric, solves the projected norm-constrained quadratic
  * problem, and expands with the KKT or lowest-curvature Ritz residual. A
- * successful return always requires an explicit full-space KKT residual.
+ * `Converged` always requires an explicit full-space KKT residual.
  * Lowest-curvature Ritz convergence is additionally required when requested
- * by the caller and whenever the projected solution is a boundary or hard-case
- * step. As in matrix-free Davidson/Lanczos, lowest-root identification assumes
- * that the generic starting probe overlaps the lowest eigenspace. A complete
- * basis or a caller-supplied spectral lower bound supplies the stronger
- * rigorous global certificate reported in `NeoResult`. The
- * physical metric enters only through the trust-region norm and projected
- * generalized eigenproblem; an optional preconditioner only proposes new
- * subspace directions.
+ * by the caller and for a hard-case step. A regular boundary candidate is
+ * certified by its exact nonlinear keyframe instead of an unrelated extremal
+ * Ritz vector. As in matrix-free Davidson/Lanczos, lowest-root identification
+ * assumes that the generic starting probe overlaps the lowest eigenspace. A
+ * complete basis or a caller-supplied spectral lower bound supplies the
+ * stronger rigorous global certificate reported in `NeoResult`. The
+ * physical metric enters the trust-region norm, projected generalized
+ * eigenproblem, and dual KKT certificate; an optional preconditioner only
+ * proposes new subspace directions.
+ * `stop_on_negative_curvature` is a zero-gradient spectral probe: it may
+ * return a verified negative Rayleigh direction before KKT convergence.
+ * A nonnegative Ritz value from an incomplete subspace is not a global
+ * positive-semidefiniteness certificate.
+ * With `allow_early_trial`, a coordinate-residual heuristic may return
+ * TrialReady, never Converged. The caller must validate an actual nonlinear
+ * keyframe and disable this heuristic near final stationarity.
  */
-NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options);
+NeoResult solve_neo(
+    const NeoProblem& problem, const NeoOptions& options,
+    bool allow_early_trial = false);
 
 }  // namespace xmvb::vb

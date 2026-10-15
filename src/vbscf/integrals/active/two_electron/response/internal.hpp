@@ -98,4 +98,18 @@ void accumulate_pair_product_adjoint(
     const ExactPackedActiveTwoElectronAdjointCache& cache,
     Eigen::MatrixXd* dense_active_gradients);
 
+/** @brief Contracts a direction with the accepted one-orbital integral image. */
+void contract_orbital_pair_direction(
+    const ExactPackedActiveTwoElectronAdjointCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& direction,
+    Eigen::MatrixXd* contraction);
+
+/** @brief Builds a bounded, shared two-active-index exact integral transform. */
+void build_exchange_integrals(ExactPackedActiveTwoElectronAdjointCache* cache);
+
+/** @brief Contracts the mixed-pair adjoint without generating an AO-pair image. */
+Eigen::MatrixXd contract_exchange_direction(
+    const ExactPackedActiveTwoElectronAdjointCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& direction);
+
 }  // namespace xmvb::vb::detail

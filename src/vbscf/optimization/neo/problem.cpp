@@ -10,18 +10,21 @@ NeoProblem::NeoProblem(
     Eigen::VectorXd gradient,
     NeoAction apply_hessian,
     NeoAction apply_metric,
+    NeoDualNorm dual_norm,
     NeoAction apply_preconditioner,
     std::optional<double> hessian_lower_bound)
     : gradient_(std::move(gradient)),
       apply_hessian_(std::move(apply_hessian)),
       apply_metric_(std::move(apply_metric)),
+      dual_norm_(std::move(dual_norm)),
       apply_preconditioner_(std::move(apply_preconditioner)),
       hessian_lower_bound_(hessian_lower_bound) {
   if (gradient_.size() == 0 || !gradient_.allFinite()) {
     throw std::invalid_argument("NEO requires a finite nonempty gradient");
   }
-  if (!apply_hessian_ || !apply_metric_) {
-    throw std::invalid_argument("NEO requires Hessian and metric actions");
+  if (!apply_hessian_ || !apply_metric_ || !dual_norm_) {
+    throw std::invalid_argument(
+        "NEO requires Hessian, metric, and dual-norm actions");
   }
   if (hessian_lower_bound_ && !std::isfinite(*hessian_lower_bound_)) {
     throw std::invalid_argument("NEO Hessian lower bound must be finite");
@@ -52,6 +55,17 @@ Eigen::VectorXd NeoProblem::apply_metric(
     const Eigen::VectorXd& direction) const {
   return apply_checked(
       apply_metric_, direction, "NEO metric action returned an invalid vector");
+}
+
+double NeoProblem::dual_norm(const Eigen::VectorXd& covector) const {
+  if (covector.size() != size() || !covector.allFinite()) {
+    throw std::invalid_argument("invalid covector passed to NEO dual norm");
+  }
+  const double norm = dual_norm_(covector);
+  if (!std::isfinite(norm) || norm < 0.0) {
+    throw std::runtime_error("NEO dual norm returned an invalid value");
+  }
+  return norm;
 }
 
 Eigen::VectorXd NeoProblem::apply_preconditioner(

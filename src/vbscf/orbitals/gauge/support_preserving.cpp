@@ -469,11 +469,9 @@ bool balance_active_gauge(OrbitalPreparationInput* input) {
   if (input == nullptr) {
     throw std::invalid_argument("active gauge target must not be null");
   }
-  // Full-AO OEO with complete structures admits active GL gauge, so this
-  // per-orbital section is not its complete quotient. The generic chart is
-  // likewise outside the validated HAO/BDO sparse-ray case.
   if (input->orbital_type != kOrbitalTypeHao &&
-      input->orbital_type != kOrbitalTypeBdo) {
+      input->orbital_type != kOrbitalTypeBdo &&
+      input->orbital_type != kOrbitalTypeOeo) {
     return false;
   }
 
@@ -487,6 +485,42 @@ bool balance_active_gauge(OrbitalPreparationInput* input) {
   const auto inactive = occupied.leftCols(n_inactive);
   const Eigen::MatrixXd& S = input->ao_overlap_matrix;
   SparseParameterLayout layout(*input);
+  if (input->orbital_type == kOrbitalTypeOeo) {
+    // Removing inactive additions and scaling each active ray does not mix
+    // active orbitals. It is valid even for an arbitrary selected VB space.
+    for (int orbital = n_inactive; orbital < n_inactive + n_active; ++orbital)
+      if (layout.orbital_coefficient_count(orbital) != n_bf) return false;
+    const Eigen::MatrixXd gram = inactive.transpose() * S * inactive;
+    const Eigen::LDLT<Eigen::MatrixXd> factor(gram);
+    if (factor.info() != Eigen::Success || !factor.isPositive())
+      throw std::runtime_error("OEO inactive gauge has singular AO metric");
+    const auto active = occupied.middleCols(n_inactive, n_active);
+    const Eigen::MatrixXd correction =
+        inactive * factor.solve(inactive.transpose() * S * active);
+    Eigen::MatrixXd balanced = active - correction;
+    const Eigen::MatrixXd metric_images = S * balanced;
+    bool changed = false;
+    for (int column = 0; column < n_active; ++column) {
+      const double norm_squared = balanced.col(column).dot(metric_images.col(column));
+      if (!(norm_squared > 0.0) || !std::isfinite(norm_squared))
+        throw std::runtime_error("balanced OEO active representative has zero AO norm");
+      const double scale = 1.0 / std::sqrt(norm_squared);
+      balanced.col(column) *= scale;
+      const double backward_error =
+          128.0 * std::numeric_limits<double>::epsilon() *
+          static_cast<double>(n_bf * n_inactive) *
+          (active.col(column).norm() + correction.col(column).norm()) * scale;
+      const int orbital = n_inactive + column;
+      for (int slot = 0; slot < n_bf; ++slot) {
+        const int flat = orbital * n_bf + slot;
+        const int ao = input->orbital_basis_index_table[flat] - 1;
+        const double value = balanced(ao, column);
+        changed = changed || std::abs(input->orbital_value_table[flat] - value) > backward_error;
+        input->orbital_value_table[flat] = value;
+      }
+    }
+    return changed;
+  }
   bool changed = false;
   for (int orbital = n_inactive;
        orbital < n_inactive + n_active;

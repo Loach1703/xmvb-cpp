@@ -370,5 +370,37 @@ int main() {
           fixed_adjoint_direction,
           1.0e-13),
       "RI fixed-adjoint HVP changed when reusing factor direction");
+  // Force streaming and a non-divisible tile boundary. This is the same
+  // factor-native operator, not a separate numerical/reference path.
+  auto tiled_cache = cache;
+  tiled_cache.accepted_one_index_factors.resize(0, 0);
+  tiled_cache.auxiliary_tile_size = 3;
+  require(is_close(
+      xmvb::vb::compute_ri_active_pair_factor_directional_derivative(
+          tiled_cache, direction), factor_direction, 1.0e-13),
+      "streamed RI factor direction changed at an auxiliary tile boundary");
+  const auto tiled_batch =
+      xmvb::vb::compute_ri_active_pair_factor_directional_derivative_batch(
+          tiled_cache, {direction, second_direction});
+  require(is_close(tiled_batch[0], factor_direction_batch[0], 1.0e-13) &&
+          is_close(tiled_batch[1], factor_direction_batch[1], 1.0e-13),
+          "streamed RI direction block changed the operator");
+  require(is_close(
+      xmvb::vb::backpropagate_ri_packed_active_two_electron_gradient(
+          packed_adjoint, tiled_cache), pullback, 1.0e-13),
+      "streamed RI gradient changed the operator");
+  require(is_close(
+      xmvb::vb::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+          packed_adjoint, tiled_cache, direction, &factor_direction),
+      fixed_adjoint_direction, 1.0e-13),
+      "streamed RI HVP changed the operator");
+  // Also tile directional factors when accepted factors are retained.
+  auto cached_tile = cache;
+  cached_tile.auxiliary_tile_size = 1;
+  require(is_close(
+      xmvb::vb::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+          packed_adjoint, cached_tile, direction, &factor_direction),
+      fixed_adjoint_direction, 1.0e-13),
+      "retained accepted RI factors changed the tiled HVP");
   return 0;
 }

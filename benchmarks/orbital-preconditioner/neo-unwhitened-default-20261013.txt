@@ -1,0 +1,104 @@
+Production NEO: unwhitened quotient coordinates
+==============================================
+
+Scope and organization
+----------------------
+NEO (ISCF=9 or the existing neo backend selection) now constructs unwhitened
+quotient charts at its initial/accepted points, trials, initial snapshots and
+terminal physical-gradient reporting. This also covers its state-averaged
+response solver. There is no new CLI/environment knob or diagnostic macro.
+Global optimizer selection and ISCF mappings are unchanged.
+TNHVP and block-LBFGS still select their established whitened charts; this is
+not a NEO fallback. Their whitening implementation is therefore still needed.
+
+Raw geometry lives in orbitals/charts/raw.{hpp,cpp}. It shares the accepted-point
+AO quotient metric between matching full-AO sectors and retains only per-orbital
+radial vectors and their scalar gap. It does not retain dense local normalized
+metrics/inverses for every orbital. Rank certification uses the same spectral
+cutoff, with shared norm bounds and eigenvalues only when the bound is inconclusive.
+No large integral/matrix replicas or per-thread metric caches were introduced.
+
+Consistency
+-----------
+Gauge complements, support constraints and orbital retraction are unchanged.
+The same chart pullbacks and left inverses define gradients, HVPs and step maps.
+The full generalized AH/trust metric is unchanged. Coordinate progress and
+keyframe norms use the cheap local AO inverse, not repeated complete physical
+metric solves. Residual covectors become Riesz vectors before being used as
+seeds/unpreconditioned enrichment directions.
+Local preconditioning is covariant: signed P-omega*G and positive P+lambda*G
+shifts retain their established signed/positive spectral policies. Source
+mixing in the full-AO analytic frame inverse remains unchanged. State-averaged
+forcing/recycling budgets use the same normalized-coordinate units as before.
+
+Removed from NEO
+----------------
+The experimental compile-time default macro, the white-chart stopping rebuild,
+and whitening selection branches in CIAH seed/norm handling are not retained.
+NEO never builds an AO-whitened step basis. The raw tangent generator no longer
+forms dense per-orbital normalized metric/inverse matrices for unused consumers.
+
+Stopping/reporting
+------------------
+Energy-change 1e-7 Eh and reference projected-gradient infinity 1e-3 are unchanged.
+Complete OEO also keeps its existing physical-dual-norm test. Infinity norms
+depend on the coordinate frame, so removing the reference conversion would
+change the stopping criterion. Keep it as a covector-only operation:
+  v=K^(-1/2) g_raw, u=K^(-1/2) r,
+  g_reference=v+u*(u^T v)/(sqrt(delta)*(1+sqrt(delta))), delta=1-u^T u.
+Its shared inverse root is lazy and is used only when the outer bound cannot
+already exclude convergence, by state-average recycling near tolerance, or by
+terminal reporting. It does not reconstruct gauge complements, an orbital
+chart, raw left inverses, or whitened AO basis products. This is the necessary
+reference-coordinate norm, not a second orbital optimization path.
+Snapshots' infinity values describe progress in the current unwhitened chart;
+their L2 values use the local coordinate dual norm. Terminal projected norms
+use the reference units. The output explicitly identifies NEO's coordinates
+and its reference-coordinate stopping/final infinity norm.
+
+Verification (Hanhai22 Slurm compute nodes only)
+----------------------------------------------
+Build 1252034: xmvb and HVP audit compiled; 10 unit executables passed:
+  quotient, CIAH, keyframe, coupled structure, analytic diagonal, NEO,
+  NEO response/globalization, block inverse BFGS, OEO normalization pullback.
+Verify 1252066: added one-electron inverse/shift covariance tests passed;
+matched-seed F2 PySCF energy/action reference passed. That test also asserts
+the production unwhitened-coordinate output. No threshold was changed.
+
+Derivative checks from build 1252034:
+  FeCl2, FD step 1e-4: coupled orbital/structure errors 6.62e-9 / 1.06e-8.
+  MnF2, FD step 1e-5: coupled orbital/structure errors 1.46e-8 / 3.59e-8.
+  F2-SA2, FD step 1e-4: coupled orbital/structure errors 4.14e-9 / 4.22e-9.
+  SA gradient/HVP linearity errors 2.33e-14 / 1.25e-14; energy linearity zero.
+Relaxed-response audits retain their pre-existing inexact response tolerance;
+the tight coupled finite differences above do not change that production policy.
+
+Native regressions 1252070, 1252077, 1252083, 32 cores, exact libcint,
+same energy/gradient thresholds; all eight calculations converged:
+case       method       steps HVP energy/Eh             GNU wall/s RSS/MiB
+FeCl2      NEO           12   249 -2181.624464866783       5.77       500.441
+MnF2       NEO           13   189 -1348.893353223860       4.22       489.078
+241        NEO            3    21 -230.720590392829        1.76       842.090
+240        NEO            4    31 -343.446302353243        4.22      1697.488
+F2-OEO     NEO            3    15 -198.689800055558        0.18        18.355
+F2-SA2     NEO            6    78 -198.335601335284        0.35        17.387
+F2-TN      TNHVP          7    NA -198.751155830526        0.19        17.531
+F2-block   block-LBFGS    8     0 -198.751155821400        0.07        15.699
+TN reports block actions rather than the NEO direction count; do not label it
+as zero HVPs. F2-SA2 uses the unchanged automatic one-electron preconditioner.
+F2-OEO was selected through ISCF=9 without a backend override.
+These are native single-run measurements, not speedup claims across nodes.
+Historical versions were not rerun. Frozen executable SHA256:
+  e29dd416fb159637e53c571afb8b6d4a0eff19ddce576478aa6713a9bb92e59e
+
+Artifacts
+---------
+results/diagnostics/hanhai22-shared-response-20261012/
+  neo-raw-build-1252034/           build, units and derivative diagnostics
+  neo-raw-verify-1252066/          final quotient unit and PySCF-reference CTest
+  neo-raw-regression-1252070/      FeCl2, MnF2, 241
+  neo-raw-regression-1252077/      240, F2-OEO, F2-SA2, TN control
+  neo-raw-regression-1252083/      block-LBFGS control
+CSV: benchmarks/orbital-preconditioner/neo-unwhitened-default-20261013.csv
+Unrelated local RI and .gitignore changes were preserved and excluded from
+this clean-base source build and from the implementation commit.

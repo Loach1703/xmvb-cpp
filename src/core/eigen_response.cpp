@@ -95,6 +95,28 @@ GeneralizedEigenActionResult apply_checked(
   return images;
 }
 
+/** @brief Accurate scalar constraint evaluation under coefficient cancellation. */
+double constraint_dot(
+    const Eigen::Ref<const Eigen::VectorXd>& normal,
+    const Eigen::Ref<const Eigen::VectorXd>& vector) {
+  long double sum = 0.0L;
+  for (Eigen::Index i = 0; i < normal.size(); ++i)
+    sum += static_cast<long double>(normal[i]) * vector[i];
+  return static_cast<double>(sum);
+}
+
+/** @brief Restores the affine gauge before testing the original equation. */
+void restore_response_gauge(
+    Eigen::VectorXd* response,
+    const Eigen::Ref<const Eigen::VectorXd>& normal,
+    double target) {
+  const double norm = normal.stableNorm();
+  const Eigen::VectorXd unit = normal / norm;
+  for (int pass = 0; pass < 2; ++pass)
+    response->noalias() += unit *
+        ((target - constraint_dot(normal, *response)) / norm);
+}
+
 Eigen::MatrixXd apply_bordered_operators(
     const GeneralizedEigenAction& action,
     const Eigen::Ref<const Eigen::VectorXd>& selected_eigenvalues,
@@ -111,7 +133,7 @@ Eigen::MatrixXd apply_bordered_operators(
         images.hamiltonian.col(state) -
         selected_eigenvalues[state] * images.overlap.col(state) +
         vectors(n, state) * overlap_selected.col(state);
-    result(n, state) = overlap_selected.col(state).dot(
+    result(n, state) = constraint_dot(overlap_selected.col(state),
         vectors.col(state).head(n));
   }
   return result;
@@ -154,17 +176,28 @@ Eigen::MatrixXd build_inverse_preconditioner(
 Eigen::VectorXd apply_response_preconditioner_column(
     const Eigen::Ref<const Eigen::VectorXd>& residual,
     const Eigen::Ref<const Eigen::VectorXd>& jacobi_inverse,
-    EigenResponseRecycleSpace* recycle) {
-  return recycle != nullptr && recycle->size() > 0
-      ? recycle->apply_absolute_spectral_preconditioner(
-            residual, jacobi_inverse)
-      : (jacobi_inverse.array() * residual.array()).matrix();
+    EigenResponseRecycleSpace* recycle,
+    const EigenResponsePreconditioner* preconditioner = nullptr,
+    Eigen::Index state = 0) {
+  if (recycle != nullptr && recycle->size() > 0) {
+    return recycle->apply_absolute_spectral_preconditioner(
+        residual, jacobi_inverse, preconditioner, state);
+  }
+  if (preconditioner != nullptr) {
+    Eigen::VectorXd result = preconditioner->apply(residual, state);
+    if (result.size() != residual.size() || !result.allFinite()) {
+      throw std::runtime_error("response inverse preconditioner returned invalid values");
+    }
+    return result;
+  }
+  return (jacobi_inverse.array() * residual.array()).matrix();
 }
 
 Eigen::MatrixXd apply_response_preconditioner(
     const Eigen::Ref<const Eigen::MatrixXd>& residuals,
     const Eigen::Ref<const Eigen::MatrixXd>& jacobi_inverse,
-    const std::vector<EigenResponseRecycleSpace*>& recycle_spaces) {
+    const std::vector<EigenResponseRecycleSpace*>& recycle_spaces,
+    const EigenResponsePreconditioner* preconditioner = nullptr) {
   if (residuals.rows() != jacobi_inverse.rows() ||
       residuals.cols() != jacobi_inverse.cols() ||
       (!recycle_spaces.empty() &&
@@ -178,7 +211,8 @@ Eigen::MatrixXd apply_response_preconditioner(
         ? nullptr
         : recycle_spaces[static_cast<std::size_t>(state)];
     result.col(state) = apply_response_preconditioner_column(
-        residuals.col(state), jacobi_inverse.col(state), recycle);
+        residuals.col(state), jacobi_inverse.col(state), recycle,
+        preconditioner, state);
   }
   return result;
 }
@@ -273,7 +307,9 @@ const Eigen::MatrixXd& EigenResponseRecycleSpace::projected_operator() const {
 Eigen::VectorXd
 EigenResponseRecycleSpace::apply_absolute_spectral_preconditioner(
     const Eigen::Ref<const Eigen::VectorXd>& right_hand_side,
-    const Eigen::Ref<const Eigen::VectorXd>& jacobi_inverse) const {
+    const Eigen::Ref<const Eigen::VectorXd>& jacobi_inverse,
+    const EigenResponsePreconditioner* preconditioner,
+    Eigen::Index state) const {
   if (right_hand_side.size() != dimension() ||
       jacobi_inverse.size() != dimension() ||
       !right_hand_side.allFinite() || !jacobi_inverse.allFinite() ||
@@ -281,24 +317,42 @@ EigenResponseRecycleSpace::apply_absolute_spectral_preconditioner(
     throw std::invalid_argument(
         "response spectral preconditioner inputs are invalid");
   }
-  if (size() == 0) {
-    return jacobi_inverse.array() * right_hand_side.array();
-  }
+  const auto complement_inverse = [&](const Eigen::VectorXd& rhs) -> Eigen::VectorXd {
+    Eigen::VectorXd result = preconditioner != nullptr
+        ? preconditioner->apply(rhs, state)
+        : (jacobi_inverse.array() * rhs.array()).matrix().eval();
+    if (result.size() != rhs.size() || !result.allFinite())
+      throw std::runtime_error("response inverse preconditioner returned invalid values");
+    return result;
+  };
+  if (size() == 0) return complement_inverse(right_hand_side);
   prepare_projected_inverse();
   if (spectral_preconditioner_basis_.cols() == 0) {
-    return jacobi_inverse.array() * right_hand_side.array();
+    return complement_inverse(right_hand_side);
   }
   const Eigen::VectorXd spectral_coordinates =
       spectral_preconditioner_basis_.transpose() * right_hand_side;
   Eigen::VectorXd complement = right_hand_side -
       spectral_preconditioner_basis_ * spectral_coordinates;
-  Eigen::VectorXd result = jacobi_inverse.array() * complement.array();
+  Eigen::VectorXd result = complement_inverse(complement);
   result.noalias() -= spectral_preconditioner_basis_ *
       (spectral_preconditioner_basis_.transpose() * result);
   result.noalias() += spectral_preconditioner_basis_ *
       (spectral_preconditioner_inverse_eigenvalues_.array() *
        spectral_coordinates.array()).matrix();
   return result;
+}
+
+double EigenResponseRecycleSpace::preconditioner_lower_bound(
+    double complement_lower_bound) const {
+  if (!(complement_lower_bound > 0.0) || !std::isfinite(complement_lower_bound))
+    throw std::invalid_argument("response complement spectral bound is invalid");
+  if (size() == 0) return complement_lower_bound;
+  prepare_projected_inverse();
+  return spectral_preconditioner_inverse_eigenvalues_.size() == 0
+      ? complement_lower_bound
+      : std::min(complement_lower_bound,
+                 spectral_preconditioner_inverse_eigenvalues_.minCoeff());
 }
 
 void EigenResponseRecycleSpace::clear() {
@@ -652,7 +706,14 @@ EigenResponseResult solve_generalized_eigen_response(
     const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected,
     const EigenResponseOptions& options,
     const std::vector<EigenResponseRecycleSpace*>& recycle_spaces,
-    const Eigen::MatrixXd* selected_residuals) {
+    const Eigen::MatrixXd* selected_residuals,
+    const EigenResponsePreconditioner* preconditioner) {
+  if (preconditioner != nullptr &&
+      (!preconditioner->apply ||
+       !std::isfinite(preconditioner->minimum_eigenvalue) ||
+       !(preconditioner->minimum_eigenvalue > 0.0))) {
+    throw std::invalid_argument("response inverse preconditioner needs an action and positive spectral bound");
+  }
   validate_inputs(
       hamiltonian_diagonal,
       overlap_diagonal,
@@ -732,6 +793,7 @@ EigenResponseResult solve_generalized_eigen_response(
   Eigen::VectorXd bordered_absolute_targets(n_selected);
   Eigen::VectorXd correctable_absolute_targets(n_selected);
   Eigen::VectorXd preconditioned_absolute_targets(n_selected);
+  Eigen::VectorXd candidate_absolute_targets(n_selected);
   Eigen::VectorXd residual_norms(n_selected);
   Eigen::VectorXd beta_new(n_selected);
   Eigen::VectorXd beta_first(n_selected);
@@ -772,9 +834,14 @@ EigenResponseResult solve_generalized_eigen_response(
     // MINRES estimates ||r||_{P}, while the candidate contract is Euclidean.
     // Since ||r||_2 <= ||r||_{P}/sqrt(min_i P_ii), this sufficient trigger
     // cannot claim a Euclidean tolerance before a true-residual check.
+    double inverse_lower_bound = preconditioner != nullptr
+        ? preconditioner->minimum_eigenvalue
+        : inverse_preconditioner.col(state).minCoeff();
+    if (!recycle_spaces.empty() && recycle_spaces[static_cast<std::size_t>(state)] != nullptr)
+      inverse_lower_bound = recycle_spaces[static_cast<std::size_t>(state)]
+          ->preconditioner_lower_bound(inverse_lower_bound);
     preconditioned_absolute_targets[state] =
-        correctable_absolute_targets[state] *
-        std::sqrt(inverse_preconditioner.col(state).minCoeff());
+        correctable_absolute_targets[state] * std::sqrt(inverse_lower_bound);
   }
 
   for (Eigen::Index state = 0; state < n_selected; ++state) {
@@ -844,7 +911,7 @@ EigenResponseResult solve_generalized_eigen_response(
   }
 
   w_new = apply_response_preconditioner(
-      v_new, inverse_preconditioner, recycle_spaces);
+      v_new, inverse_preconditioner, recycle_spaces, preconditioner);
   project_selected_roots(&w_new, root_units);
   for (Eigen::Index state = 0; state < n_selected; ++state) {
     if (rhs_norms[state] == 0.0) {
@@ -869,6 +936,10 @@ EigenResponseResult solve_generalized_eigen_response(
     // The Lanczos/Givens residual is measured in the inverse-preconditioner
     // metric; an Euclidean RHS norm gives an invalid trigger scale.
     residual_norms[state] = beta_first[state];
+    // A relative preconditioned estimate schedules a true bordered check;
+    // it is not itself a certificate in the original equation's norm.
+    candidate_absolute_targets[state] =
+        options.relative_residual_tolerance * beta_first[state];
   }
 
   for (int iteration = 0;
@@ -913,7 +984,8 @@ EigenResponseResult solve_generalized_eigen_response(
           v_new.col(state), inverse_preconditioner.col(state),
           recycle_spaces.empty()
               ? nullptr
-              : recycle_spaces[static_cast<std::size_t>(state)]);
+              : recycle_spaces[static_cast<std::size_t>(state)],
+          preconditioner, state);
       w_new.col(state).noalias() -= root_units.col(state) *
           root_units.col(state).dot(w_new.col(state));
       const double beta_squared = v_new.col(state).dot(w_new.col(state));
@@ -964,7 +1036,9 @@ EigenResponseResult solve_generalized_eigen_response(
       residual_norms[state] *= std::abs(sine[state]);
       result.iterations[static_cast<std::size_t>(state)] = iteration + 1;
       const bool estimated_converged =
-          residual_norms[state] <= preconditioned_absolute_targets[state];
+          residual_norms[state] <= std::max(
+              preconditioned_absolute_targets[state],
+              candidate_absolute_targets[state]);
       converged[static_cast<std::size_t>(state)] = estimated_converged;
       if (estimated_converged) {
         estimated_converged_states.push_back(state);
@@ -987,8 +1061,11 @@ EigenResponseResult solve_generalized_eigen_response(
         const Eigen::VectorXd forcing =
             delta_hamiltonian_selected.col(state) -
             selected_eigenvalues[state] * delta_overlap_selected.col(state);
-        const Eigen::VectorXd response =
+        Eigen::VectorXd response =
             solution.col(state) + particular_solution.col(state);
+        restore_response_gauge(&response, overlap_selected.col(state),
+                               full_rhs(n, state));
+        solution.col(state) = response - particular_solution.col(state);
         result.eigenvalue_response[state] =
             (selected_eigenvectors.col(state).dot(forcing) +
              ritz_residuals.col(state).dot(response)) /
@@ -1058,7 +1135,8 @@ EigenResponseResult solve_generalized_eigen_response(
             v_new.col(state), inverse_preconditioner.col(state),
             recycle_spaces.empty()
                 ? nullptr
-                : recycle_spaces[static_cast<std::size_t>(state)]);
+                : recycle_spaces[static_cast<std::size_t>(state)],
+            preconditioner, state);
         w_new.col(state).noalias() -= root_units.col(state) *
             root_units.col(state).dot(w_new.col(state));
         p_older.col(state).setZero();
@@ -1072,6 +1150,10 @@ EigenResponseResult solve_generalized_eigen_response(
         beta_new[state] = std::sqrt(beta_squared);
         beta_first[state] = beta_new[state];
         residual_norms[state] = beta_first[state];
+        // Calibrate the next inspection against the measured bordered error.
+        // Only the unchanged true-residual test above can accept the response.
+        candidate_absolute_targets[state] = beta_first[state] *
+            (bordered_absolute_targets[state] / true_residual.norm());
         cosine[state] = 1.0;
         old_cosine[state] = 1.0;
         sine[state] = 0.0;
@@ -1094,6 +1176,9 @@ EigenResponseResult solve_generalized_eigen_response(
         selected_eigenvalues[state] * delta_overlap_selected.col(state);
     result.eigenvector_response.col(state) =
         solution.col(state) + particular_solution.col(state);
+    Eigen::VectorXd response = result.eigenvector_response.col(state);
+    restore_response_gauge(&response, overlap_selected.col(state), full_rhs(n, state));
+    result.eigenvector_response.col(state) = response;
     result.eigenvalue_response[state] =
         (selected_eigenvectors.col(state).dot(forcing) +
          ritz_residuals.col(state).dot(
@@ -1143,6 +1228,14 @@ EigenResponseResult solve_generalized_eigen_response(
               << " original_rhs_norm=" << original_rhs_norms[state]
               << " projected_absolute_target=" <<
                      correctable_absolute_targets[state]
+              << " estimated_preconditioned_residual=" <<
+                     residual_norms[state]
+              << " preconditioned_target=" <<
+                     preconditioned_absolute_targets[state]
+              << " inverse_preconditioner_min=" <<
+                     inverse_preconditioner.col(state).minCoeff()
+              << " inverse_preconditioner_max=" <<
+                     inverse_preconditioner.col(state).maxCoeff()
               << " candidate_checks=" <<
                      candidate_checks[static_cast<std::size_t>(state)]
               << " reliable_restarts=" <<
@@ -1522,7 +1615,8 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
     const Eigen::Ref<const Eigen::MatrixXd>& overlap_selected,
     const Eigen::Ref<const Eigen::MatrixXd>& selected_residuals,
     const Eigen::Ref<const Eigen::MatrixXd>& delta_hamiltonian_selected,
-    const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected) {
+    const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected,
+    bool horizontal_forcing) {
   validate_response_columns(
       selected_eigenvalues, selected_eigenvectors, overlap_selected,
       delta_hamiltonian_selected, delta_overlap_selected);
@@ -1548,8 +1642,6 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
     throw std::invalid_argument(message.str());
   }
 
-  data.forcing = delta_hamiltonian_selected -
-      delta_overlap_selected * selected_eigenvalues.asDiagonal();
   Eigen::MatrixXd metric_derivative =
       selected_eigenvectors.transpose() * delta_overlap_selected;
   const double antisymmetric_error =
@@ -1576,6 +1668,22 @@ EqualWeightEigenCoupling prepare_equal_weight_generalized_eigen_coupling(
   const Eigen::MatrixXd energy_commutator =
       selected_eigenvalues.asDiagonal() * internal_coefficients -
       internal_coefficients * selected_eigenvalues.asDiagonal();
+  if (!horizontal_forcing) {
+    // Only selected-space projections are needed by the normalization gauge.
+    // Keep the accepted Ritz residual; do not form or project a full RHS.
+    data.gauge_selected_matrix_response = data.metric.partialPivLu().solve(
+        selected_eigenvectors.transpose() * delta_hamiltonian_selected -
+        metric_derivative * selected_eigenvalues.asDiagonal() +
+        data.metric * energy_commutator +
+        (selected_eigenvectors.transpose() * selected_residuals) *
+            internal_coefficients);
+    if (!data.gauge_selected_matrix_response.allFinite()) {
+      throw std::runtime_error("equal-weight coupling gauge multiplier is not finite");
+    }
+    return data;
+  }
+  data.forcing = delta_hamiltonian_selected -
+      delta_overlap_selected * selected_eigenvalues.asDiagonal();
   const Eigen::MatrixXd gauge_shifted_image =
       overlap_selected * energy_commutator +
       selected_residuals * internal_coefficients;

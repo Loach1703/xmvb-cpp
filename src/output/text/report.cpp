@@ -1,5 +1,6 @@
 #include "output/text/report.hpp"
 #include "output/text/sections.hpp"
+#include "vbscf/core/contracts/orbital_type.hpp"
 
 #include <array>
 #include <cerrno>
@@ -207,7 +208,7 @@ const char* orbital_preconditioner_name(
     xmvb::vb::OrbitalPreconditioner preconditioner) {
   switch (preconditioner) {
     case xmvb::vb::OrbitalPreconditioner::Automatic:
-      return "automatic (one-electron block)";
+      return "automatic (backend-selected)";
     case xmvb::vb::OrbitalPreconditioner::Identity:
       return "identity";
     case xmvb::vb::OrbitalPreconditioner::OneElectron:
@@ -360,6 +361,9 @@ void print_summary(
     print_log_field(
         "Final Davidson max rel. residual",
         format_scientific_double(davidson.maximum_relative_residual, 8));
+    print_log_field(
+        "Final Davidson CI residual (Eh)",
+        format_scientific_double(davidson.maximum_stationarity_residual, 8));
   }
   if (result.scf_result.tnvb_diagnostics.has_value()) {
     const auto& tensor=*result.scf_result.tnvb_diagnostics;
@@ -380,11 +384,25 @@ void print_summary(
   }
   if (!result.energy_only) {
     print_log_field("Gradient metric", gradient_tolerance_metric_name(options.backend));
-  print_log_field(
-      "Convergence threshold",
-      format_convergence_threshold_summary(
-          options.energy_tolerance,
-          options.gradient_tolerance));
+    if (options.backend == vb::VbScfOptimizerBackend::Neo) {
+      print_log_field("Orbital coordinates", "unwhitened quotient");
+      print_log_field("Projected infinity norm", "reference coordinates for stopping/final report");
+    }
+    const bool certifies_physical_gradient = input.complete_active_space &&
+        input.orbital_preparation_input.orbital_type == vb::kOrbitalTypeOeo &&
+        (options.backend == vb::VbScfOptimizerBackend::BlockLbfgs ||
+         options.backend == vb::VbScfOptimizerBackend::Neo ||
+         options.backend == vb::VbScfOptimizerBackend::NonredundantTruncatedNewton);
+    if (certifies_physical_gradient) {
+      print_log_field("Additional stationarity metric", "physical |g|_(G^-1)");
+      print_log_field("Physical gradient threshold",
+                      format_scientific_double(options.gradient_tolerance, 8));
+    }
+    print_log_field(
+        "Convergence threshold",
+        format_convergence_threshold_summary(
+            options.energy_tolerance,
+            options.gradient_tolerance));
   }
   print_log_field(
       "Nuclear repulsion energy",
@@ -433,9 +451,16 @@ void print_summary(
     print_log_field(
         "Final projected |g|_2",
         format_scientific_double(result.final_projected_gradient_l2_norm, 8));
-    print_log_field(
-        "Final physical |g|_(G^-1)",
-        format_scientific_double(result.final_physical_gradient_norm, 8));
+    if (result.final_physical_gradient_norm.has_value()) {
+      print_log_field(
+          "Final physical |g|_(G^-1)",
+          format_scientific_double(
+              *result.final_physical_gradient_norm, 8));
+    } else {
+      print_log_field(
+          "Final physical gradient diagnostic",
+          "unavailable: " + result.final_physical_gradient_diagnostic);
+    }
   }
   }
   if (options.backend ==

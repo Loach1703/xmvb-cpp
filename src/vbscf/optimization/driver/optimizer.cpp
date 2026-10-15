@@ -277,8 +277,11 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
   result.final_gradient_inf_norm = result.gradient_inf_norm_history.back();
   result.final_gradient_l2_norm = final_gradient_l2_norm;
   {
-    const OrbitalChart final_space =
-        build_orbital_chart(objective, parameter_view);
+    // Reporting uses only geometry and the physical metric, not curvature.
+    const OrbitalChart final_space = optimizer_detail::build_orbital_geometry(
+        objective, parameter_view,
+        options_.backend == VbScfOptimizerBackend::Neo
+            ? OrbitalChart::Coordinates::Unwhitened : OrbitalChart::Coordinates::Whitened);
     const Eigen::VectorXd final_packed_gradient =
         parameter_view.gather_from_full(
             objective.gradient_result().sparse_orbital_energy_gradient);
@@ -294,8 +297,13 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
         final_space,
         parameter_view,
         objective.input().orbital_preparation_input);
-    result.final_physical_gradient_norm =
-        final_metric.dual_norm(final_projection.reduced_gradient);
+    try {
+      result.final_physical_gradient_norm =
+          final_metric.dual_norm(final_projection.reduced_gradient);
+    } catch (const std::runtime_error& error) {
+      result.final_physical_gradient_norm.reset();
+      result.final_physical_gradient_diagnostic = error.what();
+    }
   }
   objective.ensure_exact_structure_overlap_diagonal();
   sync_result_from_objective(objective, &result);

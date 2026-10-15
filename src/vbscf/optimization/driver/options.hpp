@@ -74,6 +74,9 @@ struct VbScfOptimizerOptions {
    */
   bool verbose = true;
 
+  /** @brief Observes each completed NEO step without retaining heavy snapshots. */
+  std::function<void(const NeoIterationRecord&)> neo_iteration_callback;
+
   /**
    * @brief Whether to retain accepted-iterate trace snapshots in memory.
    */

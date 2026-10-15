@@ -1,0 +1,75 @@
+Expanded unwhitened-chart controls on Hanhai22
+=============================================
+
+Execution
+---------
+Jobs 1251989 (array 0-4) and 1251994 (array 5-6), all completed with exit zero.
+The QOS had 20 unrelated jobs and a MaxSubmitPU/MaxJobsPU limit of 25. Submit
+five cases concurrently, then the remaining two as soon as slots free. Do
+not cancel, alter or include the unrelated jobs in this study.
+
+Frozen raw/shared-metric build 1251970, executable SHA256:
+  a0fd24c5bb7c2a0d4243c0cd2875fcfe5287326828b760bbc69b5273f184a126
+No additional compilation or molecular run on a login/local node.
+NEO/CIAH, Davidson, signed analytic diagonal, exact libcint, 32 OpenMP cores,
+BLAS threads one, energy 1e-7 Eh and gradient 1e-3; no threshold changes.
+Same original input files and basis assets as the saved references, certified
+by their execution hash manifests. No reduced iteration budget was imposed.
+Whitened references were NOT rerun. Production default remains unchanged.
+
+All seven new calculations converged. Six have converged historical references:
+
+Case   steps old/new HVP old/new GNU wall s old/new RSS MiB old/new Delta E/Eh
+241       3/3          21/21        2.15/1.76          820.0/857.7       0
+240       3/4          29/31        4.80/4.23         1639.0/1624.7     -5.80e-11
+7975      3/3          25/25        3.17/3.34         1529.9/1381.7      0
+QOCGUM    4/4          52/52       13.77/11.14        2001.7/1928.0      0
+CERRAS    5/5          51/51       21.54/18.60        2035.0/2030.0     -1.02e-12
+LOFLEA    4/4          34/34       33.00/34.13        2784.7/2803.7     -1.02e-12
+
+These are single native runs on different nodes. Three references predate the
+latest kernel/whitening changes, and the others use the more recent shared
+structure-response kernel. They document end-to-end historical comparisons,
+not an isolated causal timing effect attributable solely to whitening. Small
+time/RSS changes can reflect node load and allocator variability. See the CSV
+for exact final energies, GNU/application wall times, paths, nodes and status.
+
+240 trajectory
+--------------
+At step 3 both versions are essentially at the same energy minimum. The raw
+version's energy change in step 3 is still -2.94599e-5 Eh; the established
+consecutive-energy-change criterion therefore needs another accepted step.
+Step 4 changes its energy by about -2e-10 Eh. This adds two HVPs and one macro
+step, not a final-energy error. No stopping threshold was altered to hide it.
+
+F2 full-AO OEO
+-------------
+New result: 4 steps, 15 HVPs, -198.689800055622 Eh, 0.19 s, 18.94 MiB.
+Saved reference current-suite-1249844 stopped with ciah_zero_macro_step and
+exit 2 at -198.689737529223 Eh. It is NOT a converged timing reference and is
+excluded from paired performance conclusions. Both used the same input/assets.
+The approximately 6.25e-5 Eh difference must not be reported as disagreement
+between converged results or as a certified speedup over whitening.
+
+Interpretation
+--------------
+The six valid comparisons retain final energies within 5.80e-11 Eh. Five keep
+both iteration and HVP counts; 240 takes one extra macro step and two HVPs.
+No systematic convergence regression or demonstrable convergence advantage
+of explicit whitening appears in this sample. The data support considering
+the unwhitened quotient representation for NEO, not a universal speedup claim.
+No large-system control or state-averaged control was run in this expansion.
+
+Provenance
+----------
+New artifacts:
+  results/diagnostics/hanhai22-shared-response-20261012/raw-chart-suite-1251989/
+  results/diagnostics/hanhai22-shared-response-20261012/raw-chart-suite-1251994/
+Saved references:
+  current-suite-1249844/{F2-OEO,240,7975}
+  joint-response-1251180/{241,QOCGUM,CERRAS}
+  joint-isolated-1251207/LOFLEA
+Submission script: raw-chart-suite.sbatch in the same diagnostics directory.
+Parser: benchmarks/orbital-preconditioner/summarize_unwhitened_suite.py
+CSV: benchmarks/orbital-preconditioner/unwhitened-suite-20261013.csv
+The experiment's complete source patch is unwhitened-chart-20261013.patch.

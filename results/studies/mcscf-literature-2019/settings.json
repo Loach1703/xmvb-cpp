@@ -1,0 +1,158 @@
+{
+  "status": "preparation_only_no_jobs_submitted",
+  "methods": [
+    "native_NEO",
+    "PySCF_default_AH"
+  ],
+  "excluded": [
+    "21_aromatic_molecules",
+    "block_LBFGS"
+  ],
+  "paper": "Kreplin, Knowles, Werner, J. Chem. Phys. 150, 194106 (2019)",
+  "paper_url": "https://pubs.aip.org/jcp/article/150/19/194106/197166/Second-order-MCSCF-optimization-revisited-I",
+  "source_pdf": "/home/txia/.codex/attachments/c1ed9f1a-b35b-41d0-8927-1bfdcfbef256/ORCA-casscf-2.pdf",
+  "supplement_status": "User-supplied SI extracted; nine XYZ geometries verified by atom counts; no calculations submitted",
+  "cases": [
+    {
+      "system": "[Cu2O2(NH3)6]2+",
+      "charge": 2,
+      "multiplicity": 1,
+      "state": "1Ag in C2h",
+      "basis": "all-electron aug-cc-pVTZ",
+      "cas": [
+        [
+          8,
+          10
+        ],
+        [
+          16,
+          14
+        ],
+        [
+          16,
+          16
+        ]
+      ],
+      "path_F": [
+        0,
+        20,
+        40,
+        60,
+        80,
+        100
+      ],
+      "geometry_source": "Cramer et al., J. Phys. Chem. A 110, 1991-2004 (2006), reference 122 supporting information",
+      "geometry_source_url": "https://pubs.acs.org/doi/10.1021/jp056791e",
+      "si_filename": "jp056791esi20051123_064633.pdf",
+      "si_url": "https://pubs.acs.org/doi/suppl/10.1021/jp056791e/suppl_file/jp056791esi20051123_064633.pdf",
+      "initial_guess": "F=0: closed-shell HF then AVAS; subsequent F points use previous geometry's optimized orbitals",
+      "avas_threshold": 0.3,
+      "avas_targets_large": "O 2s,3s,2p,3p and Cu 3dyz; O-O on z axis, Cu displaced along y",
+      "avas_targets_small": "O 2px,3px,2pz,3pz and Cu 3dyz",
+      "atomic_targets": "O target orbitals from SA-CASSCF/cc-pVTZ averaging three degenerate 3P states with 2s,3s,2p,3p active",
+      "unresolved": "2019 text says AVAS yields (16,18) then optimizes (16,14); 2006 SI confirms 16/14 irreps 3,4,3,4 but does not specify the 2019 AVAS trimming. Verify atomic radial targets, AO convention and integral approximation.",
+      "geometry_files": [
+        "geometries/cu2o2-f000.xyz",
+        "geometries/cu2o2-f020.xyz",
+        "geometries/cu2o2-f040.xyz",
+        "geometries/cu2o2-f060.xyz",
+        "geometries/cu2o2-f080.xyz",
+        "geometries/cu2o2-f100.xyz"
+      ],
+      "si_active_description": "2006 SI section 16/14: sy1 O2s,O2pz,O3pz; sy2 O2py,O2px,O3py,O3px; sy3 O2s,O2pz+Cu3d,O2pz-Cu3d; sy4 O2py+Cu3d,O2px,O2py-Cu3d,O3px. These describe delocalized symmetry orbitals in the original convention, not atom-local AO indices to delete."
+    },
+    {
+      "system": "Co2(CO)6C2H2",
+      "cas": [
+        18,
+        13
+      ],
+      "basis": "aug-cc-pVTZ",
+      "point_group": "C2v",
+      "multiplicity": 1,
+      "geometry_source": "2019 paper supplementary material, section VI D",
+      "avas_targets": "Co 3dx2-y2,3dxy,3dxz,3dyz; acetylene carbon 2py,2pz",
+      "orientation": "Preserve SI file; prepared proper rotation (x,y,z)->(x,-z,y), determinant +1, so Co-Co lies along z and acetylene C-C along x. Use main-text directional AO targets only in this rotated frame.",
+      "unresolved": "2019 specific root not explicitly labeled. AVAS threshold 0.3 is the paper's usual choice, not an explicitly repeated Co setting; validate dimension (18,13) and active characters. HF/AVAS has not been run.",
+      "geometry_file": "geometries/co2-carbonyl.xyz",
+      "reference_energy_Eh": -3516.24319296,
+      "charge": 0,
+      "spin_evidence": "2007 original study ic070278t identifies singlet diradical character; supports neutral-singlet preparation, but 2019 SI does not explicitly label its root.",
+      "spin_source": "https://pubs.acs.org/doi/10.1021/ic070278t",
+      "avas_geometry_file": "geometries/co2-carbonyl-avas.xyz"
+    },
+    {
+      "system": "FeCl3",
+      "multiplicity": 6,
+      "state": "6A1prime in D3h; table labels 6Ag in an Abelian subgroup",
+      "cas": [
+        [
+          9,
+          12
+        ],
+        [
+          15,
+          15
+        ]
+      ],
+      "basis": {
+        "Fe": "cc-pVTZ",
+        "Cl": "cc-pV(T+d)Z"
+      },
+      "avas_targets": "Fe 3d,4d",
+      "avas_thresholds": [
+        0.3,
+        0.1
+      ],
+      "geometry_source": "2019 paper supplementary material, planar geometry",
+      "unresolved": "Geometry verified; match neutral electron count, basis conventions, integral approximation and spatial-symmetry treatment.",
+      "geometry_file": "geometries/fecl3.xyz",
+      "reference_energies_Eh": [
+        -2641.23932176,
+        -2641.25488483
+      ]
+    },
+    {
+      "system": "Al4O2",
+      "cas": [
+        12,
+        12
+      ],
+      "basis": "aug-cc-pVDZ",
+      "point_group": "Cs",
+      "active_irreps": "8 a-prime, 4 a-double-prime",
+      "multiplicity": null,
+      "avas_targets": "Both oxygen 2p shells; Al1 3pz; Al2 and Al3 3px,3pz",
+      "avas_threshold": 0.4,
+      "geometry_source": "2019 paper supplementary material",
+      "branch_warning": "Adding Al1 3py to AVAS targets gives a different CAS(12,12) minimum 17 mEh lower in the paper",
+      "unresolved": "Geometry and atom labels verified; SI does not explicitly label multiplicity. Confirm neutral singlet/state and common spatial-symmetry treatment before running.",
+      "geometry_file": "geometries/al4o2.xyz",
+      "reference_energy_Eh": -1117.34334554,
+      "alternative_reference_energy_Eh": -1117.36039759
+    }
+  ],
+  "comparison_requirements": [
+    "One shared initial orbital frame per matched NEO/PySCF calculation; no independent guess generation",
+    "Match Cartesian versus spherical AO functions, Hamiltonian, electron count, core treatment and integral approximation",
+    "A C1 native run is not an exact reproduction of a symmetry-restricted literature state; resolve both solvers' common space before running",
+    "AVAS radial reference orbitals are part of the initial-guess specification; thresholds alone do not reproduce them",
+    "Assess carrier and workspace memory before large-CAS cases",
+    "Do not submit any jobs without the user's next instruction"
+  ],
+  "supplement_files": [
+    "sources/Supplementary_Material.pdf",
+    "/home/txia/.codex/attachments/638795f2-7539-4489-8621-0ffeb65f0031/jp056791e_si_001.pdf"
+  ],
+  "input_preparation": {
+    "status": "scripts prepared, no numerical orbitals generated",
+    "exporter": "export_shared.py",
+    "pyscf": "pyscf_shared.py",
+    "scope": "C1 matched comparison; not symmetry-restricted reproduction of the literature",
+    "blocked_by": [
+      "Cu (16,18)->(16,14) selection is not specified unambiguously",
+      "No HF/AVAS preparation authorized on compute nodes yet"
+    ],
+    "note": "Export requires one approved Cartesian MO frame, checkpoint, matching Gaussian basis and geometry; generates both input.xmi and initial_mo.npy from that one frame."
+  }
+}

@@ -15,6 +15,12 @@ set(XMVB_VBSCF_DETERMINANT_SOURCES
 )
 
 set(XMVB_VBSCF_STRUCTURE_SOURCES
+  vbscf/structures/spinor/strings.cpp
+  vbscf/structures/spinor/sigma.cpp
+  vbscf/structures/spinor/transform.cpp
+  vbscf/structures/spinor/basis.cpp
+  vbscf/structures/spinor/action.cpp
+  vbscf/structures/analysis/spin.cpp
   vbscf/structures/assembly/action.cpp
   vbscf/structures/assembly/hamiltonian_overlap.cpp
   vbscf/structures/reference/overlap.cpp
@@ -22,6 +28,8 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/evaluation/evaluator.cpp
   vbscf/structures/expansion/expander.cpp
   vbscf/structures/orthogonal_ci/exterior_transform.cpp
+  vbscf/structures/orthogonal_ci/metric.cpp
+  vbscf/structures/overlap/representation.cpp
   vbscf/structures/orthogonal_ci/integrals.cpp
   vbscf/structures/orthogonal_ci/planner.cpp
   vbscf/structures/orthogonal_ci/sigma.cpp
@@ -31,13 +39,18 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
 )
 
 set(XMVB_VBSCF_ORBITAL_SOURCES
+  vbscf/orbitals/spinor/frame.cpp
   vbscf/orbitals/preparation/preparer.cpp
+  vbscf/orbitals/preparation/overlap_pullback.cpp
   vbscf/orbitals/pullback/operator.cpp
   vbscf/orbitals/gauge/localized.cpp
   vbscf/orbitals/charts/partition.cpp
   vbscf/orbitals/charts/canonicalization.cpp
   vbscf/orbitals/charts/support_adapter.cpp
   vbscf/orbitals/charts/chart.cpp
+  vbscf/orbitals/charts/whitening.cpp
+  vbscf/orbitals/charts/raw.cpp
+  vbscf/orbitals/charts/rotation.cpp
   vbscf/orbitals/charts/layout.cpp
   vbscf/orbitals/charts/physical_metric.cpp
   vbscf/orbitals/gauge/support_preserving.cpp
@@ -47,6 +60,7 @@ set(XMVB_VBSCF_AO_INTEGRAL_SOURCES
   vbscf/integrals/ao/one_electron/backpropagator.cpp
   vbscf/integrals/ao/one_electron/builder.cpp
   vbscf/integrals/ao/one_electron/direct_operator.cpp
+  vbscf/integrals/ao/one_electron/rows.cpp
   vbscf/integrals/ao/one_electron/ri_operator.cpp
   vbscf/integrals/ao/libcint/validation.cpp
   vbscf/integrals/ao/ri/cache.cpp
@@ -60,11 +74,13 @@ set(XMVB_VBSCF_ACTIVE_INTEGRAL_SOURCES
   vbscf/integrals/active/two_electron/construction/builder.cpp
   vbscf/integrals/active/two_electron/construction/kernel.cpp
   vbscf/integrals/active/two_electron/response/adjoint.cpp
+  vbscf/integrals/active/two_electron/response/exchange.cpp
   vbscf/integrals/active/two_electron/response/directional.cpp
   vbscf/integrals/active/two_electron/response/ri.cpp
   vbscf/integrals/active/two_electron/transformation/pair_transforms.cpp
   vbscf/integrals/active/two_electron/transformation/packed_pair_map.cpp
   vbscf/integrals/active/two_electron/transformation/ao_pair_operator.cpp
+  vbscf/integrals/active/two_electron/transformation/generated_rows.cpp
   vbscf/integrals/active/two_electron/construction/ri_builder.cpp
   vbscf/integrals/active/preparation/space.cpp
   vbscf/integrals/active/two_electron/construction/indexer.cpp
@@ -86,6 +102,7 @@ set(XMVB_VBSCF_DERIVATIVE_SOURCES
   vbscf/derivatives/hessian/exact/ao_one_electron.cpp
   vbscf/derivatives/hessian/exact/operator.cpp
   vbscf/derivatives/hessian/context/response_cache.cpp
+  vbscf/derivatives/hessian/context/metric.cpp
     vbscf/derivatives/hessian/responses/active_space/integral_direction.cpp
     vbscf/derivatives/hessian/responses/active_space/local_tile_accumulator.cpp
   vbscf/derivatives/hessian/responses/active_space/outer_response.cpp
@@ -109,9 +126,13 @@ set(XMVB_VBSCF_DERIVATIVE_SOURCES
 
 set(XMVB_VBSCF_DIAGNOSTIC_SOURCES
   vbscf/diagnostics/orbitals/chart_audit.cpp
+  vbscf/diagnostics/orbitals/ciah_keyframe.cpp
+  vbscf/diagnostics/orbitals/step_geometry.cpp
 )
 
 set(XMVB_VBSCF_OPTIMIZATION_SOURCES
+  vbscf/optimization/coupled/ci_transport.cpp
+  vbscf/optimization/backends/ciah.cpp
   vbscf/optimization/backends/lbfgs.cpp
   vbscf/optimization/backends/neo.cpp
   vbscf/optimization/backends/projected_gradient.cpp
@@ -120,12 +141,15 @@ set(XMVB_VBSCF_OPTIMIZATION_SOURCES
   vbscf/optimization/globalization/line_search.cpp
   vbscf/optimization/driver/session.cpp
   vbscf/optimization/neo/coordinates.cpp
+  vbscf/optimization/neo/ciah.cpp
+  vbscf/optimization/neo/curvature.cpp
   vbscf/optimization/neo/globalization.cpp
   vbscf/optimization/neo/problem.cpp
-  vbscf/optimization/neo/response_solver.cpp
   vbscf/optimization/neo/solver.cpp
   vbscf/optimization/preconditioners/block_inverse_bfgs.cpp
   vbscf/optimization/preconditioners/hessian_diagonal.cpp
+  vbscf/optimization/preconditioners/density.cpp
+  vbscf/optimization/preconditioners/coarse.cpp
   vbscf/optimization/preconditioners/shifted_metric.cpp
   vbscf/optimization/preconditioners/transported_lbfgs.cpp
   vbscf/optimization/objective/reduced_hvp.cpp

@@ -1,4 +1,6 @@
 #include "vbscf/optimization/objective/function.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
+#include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 #include <stdexcept>
 #include <utility>
@@ -139,6 +141,7 @@ VbScfObjective::evaluate_trial_energy_with_initial_eigenvectors(
     bool canonicalize_sparse_gauge,
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors,
     bool complete_external_gradient) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::TrialForward);
   if (input_.tnvb.enabled && !parameter_vector.allFinite()) {
     throw std::invalid_argument("TNVB trial coordinates are nonfinite");
   }
@@ -202,6 +205,7 @@ VbScfCoupledKeyframeEvaluation
 VbScfObjective::evaluate_coupled_keyframe(
     const Eigen::VectorXd& parameter_vector,
     const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const {
+  const auto start = std::chrono::steady_clock::now();
   OrbitalPreparationInput trial_orbitals = input_.orbital_preparation_input;
   layout_.unpack(parameter_vector, &trial_orbitals);
   ScopedTrialOrbitals trial_scope(&input_, std::move(trial_orbitals));
@@ -218,12 +222,20 @@ VbScfObjective::evaluate_coupled_keyframe(
   result.normalized_structure_coefficients =
       std::move(fixed.normalized_coefficients);
   result.structure_residuals = std::move(fixed.structure_residuals);
+  result.coefficient_gradient = std::move(fixed.coefficient_gradient);
   result.energy = fixed.gradient.scf_result.total_energy;
+  diagnostics::neo_trace("ciah_keyframe_cost",
+      "seconds=%.17g,active=%.17g,two_electron_backward=%.17g,ao_backward=%.17g,orbital_backward=%.17g",
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
+      fixed.gradient.active_space_gradient_wall_time_seconds,
+      fixed.gradient.active_space_two_electron_backpropagation_wall_time_seconds,
+      fixed.gradient.ao_effective_one_electron_backpropagation_wall_time_seconds,
+      fixed.gradient.orbital_backpropagation_wall_time_seconds);
   return result;
 }
 
 VbScfObjective::TrialEvaluation
-VbScfObjective::evaluate_trial_with_structure_guess(
+VbScfObjective::evaluate_trial_energy_with_structure_guess(
     const Eigen::VectorXd& parameter_vector,
     const Eigen::Ref<const Eigen::MatrixXd>& selected_structure_coefficients) const {
   if (gradient_result_.second_order_context == nullptr) {
@@ -248,14 +260,12 @@ VbScfObjective::evaluate_trial_with_structure_guess(
     initial_eigenvectors.col(root) =
         selected_structure_coefficients.col(static_cast<Eigen::Index>(state));
   }
-  TrialEvaluation evaluation =
-      evaluate_trial_energy_with_initial_eigenvectors(
-          parameter_vector, true, initial_eigenvectors);
-  complete_trial(&evaluation);
-  return evaluation;
+  return evaluate_trial_energy_with_initial_eigenvectors(
+      parameter_vector, true, initial_eigenvectors);
 }
 
 void VbScfObjective::complete_trial(TrialEvaluation* evaluation) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::TrialGradient);
   if (evaluation == nullptr || !evaluation->valid ||
       evaluation->gradient_ready ||
       (!evaluation->forward_evaluation.has_value() && !evaluation->electronic_forward)) {

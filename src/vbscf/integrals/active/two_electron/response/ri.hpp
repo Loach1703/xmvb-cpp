@@ -10,28 +10,32 @@
 namespace xmvb::vb {
 
 /**
- * @brief Borrowed accepted-point data for factor-native RI 2e responses.
+ * @brief Accepted-point data for factor-native RI 2e responses.
  *
- * The cache retains only the molecule-static whitened AO-pair factors, the
- * accepted AO-by-active coefficient matrix, and the accepted active-pair
- * factors `B = L T(C)`. The factorization and active-space result supplied to
- * the builder must outlive every use of this cache.
+ * The cache borrows molecule-static whitened AO-pair factors, accepted
+ * AO-by-active coefficients, and accepted active-pair factors `B = L T(C)`.
+ * It owns only a bounded one-index transform, never AO-pair adjoints or an
+ * orbital Hessian. Borrowed data must outlive every use of this cache.
  */
 struct RiActiveTwoElectronResponseCache {
   int n_basis_functions = 0;
   int n_active_orbitals = 0;
   int n_auxiliary_functions = 0;
-  std::vector<int> ao_pair_first_indices;
-  std::vector<int> ao_pair_second_indices;
   std::vector<int> active_pair_first_indices;
   std::vector<int> active_pair_second_indices;
   const Eigen::MatrixXd* metric_whitened_ao_pair_factors = nullptr;
   const Eigen::MatrixXd* accepted_active_coefficients = nullptr;
   const Eigen::MatrixXd* accepted_active_pair_factors = nullptr;
+  /** @brief Bounded one-index factors, row `a*n_aux+A`, column AO `mu`.
+   * Empty means the identical transform is generated in auxiliary tiles.
+   */
+  Eigen::MatrixXd accepted_one_index_factors;
+  /** @brief Resource-derived auxiliary tile width, unrelated to accuracy. */
+  int auxiliary_tile_size = 0;
 };
 
 /**
- * @brief Builds and validates a borrowed factor-native RI response cache.
+ * @brief Builds a bounded one-index RI response cache with borrowed factors.
  *
  * @param ao_ri_factorization Molecule-static whitened AO-pair factors.
  * @param accepted_active_space_result Accepted RI active-space result carrying
@@ -56,9 +60,8 @@ Eigen::MatrixXd compute_ri_active_pair_factor_directional_derivative(
 /**
  * @brief Forms several active-pair factor directions in one RI transform.
  *
- * The packed-map path evaluates `L [delta T_1 ... delta T_b]` as one wide
- * matrix product. The direct-transform path shares the accepted `L_A C`
- * transform across all directions.
+ * All directions share the accepted `L_A C` transform. No AO-pair by
+ * active-pair directional map is formed.
  */
 std::vector<Eigen::MatrixXd>
 compute_ri_active_pair_factor_directional_derivative_batch(

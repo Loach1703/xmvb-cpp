@@ -1,0 +1,16 @@
+case	input_source	orbital_type
+F2	ciah-preconditioners-1247579/F2/input.xmi	HAO
+241	ciah-preconditioners-1247579/241/input.xmi	HAO
+240	ciah-preconditioners-1247579/240/input.xmi	HAO
+MnF2	ciah-preconditioners-1247579/MnF2/input.xmi	HAO
+FeCl2	ciah-preconditioners-1247579/FeCl2/input.xmi	OEO
+7975	preconditioner-suite-inputs/7975_vb.xmi	HAO
+7963	preconditioner-suite-inputs/7963_vb.xmi	HAO
+YAMSAI	preconditioner-suite-inputs/csd_YAMSAI_vb.xmi	HAO
+NEGPIA	preconditioner-suite-inputs/csd_NEGPIA_vb.xmi	HAO
+QOCGUM	preconditioner-suite-inputs/csd_QOCGUM_vb.xmi	HAO
+67970	preconditioner-suite-inputs/67970_vb.xmi	HAO
+CERRAS	preconditioner-suite-inputs/csd_CERRAS_vb.xmi	HAO
+LOFLEA	preconditioner-suite-inputs/csd_LOFLEA_vb.xmi	HAO
+10698	preconditioner-suite-inputs/10698_VBSCF.xmi	HAO
+F2-OEO	preconditioner-suite-inputs/F2_OEO.xmi	OEO

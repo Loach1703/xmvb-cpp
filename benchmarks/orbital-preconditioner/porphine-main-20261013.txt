@@ -1,0 +1,42 @@
+Fe porphine convergence submission from the committed mainline
+
+Repository mainline is master, not main. Validated response integration
+5f1e2dcb was already on master; no experiment branch needed merging.
+14140b4a adds submission scripts only, with no src/tests/CMake changes.
+Rejected experimental branches were not merged. Existing uncommitted local
+.gitignore and RI source/test edits remain untouched and are not included.
+GitHub SSH lookup failed; no remote synchronization is claimed.
+
+Build/unit Slurm job: 1251307, Hanhai22.
+Source: git archive 5f1e2dcb src tests cmake CMakeLists.txt.
+Archive SHA256: f0f9559c1424741c4f2894aeeb6f37f29600e61cf077cbbee7dbcf29020e0031.
+The execution mirror had two differing tracked src files (audit_orbital_gradient
+and ri_operator); the committed archive replaces them before rebuilding.
+Build and tests run on a compute node; the main executable is frozen only
+after all eight test invocations succeed.
+
+Convergence array: 1251314, dependency afterok:1251307, invalid dependency kills
+the array rather than letting a failed build launch calculations.
+1251314_0: singlet, nmul=1.
+1251314_1: triplet, nmul=3.
+Both: original inputs/{spin}/input.xmi (read occupied-preserving ROHF frame),
+not optimized endpoint restarts; CAS(8,11), OEO, cc-pVDZ, exact Libcint,
+NEO/CIAH (iscf=9), Davidson, analytic Hessian diagonal, gradient 1e-3,
+energy 1e-7 Eh, accepted exact-exchange memory budget 256 MiB.
+No new PySCF or historical executable runs submitted.
+
+Each run uses 32 explicitly bound OpenMP cores, BLAS=1, 192 GiB memory request,
+and an exclusive node. The two array elements may run concurrently. Exclusive
+allocation reserves the whole node but the application/srun uses 32 cores.
+Original itmax=1000 is retained; no 4/30-step diagnostic cap. Scheduler wall
+limit is the partition maximum, 15 days, not a convergence criterion.
+
+Artifact root on Hanhai22:
+/home/guqqgroup/xiatao/xmvb-runs/shared-response-20261012
+Build: porphine-main-build-1251307
+Runs: porphine-main-1251314/{singlet,triplet}
+Output, neo.tsv, resource.time, run.exit, input/binary hashes, build flags and
+verbose srun binding masks are retained. Native runs disable scalar diagnostic
+audits and phase instrumentation; normal NEO iteration counters remain on.
+
+This is a submission record, not a completed-convergence result.

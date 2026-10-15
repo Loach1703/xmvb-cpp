@@ -10,13 +10,14 @@
 #include "vbscf/optimization/driver/result.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
+#include "vbscf/optimization/trust_region/retraction.hpp"
 
 namespace xmvb::vb::optimizer_detail {
 
-OrbitalChart build_orbital_chart(
+OrbitalChart build_orbital_geometry(
     const VbScfObjective& objective,
     const SparseParameterLayout& parameter_view,
-    OrbitalPreconditioner preconditioner) {
+    OrbitalChart::Coordinates coordinates) {
   const auto& orbital_preparation_input =
       objective.input().orbital_preparation_input;
   const auto& orbital_preparation_result =
@@ -33,12 +34,23 @@ OrbitalChart build_orbital_chart(
   const int n_occupied_orbitals =
       n_inactive_doubly_occupied_orbitals +
       orbital_preparation_input.n_active_orbitals;
+  return OrbitalChart(
+      orbital_preparation_input,
+      parameter_view,
+      orbital_preparation_result.auxiliary_orbital_matrix.leftCols(n_occupied_orbitals),
+      normalized_orbital_matrix,
+      nullptr, false, objective.input().complete_active_space, nullptr, coordinates);
+}
+
+void prepare_orbital_curvature(
+    const VbScfObjective& objective, OrbitalChart& chart,
+    OrbitalPreconditioner preconditioner, bool need_ah_mapping) {
   if (preconditioner == OrbitalPreconditioner::Automatic) {
     throw std::invalid_argument(
         "orbital-chart construction requires a resolved preconditioner");
   }
   std::optional<AnalyticOrbitalDiagonal> hessian_diagonal;
-  if (preconditioner == OrbitalPreconditioner::HessianDiagonal) {
+  if (preconditioner == OrbitalPreconditioner::HessianDiagonal || need_ah_mapping) {
     const auto& context = objective.second_order_context();
     if (!context) {
       throw std::invalid_argument(
@@ -52,15 +64,45 @@ OrbitalChart build_orbital_chart(
           ? &objective.gradient_result().ao_effective_one_electron_result
                  .ao_effective_h1e
           : nullptr;
-  return OrbitalChart(
-      orbital_preparation_input,
-      parameter_view,
-      orbital_preparation_result.auxiliary_orbital_matrix.leftCols(n_occupied_orbitals),
-      normalized_orbital_matrix,
-      one_electron,
-      false,
-      objective.input().complete_active_space,
-      hessian_diagonal ? &*hessian_diagonal : nullptr);
+  chart.set_curvature(
+      objective.input().orbital_preparation_input, one_electron,
+      hessian_diagonal ? &*hessian_diagonal : nullptr,
+      need_ah_mapping && preconditioner == OrbitalPreconditioner::HessianDiagonal
+          ? OrbitalChart::CurvatureUse::AugmentedHessian
+          : OrbitalChart::CurvatureUse::PositiveBlock);
+}
+
+OrbitalChart build_orbital_chart(
+    const VbScfObjective& objective,
+    const SparseParameterLayout& parameter_view,
+    OrbitalPreconditioner preconditioner,
+    bool need_ah_mapping) {
+  auto chart = build_orbital_geometry(objective, parameter_view);
+  prepare_orbital_curvature(objective, chart, preconditioner, need_ah_mapping);
+  return chart;
+}
+
+bool orbital_gradient_converged(
+    const VbScfObjective& objective,
+    const SparseParameterLayout& parameter_view,
+    const OrbitalChart& chart,
+    const Eigen::VectorXd& reduced_gradient,
+    double tolerance) {
+  if (chart.uses_explicit_whitening()) {
+    if (gradient_infinity_norm(reduced_gradient) >= tolerance) return false;
+  } else {
+    // ||g_white||_infinity >= ||g_white||_2/sqrt(d). Reject obviously
+    // unconverged points cheaply, then use the EXACT established reference
+    // infinity criterion. This does not substitute a different threshold.
+    if (chart.coordinate_dual_norm(reduced_gradient) >=
+        tolerance * std::sqrt(static_cast<double>(chart.reduced_size()))) return false;
+    if (chart.reference_gradient_inf_norm(reduced_gradient) >= tolerance)
+      return false;
+  }
+  if (!chart.uses_active_subspace_gauge()) return true;
+  const NonredundantRetractionMetric metric(
+      chart, parameter_view, objective.input().orbital_preparation_input);
+  return metric.dual_norm(reduced_gradient) < tolerance;
 }
 
 void sync_result_from_objective(
@@ -78,7 +120,8 @@ void record_accepted_iteration_snapshot(
     const VbScfOptimizerOptions& options,
     VbScfOptimizerResult* result,
     const TnhvpIterationRecord* tnhvp,
-    const Eigen::VectorXd* reduced_gradient) {
+    const Eigen::VectorXd* reduced_gradient,
+    const OrbitalChart* chart) {
   if (!options.retain_accepted_iteration_trace && !options.accepted_iteration_callback) {
     return;
   }
@@ -106,20 +149,27 @@ void record_accepted_iteration_snapshot(
   snapshot.sparse_orbital_energy_gradient_l2_norm =
       std::sqrt(snapshot.sparse_orbital_energy_gradient_l2_norm);
   Eigen::VectorXd computed_reduced_gradient;
+  std::optional<OrbitalChart> snapshot_chart;
   if (reduced_gradient == nullptr) {
     const SparseParameterLayout parameter_view(
         objective->input().orbital_preparation_input);
-    const OrbitalChart chart = build_orbital_chart(*objective, parameter_view);
+    // A gradient snapshot requires the quotient pullback only. Do not build
+    // one-electron curvature blocks that no snapshot consumer uses.
+    snapshot_chart.emplace(build_orbital_geometry(*objective, parameter_view,
+        options.backend == VbScfOptimizerBackend::Neo
+            ? OrbitalChart::Coordinates::Unwhitened : OrbitalChart::Coordinates::Whitened));
+    chart = &*snapshot_chart;
     const Eigen::VectorXd packed_gradient = parameter_view.gather_from_full(
         gradient_result.sparse_orbital_energy_gradient);
     computed_reduced_gradient =
-        chart.project_gradient(packed_gradient).reduced_gradient;
+        chart->project_gradient(packed_gradient).reduced_gradient;
     reduced_gradient = &computed_reduced_gradient;
   }
   snapshot.has_projected_gradient = true;
   snapshot.projected_gradient_inf_norm =
       gradient_infinity_norm(*reduced_gradient);
-  snapshot.projected_gradient_l2_norm = reduced_gradient->norm();
+  snapshot.projected_gradient_l2_norm = chart
+      ? chart->coordinate_dual_norm(*reduced_gradient) : reduced_gradient->norm();
   if (include_full_payload) {
     snapshot.orbital_value_table.assign(
         objective->input().orbital_preparation_input.orbital_value_table.begin(),

@@ -1,0 +1,3 @@
+Euclidean quotient and normalization derivatives: passed
+Stored frozen tail, finite differences, scaling and rotation: passed
+Empty tangent and invalid norm: passed

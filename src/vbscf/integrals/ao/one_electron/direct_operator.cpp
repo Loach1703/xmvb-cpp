@@ -9,22 +9,12 @@
 #include <omp.h>
 #endif
 
+#include "core/openmp.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
+#include "vbscf/diagnostics/performance/workers.hpp"
+
 namespace xmvb::vb {
 namespace {
-
-struct H1eTerms {
-  int ij;
-  int kl;
-  int ik;
-  int jl;
-  int il;
-  int jk;
-  int lj;
-  int ki;
-  int kj;
-  int li;
-  double value;
-};
 
 std::size_t matrix_size(const AoIntegralInput& ao) {
   const int n_bf = ao.n_basis_functions;
@@ -52,127 +42,279 @@ std::size_t matrix_size(const AoIntegralInput& ao) {
   return n * n;
 }
 
-int matrix_index(int row, int column, int n_bf) {
-  return column * n_bf + row;
-}
-
-H1eTerms make_terms(
-    const AoIntegralInput& ao,
-    std::size_t integral_index) {
+/**
+ * @brief Contracts contiguous unique-integral groups with a common left pair.
+ *
+ * CSR references are storage-ordered, so each group reuses its left AO indices
+ * and Coulomb source. Compact streams need not be ordered: singleton groups
+ * obey the same contraction. Only two scalar Coulomb sums are retained; ERIs
+ * and density matrices stay shared, with no decoded-stencil cache.
+ */
+template <bool Forward, bool Transpose>
+void contract_integrals(
+    const AoIntegralInput& ao, std::size_t begin, std::size_t end,
+    const double* source, const double* adjoint,
+    double* forward, double* transpose) {
   const AoPairGraph& graph = ao.pair_graph;
-  const AoPairIntegral eri = graph.integral(integral_index);
   const int n_bf = ao.n_basis_functions;
-  const int i = graph.pair_first[eri.left_pair];
-  const int j = graph.pair_second[eri.left_pair];
-  const int k = graph.pair_first[eri.right_pair];
-  const int l = graph.pair_second[eri.right_pair];
-  double value = eri.value;
-  if (i == j) {
-    value *= 0.5;
+  const bool compact = graph.has_compact_integral_stream();
+  while (begin < end) {
+    const int left = graph.integral_rows[begin];
+    const int i = graph.pair_first[left];
+    const int j = graph.pair_second[left];
+    const int i_column = i * n_bf;
+    const int j_column = j * n_bf;
+    const int ij = j_column + i;
+    const double left_scale = i == j ? 0.5 : 1.0;
+    double source_ij = 0.0, adjoint_ij = 0.0;
+    if constexpr (Forward) source_ij = source[ij];
+    if constexpr (Transpose) adjoint_ij = adjoint[ij];
+    double forward_coulomb = 0.0, transpose_coulomb = 0.0;
+    do {
+      const std::size_t edge = compact ? begin : graph.integral_edges[begin];
+      const int right = compact ? graph.integral_columns[edge] : graph.columns[edge];
+      const int k = graph.pair_first[right];
+      const int l = graph.pair_second[right];
+      double value = (compact ? graph.integral_values[edge] : graph.values[edge]) * left_scale;
+      if (k == l) value *= 0.5;
+      if (left == right) value *= 0.5;
+      const int k_column = k * n_bf;
+      const int l_column = l * n_bf;
+      const int kl = l_column + k;
+      const int ik = k_column + i, jl = l_column + j;
+      const int il = l_column + i, jk = k_column + j;
+      const int lj = j_column + l, ki = i_column + k;
+      const int kj = j_column + k, li = i_column + l;
+      const double coulomb = 4.0 * value;
+      if constexpr (Forward) {
+        forward_coulomb += coulomb * source[kl];
+        forward[kl] += coulomb * source_ij;
+        forward[ik] -= value * source[lj];
+        forward[jl] -= value * source[ki];
+        forward[il] -= value * source[kj];
+        forward[jk] -= value * source[li];
+      }
+      if constexpr (Transpose) {
+        transpose_coulomb += coulomb * adjoint[kl];
+        transpose[kl] += coulomb * adjoint_ij;
+        transpose[lj] -= value * adjoint[ik];
+        transpose[ki] -= value * adjoint[jl];
+        transpose[kj] -= value * adjoint[il];
+        transpose[li] -= value * adjoint[jk];
+      }
+      ++begin;
+    } while (begin < end && graph.integral_rows[begin] == left);
+    // Exchange terms can also touch ij. Keeping the Coulomb sum separate is
+    // algebraically exact even for coincident indices; only sum order changes.
+    if constexpr (Forward) forward[ij] += forward_coulomb;
+    if constexpr (Transpose) transpose[ij] += transpose_coulomb;
   }
-  if (k == l) {
-    value *= 0.5;
-  }
-  if (i == k && j == l) {
-    value *= 0.5;
-  }
+}
 
-  return {
-      .ij = matrix_index(i, j, n_bf),
-      .kl = matrix_index(k, l, n_bf),
-      .ik = matrix_index(i, k, n_bf),
-      .jl = matrix_index(j, l, n_bf),
-      .il = matrix_index(i, l, n_bf),
-      .jk = matrix_index(j, k, n_bf),
-      .lj = matrix_index(l, j, n_bf),
-      .ki = matrix_index(k, i, n_bf),
-      .kj = matrix_index(k, j, n_bf),
-      .li = matrix_index(l, i, n_bf),
-      .value = value,
+/** @brief Thread-ordered reduction; output elements are owned by distinct workers. */
+double sum_element(
+    const std::vector<std::vector<double>>& partial,
+    std::size_t index,
+    int team_size) {
+  double sum = 0.0;
+  for (int thread = 0; thread < team_size; ++thread)
+    sum += partial[thread][index];
+  return sum;
+}
+
+/** @brief Interleaved symmetric channels share all integral and AO decoding. */
+void contract_symmetric_integrals(
+    const AoIntegralInput& ao, std::size_t begin, std::size_t end,
+    const double* source, double* target) {
+  using ConstChannels = Eigen::Map<const Eigen::Array2d>;
+  using Channels = Eigen::Map<Eigen::Array2d>;
+  const auto& graph = ao.pair_graph;
+  const int n_bf = ao.n_basis_functions;
+  const bool compact = graph.has_compact_integral_stream();
+  while (begin < end) {
+    const int left = graph.integral_rows[begin];
+    const int i = graph.pair_first[left], j = graph.pair_second[left];
+    const int ij = j * n_bf + i;
+    const double scale = i == j ? 0.5 : 1.0;
+    const Eigen::Array2d source_ij = ConstChannels(source + 2 * ij);
+    Eigen::Array2d coulomb = Eigen::Array2d::Zero();
+    do {
+      const std::size_t edge = compact ? begin : graph.integral_edges[begin];
+      const int right = compact ? graph.integral_columns[edge] : graph.columns[edge];
+      const int k = graph.pair_first[right], l = graph.pair_second[right];
+      double value = (compact ? graph.integral_values[edge] : graph.values[edge]) * scale;
+      if (k == l) value *= 0.5;
+      if (left == right) value *= 0.5;
+      const int kl = l * n_bf + k;
+      const int ik = k * n_bf + i, jl = l * n_bf + j;
+      const int il = l * n_bf + i, jk = k * n_bf + j;
+      const int lj = j * n_bf + l, ki = i * n_bf + k;
+      const int kj = j * n_bf + k, li = i * n_bf + l;
+      coulomb += (4.0 * value) * ConstChannels(source + 2 * kl);
+      Channels(target + 2 * kl) += (4.0 * value) * source_ij;
+      Channels(target + 2 * ik) -= value * ConstChannels(source + 2 * lj);
+      Channels(target + 2 * jl) -= value * ConstChannels(source + 2 * ki);
+      Channels(target + 2 * il) -= value * ConstChannels(source + 2 * kj);
+      Channels(target + 2 * jk) -= value * ConstChannels(source + 2 * li);
+      ++begin;
+    } while (begin < end && graph.integral_rows[begin] == left);
+    Channels(target + 2 * ij) += coulomb;
+  }
+}
+
+/** @brief Common-left-pair stencil, vectorized over interleaved batch channels. */
+template<bool Packed>
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+__attribute__((target_clones("avx512f", "avx2", "default")))
+#endif
+void contract_symmetric_block(
+    const AoIntegralInput& ao, std::size_t begin, std::size_t end,
+    const double* source, double* target, Eigen::Index width, double* coulomb) {
+  const auto& graph = ao.pair_graph;
+  const int n_bf = ao.n_basis_functions;
+  const bool compact = graph.has_compact_integral_stream();
+  const auto output = [&](int row,int column) -> Eigen::Index {
+    if constexpr (Packed) {
+      const Eigen::Index hi=std::max(row,column),lo=std::min(row,column);
+      return (hi*(hi+1)/2+lo)*width;
+    } else return (column*n_bf+row)*width;
   };
-}
-
-inline void accumulate_forward(
-    const H1eTerms& t,
-    const double* source,
-    double* target) {
-  const double coulomb = 4.0 * t.value;
-  target[t.ij] += coulomb * source[t.kl];
-  target[t.kl] += coulomb * source[t.ij];
-  target[t.ik] -= t.value * source[t.lj];
-  target[t.jl] -= t.value * source[t.ki];
-  target[t.il] -= t.value * source[t.kj];
-  target[t.jk] -= t.value * source[t.li];
-}
-
-inline void accumulate_transpose(
-    const H1eTerms& t,
-    const double* adjoint,
-    double* target) {
-  const double coulomb = 4.0 * t.value;
-  target[t.kl] += coulomb * adjoint[t.ij];
-  target[t.ij] += coulomb * adjoint[t.kl];
-  target[t.lj] -= t.value * adjoint[t.ik];
-  target[t.ki] -= t.value * adjoint[t.jl];
-  target[t.kj] -= t.value * adjoint[t.il];
-  target[t.li] -= t.value * adjoint[t.jk];
-}
-
-int active_threads(int requested, std::size_t n_integrals) {
-  if (requested <= 0) {
-    throw std::invalid_argument("AO-H1E thread count must be positive");
-  }
-  if (n_integrals == 0) {
-    return 1;
-  }
-  return std::min(requested, static_cast<int>(n_integrals));
-}
-
-void reduce(
-    std::vector<std::vector<double>> partial,
-    std::vector<double>* result) {
-  if (partial.size() == 1) {
-    *result = std::move(partial.front());
-    return;
-  }
-  result->assign(partial.front().size(), 0.0);
-  for (const auto& local : partial) {
-    for (std::size_t index = 0; index < result->size(); ++index) {
-      (*result)[index] += local[index];
-    }
+  while (begin < end) {
+    const int left = graph.integral_rows[begin];
+    const int i = graph.pair_first[left], j = graph.pair_second[left];
+    const Eigen::Index ij = (j * n_bf + i) * width;
+    const double scale = i == j ? 0.5 : 1.0;
+    std::fill_n(coulomb, width, 0.0);
+    do {
+      const std::size_t edge = compact ? begin : graph.integral_edges[begin];
+      const int right = compact ? graph.integral_columns[edge] : graph.columns[edge];
+      const int k = graph.pair_first[right], l = graph.pair_second[right];
+      double value = (compact ? graph.integral_values[edge] : graph.values[edge]) * scale;
+      if (k == l) value *= 0.5;
+      if (left == right) value *= 0.5;
+      const Eigen::Index kl = (l * n_bf + k) * width;
+      const Eigen::Index lj = (j * n_bf + l) * width, ki = (i * n_bf + k) * width;
+      const Eigen::Index kj = (j * n_bf + k) * width, li = (i * n_bf + l) * width;
+      const Eigen::Index tkl=output(k,l),tik=output(i,k),tjl=output(j,l);
+      const Eigen::Index til=output(i,l),tjk=output(j,k);
+#pragma omp simd
+      for (Eigen::Index channel = 0; channel < width; ++channel) {
+        coulomb[channel] += (4.0 * value) * source[kl + channel];
+        target[tkl + channel] += (4.0 * value) * source[ij + channel];
+        target[tik + channel] -= value * source[lj + channel];
+        target[tjl + channel] -= value * source[ki + channel];
+        target[til + channel] -= value * source[kj + channel];
+        target[tjk + channel] -= value * source[li + channel];
+      }
+      ++begin;
+    } while (begin < end && graph.integral_rows[begin] == left);
+#pragma omp simd
+    for (Eigen::Index channel = 0; channel < width; ++channel)
+      target[output(i,j) + channel] += coulomb[channel];
   }
 }
 
 }  // namespace
 
+void apply_symmetric_ao_h1e_fused(
+    const double* source, const double* adjoint, const AoIntegralInput& ao,
+    int n_threads, AoH1eSymmetricWorkspace* workspace,
+    std::vector<double>* forward, std::vector<double>* transpose) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
+  if (source == nullptr || adjoint == nullptr || workspace == nullptr ||
+      forward == nullptr || transpose == nullptr)
+    throw std::invalid_argument("symmetric AO-H1E buffers must not be null");
+  const std::size_t size = matrix_size(ao);
+  const int n_bf = ao.n_basis_functions;
+  const std::size_t n_integrals = ao.pair_graph.integral_count();
+  n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = xmvb::openmp_chunk_size(n_integrals, n_threads);
+  workspace->sources.resize(size, 2);
+  workspace->partial.resize(n_threads);
+  forward->resize(size);
+  transpose->resize(size);
+  // Packing is only AO-sized work. Complete it before launching the team:
+  // avoid an extra work-sharing barrier for this small preparation loop.
+  for (Eigen::Index index = 0; index < static_cast<Eigen::Index>(size); ++index) {
+    workspace->sources(index, 0) = source[index];
+    workspace->sources(index, 1) = adjoint[index];
+  }
+  diagnostics::WorkerLoopTimes work(n_threads);
+#pragma omp parallel num_threads(n_threads)
+  {
+    int thread = 0, team_size = 1;
+#ifdef _OPENMP
+    thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
+#endif
+    auto& local = workspace->partial[thread];
+    local.setZero(size, 2);
+    work.start(thread);
+#pragma omp for schedule(dynamic, 1) nowait
+    for (std::size_t begin = 0; begin < n_integrals; begin += chunk)
+      contract_symmetric_integrals(ao, begin, std::min(begin + chunk, n_integrals),
+          workspace->sources.data(), local.data());
+    work.stop(thread);
+#pragma omp barrier
+#pragma omp for schedule(static) nowait
+    for (Eigen::Index pair = 0; pair < static_cast<Eigen::Index>(ao.pair_graph.pair_first.size()); ++pair) {
+      const Eigen::Index i = ao.pair_graph.pair_first[pair];
+      const Eigen::Index j = ao.pair_graph.pair_second[pair];
+      const Eigen::Index index = j * n_bf + i, partner = i * n_bf + j;
+      Eigen::Array2d sum = Eigen::Array2d::Zero();
+      for (int worker = 0; worker < team_size; ++worker) {
+        const auto& values = workspace->partial[worker];
+        sum += values.row(index).array().transpose();
+        sum += values.row(partner).array().transpose();
+      }
+      (*forward)[index] = sum[0];
+      (*forward)[partner] = sum[0];
+      (*transpose)[index] = 0.5 * sum[1];
+      (*transpose)[partner] = 0.5 * sum[1];
+    }
+  }
+  work.finish(diagnostics::Phase::AoH1eFused);
+}
+
 std::vector<double> apply_ao_h1e(
     const double* source,
     const AoIntegralInput& ao,
     int n_threads) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eForward);
   if (source == nullptr) {
     throw std::invalid_argument("AO-H1E source must not be null");
   }
   const std::size_t size = matrix_size(ao);
   const std::size_t n_integrals = ao.pair_graph.integral_count();
-  n_threads = active_threads(n_threads, n_integrals);
-  std::vector<std::vector<double>> partial(
-      n_threads, std::vector<double>(size, 0.0));
+  n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = xmvb::openmp_chunk_size(n_integrals, n_threads);
+  std::vector<std::vector<double>> partial(n_threads);
+  std::vector<double> result(size);
+  diagnostics::WorkerLoopTimes work(n_threads);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
+    int team_size = 1;
 #ifdef _OPENMP
     thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
 #endif
     auto& local = partial[thread];
-#pragma omp for schedule(static)
-    for (std::ptrdiff_t offset = 0;
-         offset < static_cast<std::ptrdiff_t>(n_integrals);
-         ++offset) {
-      accumulate_forward(make_terms(ao, offset), source, local.data());
+    local.assign(size, 0.0);
+    work.start(thread);
+#pragma omp for schedule(dynamic, 1) nowait
+    for (std::size_t begin = 0; begin < n_integrals; begin += chunk) {
+      contract_integrals<true, false>(
+          ao, begin, std::min(begin + chunk, n_integrals),
+          source, nullptr, local.data(), nullptr);
     }
+    work.stop(thread);
+#pragma omp barrier
+#pragma omp for schedule(static) nowait
+    for (std::size_t index = 0; index < size; ++index)
+      result[index] = sum_element(partial, index, team_size);
   }
-  std::vector<double> result;
-  reduce(std::move(partial), &result);
+  work.finish(diagnostics::Phase::AoH1eForward);
   return result;
 }
 
@@ -180,91 +322,137 @@ std::vector<double> apply_ao_h1e_transpose(
     const double* adjoint,
     const AoIntegralInput& ao,
     int n_threads) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eTranspose);
   if (adjoint == nullptr) {
     throw std::invalid_argument("AO-H1E adjoint must not be null");
   }
   const std::size_t size = matrix_size(ao);
   const std::size_t n_integrals = ao.pair_graph.integral_count();
-  n_threads = active_threads(n_threads, n_integrals);
-  std::vector<std::vector<double>> partial(
-      n_threads, std::vector<double>(size, 0.0));
+  n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = xmvb::openmp_chunk_size(n_integrals, n_threads);
+  std::vector<std::vector<double>> partial(n_threads);
+  std::vector<double> result(size);
+  diagnostics::WorkerLoopTimes work(n_threads);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
+    int team_size = 1;
 #ifdef _OPENMP
     thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
 #endif
     auto& local = partial[thread];
-#pragma omp for schedule(static)
-    for (std::ptrdiff_t offset = 0;
-         offset < static_cast<std::ptrdiff_t>(n_integrals);
-         ++offset) {
-      accumulate_transpose(make_terms(ao, offset), adjoint, local.data());
+    local.assign(size, 0.0);
+    work.start(thread);
+#pragma omp for schedule(dynamic, 1) nowait
+    for (std::size_t begin = 0; begin < n_integrals; begin += chunk) {
+      contract_integrals<false, true>(
+          ao, begin, std::min(begin + chunk, n_integrals),
+          nullptr, adjoint, nullptr, local.data());
     }
+    work.stop(thread);
+#pragma omp barrier
+#pragma omp for schedule(static) nowait
+    for (std::size_t index = 0; index < size; ++index)
+      result[index] = sum_element(partial, index, team_size);
   }
-  std::vector<double> result;
-  reduce(std::move(partial), &result);
+  work.finish(diagnostics::Phase::AoH1eTranspose);
   return result;
 }
 
-void apply_ao_h1e_fused(
-    const double* source,
-    const double* adjoint,
-    const AoIntegralInput& ao,
-    int n_threads,
-    AoH1eFusedWorkspace* workspace,
-    std::vector<double>* forward,
-    std::vector<double>* transpose) {
-  if (source == nullptr || adjoint == nullptr ||
-      workspace == nullptr || forward == nullptr || transpose == nullptr) {
-    throw std::invalid_argument("AO-H1E fused buffers must not be null");
-  }
-  const std::size_t size = matrix_size(ao);
+/** @brief One contraction/reduction implementation for distinct storage roles. */
+template<bool Packed>
+void apply_symmetric_channels(const AoIntegralInput& ao,int n_threads,
+    AoH1eBatchWorkspace* workspace,Eigen::MatrixXd* response) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
+  const std::size_t size=matrix_size(ao);
+  if (!workspace || !response || workspace->sources.rows()!=static_cast<Eigen::Index>(size))
+    throw std::invalid_argument("invalid interleaved AO response channels");
+  const Eigen::Index width = workspace->sources.cols();
+  response->resize(size, width);
+  if (width == 0) return;
   const std::size_t n_integrals = ao.pair_graph.integral_count();
-  n_threads = active_threads(n_threads, n_integrals);
-  workspace->forward.resize(n_threads);
-  workspace->transpose.resize(n_threads);
-  for (int thread = 0; thread < n_threads; ++thread) {
-    workspace->forward[thread].assign(size, 0.0);
-    workspace->transpose[thread].assign(size, 0.0);
-  }
+  n_threads = bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = openmp_chunk_size(n_integrals, n_threads);
+  workspace->partial.resize(n_threads);
+  workspace->coulomb.resize(n_threads);
+  const int n_bf = ao.n_basis_functions;
+  const Eigen::Index n_pairs=static_cast<Eigen::Index>(n_bf)*(n_bf+1)/2;
+  diagnostics::WorkerLoopTimes work(n_threads);
 #pragma omp parallel num_threads(n_threads)
   {
-    int thread = 0;
+    int thread = 0, team_size = 1;
 #ifdef _OPENMP
     thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
 #endif
-    auto& local_forward = workspace->forward[thread];
-    auto& local_transpose = workspace->transpose[thread];
-#pragma omp for schedule(static)
-    for (std::ptrdiff_t offset = 0;
-         offset < static_cast<std::ptrdiff_t>(n_integrals);
-         ++offset) {
-      const H1eTerms terms = make_terms(ao, offset);
-      accumulate_forward(terms, source, local_forward.data());
-      accumulate_transpose(terms, adjoint, local_transpose.data());
+    auto& local = workspace->partial[thread];
+    local.setZero(Packed ? n_pairs : static_cast<Eigen::Index>(size), width);
+    auto& coulomb = workspace->coulomb[thread];
+    coulomb.resize(width);
+    work.start(thread);
+#pragma omp for schedule(dynamic, 1) nowait
+    for (std::size_t begin = 0; begin < n_integrals; begin += chunk) {
+      if constexpr (Packed) {
+        contract_symmetric_block<true>(ao, begin, std::min(begin + chunk, n_integrals),
+            workspace->sources.data(), local.data(), width, coulomb.data());
+      } else {
+        if (width==1)
+          contract_integrals<true,false>(ao,begin,std::min(begin+chunk,n_integrals),
+              workspace->sources.data(),nullptr,local.data(),nullptr);
+        else
+          contract_symmetric_block<false>(ao,begin,std::min(begin+chunk,n_integrals),
+              workspace->sources.data(),local.data(),width,coulomb.data());
+      }
+    }
+    work.stop(thread);
+#pragma omp barrier
+#pragma omp for schedule(static) nowait
+    for (int column = 0; column < n_bf; ++column) {
+      for (int row = column; row < n_bf; ++row) {
+        const Eigen::Index index = column * n_bf + row;
+        const Eigen::Index partner = row * n_bf + column;
+        const Eigen::Index pair=static_cast<Eigen::Index>(row)*(row+1)/2+column;
+        for (Eigen::Index channel = 0; channel < width; ++channel) {
+          double sum = 0.0;
+          for (int worker = 0; worker < team_size; ++worker) {
+            if constexpr (Packed) sum+=workspace->partial[worker](pair,channel);
+            else sum+=workspace->partial[worker](index,channel)+workspace->partial[worker](partner,channel);
+          }
+          if constexpr (Packed) if (row==column) sum*=2.0;
+          (*response)(index, channel) = (*response)(partner, channel) = sum;
+        }
+      }
     }
   }
-  forward->assign(size, 0.0);
-  transpose->assign(size, 0.0);
-  for (int thread = 0; thread < n_threads; ++thread) {
-    const auto& local_forward = workspace->forward[thread];
-    const auto& local_transpose = workspace->transpose[thread];
-    for (std::size_t index = 0; index < size; ++index) {
-      (*forward)[index] += local_forward[index];
-      (*transpose)[index] += local_transpose[index];
-    }
-  }
+  work.finish(diagnostics::Phase::AoH1eFused);
 }
 
-void apply_ao_h1e_fused_batch(
+void apply_symmetric_ao_h1e_batch(const Eigen::Ref<const Eigen::MatrixXd>& sources,
+    const AoIntegralInput& ao,int n_threads,AoH1eBatchWorkspace* workspace,
+    Eigen::MatrixXd* response) {
+  const std::size_t size=matrix_size(ao);
+  if (!workspace || !response || sources.rows()!=static_cast<Eigen::Index>(size))
+    throw std::invalid_argument("invalid symmetric AO response batch");
+  workspace->sources=sources;
+  apply_symmetric_channels<false>(ao,n_threads,workspace,response);
+}
+
+void apply_symmetric_ao_h1e_channels(const AoIntegralInput& ao,int n_threads,
+    AoH1eBatchWorkspace* workspace,Eigen::MatrixXd* response) {
+  apply_symmetric_channels<true>(ao,n_threads,workspace,response);
+}
+
+void apply_symmetric_ao_h1e_fused_batch(
     const Eigen::Ref<const Eigen::MatrixXd>& sources,
     const Eigen::Ref<const Eigen::MatrixXd>& adjoints,
     const AoIntegralInput& ao,
     int n_threads,
+    AoH1eBatchWorkspace* workspace,
     Eigen::MatrixXd* forward,
     Eigen::MatrixXd* transpose) {
-  if (forward == nullptr || transpose == nullptr) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
+  if (workspace == nullptr || forward == nullptr || transpose == nullptr) {
     throw std::invalid_argument("AO-H1E batch outputs must not be null");
   }
   const std::size_t size = matrix_size(ao);
@@ -274,69 +462,62 @@ void apply_ao_h1e_fused_batch(
     throw std::invalid_argument("AO-H1E batch input shape mismatch");
   }
   const std::size_t n_integrals = ao.pair_graph.integral_count();
-  n_threads = active_threads(n_threads, n_integrals);
+  n_threads = xmvb::bounded_openmp_thread_count(n_threads, n_integrals);
+  const auto chunk = xmvb::openmp_chunk_size(n_integrals, n_threads);
   const Eigen::Index n_directions = sources.cols();
-  using RowMatrix =
-      Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
-  const RowMatrix source_rows = sources;
-  const RowMatrix adjoint_rows = adjoints;
-  std::vector<RowMatrix> partial_forward(
-      n_threads, RowMatrix::Zero(size, n_directions));
-  std::vector<RowMatrix> partial_transpose(
-      n_threads, RowMatrix::Zero(size, n_directions));
+  forward->resize(size, n_directions);
+  transpose->resize(size, n_directions);
+  if (n_directions == 0) return;
+  const Eigen::Index width = 2 * n_directions;
+  workspace->sources.resize(size, width);
+  workspace->partial.resize(n_threads);
+  workspace->coulomb.resize(n_threads);
+  for (Eigen::Index index = 0; index < static_cast<Eigen::Index>(size); ++index) {
+    for (Eigen::Index direction = 0; direction < n_directions; ++direction) {
+      workspace->sources(index, 2 * direction) = sources(index, direction);
+      workspace->sources(index, 2 * direction + 1) = adjoints(index, direction);
+    }
+  }
+  const int n_bf = ao.n_basis_functions;
+  diagnostics::WorkerLoopTimes work(n_threads);
 #pragma omp parallel num_threads(n_threads)
   {
     int thread = 0;
+    int team_size = 1;
 #ifdef _OPENMP
     thread = omp_get_thread_num();
+    team_size = omp_get_num_threads();
 #endif
-    RowMatrix& local_forward = partial_forward[thread];
-    RowMatrix& local_transpose = partial_transpose[thread];
-#pragma omp for schedule(static)
-    for (std::ptrdiff_t offset = 0;
-         offset < static_cast<std::ptrdiff_t>(n_integrals);
-         ++offset) {
-      const H1eTerms t = make_terms(ao, offset);
-      const double coulomb = 4.0 * t.value;
-#pragma omp simd
-      for (Eigen::Index direction = 0;
-           direction < n_directions;
-           ++direction) {
-        local_forward(t.ij, direction) +=
-            coulomb * source_rows(t.kl, direction);
-        local_forward(t.kl, direction) +=
-            coulomb * source_rows(t.ij, direction);
-        local_forward(t.ik, direction) -=
-            t.value * source_rows(t.lj, direction);
-        local_forward(t.jl, direction) -=
-            t.value * source_rows(t.ki, direction);
-        local_forward(t.il, direction) -=
-            t.value * source_rows(t.kj, direction);
-        local_forward(t.jk, direction) -=
-            t.value * source_rows(t.li, direction);
-        local_transpose(t.kl, direction) +=
-            coulomb * adjoint_rows(t.ij, direction);
-        local_transpose(t.ij, direction) +=
-            coulomb * adjoint_rows(t.kl, direction);
-        local_transpose(t.lj, direction) -=
-            t.value * adjoint_rows(t.ik, direction);
-        local_transpose(t.ki, direction) -=
-            t.value * adjoint_rows(t.jl, direction);
-        local_transpose(t.kj, direction) -=
-            t.value * adjoint_rows(t.il, direction);
-        local_transpose(t.li, direction) -=
-            t.value * adjoint_rows(t.jk, direction);
+    auto& local = workspace->partial[thread];
+    local.setZero(size, width);
+    auto& coulomb = workspace->coulomb[thread];
+    coulomb.resize(width);
+    work.start(thread);
+#pragma omp for schedule(dynamic, 1) nowait
+    for (std::size_t begin = 0; begin < n_integrals; begin += chunk)
+      contract_symmetric_block<false>(ao, begin, std::min(begin + chunk, n_integrals),
+          workspace->sources.data(), local.data(), width, coulomb.data());
+    work.stop(thread);
+#pragma omp barrier
+#pragma omp for schedule(static) nowait
+    for (int column = 0; column < n_bf; ++column) {
+      for (int row = column; row < n_bf; ++row) {
+        const Eigen::Index index = column * n_bf + row;
+        const Eigen::Index partner = row * n_bf + column;
+        for (Eigen::Index direction = 0; direction < n_directions; ++direction) {
+          double sum_forward = 0.0, sum_transpose = 0.0;
+          for (int worker = 0; worker < team_size; ++worker) {
+            const auto& partial = workspace->partial[worker];
+            sum_forward += partial(index, 2 * direction) + partial(partner, 2 * direction);
+            sum_transpose += partial(index, 2 * direction + 1) + partial(partner, 2 * direction + 1);
+          }
+          (*forward)(index, direction) = (*forward)(partner, direction) = sum_forward;
+          (*transpose)(index, direction) = (*transpose)(partner, direction) = 0.5 * sum_transpose;
+        }
       }
     }
   }
-  RowMatrix sum_forward = RowMatrix::Zero(size, n_directions);
-  RowMatrix sum_transpose = RowMatrix::Zero(size, n_directions);
-  for (int thread = 0; thread < n_threads; ++thread) {
-    sum_forward += partial_forward[thread];
-    sum_transpose += partial_transpose[thread];
-  }
-  *forward = sum_forward;
-  *transpose = sum_transpose;
+  work.finish(diagnostics::Phase::AoH1eFused);
 }
 
 }  // namespace xmvb::vb

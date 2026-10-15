@@ -30,6 +30,12 @@ struct AcceptedOrbitalPreparationCache {
   bool has_pullback_cache = false;
 };
 
+/** Gradient-weighted data for one upstream orbital pullback at fixed geometry. */
+struct OrbitalPreparationPullback {
+  Eigen::MatrixXd original_orbital_gradient;
+  Eigen::MatrixXd inactive_density_gradient_symmetric;
+};
+
 /** Dense representative of one sparse-coordinate orbital tangent. */
 struct DenseOrbitalTangentContext {
   Eigen::MatrixXd normalized_orbitals;
@@ -50,6 +56,19 @@ AcceptedOrbitalPreparationCache build_accepted_orbital_preparation_cache(
     const Eigen::Ref<const Eigen::MatrixXd>& total_active_auxiliary_gradient,
     const std::vector<double>& total_inactive_density_gradient);
 
+/** Build upstream weights using accepted geometry without rebuilding its inverse. */
+OrbitalPreparationPullback build_orbital_preparation_pullback(
+    const OrbitalPreparationInput& input,
+    const Eigen::Ref<const Eigen::MatrixXd>& active_auxiliary_gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>& inactive_density_gradient,
+    const AcceptedOrbitalPreparationCache& geometry);
+
+/** Zero inactive-density upstream variant stored without an AO-square weight. */
+OrbitalPreparationPullback build_orbital_preparation_pullback(
+    const OrbitalPreparationInput& input,
+    const Eigen::Ref<const Eigen::MatrixXd>& active_auxiliary_gradient,
+    const AcceptedOrbitalPreparationCache& geometry);
+
 std::vector<double> backpropagate_active_space_orbital_gradient(
     const Eigen::Ref<const Eigen::MatrixXd>& active_auxiliary_gradient,
     const Eigen::Ref<const Eigen::MatrixXd>& inactive_density_gradient,
@@ -68,7 +87,8 @@ OrbitalPreparationDirectionalResult build_orbital_preparation_directional_result
     const DenseOrbitalTangentContext& orbital_tangent_context,
     int n_inactive_doubly_occupied_orbitals,
     int n_active_orbitals,
-    const AcceptedOrbitalPreparationCache& cache);
+    const AcceptedOrbitalPreparationCache& cache,
+    bool materialize_inactive_density = true);
 
 /**
  * @brief Differentiates the orbital-preparation pullback at fixed upstream adjoints.
@@ -96,5 +116,17 @@ std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
     const std::vector<double>& total_inactive_density_gradient,
     const Eigen::Ref<const Eigen::VectorXd>& input_retract_tangent,
     const AcceptedOrbitalPreparationCache& cache);
+
+/** Fixed-upstream derivative with separately cached geometry and weights. */
+std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
+    const OrbitalPreparationInput& input,
+    const DenseOrbitalTangentContext& orbital_tangent_context,
+    const Eigen::Ref<const Eigen::MatrixXd>& total_active_auxiliary_gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>&
+        basis_overlap_times_delta_active_orbitals,
+    const Eigen::Ref<const Eigen::MatrixXd>& total_inactive_density_gradient,
+    const Eigen::Ref<const Eigen::VectorXd>& input_retract_tangent,
+    const AcceptedOrbitalPreparationCache& geometry,
+    const OrbitalPreparationPullback& pullback);
 
 }  // namespace xmvb::vb

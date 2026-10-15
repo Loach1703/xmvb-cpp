@@ -10,6 +10,7 @@
 #include "core/eigen_response.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
+#include "vbscf/structures/orthogonal_ci/metric.hpp"
 
 namespace xmvb::vb {
 
@@ -55,6 +56,8 @@ struct AcceptedSelectedStateGeneralizedEigenResponseOperator {
   /** Same accepted-point response spaces, one for each selected root. */
   mutable std::vector<xmvb::core::EigenResponseRecycleSpace>
       response_recycle_spaces;
+  /** @brief Budgeted complete-space metric factors shared by all isolated RHS. */
+  const StructureMetricInverse* metric_inverse = nullptr;
 
   /** @brief Revision of the common accepted-point response spaces. */
   std::uint64_t revision() const noexcept;

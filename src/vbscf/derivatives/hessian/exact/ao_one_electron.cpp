@@ -1,88 +1,68 @@
 #include "vbscf/derivatives/hessian/exact/ao_one_electron_internal.hpp"
 
-#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
 #include "core/openmp.hpp"
 #include "vbscf/integrals/ao/contracts/input.hpp"
 #include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
-#include "vbscf/orbitals/preparation/input.hpp"
+#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 
 namespace xmvb::vb::detail {
 
-int choose_exact_ao_h1e_thread_count(
-    const OrbitalPreparationInput& input) {
-  if (input.n_basis_functions == 0) {
-    throw std::invalid_argument("AO-H1E basis size must be positive");
-  }
-  return std::min(
-      effective_openmp_thread_count(),
-      static_cast<int>(input.n_basis_functions));
-}
-
-void symmetrize_exact_ao_h1e_forward(
-    Eigen::Ref<Eigen::MatrixXd> delta_h1e) {
-  if (delta_h1e.rows() != delta_h1e.cols()) {
-    throw std::invalid_argument(
-        "AO-H1E forward response must be a square matrix");
-  }
-  for (Eigen::Index row = 0; row < delta_h1e.rows(); ++row) {
-    for (Eigen::Index column = 0; column <= row; ++column) {
-      delta_h1e(row, column) += delta_h1e(column, row);
-      delta_h1e(column, row) = delta_h1e(row, column);
+void apply_exact_ao_response(
+    const Eigen::Ref<const Eigen::MatrixXd>& density,
+    const Eigen::Ref<const Eigen::MatrixXd>& pullback,
+    const Eigen::Ref<const Eigen::MatrixXd>& weighted_directions,
+    const ExactPackedActiveTwoElectronAdjointCache& cache,
+    const AoIntegralInput& ao,
+    AoH1eBatchWorkspace* workspace,
+    Eigen::MatrixXd* combined_response,
+    Eigen::MatrixXd* active_projection) {
+  const int n_bf = ao.n_basis_functions;
+  const int n = cache.n_active_orbitals;
+  if (n_bf <= 0 || density.rows() != n_bf * n_bf ||
+      pullback.rows() != density.rows() || pullback.cols() != density.cols() ||
+      weighted_directions.rows() != n_bf * n ||
+      weighted_directions.cols() != density.cols() ||
+      combined_response == nullptr || active_projection == nullptr)
+    throw std::invalid_argument("invalid exact AO response arguments");
+  const auto& coefficients = *cache.accepted_active_coefficients;
+  active_projection->resize(n_bf * n, density.cols());
+  if (cache.exchange_integrals.size() != 0) {
+    // T=delta D+W C^T, pullback=T+T^T. By linearity,
+    // R=L(delta D)+L(T+T^T)/2=L(2 delta D+(W C^T+C W^T)/2).
+    // Therefore L(delta D) C=R C/2-L(W C^T+C W^T) C/4.
+    // Only R traverses the AO integral graph; the correction uses accepted
+    // half-transformed images in O(n_bf^2*n_active^2) arithmetic.
+    const Eigen::MatrixXd source = density + 0.5 * pullback;
+    apply_symmetric_ao_h1e_batch(source, ao, effective_openmp_thread_count(),
+                               workspace, combined_response);
+    for (Eigen::Index column = 0; column < density.cols(); ++column) {
+      const Eigen::Map<const Eigen::MatrixXd> response(
+          combined_response->col(column).data(), n_bf, n_bf);
+      const Eigen::Map<const Eigen::MatrixXd> weights(
+          weighted_directions.col(column).data(), n_bf, n);
+      Eigen::Map<Eigen::MatrixXd> projection(
+          active_projection->col(column).data(), n_bf, n);
+      projection.noalias() = 0.5 * response * coefficients;
+      projection -= 0.25 * project_exact_active_density_response(cache, weights);
+    }
+  } else {
+    // When the bounded accepted image is not admitted, keep the streamed
+    // integral representation. Consumers still share a single projection.
+    Eigen::MatrixXd forward, adjoint;
+    apply_symmetric_ao_h1e_fused_batch(density, pullback, ao,
+        effective_openmp_thread_count(), workspace, &forward, &adjoint);
+    *combined_response = forward + adjoint;
+    for (Eigen::Index column = 0; column < density.cols(); ++column) {
+      const Eigen::Map<const Eigen::MatrixXd> response(
+          forward.col(column).data(), n_bf, n_bf);
+      Eigen::Map<Eigen::MatrixXd> projection(
+          active_projection->col(column).data(), n_bf, n);
+      projection.noalias() = response * coefficients;
     }
   }
-}
-
-void apply_forward_exact_ao_one_electron_response(
-    const Eigen::MatrixXd& density,
-    const AoIntegralInput& ao,
-    const OrbitalPreparationInput& orbital_input,
-    std::vector<double>* delta_h1e) {
-  const int n_bf = ao.n_basis_functions;
-  if (n_bf <= 0 || density.rows() != n_bf || density.cols() != n_bf ||
-      delta_h1e == nullptr) {
-    throw std::invalid_argument("invalid forward AO-H1E response arguments");
-  }
-  *delta_h1e = apply_ao_h1e(
-      density.data(),
-      ao,
-      choose_exact_ao_h1e_thread_count(orbital_input));
-  Eigen::Map<Eigen::MatrixXd> delta(delta_h1e->data(), n_bf, n_bf);
-  symmetrize_exact_ao_h1e_forward(delta);
-}
-
-void apply_fused_exact_ao_one_electron_response(
-    const Eigen::MatrixXd& density,
-    const Eigen::MatrixXd& gradient,
-    const AoIntegralInput& ao,
-    const OrbitalPreparationInput& orbital_input,
-    AoH1eFusedWorkspace* workspace,
-    Eigen::MatrixXd* symmetric_gradient,
-    std::vector<double>* delta_h1e,
-    std::vector<double>* density_gradient) {
-  const int n_bf = ao.n_basis_functions;
-  if (n_bf <= 0 || density.rows() != n_bf || density.cols() != n_bf ||
-      gradient.rows() != n_bf || gradient.cols() != n_bf ||
-      symmetric_gradient == nullptr || delta_h1e == nullptr ||
-      density_gradient == nullptr) {
-    throw std::invalid_argument("invalid fused AO-H1E response arguments");
-  }
-
-  symmetric_gradient->resizeLike(gradient);
-  *symmetric_gradient = gradient + gradient.transpose();
-  apply_ao_h1e_fused(
-      density.data(),
-      symmetric_gradient->data(),
-      ao,
-      choose_exact_ao_h1e_thread_count(orbital_input),
-      workspace,
-      delta_h1e,
-      density_gradient);
-
-  Eigen::Map<Eigen::MatrixXd> delta(delta_h1e->data(), n_bf, n_bf);
-  symmetrize_exact_ao_h1e_forward(delta);
 }
 
 }  // namespace xmvb::vb::detail

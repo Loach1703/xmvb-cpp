@@ -18,15 +18,22 @@ def main():
     with tempfile.TemporaryDirectory(prefix="cpp-tnvb-cli-") as directory:
         path = Path(directory) / "input.xmi"
 
-        def run(configuration, iterations, options=(), forbidden=True, molden=False, iscf=5):
+        def run(configuration, iterations, options=(), forbidden=True, molden=False, iscf=5,
+                guess_body=None):
             text = original.replace("tnvb\ntnbond=128\ntnsumbond=256\n", configuration + "\n")
             text = text.replace("itmax=0", f"itmax={iterations}")
             text = text.replace("iscf=5", f"iscf={iscf}")
+            if guess_body is not None:
+                text, count = re.subn(r"(?ims)^\$gus\s*\n.*?^\$end\s*$",
+                                      lambda _: "$gus\n" + guess_body + "$end\n", text)
+                assert count == 1, "restart regression requires exactly one GUS section"
             if not molden:
                 text = re.sub(r"(?mi)^molden\s*$", "", text)
             artifact = path.with_suffix(".molden")
-            if artifact.exists():
-                artifact.unlink()
+            orbital_artifact = path.with_suffix(".orb")
+            for generated in (artifact, orbital_artifact):
+                if generated.exists():
+                    generated.unlink()
             path.write_text(text)
             child_env = env.copy()
             if forbidden:
@@ -35,6 +42,10 @@ def main():
                 child_env.pop("XMVB_BLOCK2_FORBID_3PDM", None)
             result = subprocess.run([executable, str(path), *options], env=child_env,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            if result.returncode in (0, 2):
+                # The master exporter writes reusable GUS-body orbitals only
+                # after real optimization convergence, not for ENERGY/caps.
+                assert orbital_artifact.is_file() == ("VBSCF converged" in result.stdout), result.stdout
             if molden and result.returncode in (0, 2):
                 assert artifact.is_file(), result.stdout
                 exported = artifact.read_text()
@@ -97,6 +108,21 @@ def main():
                           "COMPUTED NATURAL ORBITALS", "XMVB ATOMIC POPULATION ANALYSIS"):
                 assert label in output, label
             assert "block_lbfgs_line_search_failed" not in output, output
+        # Cover the conflict-resolved production entrypoint end to end: TNVB
+        # block-LBFGS convergence must retain master's restart-file export.
+        status, output = run("TNVB TNBOND=128 TNSUMBOND=256", 100,
+                             forbidden=False, molden=True, iscf=8)
+        assert status == 0 and "VBSCF converged" in output, output
+        orbital_text = path.with_suffix(".orb").read_text()
+        assert "$" not in orbital_text, orbital_text
+        assert [int(value) for value in re.findall(r"(?m)^# ORBITAL (\d+) NAO", orbital_text)] == list(range(1, 25))
+        final_energy = float(re.search(r"Final total energy\s*:\s*([-0-9.]+)", output).group(1))
+        status, output = run("TNVB TNBOND=128 TNSUMBOND=256", 0,
+                             iscf=8, guess_body=orbital_text)
+        assert status == 0 and "energy_only" in output, output
+        assert "[TNVB-RDM]" not in output, output
+        restart_energy = float(re.search(r"Final total energy\s*:\s*([-0-9.]+)", output).group(1))
+        assert abs(restart_energy - final_energy) <= 1e-9, (restart_energy, final_energy)
     print("TNVB CLI ISCF=5/8, ENERGY, override, capability, fit-warning and analysis/export tests passed")
     return 0
 

@@ -154,8 +154,6 @@ ExactHvpOperator::State::State(
         n_active_orbitals);
     accepted_hho_gradient_symmetric_ =
         accepted_hho_gradient + accepted_hho_gradient.transpose();
-    accepted_active_auxiliary_orbitals_times_hho_gradient_symmetric_ =
-        accepted_active_auxiliary_orbitals_ * accepted_hho_gradient_symmetric_;
     zero_core_hamiltonian_ =
         Eigen::MatrixXd::Zero(n_basis_functions, n_basis_functions);
     if (current_input_->standard_two_electron_mode ==
@@ -274,7 +272,9 @@ ExactHvpOperator::State::diagnostics() const {
   if (!accepted_ri_two_electron_cache_.has_value() &&
       accepted_exact_two_electron_cache_.accepted_pair_products != nullptr) {
     info.resident_exact_pair_elements = static_cast<std::size_t>(
-        accepted_exact_two_electron_cache_.accepted_pair_products->size());
+        accepted_exact_two_electron_cache_.accepted_pair_products->size() +
+        accepted_exact_two_electron_cache_.orbital_pair_products.size() +
+        accepted_exact_two_electron_cache_.exchange_integrals.size());
   }
   info.exact_pair_tile_rows = accepted_ri_two_electron_cache_.has_value()
       ? 0

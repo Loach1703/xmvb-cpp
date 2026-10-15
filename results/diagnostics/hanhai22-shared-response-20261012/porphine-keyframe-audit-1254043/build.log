@@ -1,0 +1,18 @@
+[  0%] Built target xmvb_assets
+[  0%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/diagnostics/orbitals/ciah_keyframe.cpp.o
+[  2%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/optimization/backends/ciah.cpp.o
+[  4%] Linking CXX static library libxmvb-vbscf.a
+[ 81%] Built target xmvb_vbscf
+[ 85%] Built target xmvb_libcint
+[ 89%] Built target xmvb_input_deck
+[ 93%] Built target xmvb_guess
+[ 93%] Built target xmvb_input
+[ 97%] Built target xmvb_output
+[100%] Linking CXX executable xmvb-cpp.exe
+[100%] Built target xmvb
+[100%] Built target xmvb_vbscf
+[100%] Linking CXX executable test_ciah
+[100%] Built target test_ciah
+[ 97%] Built target xmvb_vbscf
+[100%] Linking CXX executable test_coupled_structure
+[100%] Built target test_coupled_structure

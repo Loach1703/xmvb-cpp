@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <Eigen/Core>
@@ -9,9 +11,15 @@
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
+#include "vbscf/structures/assembly/connection.hpp"
 #include "vbscf/structures/expansion/types.hpp"
 
 namespace xmvb::vb {
+
+class StructureMetricInverse;
+
+/** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
+enum class StructureActionMode { Davidson, ActionOnly };
 
 /**
  * @brief Result of applying the structure Hamiltonian and overlap to a vector block.
@@ -31,6 +39,16 @@ struct StructureActiveIntegralAdjoint {
   Eigen::MatrixXd pair_kernel;
 };
 
+/** @brief Shared response sweep; retains only structure images and active tensors.
+ * Spin-product workspaces are consumed one state at a time, not retained here.
+ */
+struct StructureResponseSweep {
+  StructureActionResult images;
+  Eigen::MatrixXd one_electron;
+  Eigen::MatrixXd pair_kernel;
+  Eigen::MatrixXd generator;
+};
+
 /** @brief Direction-independent selected-state data for direct-CI adjoints. */
 struct StructureAdjointState {
   std::vector<Eigen::MatrixXd> source_coefficients;
@@ -41,12 +59,17 @@ struct StructureAdjointState {
   Eigen::MatrixXd one_electron_gradient;
   Eigen::MatrixXd pair_kernel_gradient;
   Eigen::MatrixXd generator_gradient;
+  /** Upper-triangular accepted-state transition 1-RDMs for gauge multipliers. */
+  std::vector<Eigen::MatrixXd> overlap_generators;
 };
 
 /** @brief Direct-CI intermediates shared by structure and adjoint directions. */
 struct StructureIntegralDirection {
   Eigen::MatrixXd coefficient_direction;
   Eigen::MatrixXd sigma_direction;
+  /** Full-trace diagnostic request; never changes the physical action. */
+  bool capture_connection = false;
+  std::optional<StructureConnectionDirection> connection;
 };
 
 struct StructureActionStorage {
@@ -90,7 +113,8 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
       const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_active_orbitals,
-      const StructureDiagonal* precomputed_preconditioner = nullptr);
+      const StructureDiagonal* precomputed_preconditioner = nullptr,
+      StructureActionMode mode = StructureActionMode::Davidson);
 
   ~StructureAction();
   StructureAction(StructureAction&&) noexcept;
@@ -105,6 +129,13 @@ public:
    * @return Hamiltonian and overlap images with the same shape.
    */
   StructureActionResult apply(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
+
+  /** @brief Exact overlap image; direct-CI needs only forward/adjoint transforms.
+   * Shares the accepted-point representation and the existing block budget.
+   * Pair-based representations retain their exact combined action.
+   */
+  Eigen::MatrixXd apply_overlap(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
 
   /**
@@ -176,6 +207,17 @@ public:
       const SelectedStateDeterminantMatrices& directional_selected_states,
       const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const;
 
+  /** @brief Computes Hq, Mq and the response adjoint in one direct-CI sweep. */
+  StructureResponseSweep apply_response(
+      const StructureAdjointState& state,
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const;
+
+  /** @brief Adds the horizontal-gauge multiplier and pulls back active tensors. */
+  StructureActiveIntegralAdjoint finish_response(
+      const StructureAdjointState& state,
+      StructureResponseSweep sweep,
+      const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const;
+
   /**
    * @brief Expands structure vectors directly onto unique spin products.
    *
@@ -209,6 +251,36 @@ public:
   Eigen::MatrixXd orthogonalize_structure_block(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
 
+  /** @brief Representation-only one-body adjoint; never applies the Hamiltonian. */
+  Eigen::MatrixXd carrier_generator_adjoint(
+      const Eigen::Ref<const Eigen::MatrixXd>& left,
+      const Eigen::Ref<const Eigen::MatrixXd>& right) const;
+
+  /** @brief Whether the carrier diagonal and one-column workspace fit the action budget. */
+  bool supports_carrier_diagonal() const noexcept;
+
+  /** @brief Applies F^T(diag(H_orth)-E-omega)^-1 F to structure vectors.
+   * F is the exact exterior/structure map, not an assumed orthogonal VB basis.
+   * Callers supply the two horizontal Riesz maps for a coordinate-space inverse.
+   * Carrier storage is shared and columns are processed sequentially.
+   */
+  Eigen::MatrixXd apply_inverse_carrier_diagonal(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const;
+
+  /** @brief Physical Ritz residual in the orthogonal spin-string carrier.
+   * Valid as a structure-space certificate only for a complete variational
+   * spin sector, not an arbitrary selected structure subspace. The caller
+   * must establish this completeness. Uses one carrier column, no dense M.
+   */
+  double complete_space_residual_norm(
+      const Eigen::Ref<const Eigen::VectorXd>& coefficients, double energy) const;
+
+  /** @brief Applies inverse exterior transforms to packed spin products in place. */
+  void inverse_orbital_transform(Eigen::MatrixXd* spin_products) const;
+  /** @brief Applies inverse-adjoint exterior transforms to spin products in place. */
+  void inverse_adjoint_orbital_transform(Eigen::MatrixXd* spin_products) const;
+
   /**
    * @brief Contracts packed unique-string-product images into structures.
    *
@@ -232,19 +304,27 @@ public:
       int beta_begin,
       Eigen::MatrixXd* structure_images) const;
 
-  /** @brief Returns the H/S diagonal model used only for preconditioning. */
+  /** @brief H/S preconditioning model; empty for an ActionOnly instance. */
   const StructureDiagonal& preconditioner_diagonal() const noexcept;
 
   int n_determinants() const noexcept;
   int n_structures() const noexcept;
+  int n_alpha_strings() const noexcept { return n_unique_alpha_; }
+  int n_beta_strings() const noexcept { return n_unique_beta_; }
 
   /** @brief Reports the retained factor storage and channel representations. */
   StructureActionStorage storage() const noexcept;
 
 private:
+  StructureResponseSweep contract_response(
+      const StructureAdjointState& state,
+      const std::function<Eigen::MatrixXd(int)>& coefficients,
+      bool collect_images) const;
+  friend class StructureMetricInverse;
   struct OrthogonalDirectCiData;
   struct TiledPairData;
   struct StructureTerm {
+    int spin_product = 0;
     int structure = 0;
     double coefficient = 0.0;
   };
@@ -252,6 +332,9 @@ private:
   std::vector<int> spin_products_;
   std::vector<std::size_t> spin_term_offsets_;
   std::vector<StructureTerm> spin_terms_;
+  /** Structure-major permutation of `spin_terms_` for race-free C^T actions. */
+  std::vector<std::size_t> structure_term_offsets_;
+  std::vector<std::size_t> structure_term_indices_;
 
   StructureDiagonal preconditioner_diagonal_;
   int n_determinants_ = 0;

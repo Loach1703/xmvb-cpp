@@ -1,4 +1,5 @@
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 #include "vbscf/derivatives/hessian/exact/apply_internal.hpp"
 
@@ -144,6 +145,24 @@ OrbitalCouplingAction ExactHvpOperator::apply_orbital_coupling(
   return state_->apply_orbital_coupling(reduced_direction);
 }
 
+Eigen::VectorXd ExactHvpOperator::apply_orbital(
+    const Eigen::VectorXd& direction) const {
+  return state_->apply_orbital(direction);
+}
+
+Eigen::VectorXd ExactHvpOperator::State::apply_orbital(
+    const Eigen::VectorXd& direction) const {
+  OrbitalCouplingAction gauge;
+  return apply_reduced_impl(
+      direction,
+      {.direct_core_response = true,
+       .fixed_upstream_pullback = true,
+       .local_active_response = true,
+       .structure_response = false},
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      &gauge, false);
+}
+
 OrbitalCouplingAction ExactHvpOperator::State::apply_orbital_coupling(
     const Eigen::VectorXd& reduced_direction) const {
   OrbitalCouplingAction result;
@@ -168,6 +187,7 @@ StructureResponseBlock ExactHvpOperator::solve_structure_response_block(
 StructureResponseBlock ExactHvpOperator::State::solve_structure_response_block(
     const std::vector<Eigen::MatrixXd>& scaled_structure_forcing,
     double relative_residual_tolerance) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::StructureSolve);
   if (scaled_structure_forcing.empty() ||
       !(relative_residual_tolerance > 0.0) ||
       relative_residual_tolerance >= 1.0 ||
@@ -281,17 +301,31 @@ Eigen::VectorXd ExactHvpOperator::State::apply_structure_coupling_adjoint(
       coefficient_response, adjoint_multipliers);
 }
 
+Eigen::VectorXd ExactHvpOperator::apply_structure_coupling_adjoint(
+    const StructureActiveIntegralAdjoint& adjoint) const {
+  return state_->apply_structure_coupling_adjoint(adjoint);
+}
+
+Eigen::VectorXd ExactHvpOperator::State::apply_structure_coupling_adjoint(
+    const StructureActiveIntegralAdjoint& adjoint) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::StructureAdjoint);
+  return pullback_structure_response(make_active_gradient_direction(adjoint,
+      current_input_->orbital_preparation_input.n_active_orbitals));
+}
+
 Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     const Eigen::VectorXd& reduced_direction,
     HvpComponents components,
-    const Eigen::VectorXd* precomputed_delta_ao_effective_h1e,
-    const Eigen::VectorXd* precomputed_inactive_density_gradient,
+    const Eigen::VectorXd* precomputed_ao_response,
+    const Eigen::MatrixXd* precomputed_active_projection,
     const Eigen::VectorXd* precomputed_delta_packed_active_two_electron,
     const Eigen::MatrixXd* precomputed_ri_active_pair_factor_direction,
     const ExactCtxPairMatrix* precomputed_directional_pair_products,
     const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
     const PrecomputedDirection* precomputed_direction,
-    OrbitalCouplingAction* coupling_output) const {
+    OrbitalCouplingAction* coupling_output,
+    bool horizontal_forcing) const {
+  diagnostics::ScopedPhase apply_phase(diagnostics::Phase::HvpApply);
   const auto apply_start_time = std::chrono::steady_clock::now();
   auto record_apply_wall_time = [&]() {
     ++apply_timing_totals_.apply_count;
@@ -316,13 +350,14 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     throw std::invalid_argument(
         "coupled orbital action cannot solve the structure response");
   }
-  if (coupling_output != nullptr) {
+  if (coupling_output != nullptr && horizontal_forcing) {
     coupling_output->scaled_structure_forcing = Eigen::MatrixXd::Zero(
         accepted_point_context_->n_structures,
         static_cast<int>(accepted_point_context_->selected_state_indices.size()));
   }
 
   const auto core_setup_start_time = std::chrono::steady_clock::now();
+  diagnostics::ScopedPhase setup_phase(diagnostics::Phase::HvpSetup);
   const Eigen::VectorXd local_packed_direction =
       precomputed_direction == nullptr
           ? nonredundant_space_->expand_step(reduced_direction)
@@ -372,41 +407,38 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       orbital_preparation_directional_result.delta_active_auxiliary_orbitals;
   apply_timing_totals_.core_setup_wall_time_seconds +=
       detail::exact_hvp_elapsed_seconds(core_setup_start_time);
+  setup_phase.stop();
   // `F11` and `delta F11` are explicitly symmetrized in the AO-H1E builder, so
   // the directional active-space matrix gradient only needs the two distinct
   // left contractions `delta F11 * T_active` and `F11 * delta T_active`.
   const Eigen::MatrixXd delta_active_times_hho_symmetric =
       orbital_preparation_directional_result.delta_active_auxiliary_orbitals *
       accepted_hho_gradient_symmetric_;
-  Eigen::MatrixXd total_ao_effective_one_electron_direction =
-      orbital_preparation_directional_result.delta_inactive_density;
-  total_ao_effective_one_electron_direction.noalias() +=
-      delta_active_times_hho_symmetric *
-      accepted_active_auxiliary_orbitals_.transpose();
-  const double* delta_ao_effective_h1e_data = nullptr;
-  const double* inactive_density_gradient_data = nullptr;
-  if (precomputed_delta_ao_effective_h1e != nullptr ||
-      precomputed_inactive_density_gradient != nullptr) {
-    if (precomputed_delta_ao_effective_h1e == nullptr ||
-        precomputed_inactive_density_gradient == nullptr ||
-        precomputed_delta_ao_effective_h1e->size() !=
-            static_cast<Eigen::Index>(ao_matrix_size) ||
-        precomputed_inactive_density_gradient->size() !=
-            static_cast<Eigen::Index>(ao_matrix_size)) {
+  Eigen::MatrixXd total_inactive_density_direction;
+  Eigen::MatrixXd delta_ao_effective_h1e_times_active_auxiliary_orbitals;
+  if (precomputed_ao_response != nullptr || precomputed_active_projection != nullptr) {
+    if (precomputed_ao_response == nullptr || precomputed_active_projection == nullptr ||
+        precomputed_ao_response->size() != static_cast<Eigen::Index>(ao_matrix_size) ||
+        precomputed_active_projection->rows() != n_basis_functions ||
+        precomputed_active_projection->cols() != accepted_active_auxiliary_orbitals_.cols()) {
       throw std::invalid_argument(
           "precomputed block AO-H1E response has inconsistent dimensions");
     }
-    delta_ao_effective_h1e_data =
-        precomputed_delta_ao_effective_h1e->data();
-    inactive_density_gradient_data =
-        precomputed_inactive_density_gradient->data();
+    total_inactive_density_direction = Eigen::Map<const Eigen::MatrixXd>(
+        precomputed_ao_response->data(), n_basis_functions, n_basis_functions);
+    delta_ao_effective_h1e_times_active_auxiliary_orbitals = *precomputed_active_projection;
   } else {
     const auto ao_effective_one_electron_fused_start_time =
         std::chrono::steady_clock::now();
+    diagnostics::ScopedPhase phase(diagnostics::Phase::AoResponse);
+    Eigen::MatrixXd total_ao_effective_one_electron_direction =
+        orbital_preparation_directional_result.delta_inactive_density;
+    total_ao_effective_one_electron_direction.noalias() +=
+        delta_active_times_hho_symmetric * accepted_active_auxiliary_orbitals_.transpose();
+    ao_h1e_symmetrized_gradient_workspace_ =
+        total_ao_effective_one_electron_direction +
+        total_ao_effective_one_electron_direction.transpose();
     if (accepted_ri_factorization_ != nullptr) {
-      ao_h1e_symmetrized_gradient_workspace_ =
-          total_ao_effective_one_electron_direction +
-          total_ao_effective_one_electron_direction.transpose();
       const auto& delta_inactive_density =
           orbital_preparation_directional_result.delta_inactive_density;
       apply_ao_effective_one_electron_ri_operator_adaptive(
@@ -417,34 +449,36 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           &ri_ao_h1e_strategy_,
           &ri_ao_h1e_forward_workspace_,
           &ri_ao_h1e_adjoint_workspace_);
-      ao_h1e_delta_h1e_workspace_.assign(
-          ri_ao_h1e_forward_workspace_.data(),
-          ri_ao_h1e_forward_workspace_.data() +
-              ri_ao_h1e_forward_workspace_.size());
       detail::encode_symmetric_ao_gradient(
           ri_ao_h1e_adjoint_workspace_,
           &ao_h1e_inactive_density_gradient_workspace_);
+      const Eigen::Map<const Eigen::MatrixXd> adjoint(
+          ao_h1e_inactive_density_gradient_workspace_.data(),
+          n_basis_functions, n_basis_functions);
+      total_inactive_density_direction = ri_ao_h1e_forward_workspace_ + adjoint;
+      delta_ao_effective_h1e_times_active_auxiliary_orbitals.noalias() =
+          ri_ao_h1e_forward_workspace_ * accepted_active_auxiliary_orbitals_;
     } else {
-      detail::apply_fused_exact_ao_one_electron_response(
-          orbital_preparation_directional_result.delta_inactive_density,
-          total_ao_effective_one_electron_direction,
+      const Eigen::Map<const Eigen::MatrixXd> density(
+          orbital_preparation_directional_result.delta_inactive_density.data(), ao_matrix_size, 1);
+      const Eigen::Map<const Eigen::MatrixXd> pullback(
+          ao_h1e_symmetrized_gradient_workspace_.data(), ao_matrix_size, 1);
+      const Eigen::Map<const Eigen::MatrixXd> weights(
+          delta_active_times_hho_symmetric.data(), delta_active_times_hho_symmetric.size(), 1);
+      Eigen::MatrixXd response, projection;
+      detail::apply_exact_ao_response(density, pullback, weights,
+          accepted_exact_two_electron_cache_,
           current_input_->ao_integral_input,
-          current_input_->orbital_preparation_input,
-          &ao_h1e_fused_workspace_,
-          &ao_h1e_symmetrized_gradient_workspace_,
-          &ao_h1e_delta_h1e_workspace_,
-          &ao_h1e_inactive_density_gradient_workspace_);
+          &ao_h1e_batch_workspace_, &response, &projection);
+      total_inactive_density_direction = Eigen::Map<const Eigen::MatrixXd>(
+          response.data(), n_basis_functions, n_basis_functions);
+      delta_ao_effective_h1e_times_active_auxiliary_orbitals =
+          Eigen::Map<const Eigen::MatrixXd>(projection.data(), n_basis_functions,
+                                         accepted_active_auxiliary_orbitals_.cols());
     }
-    delta_ao_effective_h1e_data = ao_h1e_delta_h1e_workspace_.data();
-    inactive_density_gradient_data =
-        ao_h1e_inactive_density_gradient_workspace_.data();
     apply_timing_totals_.ao_effective_one_electron_fused_wall_time_seconds +=
         detail::exact_hvp_elapsed_seconds(ao_effective_one_electron_fused_start_time);
   }
-  const Eigen::Map<const Eigen::MatrixXd> delta_ao_effective_h1e(
-      delta_ao_effective_h1e_data,
-      n_basis_functions,
-      n_basis_functions);
 
   const bool build_orbital_coupling = coupling_output != nullptr;
   const bool compute_outer_response = components.local_active_response ||
@@ -489,15 +523,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     }
   }
   std::vector<double> combined_core_orbital_value_gradient;
-  Eigen::MatrixXd delta_ao_effective_h1e_times_active_auxiliary_orbitals;
-  if (compute_outer_response) {
-    // Full HVPs need `delta F11 * A_active` both for the direct-core
-    // `delta F11 * A_active * G_hho` pullback and for outer-response
-    // `delta HHO = A_active^T * delta F11 * A_active`.  Materializing it once
-    // avoids repeating the same AO-by-active contraction in the two stages.
-    delta_ao_effective_h1e_times_active_auxiliary_orbitals.noalias() =
-        delta_ao_effective_h1e * accepted_active_auxiliary_orbitals_;
-  }
 
   if (compute_outer_response) {
     const auto outer_response_start_time =
@@ -510,6 +535,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
 
     const auto active_space_integrals_start_time =
         std::chrono::steady_clock::now();
+    diagnostics::ScopedPhase active_direction_phase(diagnostics::Phase::ActiveDirection);
     const ActiveSpaceIntegralDirectionView active_space_integral_direction =
         precomputed_outer_response != nullptr
         ? ActiveSpaceIntegralDirectionView{
@@ -538,6 +564,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
 
     const auto structure_matrices_start_time =
         std::chrono::steady_clock::now();
+    active_direction_phase.stop();
+    diagnostics::ScopedPhase selected_direction_phase(diagnostics::Phase::SelectedDirection);
     const StructureAction* accepted_structure_action =
         outer_response_context()
             .selected_state_eigen_response_operator.structure_action;
@@ -631,12 +659,29 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
                   eigen.overlap_selected,
                   eigen.selected_residuals,
                   images.delta_hamiltonian_selected,
-                  images.delta_overlap_selected);
+                  images.delta_overlap_selected,
+                  horizontal_forcing);
           local_gauge_coupling = scale_equal_weight_structure_coupling(
               coupling, accepted_point_context_->normalized_state_weights);
           gauge_coupling = &*local_gauge_coupling;
           coupling_output->scaled_structure_forcing =
               gauge_coupling->horizontal_forcing.scaled_coefficients;
+          if (local_direct_ci_direction.has_value() &&
+              local_direct_ci_direction->connection.has_value()) {
+            auto diagnostic = std::move(*local_direct_ci_direction->connection);
+            // Include normalization/gauge terms even for a nonzero Ritz residual.
+            diagnostic.representation_forcing +=
+                coupling.horizontal_forcing - coupling.forcing;
+            for (Eigen::Index state = 0; state < diagnostic.overlap.cols(); ++state) {
+              const double scale = std::sqrt(2.0 *
+                  accepted_point_context_->normalized_state_weights[state]);
+              diagnostic.representation_forcing.col(state) *= scale;
+              diagnostic.integral_forcing.col(state) *= scale;
+              diagnostic.overlap.col(state) *= scale;
+              diagnostic.squared_norm[state] *= scale * scale;
+            }
+            coupling_output->connection = std::move(diagnostic);
+          }
         } else {
           const auto eigensystem_start_time =
               std::chrono::steady_clock::now();
@@ -739,6 +784,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     }
 
     const auto active_gradient_start_time = std::chrono::steady_clock::now();
+    selected_direction_phase.stop();
+    diagnostics::ScopedPhase backward_phase(diagnostics::Phase::ActiveBackward);
     ActiveSpaceGradientDirection directional_active_space_gradient;
     if (direct_active_gradient) {
       if (!accepted_point_context_->structure_adjoint_state.has_value()) {
@@ -840,6 +887,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
 
     const auto orbital_pullback_start_time =
         std::chrono::steady_clock::now();
+    backward_phase.stop();
+    diagnostics::ScopedPhase pullback_phase(diagnostics::Phase::OrbitalPullback);
     const std::vector<double> outer_response_orbital_value_gradient =
         build_orbital_value_gradient_from_active_space_gradient_direction(
             *current_input_,
@@ -870,20 +919,15 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
         basis_overlap *
         orbital_preparation_directional_result.delta_active_auxiliary_orbitals *
         accepted_sso_gradient_symmetric_;
-    if (compute_outer_response) {
-      delta_auxiliary_active_gradient.noalias() +=
-          delta_ao_effective_h1e_times_active_auxiliary_orbitals *
-          accepted_hho_gradient_symmetric_;
-    } else {
-      delta_auxiliary_active_gradient.noalias() +=
-          delta_ao_effective_h1e *
-          accepted_active_auxiliary_orbitals_times_hho_gradient_symmetric_;
-    }
+    delta_auxiliary_active_gradient.noalias() +=
+        delta_ao_effective_h1e_times_active_auxiliary_orbitals *
+        accepted_hho_gradient_symmetric_;
     delta_auxiliary_active_gradient.noalias() +=
         ao_effective_h1e *
         delta_active_times_hho_symmetric;
     const auto active_two_electron_start_time =
         std::chrono::steady_clock::now();
+    diagnostics::ScopedPhase phase(diagnostics::Phase::TwoElectronResponse);
     if (accepted_ri_two_electron_cache_.has_value()) {
       accepted_exact_two_electron_apply_workspace_
           .dense_active_gradient_direction =
@@ -941,15 +985,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
         accepted_exact_two_electron_apply_workspace_
             .dense_active_gradient_direction;
 
-    Eigen::MatrixXd total_inactive_density_direction =
-        delta_ao_effective_h1e;
-    const Eigen::Map<const Eigen::MatrixXd> ao_backpropagated_inactive_density(
-        inactive_density_gradient_data,
-        n_basis_functions,
-        n_basis_functions);
-    total_inactive_density_direction.noalias() +=
-        ao_backpropagated_inactive_density;
-
     const auto orbital_backprop_start_time =
         std::chrono::steady_clock::now();
     const std::vector<double> orbital_value_gradient =
@@ -977,6 +1012,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           ao_matrix_size) {
     const auto fixed_upstream_pullback_start_time =
         std::chrono::steady_clock::now();
+    diagnostics::ScopedPhase phase(diagnostics::Phase::FixedPullback);
     const std::vector<double> fixed_upstream_orbital_value_gradient =
         apply_fixed_upstream_orbital_pullback_direction(
             current_input_->orbital_preparation_input,
@@ -1020,6 +1056,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
 Eigen::VectorXd ExactHvpOperator::State::apply_structure_response_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficient_response,
     const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::StructureAdjoint);
   const int n_structures = accepted_point_context_->n_structures;
   const int n_states = static_cast<int>(
       accepted_point_context_->selected_state_indices.size());
@@ -1099,6 +1136,11 @@ Eigen::VectorXd ExactHvpOperator::State::apply_structure_response_adjoint(
       .outer_response_structure_active_gradient_wall_time_seconds +=
       active_gradient_seconds;
 
+  return pullback_structure_response(active_gradient);
+}
+
+Eigen::VectorXd ExactHvpOperator::State::pullback_structure_response(
+    const ActiveSpaceGradientDirection& active_gradient) const {
   const auto orbital_pullback_start = std::chrono::steady_clock::now();
   const std::vector<double> orbital_value_gradient =
       build_orbital_value_gradient_from_active_space_gradient_direction(

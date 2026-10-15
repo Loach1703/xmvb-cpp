@@ -13,6 +13,19 @@ inline int cartesian_ao_count(int angular_momentum) {
   return (angular_momentum + 1) * (angular_momentum + 2) / 2;
 }
 
+/** @brief Cartesian component norm for a unit-radial Gaussian shell.
+ *
+ * Libcint includes spherical prefactors for s/p only. Higher angular momenta
+ * retain their angular integral. This is the PySCF Cartesian convention, not
+ * component-wise unit normalization; an auxiliary-metric cutoff depends on it.
+ */
+inline double radial_cartesian_scale(int lx, int ly, int lz) {
+  const int l = lx + ly + lz;
+  if (l < 2) return 1.0;
+  return std::sqrt(2.0 * std::tgamma(lx + 0.5) * std::tgamma(ly + 0.5) *
+                   std::tgamma(lz + 0.5) / std::tgamma(l + 1.5));
+}
+
 inline double factorial_as_double(int n) {
   double result = 1.0;
   for (int value = n; value > 0; --value) {

@@ -17,6 +17,30 @@
 
 namespace xmvb::vb::detail {
 
+void contract_orbital_pair_direction(
+    const ExactPackedActiveTwoElectronAdjointCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& direction,
+    Eigen::MatrixXd* contraction) {
+  const Eigen::Index n = cache.n_active_orbitals;
+  const Eigen::Index pairs = cache.active_pair_first_indices.size();
+  if (contraction == nullptr || direction.rows() != cache.n_basis_functions ||
+      direction.cols() != n || cache.orbital_pair_products.rows() != direction.rows() * n ||
+      cache.orbital_pair_products.cols() != pairs) {
+    throw std::invalid_argument("invalid one-orbital integral direction");
+  }
+  const Eigen::Map<const ExactCtxPairMatrix> image(
+      cache.orbital_pair_products.data(), cache.n_basis_functions, n * pairs);
+  const Eigen::MatrixXd projected = image.transpose() * direction;
+  contraction->resize(pairs, pairs);
+  for (Eigen::Index p = 0; p < pairs; ++p) {
+    const int a = cache.active_pair_first_indices[p];
+    const int b = cache.active_pair_second_indices[p];
+    for (Eigen::Index q = 0; q < pairs; ++q) {
+      (*contraction)(p, q) = projected(b * pairs + q, a) + projected(a * pairs + q, b);
+    }
+  }
+}
+
 void build_ao_pair_component_tables(
     int n_bf,
     std::vector<int>* first_indices,

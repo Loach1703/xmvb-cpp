@@ -65,6 +65,7 @@ struct TnhvpIterationRecord {
   double predicted_decrease = 0.0;
   double actual_decrease = 0.0;
   double trust_ratio = 0.0;
+
   double minimum_ritz_value = 0.0;
   double minimum_shifted_ritz_value = 0.0;
   double trust_region_shift = 0.0;
@@ -113,6 +114,18 @@ struct NeoIterationRecord {
   double actual_reduction = 0.0;
   double trust_ratio = 0.0;
 
+  /** Source reduced-gradient L2 norm, before the accepted step. */
+  double source_gradient_norm = 0.0;
+  /** Physical dual norms, evaluated only when a live NEO observer is present. */
+  double source_physical_gradient_norm = 0.0;
+  double physical_orbital_kkt_norm = 0.0;
+  double accepted_physical_gradient_norm = 0.0;
+  /** Physical orbital step norm and trust-region shift. */
+  double orbital_step_norm = 0.0;
+  double shift = 0.0;
+
+  /** Nonlinear-validated candidate, not a certified coupled Newton solve. */
+  bool approximate_step = false;
   bool global_curvature_certified = false;
   bool reached_boundary = false;
 };
@@ -191,10 +204,13 @@ struct VbScfAcceptedIterationSnapshot {
   /** Whether nonredundant projected-gradient norms are available. */
   bool has_projected_gradient = false;
 
-  /** Infinity norm of the gradient in the nonredundant orbital chart. */
+  /** @brief Progress infinity norm in the current chart.
+   * NEO reports unwhitened components here; stopping/terminal infinity norms
+   * use the established reference coordinates, without whitening step bases.
+   */
   double projected_gradient_inf_norm = 0.0;
 
-  /** Euclidean norm of the gradient in the nonredundant orbital chart. */
+  /** @brief Dual norm in the local AO coordinate metric (Euclidean if whitened). */
   double projected_gradient_l2_norm = 0.0;
 
   /**
@@ -275,14 +291,15 @@ struct VbScfOptimizerResult {
   double final_gradient_l2_norm = 0.0;
 
   /**
-   * @brief Final projected gradient Euclidean norm in the nonredundant reduced space.
+   * @brief Final projected gradient norm in the local AO coordinate metric.
    */
   double final_projected_gradient_l2_norm = 0.0;
 
   /**
    * @brief Final metric-dual gradient norm on the physical orbital quotient.
    */
-  double final_physical_gradient_norm = 0.0;
+  std::optional<double> final_physical_gradient_norm;
+  std::string final_physical_gradient_diagnostic;
 
   /**
    * @brief Total energy after each objective/gradient evaluation, including the initial value.

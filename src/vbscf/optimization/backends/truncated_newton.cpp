@@ -184,7 +184,8 @@ BackendRunResult run_truncated_newton_backend(
     final_projected_gradient_l2_norm =
         current_projection.reduced_gradient.norm();
     if (run_result.n_iterations == 0 &&
-        reduced_gradient_inf_norm < options.gradient_tolerance) {
+        orbital_gradient_converged(*objective, parameter_view, current_space,
+            current_projection.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason =
           "nonredundant_truncated_newton_initial_tolerance";
@@ -701,8 +702,8 @@ BackendRunResult run_truncated_newton_backend(
           &packed_secant_history);
     }
     if (std::abs(de) < options.energy_tolerance &&
-        final_projected_gradient_inf_norm <
-            options.gradient_tolerance) {
+        orbital_gradient_converged(*objective, parameter_view, next_space,
+            next_projection.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason =
           "nonredundant_truncated_newton_projected_gradient_tolerance";

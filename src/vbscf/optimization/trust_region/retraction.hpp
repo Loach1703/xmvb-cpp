@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <mutex>
 #include <Eigen/Core>
 
 #include "vbscf/orbitals/charts/chart.hpp"
@@ -19,8 +21,9 @@ Eigen::VectorXd gather_nonredundant_retract_tangent(
  * @brief Accepted-point pullback metric of the additive sparse retraction.
  *
  * The algebraic quotient chart supplies the horizontal raw-coefficient lift.
- * This object measures that same lift after the inactive-subspace and active-
- * ray physical map; it never stores a full reduced metric matrix. The chart is
+ * This object measures that same lift after the inactive-subspace and active
+ * physical map. Complete OEO uses the active span; a structure subset uses
+ * individual rays. It never stores a full reduced metric matrix. The chart is
  * prewhitened only in independent local orbital-normalization metrics, so the
  * complete coupled reduced metric is generally not the identity. Callers must
  * use `apply` for the metric covector and `norm` for the physical tangent norm;
@@ -39,9 +42,10 @@ public:
   /**
    * @brief Applies the inverse Riesz map without assembling the metric.
    *
-   * Solves @f$M y=b@f$ by conjugate gradients using matrix-free metric
-   * actions. Failure to reach the roundoff-derived residual tolerance in at
-   * most the reduced-space dimension is reported explicitly.
+   * Solves @f$G y=b@f$ by PCG with exact orbital-diagonal metric blocks,
+   * matrix-free coupled actions and recursive residuals. True residuals certify convergence;
+   * a residual gap or a complete Krylov cycle triggers a restart, which
+   * continues only while the certified residual decreases above roundoff.
    */
   Eigen::VectorXd solve(const Eigen::VectorXd& covector) const;
 
@@ -63,6 +67,9 @@ private:
   const OrbitalChart& space_;
   const SparseParameterLayout& parameter_view_;
   OrbitalPhysicalMetric physical_metric_;
+  /** @brief Shared lazy factorization: analytic dual norms need no PCG blocks. */
+  mutable std::once_flag block_inverse_once_;
+  mutable std::function<Eigen::VectorXd(const Eigen::VectorXd&)> block_inverse_;
 };
 
 Eigen::VectorXd shrink_reduced_step_inside_trust_radius(

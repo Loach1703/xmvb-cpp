@@ -1,0 +1,267 @@
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
+#include <vector>
+
+#include <Eigen/Core>
+#include <Eigen/LU>
+#include <Eigen/QR>
+
+#include "vbscf/determinants/pairs/same_spin_cache.hpp"
+#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/overlap/representation.hpp"
+
+namespace {
+
+using namespace xmvb::vb;
+
+void require(bool condition, const char* message) {
+  if (!condition) throw std::runtime_error(message);
+}
+
+double relative_error(const Eigen::MatrixXd& actual,
+                      const Eigen::MatrixXd& reference) {
+  return (actual - reference).norm() /
+         std::max(1.0, reference.norm());
+}
+
+double dot(const Eigen::MatrixXd& left, const Eigen::MatrixXd& right) {
+  return (left.array() * right.array()).sum();
+}
+
+Eigen::MatrixXd upper(double diagonal_shift, double off_diagonal_scale) {
+  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(4, 4);
+  for (int i = 0; i < 4; ++i) {
+    result(i, i) = 1.0 + diagonal_shift + 0.09 * i;
+    for (int j = i + 1; j < 4; ++j) {
+      result(i, j) = off_diagonal_scale *
+                     std::sin(0.61 * (i + 1) * (j + 2));
+    }
+  }
+  return result;
+}
+
+Eigen::MatrixXd upper_direction(double scale) {
+  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(4, 4);
+  for (int i = 0; i < 4; ++i) {
+    for (int j = i; j < 4; ++j) {
+      result(i, j) = scale * std::cos(0.37 * (i + 2) * (j + 1));
+    }
+  }
+  return result;
+}
+
+Eigen::MatrixXd selected_expansion(int n_alpha, int n_beta) {
+  Eigen::MatrixXd w(n_alpha * n_beta, 3);
+  for (int product = 0; product < w.rows(); ++product) {
+    w(product, 0) = std::sin(0.41 * (product + 1));
+    w(product, 1) = std::cos(0.29 * (product + 2));
+    w(product, 2) = std::sin(0.17 * (product + 3)) +
+                    0.37 * std::cos(0.53 * (product + 1));
+  }
+  require(Eigen::FullPivLU<Eigen::MatrixXd>(w).rank() == 3,
+          "selected expansion lost column rank");
+  return w;
+}
+
+StructureAction make_action(
+    const std::vector<std::vector<int>>& alpha,
+    const std::vector<std::vector<int>>& beta,
+    const Eigen::MatrixXd& w) {
+  const int n_beta = static_cast<int>(beta.size());
+  std::vector<std::vector<int>> determinant_alpha, determinant_beta;
+  std::vector<std::vector<StructureExpansionTerm>> terms(w.rows());
+  for (int a = 0; a < static_cast<int>(alpha.size()); ++a) {
+    for (int b = 0; b < n_beta; ++b) {
+      const int product = a * n_beta + b;
+      determinant_alpha.push_back(alpha[a]);
+      determinant_beta.push_back(beta[b]);
+      for (int structure = 0; structure < 3; ++structure) {
+        terms[product].push_back({structure, w(product, structure)});
+      }
+    }
+  }
+  const auto topology = build_same_spin_pair_topology(
+      determinant_alpha, determinant_beta, 4);
+  const Eigen::Matrix4d identity = Eigen::Matrix4d::Identity();
+  const std::vector<double> packed_overlap(identity.data(),
+                                            identity.data() + identity.size());
+  ActiveSpaceTwoElectronResult two_electron;
+  two_electron.packed_active_two_electron_integrals.assign(
+      packed_active_two_electron_integral_count(4), 0.0);
+  return StructureAction(
+      terms, 3, topology, packed_overlap, Eigen::Matrix4d::Zero(),
+      two_electron, 4, nullptr, StructureActionMode::ActionOnly);
+}
+
+// Independent small-system oracle: enumerate each occupied minor directly.
+Eigen::MatrixXd compound(
+    const Eigen::MatrixXd& kernel,
+    const std::vector<std::vector<int>>& occupied) {
+  const int n = static_cast<int>(occupied.size());
+  const int electrons = static_cast<int>(occupied.front().size());
+  Eigen::MatrixXd result(n, n);
+  for (int left = 0; left < n; ++left) {
+    for (int right = 0; right < n; ++right) {
+      Eigen::MatrixXd minor(electrons, electrons);
+      for (int row = 0; row < electrons; ++row) {
+        for (int col = 0; col < electrons; ++col) {
+          minor(row, col) =
+              kernel(occupied[left][row], occupied[right][col]);
+        }
+      }
+      result(left, right) = minor.determinant();
+    }
+  }
+  return result;
+}
+
+Eigen::MatrixXd product_compound(
+    const Eigen::MatrixXd& kernel,
+    const std::vector<std::vector<int>>& alpha,
+    const std::vector<std::vector<int>>& beta) {
+  const Eigen::MatrixXd a = compound(kernel, alpha);
+  const Eigen::MatrixXd b = compound(kernel, beta);
+  Eigen::MatrixXd product(a.rows() * b.rows(), a.cols() * b.cols());
+  for (int al = 0; al < a.rows(); ++al) {
+    for (int bl = 0; bl < b.rows(); ++bl) {
+      for (int ar = 0; ar < a.cols(); ++ar) {
+        for (int br = 0; br < b.cols(); ++br) {
+          product(al * b.rows() + bl, ar * b.cols() + br) =
+              a(al, ar) * b(bl, br);
+        }
+      }
+    }
+  }
+  return product;
+}
+
+Eigen::MatrixXd reference_cross(
+    const Eigen::MatrixXd& left,
+    const Eigen::MatrixXd& right,
+    const Eigen::MatrixXd& w,
+    const std::vector<std::vector<int>>& alpha,
+    const std::vector<std::vector<int>>& beta) {
+  return w.transpose() * product_compound(left.transpose() * right,
+                                          alpha, beta) * w;
+}
+
+void check_case(const std::vector<std::vector<int>>& alpha,
+                const std::vector<std::vector<int>>& beta,
+                bool full_ambient) {
+  const Eigen::MatrixXd w = selected_expansion(alpha.size(), beta.size());
+  const auto action = make_action(alpha, beta, w);
+  const RepresentationOverlap overlap(action, alpha, beta, 4);
+  const Eigen::MatrixXd left = upper(0.04, 0.29);
+  const Eigen::MatrixXd right = upper(-0.08, -0.21);
+  const Eigen::MatrixXd dl = upper_direction(0.46);
+  const Eigen::MatrixXd dr = upper_direction(-0.33);
+  const Eigen::MatrixXd kernel = left.transpose() * right;
+  require((kernel - kernel.transpose()).norm() > 0.1,
+          "cross-kernel fixture is accidentally symmetric");
+  Eigen::Vector3d x(0.6, -0.4, 0.8), y(-0.3, 0.7, 0.5);
+  Eigen::MatrixXd block(3, 2);
+  block.col(0) = y;
+  block.col(1) = x;
+
+  const Eigen::MatrixXd reference =
+      reference_cross(left, right, w, alpha, beta);
+  require(relative_error(overlap.apply(left, right, block),
+                         reference * block) < 2e-12,
+          "cross-Gram block action differs from explicit occupied minors");
+  const double scalar = x.dot(overlap.apply(left, right, y).col(0));
+  require(std::abs(scalar - x.dot(reference * y)) < 2e-12,
+          "cross-Gram scalar differs from explicit occupied minors");
+
+  const Eigen::MatrixXd reverse =
+      overlap.apply(right, left, Eigen::Matrix3d::Identity());
+  require(relative_error(reverse, reference.transpose()) < 2e-12,
+          "left/right cross-Gram transpose symmetry failed");
+  require(std::abs(scalar - y.dot(overlap.apply(right, left, x).col(0))) < 2e-12,
+          "left/right scalar cross symmetry failed");
+
+  constexpr double h = 1e-6;
+  const Eigen::MatrixXd finite_action_direction =
+      (overlap.apply(left + h * dl, right + h * dr, block) -
+       overlap.apply(left - h * dl, right - h * dr, block)) / (2.0 * h);
+  const Eigen::MatrixXd analytic_action_direction =
+      overlap.apply_direction(left, right, dl, dr, block);
+  require(relative_error(analytic_action_direction,
+                         finite_action_direction) < 2e-8,
+          "cross-Gram directional block action fails finite differences");
+
+  const UpperPair adjoint = overlap.adjoint(left, right, x, y);
+  const double adjoint_dot = dot(adjoint.left, dl) + dot(adjoint.right, dr);
+  const double scalar_difference =
+      (x.dot(overlap.apply(left + h * dl, right + h * dr, y).col(0)) -
+       x.dot(overlap.apply(left - h * dl, right - h * dr, y).col(0))) /
+      (2.0 * h);
+  require(std::abs(adjoint_dot - scalar_difference) <
+              2e-8 * std::max(1.0, std::abs(scalar_difference)),
+          "cross-Gram upper adjoint fails scalar directional difference");
+  require(std::abs(adjoint_dot -
+                   x.dot(overlap.apply_direction(left, right, dl, dr, y).col(0))) <
+              2e-10,
+          "cross-Gram action and adjoint violate dot-product duality");
+  const UpperPair swapped = overlap.adjoint(right, left, y, x);
+  require(relative_error(adjoint.left, swapped.right) < 2e-12 &&
+              relative_error(adjoint.right, swapped.left) < 2e-12,
+          "left/right adjoints violate cross symmetry");
+
+  const UpperPair analytic_adjoint_direction =
+      overlap.adjoint_direction(left, right, dl, dr, x, y);
+  const UpperPair plus = overlap.adjoint(left + h * dl, right + h * dr, x, y);
+  const UpperPair minus = overlap.adjoint(left - h * dl, right - h * dr, x, y);
+  require(relative_error(analytic_adjoint_direction.left,
+                         (plus.left - minus.left) / (2.0 * h)) < 2e-7 &&
+              relative_error(analytic_adjoint_direction.right,
+                             (plus.right - minus.right) / (2.0 * h)) < 2e-7,
+          "cross-Gram adjoint direction fails finite differences");
+
+  // At identity, many pair minors vanish exactly. Cofactor derivatives of
+  // those singular minors must still contribute to the chart adjoint.
+  const Eigen::Matrix4d identity = Eigen::Matrix4d::Identity();
+  require(std::abs(compound(identity, alpha)(0, 1)) < 1e-15,
+          "identity fixture does not contain a singular pair minor");
+  const UpperPair identity_adjoint = overlap.adjoint(identity, identity, x, y);
+  const double identity_difference =
+      (x.dot(overlap.apply(identity + h * dl, identity, y).col(0)) -
+       x.dot(overlap.apply(identity - h * dl, identity, y).col(0))) /
+      (2.0 * h);
+  require(std::abs(dot(identity_adjoint.left, dl) - identity_difference) < 2e-8,
+          "singular occupied minors lost their derivative contribution");
+
+  if (full_ambient) {
+    // The carrier is complete, but the three selected columns do not close
+    // under a finite orbital change.
+    const Eigen::MatrixXd f_left =
+        product_compound(left, alpha, beta) * w;
+    const Eigen::MatrixXd f_right =
+        product_compound(right, alpha, beta) * w;
+    const Eigen::VectorXd target = f_right * y;
+    const Eigen::VectorXd residual =
+        target - f_left * f_left.colPivHouseholderQr().solve(target);
+    require(residual.norm() > 1e-3,
+            "full-ambient selected-space fixture accidentally closes");
+  }
+}
+
+}  // namespace
+
+int main() {
+  try {
+    const std::vector<std::vector<int>> full_alpha = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+    const std::vector<std::vector<int>> full_beta = {
+        {0}, {1}, {2}, {3}};
+    check_case(full_alpha, full_beta, true);
+    check_case({{0, 1}, {0, 2}, {1, 3}}, {{0}, {2}, {3}}, false);
+    std::cout << "Selected-space representation cross-Gram and derivatives: passed\n";
+    return 0;
+  } catch (const std::exception& error) {
+    std::cerr << error.what() << '\n';
+    return 1;
+  }
+}

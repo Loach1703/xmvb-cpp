@@ -7,7 +7,9 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
+#include <Eigen/LU>
 
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
@@ -19,11 +21,82 @@
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/orthogonal_ci/metric.hpp"
+#include "core/metric_solve.hpp"
 
 namespace {
 
 void require(bool condition, const std::string& message) {
   if (!condition) throw std::runtime_error(message);
+}
+
+/** @brief Repeated Riesz maps reuse inverse images, not an approximate norm. */
+void check_metric_recycling() {
+  constexpr int n = 24;
+  Eigen::MatrixXd transform = Eigen::MatrixXd::Identity(n, n);
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < i; ++j) transform(i,j) = 0.03 * std::sin(i + 2*j);
+  const Eigen::VectorXd spectrum = Eigen::VectorXd::LinSpaced(n, 0.0, 4.0)
+      .array().unaryExpr([](double x) { return std::pow(10.0, x); });
+  const Eigen::MatrixXd metric = transform * spectrum.asDiagonal() * transform.transpose();
+  const auto action = [&](const Eigen::VectorXd& x) { return (metric * x).eval(); };
+  const auto inverse = [&](const Eigen::VectorXd& x) {
+    return (x.array() / metric.diagonal().array()).matrix().eval();
+  };
+  xmvb::core::MetricSolveWorkspace workspace(3);
+  const Eigen::VectorXd a = Eigen::VectorXd::LinSpaced(n, -0.37, 0.62);
+  const Eigen::VectorXd b = Eigen::VectorXd::LinSpaced(n, 0.29, -0.43);
+  xmvb::core::MetricSolveStats stats;
+  const auto xa = workspace.solve(a, action, inverse, &stats);
+  const auto xb = workspace.solve(b, action, inverse, &stats);
+  const Eigen::VectorXd rhs = 0.4 * a - 0.7 * b;
+  const auto x = workspace.solve(rhs, action, inverse, &stats);
+  require((metric*x-rhs).norm() <= std::sqrt(std::numeric_limits<double>::epsilon()) * rhs.norm(),
+      "recycled Riesz solve changed its true-residual accuracy");
+  require(stats.iterations == 0 && stats.actions == 1 && stats.certifications == 1,
+      "a known inverse span launched another metric CG solve");
+  require((x - (0.4*xa - 0.7*xb)).norm() < 1e-10,
+      "recycled metric map is not linear on solved covectors");
+  for (int j = 0; j < 6; ++j) {
+    const Eigen::VectorXd probe = Eigen::VectorXd::Unit(n,j);
+    const auto y = workspace.solve(probe, action, inverse, &stats);
+    require((metric*y-probe).norm() <= std::sqrt(std::numeric_limits<double>::epsilon()),
+        "new RHS lost the recycled metric solve certificate");
+    require(workspace.size() <= 3, "metric reuse space exceeded its memory bound");
+  }
+  const auto zero = workspace.solve(Eigen::VectorXd::Zero(n), action, inverse, &stats);
+  require(zero.isZero() && stats.actions == 0, "zero covector requires no metric action");
+  xmvb::core::MetricSolveWorkspace observed(2);
+  const Eigen::VectorXd direction = Eigen::VectorXd::LinSpaced(n,-0.42,0.73);
+  observed.observe(direction, action(direction));
+  const auto known = observed.solve(action(direction), action, inverse, &stats);
+  require(stats.iterations == 0 && stats.actions == 1 &&
+      (metric*known-action(direction)).norm() <=
+          std::sqrt(std::numeric_limits<double>::epsilon()) * action(direction).norm(),
+      "an existing AH metric image relaunched CG");
+
+  // The captured component is exactly zero, but the complete residual is large.
+  xmvb::core::MetricSolveWorkspace decisions(2);
+  Eigen::Matrix3d diagonal = Eigen::Vector3d(2.0, 0.001, 7.0).asDiagonal();
+  const Eigen::VectorXd e0 = Eigen::VectorXd::Unit(3, 0);
+  decisions.observe(e0, diagonal * e0);
+  const Eigen::VectorXd outside = Eigen::VectorXd::Unit(3, 1);
+  int actions = 0;
+  const auto metric_action = [&](const Eigen::VectorXd& v) {
+    ++actions;
+    return (diagonal * v).eval();
+  };
+  const auto jacobi = [&](const Eigen::VectorXd& v) {
+    return (v.array() / diagonal.diagonal().array()).matrix().eval();
+  };
+  require(!decisions.norm_below(outside, 10.0, metric_action, jacobi) && actions == 1,
+      "projected-zero residual was accepted or launched a full inverse solve");
+  require(decisions.norm_below(outside, 40.0, metric_action, jacobi),
+      "ambiguous lower bound did not use the complete metric solve");
+  const double norm = std::sqrt(outside.dot(diagonal.inverse() * outside));
+  require(!decisions.norm_below(outside, 0.999*norm, metric_action, jacobi) &&
+      decisions.norm_below(outside, 1.001*norm, metric_action, jacobi),
+      "decision comparison changed its threshold");
 }
 
 struct StructureFixture {
@@ -128,6 +201,16 @@ std::shared_ptr<xmvb::vb::AcceptedPointContext> accepted_point(
       xmvb::vb::StructureActionResult{
           fixture.hamiltonian * accepted->selected_state_eigenvectors,
           fixture.overlap * accepted->selected_state_eigenvectors};
+  auto& selected = accepted->selected_state_matrices;
+  selected.n_structures = accepted->n_structures;
+  selected.n_unique_alpha = selected.n_unique_beta = 2;
+  selected.normalized_state_weights = accepted->normalized_state_weights;
+  selected.states.resize(n_states);
+  for (int i = 0; i < n_states; ++i) {
+    selected.states[i].normalized_state_weight = accepted->normalized_state_weights[i];
+    selected.states[i].coefficient_matrix = fixture.action.expand_structure_block(
+        accepted->selected_state_eigenvectors.col(i));
+  }
   return accepted;
 }
 
@@ -193,6 +276,16 @@ void check_single_state(const StructureFixture& fixture) {
   require(std::abs(structure.squared_norm(tangent) - expected_norm) < 2.0e-13,
           "structure physical norm differs from z^T S z");
   require(expected_norm > 0.0, "test structure tangent has zero physical norm");
+  const Eigen::VectorXd covector = structure.coordinates(tangent);
+  Eigen::MatrixXd metric(covector.size(), covector.size());
+  for (Eigen::Index col = 0; col < metric.cols(); ++col)
+    metric.col(col) = structure.apply_metric_coordinates(
+        Eigen::VectorXd::Unit(covector.size(), col));
+  const double dense_dual = std::sqrt(covector.dot(metric.ldlt().solve(covector)));
+  require(std::abs(structure.dual_norm(covector) - dense_dual) < 1e-10,
+      "complete structure dual norm differs from dense Riesz reference");
+  require(structure.dual_norm(Eigen::VectorXd::Zero(covector.size())) == 0.0,
+      "zero structure covector has nonzero dual norm");
 }
 
 void check_equal_weight_multistate(const StructureFixture& fixture) {
@@ -222,6 +315,23 @@ void check_equal_weight_multistate(const StructureFixture& fixture) {
   const auto hy = structure.apply_hessian(horizontal_y);
   const auto coordinate_action = structure.apply_coupling_coordinates(
       structure.coordinates(horizontal_x));
+  xmvb::vb::StructureActiveIntegralAdjoint joint_adjoint;
+  const auto joint = structure.apply_coupling_coordinates(
+      structure.coordinates(horizontal_x), &joint_adjoint);
+  require((joint.hessian_coordinates-coordinate_action.hessian_coordinates).norm() < 3e-13 &&
+      (joint.metric_coordinates-coordinate_action.metric_coordinates).norm() < 3e-13 &&
+      (joint.adjoint_multipliers-coordinate_action.adjoint_multipliers).norm() < 3e-13,
+      "joint response changed horizontal Hessian, metric or multipliers");
+  auto response_states = accepted->selected_state_matrices;
+  for (int i = 0; i < structure.n_states(); ++i)
+    response_states.states[i].coefficient_matrix = fixture.action.expand_structure_block(
+        coordinate_action.coefficient_response.col(i));
+  const auto separate_adjoint = fixture.action.active_integral_response_adjoint(
+      *accepted->structure_adjoint_state, response_states, coordinate_action.adjoint_multipliers);
+  require((joint_adjoint.overlap-separate_adjoint.overlap).norm() < 3e-13 &&
+      (joint_adjoint.one_electron-separate_adjoint.one_electron).norm() < 3e-13 &&
+      (joint_adjoint.pair_kernel-separate_adjoint.pair_kernel).norm() < 3e-13,
+      "joint structure response changed the integral adjoint");
   const auto coordinate_y = structure.apply_coupling_coordinates(
       structure.coordinates(horizontal_y));
   Eigen::MatrixXd coordinate_block(structure.tangent_size(), 2);
@@ -286,6 +396,7 @@ void check_unequal_weights_rejected(const StructureFixture& fixture) {
   const auto accepted = accepted_point(fixture, 2, {0.6, 0.4});
   bool rejected = false;
   try {
+    check_metric_recycling();
     (void)xmvb::vb::StructureTangentOperator(accepted, fixture.action);
   } catch (const std::invalid_argument&) {
     rejected = true;
@@ -370,6 +481,147 @@ void check_coupled_neo_coordinates(const StructureFixture& fixture) {
   require(rejected, "coupled NEO accepted an invalid coordinate dimension");
 }
 
+/** Compare the horizontal factorized inverse to an independent dense metric. */
+void check_metric_factorization(const StructureFixture& fixture) {
+  for (const int n_states : {1, 2}) {
+    auto accepted = accepted_point(fixture, n_states,
+        std::vector<double>(n_states, 1.0 / n_states));
+    accepted->complete_active_space = true;
+    accepted->same_spin_pair_cache.alpha_reuse_table.unique_determinants = {{0}, {1}};
+    accepted->same_spin_pair_cache.beta_reuse_table.unique_determinants = {{0}, {1}};
+    const xmvb::vb::StructureTangentOperator structure(accepted, fixture.action);
+    const auto* factors = accepted->metric_inverse(fixture.action);
+    require(factors != nullptr && factors == accepted->metric_inverse(fixture.action),
+        "complete metric factors are not shared at the accepted point");
+    require(factors->factor_bytes() < 4*4*sizeof(double),
+        "horizontal inverse allocated a full structure matrix");
+    Eigen::MatrixXd dense(structure.tangent_size(), structure.tangent_size());
+    for (int j = 0; j < dense.cols(); ++j)
+      dense.col(j) = structure.apply_metric_coordinates(Eigen::VectorXd::Unit(dense.cols(),j));
+    const Eigen::VectorXd rhs = Eigen::VectorXd::LinSpaced(dense.rows(), -0.37, 0.62);
+    const Eigen::VectorXd expected = dense.llt().solve(rhs);
+    const Eigen::VectorXd actual = structure.apply_inverse_metric_model(rhs);
+    require((expected-actual).norm() < 1e-12 && (dense*actual-rhs).norm() < 1e-12,
+        "complete horizontal overlap inverse differs from its dense reference");
+    require(std::abs(structure.dual_norm(rhs)-std::sqrt(rhs.dot(expected))) < 1e-12,
+        "factorized structure norm changed the physical metric");
+    xmvb::core::MetricSolveStats stats;
+    const auto certified = xmvb::core::solve_metric(rhs,
+        [&](const Eigen::VectorXd& x) { return structure.apply_metric_coordinates(x); },
+        [&](const Eigen::VectorXd& x) { return structure.apply_inverse_metric_model(x); }, &stats);
+    require(stats.iterations <= 2 && stats.certifications >= 1 &&
+        stats.relative_residual <= std::sqrt(std::numeric_limits<double>::epsilon()) &&
+        (certified-expected).norm() < 1e-12,
+        "factorized metric inverse lost its true-residual certification");
+  }
+  auto selected = accepted_point(fixture, 1, {1.0});
+  require(selected->metric_inverse(fixture.action) == nullptr,
+      "complete spin carrier incorrectly admitted a noncomplete VB space");
+}
+
+/** @brief Carrier inverse needs both horizontal Riesz maps in a nonorthogonal basis. */
+void check_carrier_diagonal(const StructureFixture& fixture) {
+  const auto expanded=fixture.action.orthogonalize_structure_block(Eigen::Matrix4d::Identity());
+  Eigen::Matrix4d f;
+  for (int j=0;j<4;++j) {
+    const Eigen::Matrix2d block=expanded.middleCols(2*j,2);
+    f.col(j)=Eigen::Map<const Eigen::Vector4d>(block.data());
+  }
+  const Eigen::Matrix4d fi=f.inverse();
+  const Eigen::Vector4d diagonal=(fi.transpose()*fixture.hamiltonian*fi).diagonal();
+  const double shift=-0.07;
+  for (const int n_states:{1,2}) {
+    auto accepted=accepted_point(fixture,n_states,std::vector<double>(n_states,1.0/n_states));
+    accepted->complete_active_space=true;
+    accepted->same_spin_pair_cache.alpha_reuse_table.unique_determinants={{0},{1}};
+    accepted->same_spin_pair_cache.beta_reuse_table.unique_determinants={{0},{1}};
+    const xmvb::vb::StructureTangentOperator structure(accepted,fixture.action);
+    const int dimension=structure.tangent_size();
+    Eigen::MatrixXd l(4*n_states,dimension);
+    for (int j=0;j<dimension;++j) {
+      const auto raw=structure.expand(Eigen::VectorXd::Unit(dimension,j)).scaled_coefficients;
+      for (int s=0;s<n_states;++s) l.block(4*s,j,4,1)=f*raw.col(s);
+    }
+    const Eigen::MatrixXd g=l.transpose()*l;
+    const Eigen::MatrixXd gi=g.inverse();
+    Eigen::VectorXd inverse_diagonal(4*n_states);
+    for (int s=0;s<n_states;++s)
+      inverse_diagonal.segment(4*s,4)=
+          (diagonal.array()-fixture.eigenvalues[s]-shift).inverse().matrix();
+    const Eigen::MatrixXd expected=gi*l.transpose()*inverse_diagonal.asDiagonal()*l*gi;
+    Eigen::MatrixXd actual(dimension,dimension);
+    for (int j=0;j<dimension;++j)
+      actual.col(j)=structure.apply_inverse_augmented_hessian_diagonal(
+          Eigen::VectorXd::Unit(dimension,j),shift);
+    require((actual-expected).norm()<2e-11,
+        "carrier preconditioner did not apply both horizontal Riesz maps");
+    require((actual-actual.transpose()).norm()<2e-12,
+        "carrier preconditioner lost coordinate-space symmetry");
+  }
+}
+
+/** Check the forcing split without assuming a stationary carrier root. */
+void check_connection(const StructureFixture& fixture) {
+  require(fixture.action.supports_integral_direction(), "fixture lacks direct CI");
+  Eigen::Matrix2d overlap_direction, one_direction;
+  overlap_direction << 0.03, -0.04, -0.04, 0.02;
+  one_direction << 0.11, 0.02, 0.02, -0.07;
+  const std::vector<double> overlap(overlap_direction.data(), overlap_direction.data()+4);
+  const std::vector<double> one(one_direction.data(), one_direction.data()+4);
+  std::vector<double> two(xmvb::vb::packed_active_two_electron_integral_count(2), 0.0);
+  for (const bool stationary : {true, false}) {
+    Eigen::VectorXd coefficients = fixture.eigenvectors.col(0);
+    if (!stationary) coefficients += 0.4 * fixture.eigenvectors.col(1);
+    coefficients /= std::sqrt(coefficients.dot(fixture.overlap * coefficients));
+    const double energy = coefficients.dot(fixture.hamiltonian * coefficients);
+    xmvb::vb::SelectedStateDeterminantMatrices selected;
+    selected.n_structures = 4;
+    selected.n_unique_alpha = selected.n_unique_beta = 2;
+    selected.normalized_state_weights = {1.0};
+    selected.states.resize(1);
+    selected.states[0].normalized_state_weight = 1.0;
+    selected.states[0].coefficient_matrix.resize(2, 2);
+    for (int a = 0; a < 2; ++a)
+      for (int b = 0; b < 2; ++b)
+        selected.states[0].coefficient_matrix(a,b) = coefficients[2*a+b];
+    const auto state = fixture.action.prepare_active_adjoint(selected, {energy});
+    xmvb::vb::StructureIntegralDirection captured, plain;
+    captured.capture_connection = true;
+    const auto images = fixture.action.apply_integral_direction(state, overlap, one, two, &captured);
+    const auto reference = fixture.action.apply_integral_direction(state, overlap, one, two, &plain);
+    require(captured.connection.has_value() && !plain.connection.has_value(),
+        "connection diagnostic capture contract failed");
+    require((images.hamiltonian-reference.hamiltonian).norm() < 1e-14 &&
+        (images.overlap-reference.overlap).norm() < 1e-14,
+        "connection capture changed the action");
+    require((images.hamiltonian-energy*images.overlap-
+        captured.connection->representation_forcing-captured.connection->integral_forcing).norm() < 1e-12,
+        "connection forcing decomposition lost a carrier residual term");
+    require(captured.connection->squared_norm[0] >= -1e-14,
+        "connection tangent squared norm is invalid");
+    if (stationary) {
+      const auto accepted = accepted_point(fixture, 1, {1.0});
+      xmvb::vb::StructureTangentOperator tangent(accepted, fixture.action);
+      const double scale = std::sqrt(2.0);
+      const Eigen::VectorXd rhs = tangent.project_coordinates(
+          scale * captured.connection->overlap);
+      Eigen::MatrixXd metric(tangent.tangent_size(), tangent.tangent_size());
+      for (int j = 0; j < metric.cols(); ++j)
+        metric.col(j) = tangent.apply_metric_coordinates(
+            Eigen::VectorXd::Unit(metric.cols(), j));
+      const Eigen::VectorXd gamma = metric.llt().solve(rhs);
+      require(std::abs(2.0 * captured.connection->squared_norm[0] - rhs.dot(gamma)) < 1e-12,
+          "complete carrier connection has a spurious closure defect");
+      require((tangent.project_coordinates(scale * captured.connection->representation_forcing) -
+          tangent.apply_hessian_coordinates(gamma)).norm() < 1e-12,
+          "complete stationary carrier connection is not C gamma");
+    } else {
+      require(state.residuals[0].norm() > 1e-3,
+          "nonstationary connection test accidentally has zero carrier residual");
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -379,6 +631,9 @@ int main() {
     check_equal_weight_multistate(fixture);
     check_unequal_weights_rejected(fixture);
     check_coupled_neo_coordinates(fixture);
+    check_connection(fixture);
+    check_carrier_diagonal(fixture);
+    check_metric_factorization(fixture);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

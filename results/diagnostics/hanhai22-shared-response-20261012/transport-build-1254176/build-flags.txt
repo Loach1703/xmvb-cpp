@@ -1,0 +1,11 @@
+Compiler: /gpfs/opt/gcc/14.1.0/bin/g++
+CMake: 3.30.5
+Generator: Unix Makefiles
+Source base: 75558cb1 plus finite-transport integration working patch
+CXX_DEFINES: -DEIGEN_USE_BLAS=1 -DEIGEN_USE_LAPACKE=1
+CXX_FLAGS: -O3 -DNDEBUG -g1 -fno-omit-frame-pointer -std=gnu++17 -fdiagnostics-color=always -fpermissive -ffunction-sections -pipe -fopenmp
+Dependency prefix: /home/guqqgroup/xiatao/software/xmvb-deps-20261012
+Execution: Hanhai22 Slurm, srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores
+Unit execution: one bound core, OMP_NUM_THREADS=1
+Molecular execution: 32 OpenMP threads, PLACES=cores, PROC_BIND=close, MAX_ACTIVE_LEVELS=1, BLAS threads=1
+Unrelated local RI operator/test and .gitignore edits are excluded from this commit.

@@ -1,0 +1,23 @@
+diff --git a/src/vbscf/optimization/backends/neo.cpp b/src/vbscf/optimization/backends/neo.cpp
+--- a/src/vbscf/optimization/backends/neo.cpp
++++ b/src/vbscf/optimization/backends/neo.cpp
+@@ -292,11 +292,10 @@
+   } else {
+-    HvpComponents core_components;
+-    core_components.local_active_response = false;
+-    core_components.structure_response = false;
+-    auto problem = std::make_shared<NeoProblem>(
+-        reduced_gradient,
+-        [&orbital_hessian, core_components](
+-            const Eigen::VectorXd& vector) {
+-          return orbital_hessian.apply_reduced(vector, core_components);
+-        },
++    auto problem = std::make_shared<NeoProblem>(
++        reduced_gradient,
++        [&orbital_hessian](
++            const Eigen::VectorXd& vector) {
++          // Include selected-state normalization gauge, but do not solve
++          // the horizontal structure response equation.
++          return orbital_hessian.apply_orbital_coupling(vector).orbital_hessian;
++        },
+         [&orbital_metric](const Eigen::VectorXd& vector) {

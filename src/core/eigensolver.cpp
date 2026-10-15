@@ -124,6 +124,10 @@ void validate_davidson_options(
       options.energy_tolerance <= 0.0) {
     throw std::invalid_argument("Davidson energy tolerance must be positive");
   }
+  if (!std::isfinite(options.stationarity_tolerance) ||
+      options.stationarity_tolerance <= 0.0) {
+    throw std::invalid_argument("Davidson stationarity tolerance must be positive");
+  }
 }
 
 void validate_davidson_diagonals(
@@ -300,13 +304,15 @@ DavidsonOptions make_davidson_options(
     int dimension,
     int n_roots,
     double energy_tolerance,
-    double relative_residual_tolerance) {
+    double relative_residual_tolerance,
+    double stationarity_tolerance) {
   if (dimension <= 0 || n_roots <= 0 || n_roots > dimension) {
     throw std::invalid_argument("invalid Davidson eigenproblem dimensions");
   }
   if (!std::isfinite(energy_tolerance) || energy_tolerance <= 0.0 ||
       !std::isfinite(relative_residual_tolerance) ||
-      relative_residual_tolerance <= 0.0) {
+      relative_residual_tolerance <= 0.0 ||
+      !std::isfinite(stationarity_tolerance) || stationarity_tolerance <= 0.0) {
     throw std::invalid_argument(
         "Davidson accuracy tolerances must be positive");
   }
@@ -314,7 +320,7 @@ DavidsonOptions make_davidson_options(
   // matrices; the projected Hamiltonian uses one subspace square. Cap this
   // workspace by bytes, not by a molecular or structure-count heuristic.
   constexpr long double kBasisBudgetDoubles =
-      static_cast<long double>(64ULL * 1024ULL * 1024ULL) / sizeof(double);
+      static_cast<long double>(512ULL * 1024ULL * 1024ULL) / sizeof(double);
   const long double n = static_cast<long double>(dimension);
   const long double capacity =
       2.0L * kBasisBudgetDoubles /
@@ -331,7 +337,8 @@ DavidsonOptions make_davidson_options(
       2 * dimension,
       max_subspace,
       energy_tolerance,
-      relative_residual_tolerance};
+      relative_residual_tolerance,
+      stationarity_tolerance};
 }
 
 GeneralizedEigenResult GeneralizedEigensolver::solve_dense(
@@ -446,6 +453,7 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
       0,
       active_dimension,
       &projected_hamiltonian);
+  Eigen::VectorXd previous_eigenvalues;
 
   for (int iteration = 1;
        iteration <= options.max_iterations;
@@ -465,7 +473,7 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
     const int n_projected_roots =
         active_dimension + options.n_roots > max_subspace
             ? active_dimension
-            : options.n_roots;
+            : std::min(active_dimension, options.n_roots + 1);
     const ProjectedEigenpairs projected =
         solve_lowest_projected_eigenpairs(
             active_projected_hamiltonian,
@@ -479,8 +487,16 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
         active_hamiltonian_basis * root_coefficients;
     const Eigen::MatrixXd overlap_root_vectors =
         active_overlap_basis * root_coefficients;
+    const double selected_subspace_gap =
+        projected_eigenvalues.size() > options.n_roots
+        ? std::max(
+              projected_eigenvalues[options.n_roots] -
+                  projected_eigenvalues[options.n_roots - 1],
+              std::numeric_limits<double>::epsilon())
+        : std::numeric_limits<double>::epsilon();
 
     result.relative_residual_norms.assign(options.n_roots, 0.0);
+    result.stationarity_residual_norms.assign(options.n_roots, 0.0);
     bool converged = true;
     Eigen::MatrixXd corrections(dimension, options.n_roots);
     int n_corrections = 0;
@@ -496,20 +512,62 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
                   overlap_root_vectors.col(root).norm());
       const double relative_residual = residual.norm() / residual_scale;
       result.relative_residual_norms[root] = relative_residual;
-      const double energy_scaled_tolerance =
-          options.energy_tolerance / std::max(1.0, std::abs(eigenvalue));
-      const double required_residual =
-          std::min(options.residual_tolerance, energy_scaled_tolerance);
-      if (relative_residual <= required_residual) {
-        continue;
+      const double stationarity_residual =
+          residual.norm() / root_vectors.col(root).norm();
+      result.stationarity_residual_norms[root] = stationarity_residual;
+      const double energy_scale = std::max(1.0, std::abs(eigenvalue));
+      const double first_iteration_residual_tolerance =
+          options.energy_tolerance / energy_scale;
+      const double spectral_energy_residual_tolerance = std::sqrt(
+          (options.energy_tolerance / energy_scale) *
+          (selected_subspace_gap / energy_scale));
+      const bool ritz_energy_stable =
+          previous_eigenvalues.size() == options.n_roots &&
+          std::abs(eigenvalue - previous_eigenvalues[root]) <=
+              options.energy_tolerance;
+      const bool independently_certified =
+          relative_residual <= first_iteration_residual_tolerance;
+      const double required_residual = std::min(
+          options.residual_tolerance,
+          spectral_energy_residual_tolerance);
+      if (relative_residual <= required_residual &&
+          stationarity_residual <= options.stationarity_tolerance &&
+          (ritz_energy_stable || independently_certified)) {
+        if (!options.physical_residual_norm) continue;
+        const double physical_residual = options.physical_residual_norm(
+            root_vectors.col(root), eigenvalue);
+        if (!std::isfinite(physical_residual) || physical_residual < 0.0)
+          throw std::runtime_error("Davidson physical residual norm is invalid");
+        result.stationarity_residual_norms[root] = physical_residual;
+        if (physical_residual <= options.stationarity_tolerance) continue;
       }
       converged = false;
-      corrections.col(n_corrections) = precondition_residual(
-          hamiltonian_diagonal,
-          overlap_diagonal,
-          eigenvalue,
-          residual);
+      if (options.residual_preconditioner) {
+        Eigen::VectorXd correction =
+            options.residual_preconditioner(residual, eigenvalue);
+        if (correction.size() != dimension || !correction.allFinite()) {
+          throw std::runtime_error(
+              "Davidson residual preconditioner returned an invalid vector");
+        }
+        corrections.col(n_corrections) = -correction;
+      } else {
+        corrections.col(n_corrections) = precondition_residual(
+            hamiltonian_diagonal,
+            overlap_diagonal,
+            eigenvalue,
+            residual);
+      }
       ++n_corrections;
+    }
+
+    if (options.observe_iteration) {
+      options.observe_iteration(
+          iteration,
+          active_dimension,
+          projected_eigenvalues[0],
+          *std::max_element(
+              result.relative_residual_norms.begin(),
+              result.relative_residual_norms.end()));
     }
 
     if (converged) {
@@ -520,18 +578,41 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
           root_vectors.data(),
           root_vectors.data() + root_vectors.size());
       result.overlap_eigenvectors = overlap_root_vectors;
+      result.hamiltonian_eigenvectors = hamiltonian_root_vectors;
       return result;
     }
+    previous_eigenvalues =
+        projected_eigenvalues.head(options.n_roots);
 
     // A complete S-orthonormal basis leaves no independent correction
     // direction. Returning an inaccurate root here would violate the outer
     // derivative contract, so report the finite-precision limit explicitly.
     if (active_dimension == dimension) {
+      // A failed algebraic Ritz gate must not hide the physical root error
+      // behind ||r||/||c|| in an ill-conditioned structure representation.
+      if (options.physical_residual_norm) {
+        for (int root = 0; root < options.n_roots; ++root) {
+          const double physical = options.physical_residual_norm(
+              root_vectors.col(root), projected_eigenvalues[root]);
+          if (!std::isfinite(physical) || physical < 0.0)
+            throw std::runtime_error("Davidson physical residual norm is invalid");
+          result.stationarity_residual_norms[root] = physical;
+        }
+      }
       std::ostringstream message;
       message << "complete Davidson basis cannot meet the requested Ritz residual: "
               << *std::max_element(
                      result.relative_residual_norms.begin(),
-                     result.relative_residual_norms.end());
+                     result.relative_residual_norms.end())
+              << (options.physical_residual_norm
+                      ? "; physical CI stationarity residual = "
+                      : "; CI stationarity residual = ")
+              << *std::max_element(
+                     result.stationarity_residual_norms.begin(),
+                     result.stationarity_residual_norms.end())
+              << " (requested " << options.stationarity_tolerance << ')'
+              << "; coefficient norm = " << root_vectors.colwise().norm().maxCoeff()
+              << "; overlap-image norm = " << overlap_root_vectors.colwise().norm().maxCoeff();
       throw std::runtime_error(message.str());
     }
 
@@ -543,16 +624,16 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
         &result.block_actions);
 
     if (active_dimension + n_corrections > max_subspace) {
-      const int available_after_restart = max_subspace - n_corrections;
-      // A truncated single-root solve releases half of the saturated Ritz
-      // space, preserving useful spectral information without replacing only
-      // one direction at a time. Block solves retain the largest compatible
-      // space because simultaneous corrections need neighboring Ritz vectors.
-      const int n_keep = max_subspace < dimension && options.n_roots == 1
-          ? std::max(options.n_roots, max_subspace / 2)
-          : std::min(
-                active_dimension,
-                std::max(options.n_roots, available_after_restart));
+      // Thick restart retains the requested low Ritz space and releases half
+      // of the bounded workspace for subsequent residual expansions.  Keeping
+      // every vector except the current correction block makes a block solve
+      // restart after every iteration and can permanently stagnate on a poor
+      // Jacobi preconditioner.  The same spectral restart is valid for one or
+      // several roots: discarded high Ritz vectors are variationally inferior
+      // to the retained low subspace and can be regenerated by new residuals.
+      const int n_keep = std::min(
+          active_dimension,
+          std::max(options.n_roots, max_subspace / 2));
       const Eigen::MatrixXd keep_coefficients =
           projected_eigenvectors.leftCols(n_keep);
       const Eigen::MatrixXd restarted_basis =
@@ -596,7 +677,12 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
           << " iterations; largest relative residual = "
           << *std::max_element(
                  result.relative_residual_norms.begin(),
-                 result.relative_residual_norms.end());
+                 result.relative_residual_norms.end())
+          << "; largest CI stationarity residual = "
+          << *std::max_element(
+                 result.stationarity_residual_norms.begin(),
+                 result.stationarity_residual_norms.end())
+          << " (requested " << options.stationarity_tolerance << ')';
   throw std::runtime_error(message.str());
 }
 

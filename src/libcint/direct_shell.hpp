@@ -56,12 +56,28 @@ struct LibcintThreeCenterShellBlock {
   int auxiliary_ao_count = 0;
 
   /**
-   * @brief Raw libcint Cartesian block in `[left][right][auxiliary]` order.
+   * @brief Cartesian block in `[left][right][auxiliary]` order.
+   * Primary AOs are component-normalized; auxiliary AOs are radial-normalized.
    *
    * The flattened index is
    * `left + right * left_count + auxiliary * left_count * right_count`.
    */
   std::vector<double> values;
+};
+
+/**
+ * @brief Caller-owned shell buffers and libcint scratch, reused by one worker.
+ *
+ * Returned block references remain valid only until their buffer is reused
+ * (including the raw quartet prescreen). Do not share a workspace between calls
+ * that execute concurrently.
+ * The evaluator and its read-only optimizers may be shared between workers.
+ */
+struct LibcintShellWorkspace {
+  std::vector<double> cache;
+  LibcintShellQuartet quartet;
+  LibcintShellBlock metric;
+  LibcintThreeCenterShellBlock three_center;
 };
 
 class LibcintDirectShellEvaluator {
@@ -101,24 +117,34 @@ public:
       int left_shell,
       int right_shell) const;
 
-  LibcintShellQuartet evaluate_two_electron_shell_quartet(
+  const LibcintShellQuartet& evaluate_two_electron_shell_quartet(
       int shell_i,
       int shell_j,
       int shell_k,
-      int shell_l) const;
+      int shell_l,
+      LibcintShellWorkspace& workspace) const;
 
-  LibcintShellBlock evaluate_auxiliary_metric_shell_pair(
+  const LibcintShellBlock& evaluate_auxiliary_metric_shell_pair(
       int left_auxiliary_shell,
-      int right_auxiliary_shell) const;
+      int right_auxiliary_shell,
+      LibcintShellWorkspace& workspace) const;
 
-  LibcintThreeCenterShellBlock evaluate_three_center_shell_block(
+  const LibcintThreeCenterShellBlock& evaluate_three_center_shell_block(
       int primary_left_shell,
       int primary_right_shell,
-      int auxiliary_shell) const;
+      int auxiliary_shell,
+      LibcintShellWorkspace& workspace) const;
 
-  double evaluate_max_abs_raw_two_electron_shell_pair(
+  /** @brief Maximum normalized `(mu nu|mu nu)` in a shell pair.
+   *
+   * Its square root is a Schwarz bound for the same unit-normalized AOs as
+   * evaluate_two_electron_shell_quartet(). Raw contraction scales must not
+   * enter the shell screening criterion.
+   */
+  double evaluate_two_electron_shell_pair_bound(
       int shell_i,
-      int shell_j) const;
+      int shell_j,
+      LibcintShellWorkspace& workspace) const;
 
 private:
   void validate_shell_index(int shell_index) const;

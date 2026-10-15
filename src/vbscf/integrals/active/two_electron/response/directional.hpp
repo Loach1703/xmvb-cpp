@@ -27,9 +27,11 @@ void compute_exact_packed_active_two_electron_integral_directional_derivative(
 /**
  * @brief Computes several exact `delta GGO` directions with bounded workspace.
  *
- * The result has one packed active-2e derivative per column. Directions reuse
- * one workspace but remain separate AO-pair actions; concatenating them into a
- * wider matrix reduces cache locality on the production graph kernel.
+ * The result has one packed active-2e derivative per column. Integral-only
+ * consumers reuse accepted images without computing unused directional images.
+ * Resident orbital-adjoint images use memory-budgeted column blocks; streamed
+ * integral-only consumers share each accepted row tile across all directions.
+ * Returned images are reused by the orbital pullback, not transformed again.
  */
 Eigen::MatrixXd
 compute_exact_packed_active_two_electron_integral_directional_derivative_batch(

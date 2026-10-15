@@ -1,0 +1,11 @@
+Base: master 53cd3e9b. Exact analytic Hessian diagonal optimization.
+CSR output-owned exchange contraction, fused projected core Coulomb rows,
+accepted active Coulomb reuse, exact removal of the redundant total density
+source. Shared 64 MiB explicit-buffer workspace planner; no full AO worker
+images on the CSR row path. This is not a strict process/heap-memory cap.
+Exact layouts selected by integral-record visits and runtime L2 capacity,
+not by molecule name or numerical tolerances.
+Compact unique-integral and RI representations retain their required storage
+algorithms. No HVP, orbital chart, optimizer strategy or threshold changes.
+Unrelated local RI edits are excluded. Independent four-index row-operator and
+rotated-MO analytic-diagonal references, quotient/CIAH/SA regression required.

@@ -1,0 +1,245 @@
+{
+  "run": "results/diagnostics/hanhai22-shared-response-20261012/ciah-coordinate-audit-1250554/QOCGUM-audit",
+  "macros": 4,
+  "hvp": 52,
+  "keyframes": 17,
+  "keyframe_calls_timed": 0,
+  "keyframe_seconds": null,
+  "keyframe_active_seconds": {
+    "seconds": null,
+    "setup": null,
+    "action": null,
+    "adjoint": null
+  },
+  "keyframe_hs_actions": null,
+  "keyframe_max_diagonal_bytes": null,
+  "keyframe_decisions": [
+    {
+      "macro": 1,
+      "attempt": 0,
+      "actual": "0.73186965490309119",
+      "predicted": "0.65212121202664464",
+      "mismatch": "0.53029382320160168",
+      "mismatch_small": "1",
+      "energy": "-480.03886236120616",
+      "accepted": "1"
+    },
+    {
+      "macro": 1,
+      "attempt": 0,
+      "actual": "0.74814216949620327",
+      "predicted": "0.18280426213382239",
+      "mismatch": "0.72718600198981498",
+      "mismatch_small": "0",
+      "energy": "-480.02953290543724",
+      "accepted": "0"
+    },
+    {
+      "macro": 2,
+      "attempt": 0,
+      "actual": "0.30672614568541878",
+      "predicted": "0.19387117071970261",
+      "mismatch": "0.2505966138519663",
+      "mismatch_small": "1",
+      "energy": "-480.0878895205808",
+      "accepted": "1"
+    },
+    {
+      "macro": 2,
+      "attempt": 0,
+      "actual": "0.24833147527405289",
+      "predicted": "0.068642015382697805",
+      "mismatch": "0.24059649993758239",
+      "mismatch_small": "0",
+      "energy": "-480.08660164596949",
+      "accepted": "0"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.07756929425255045",
+      "predicted": "0.045711175674992791",
+      "mismatch": "0.064529209132843726",
+      "mismatch_small": "1",
+      "energy": "-480.09429129165096",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.043536383688078162",
+      "predicted": "0.025328971460539213",
+      "mismatch": "0.035634744402673765",
+      "mismatch_small": "1",
+      "energy": "-480.0946035215668",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.021664166602943069",
+      "predicted": "0.013504262924853431",
+      "mismatch": "0.017680336804105672",
+      "mismatch_small": "1",
+      "energy": "-480.09472623926115",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.011266482724572247",
+      "predicted": "0.0069070104845102287",
+      "mismatch": "0.0092595542566591155",
+      "mismatch_small": "1",
+      "energy": "-480.09475467216737",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.0059766215663870888",
+      "predicted": "0.0034818248324857606",
+      "mismatch": "0.0049293562969410518",
+      "mismatch_small": "1",
+      "energy": "-480.09476351632941",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.0032250988771633936",
+      "predicted": "0.0019334794796892496",
+      "mismatch": "0.0026337815830649487",
+      "mismatch_small": "1",
+      "energy": "-480.09476575437452",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.0016416021114191732",
+      "predicted": "0.00082642625823199612",
+      "mismatch": "0.0014189123339433342",
+      "mismatch_small": "1",
+      "energy": "-480.09476641253866",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "actual": "0.00089781345303119797",
+      "predicted": "0.00048241757106841181",
+      "mismatch": "0.00076340959305640753",
+      "mismatch_small": "1",
+      "energy": "-480.09476659968209",
+      "accepted": "1"
+    },
+    {
+      "macro": 4,
+      "attempt": 0,
+      "actual": "9.0331142575913301e-05",
+      "predicted": "9.0328001742523274e-05",
+      "mismatch": "1.5671175481285026e-07",
+      "mismatch_small": "1",
+      "energy": "-480.09476668175296",
+      "accepted": "1"
+    }
+  ],
+  "micro_ends": [
+    {
+      "macro": 1,
+      "attempt": 0,
+      "reason": "keyframe_mismatch",
+      "source_coordinate_norm": "3.6909302931934103",
+      "predicted_coordinate_norm": "0.34218876108037577",
+      "frozen_model_coordinate_norm": "0.6388573115099867",
+      "keyframe_correction_norm": "0.53029382320160157",
+      "last_ritz": "0.18379609933572005"
+    },
+    {
+      "macro": 2,
+      "attempt": 0,
+      "reason": "keyframe_mismatch",
+      "source_coordinate_norm": "0.70022951048702387",
+      "predicted_coordinate_norm": "0.14587254650989995",
+      "frozen_model_coordinate_norm": "0.28599053636717997",
+      "keyframe_correction_norm": "0.2505966138519663",
+      "last_ritz": "0.068693480612336211"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "reason": "micro_budget",
+      "source_coordinate_norm": "0.23363687567207922",
+      "predicted_coordinate_norm": "0.00026309366433770062",
+      "frozen_model_coordinate_norm": "0.040374869677473939",
+      "keyframe_correction_norm": "0.040377944739918133",
+      "last_ritz": "0.00026309366466551609"
+    },
+    {
+      "macro": 4,
+      "attempt": 0,
+      "reason": "micro_gradient",
+      "source_coordinate_norm": "0.00039799029987841195",
+      "predicted_coordinate_norm": "5.2414278859088412e-05",
+      "frozen_model_coordinate_norm": "5.2409468469288155e-05",
+      "keyframe_correction_norm": "1.5671175481284015e-07",
+      "last_ritz": "5.2414278862703948e-05"
+    }
+  ],
+  "macro_trials": [
+    {
+      "macro": 1,
+      "attempt": 0,
+      "scale": "1",
+      "linear": "-1.0522359219736614",
+      "quadratic": "1.0287899525217485",
+      "current_energy": "-479.55046394844169",
+      "trial_energy": "-480.03867857027137",
+      "predicted": "0.53784094571278718",
+      "actual": "0.48821462182968389",
+      "rho": "0.90773048374490206",
+      "accepted": "1"
+    },
+    {
+      "macro": 2,
+      "attempt": 0,
+      "scale": "1",
+      "linear": "-0.10138128751508244",
+      "quadratic": "0.075231336478027433",
+      "current_energy": "-480.03867857027137",
+      "trial_energy": "-480.08714739832101",
+      "predicted": "0.063765619276068719",
+      "actual": "0.048468828049635704",
+      "rho": "0.76010910895091222",
+      "accepted": "1"
+    },
+    {
+      "macro": 3,
+      "attempt": 0,
+      "scale": "1",
+      "linear": "-0.013615968960035123",
+      "quadratic": "0.011993305189427173",
+      "current_energy": "-480.08714739832101",
+      "trial_energy": "-480.09476666133128",
+      "predicted": "0.007619316365321537",
+      "actual": "0.0076192630102696057",
+      "rho": "0.99999299739643654",
+      "accepted": "1"
+    },
+    {
+      "macro": 4,
+      "attempt": 0,
+      "scale": "1",
+      "linear": "-4.097800068804989e-08",
+      "quadratic": "4.0990313645168097e-08",
+      "current_energy": "-480.09476666133128",
+      "trial_energy": "-480.09476668185619",
+      "predicted": "2.0482843865465842e-08",
+      "actual": "2.0524907995422836e-08",
+      "rho": "1.0020536274275818",
+      "accepted": "1"
+    }
+  ],
+  "limits": "Observed corrections do not establish the outcome of skipping a keyframe. Scalar-audit wall time is not the native benchmark time."
+}

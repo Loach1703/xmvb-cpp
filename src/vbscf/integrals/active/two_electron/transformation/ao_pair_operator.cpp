@@ -11,8 +11,74 @@
 #endif
 
 #include "core/openmp.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
+#include "vbscf/diagnostics/performance/workers.hpp"
 
 namespace xmvb::vb::detail {
+namespace {
+
+/**
+ * @brief Contracts disjoint CSR rows with shared inputs and no private image.
+ *
+ * One source implementation is compiled for supported x86 vector widths;
+ * the runtime selects an ISA supported by the executing compute node.
+ * This does not require node-specific global compiler flags or data replicas.
+ */
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+__attribute__((target_clones("avx512f", "avx2", "default")))
+#endif
+void contract_rows(const int* offsets, const int* columns, const double* values,
+                   const double* source, double* target, std::size_t width,
+                   std::size_t first_row, std::size_t end_row) {
+  for (std::size_t row = first_row; row < end_row; ++row) {
+    double* output = target + row * width;
+    std::fill_n(output, width, 0.0);
+    int edge = offsets[row];
+    const int end = offsets[row + 1];
+    // Consume eight consecutive edges before writing the output row again.
+    // CSR metadata is still read once and additions retain their edge order.
+    for (; end - edge >= 8; edge += 8) {
+      const double* input0 = source + static_cast<std::size_t>(columns[edge]) * width;
+      const double* input1 = source + static_cast<std::size_t>(columns[edge + 1]) * width;
+      const double* input2 = source + static_cast<std::size_t>(columns[edge + 2]) * width;
+      const double* input3 = source + static_cast<std::size_t>(columns[edge + 3]) * width;
+      const double* input4 = source + static_cast<std::size_t>(columns[edge + 4]) * width;
+      const double* input5 = source + static_cast<std::size_t>(columns[edge + 5]) * width;
+      const double* input6 = source + static_cast<std::size_t>(columns[edge + 6]) * width;
+      const double* input7 = source + static_cast<std::size_t>(columns[edge + 7]) * width;
+      const double value0 = values[edge];
+      const double value1 = values[edge + 1];
+      const double value2 = values[edge + 2];
+      const double value3 = values[edge + 3];
+      const double value4 = values[edge + 4];
+      const double value5 = values[edge + 5];
+      const double value6 = values[edge + 6];
+      const double value7 = values[edge + 7];
+#pragma omp simd
+      for (std::size_t pair = 0; pair < width; ++pair) {
+        double sum = output[pair];
+        sum += value0 * input0[pair];
+        sum += value1 * input1[pair];
+        sum += value2 * input2[pair];
+        sum += value3 * input3[pair];
+        sum += value4 * input4[pair];
+        sum += value5 * input5[pair];
+        sum += value6 * input6[pair];
+        sum += value7 * input7[pair];
+        output[pair] = sum;
+      }
+    }
+    for (; edge < end; ++edge) {
+      const double* input = source + static_cast<std::size_t>(columns[edge]) * width;
+      const double value = values[edge];
+#pragma omp simd
+      for (std::size_t pair = 0; pair < width; ++pair)
+        output[pair] += value * input[pair];
+    }
+  }
+}
+
+}  // namespace
 
 void apply_exact_ao_pair_kernel(
     const AoIntegralInput& ao,
@@ -20,6 +86,15 @@ void apply_exact_ao_pair_kernel(
     int n_bf,
     std::size_t n_active_pairs,
     ExactCtxPairMatrix* result) {
+  if (n_bf != ao.n_basis_functions)
+    throw std::invalid_argument("AO-pair basis dimension mismatch");
+  apply_exact_ao_pair_graph(ao.pair_graph, coefficients, n_bf, n_active_pairs, result);
+}
+
+void apply_exact_ao_pair_graph(
+    const AoPairGraph& graph, const Eigen::Ref<const ExactCtxPairMatrix>& coefficients,
+    int n_bf, std::size_t n_active_pairs, ExactCtxPairMatrix* result) {
+  diagnostics::ScopedPhase phase(diagnostics::Phase::AoPairAction);
   if (result == nullptr) {
     throw std::invalid_argument("AO-pair result must not be null");
   }
@@ -30,10 +105,10 @@ void apply_exact_ao_pair_kernel(
     throw std::invalid_argument("AO-pair coefficient shape mismatch");
   }
 
-  const AoPairGraph& graph = ao.pair_graph;
-  result->setZero(
+  result->resize(
       static_cast<Eigen::Index>(n_bf_pairs),
       static_cast<Eigen::Index>(n_active_pairs));
+  if (n_active_pairs == 0) return;
 
   int n_threads = 1;
 #ifdef _OPENMP
@@ -52,20 +127,18 @@ void apply_exact_ao_pair_kernel(
         std::max(1, static_cast<int>(std::min<std::size_t>(
             graph.integral_count(),
             static_cast<std::size_t>(std::numeric_limits<int>::max())))));
-    std::vector<ExactCtxPairMatrix> partial_products;
-    partial_products.reserve(n_threads);
-    for (int thread = 0; thread < n_threads; ++thread) {
-      partial_products.emplace_back(
-          ExactCtxPairMatrix::Zero(
-              static_cast<Eigen::Index>(n_bf_pairs),
-              static_cast<Eigen::Index>(n_active_pairs)));
-    }
+    std::vector<ExactCtxPairMatrix> partial_products(n_threads);
 #pragma omp parallel num_threads(n_threads)
     {
       int thread = 0;
+      int team_size = 1;
 #ifdef _OPENMP
       thread = omp_get_thread_num();
+      team_size = omp_get_num_threads();
 #endif
+      partial_products[thread].setZero(
+          static_cast<Eigen::Index>(n_bf_pairs),
+          static_cast<Eigen::Index>(n_active_pairs));
       double* local_target = partial_products[thread].data();
 #pragma omp for schedule(static)
       for (std::ptrdiff_t integral_offset = 0;
@@ -96,9 +169,15 @@ void apply_exact_ao_pair_kernel(
           }
         }
       }
-    }
-    for (const auto& partial : partial_products) {
-      *result += partial;
+      // The omp-for barrier completes all scatter images before reduction.
+      // Reuse the same team and sum only images produced by actual workers.
+#pragma omp for schedule(static) nowait
+      for (Eigen::Index index = 0; index < result->size(); ++index) {
+        double value = 0.0;
+        for (int worker = 0; worker < team_size; ++worker)
+          value += partial_products[worker].data()[index];
+        target[index] = value;
+      }
     }
     return;
   }
@@ -111,60 +190,28 @@ void apply_exact_ao_pair_kernel(
   }
 
   n_threads = std::min(n_threads, static_cast<int>(n_bf_pairs));
+  const int n_pieces = static_cast<int>(
+      openmp_work_pieces(n_bf_pairs, n_threads));
   const auto row_boundaries =
-      graph.balanced_row_boundaries(n_threads);
+      graph.balanced_row_boundaries(n_pieces);
 
+  diagnostics::WorkerLoopTimes work(n_threads);
 #pragma omp parallel num_threads(n_threads)
   {
-    int thread = 0;
+    int worker = 0;
 #ifdef _OPENMP
-    thread = omp_get_thread_num();
+    worker = omp_get_thread_num();
 #endif
-    for (std::size_t row = row_boundaries[thread];
-         row < row_boundaries[thread + 1];
-         ++row) {
-      double* target_row = target + row * n_active_pairs;
-      int edge = graph.row_offsets[row];
-      const int end = graph.row_offsets[row + 1];
-      for (; edge + 3 < end; edge += 4) {
-        const int column_0 = graph.columns[edge];
-        const int column_1 = graph.columns[edge + 1];
-        const int column_2 = graph.columns[edge + 2];
-        const int column_3 = graph.columns[edge + 3];
-        const double value_0 = graph.values[edge];
-        const double value_1 = graph.values[edge + 1];
-        const double value_2 = graph.values[edge + 2];
-        const double value_3 = graph.values[edge + 3];
-        const double* source_0 =
-            source + static_cast<std::size_t>(column_0) * n_active_pairs;
-        const double* source_1 =
-            source + static_cast<std::size_t>(column_1) * n_active_pairs;
-        const double* source_2 =
-            source + static_cast<std::size_t>(column_2) * n_active_pairs;
-        const double* source_3 =
-            source + static_cast<std::size_t>(column_3) * n_active_pairs;
-#pragma omp simd
-        for (std::size_t pair = 0; pair < n_active_pairs; ++pair) {
-          double accumulated = target_row[pair];
-          accumulated += value_0 * source_0[pair];
-          accumulated += value_1 * source_1[pair];
-          accumulated += value_2 * source_2[pair];
-          accumulated += value_3 * source_3[pair];
-          target_row[pair] = accumulated;
-        }
-      }
-      for (; edge < end; ++edge) {
-        const int column = graph.columns[edge];
-        const double value = graph.values[edge];
-        const double* source_row =
-            source + static_cast<std::size_t>(column) * n_active_pairs;
-#pragma omp simd
-        for (std::size_t pair = 0; pair < n_active_pairs; ++pair) {
-          target_row[pair] += value * source_row[pair];
-        }
-      }
+    work.start(worker);
+#pragma omp for schedule(dynamic, 1) nowait
+    for (int partition = 0; partition < n_pieces; ++partition) {
+      contract_rows(graph.row_offsets.data(), graph.columns.data(), graph.values.data(),
+                    source, target, n_active_pairs,
+                    row_boundaries[partition], row_boundaries[partition + 1]);
     }
+    work.stop(worker);
   }
+  work.finish(diagnostics::Phase::AoPairAction);
 }
 
 void apply_generated_pair_rows(
@@ -202,62 +249,8 @@ void apply_generated_pair_rows(
       (build_direction != (directional_pair_products != nullptr))) {
     throw std::invalid_argument("generated AO-pair row dimensions are inconsistent");
   }
-  const AoPairGraph& graph = ao.pair_graph;
-  if (graph.row_offsets.size() != static_cast<std::size_t>(n_bf_pairs + 1) ||
-      graph.columns.size() != graph.values.size() ||
-      graph.values.size() !=
-          static_cast<std::size_t>(graph.row_offsets.back())) {
-    throw std::invalid_argument("invalid AO-pair graph");
-  }
-
-  pair_products->setZero(row_count, n_active_pairs);
-  if (directional_pair_products != nullptr) {
-    directional_pair_products->setZero(row_count, n_active_pairs);
-  }
-#pragma omp parallel for schedule(static)
-  for (Eigen::Index local_row = 0; local_row < row_count; ++local_row) {
-    const Eigen::Index target_row = row_begin + local_row;
-    const int edge_begin = graph.row_offsets[target_row];
-    const int edge_end = graph.row_offsets[target_row + 1];
-    for (int edge = edge_begin; edge < edge_end; ++edge) {
-      const Eigen::Index source_row = graph.columns[edge];
-      const int first_bf = cache.ao_pair_first_indices[source_row];
-      const int second_bf = cache.ao_pair_second_indices[source_row];
-      const double integral = graph.values[edge];
-      for (Eigen::Index active_pair = 0;
-           active_pair < n_active_pairs;
-           ++active_pair) {
-        const int first_active = cache.active_pair_first_indices[active_pair];
-        const int second_active = cache.active_pair_second_indices[active_pair];
-        double coefficient =
-            dense_active_coefficients(first_bf, first_active) *
-            dense_active_coefficients(second_bf, second_active);
-        if (first_bf != second_bf) {
-          coefficient +=
-              dense_active_coefficients(second_bf, first_active) *
-              dense_active_coefficients(first_bf, second_active);
-        }
-        (*pair_products)(local_row, active_pair) += integral * coefficient;
-
-        if (build_direction) {
-          double mixed =
-              (*dense_active_direction)(first_bf, first_active) *
-                  dense_active_coefficients(second_bf, second_active) +
-              dense_active_coefficients(first_bf, first_active) *
-                  (*dense_active_direction)(second_bf, second_active);
-          if (first_bf != second_bf) {
-            mixed +=
-                (*dense_active_direction)(second_bf, first_active) *
-                    dense_active_coefficients(first_bf, second_active) +
-                dense_active_coefficients(second_bf, first_active) *
-                    (*dense_active_direction)(first_bf, second_active);
-          }
-          (*directional_pair_products)(local_row, active_pair) +=
-              integral * mixed;
-        }
-      }
-    }
-  }
+  apply_generated_ao_pair_rows(ao, dense_active_coefficients, dense_active_direction,
+      row_begin, row_count, pair_products, directional_pair_products);
 }
 
 }  // namespace xmvb::vb::detail

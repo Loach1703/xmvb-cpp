@@ -1,0 +1,135 @@
+Consumer-specific NEO curvature construction
+==========================================
+
+Scope
+-----
+Base: master b5e61c14. A single-state CIAH macro with the analytic diagonal
+needs the signed inverse action. In the complete full-AO quotient that action
+already uses the existing invertible frame map and signed rotation diagonal.
+It does not use the positive local blocks built for TN/L-BFGS.
+
+OrbitalChart::CurvatureUse now declares the consumer. Eligible full-OEO CIAH
+constructs only frame components, source maps and the signed diagonal. The
+diagonal is a weighted column-square sum, without forming a local curvature
+matrix. The removed work is one local eigensolve plus positive reconstruction
+and dense inverse per optimized orbital per model. This does not remove the
+frame-map construction or its existing residual certificate, nor the work of
+constructing the analytic diagonal from electronic integrals.
+
+Constrained HAO and selected OEO spaces retain their local signed spectra.
+State averaging, TN/L-BFGS and one-electron CIAH retain the positive blocks
+they actually consume. No coordinate, HVP, energy acceptance policy, numerical
+threshold or thread-owned large array was changed. Calling a positive-block
+action on an AH-only frame is an error, not a diagonal approximation.
+
+Verification
+------------
+Hanhai22 build/verification: 1252355. Eight unit executables and the matched
+F2-PySCF NEO reference passed. The quotient test compares AH-only and full
+construction in whitened/unwhitened, HAO and selected/complete OEO charts:
+signed inverse at positive/negative shifts, diagonal, lift and clipping.
+
+The first build 1252348 compiled the implementation but stopped on an invalid
+test target name. Verification 1252355 used the corrected targets; no failed
+unit result was suppressed. A pending obsolete verification job 1252353 was
+cancelled before execution. The frozen executable/source hashes are retained
+in neo-frame-build-1252355/.
+
+Native exact-libcint 32-core regression array 1252359: all eight runs converged.
+All six NEO input and basis manifests match the previous saved regressions.
+No historical executable was rerun. GNU-time wall and process peak RSS:
+
+case       steps old/new  HVP old/new  wall s old/new  RSS MiB old/new
+FeCl2      12/12          249/252      5.77/6.51       500.4/478.5
+MnF2       13/13          189/189      4.22/4.82       489.1/510.0
+241         3/3           21/21       1.76/1.93       842.1/860.9
+240         4/4           31/31       4.22/4.10      1697.5/1595.7
+F2-OEO      3/4           15/14       0.18/0.29        18.4/18.4
+F2-SA2      6/6           78/78       0.35/0.34        17.4/17.4
+
+Maximum final energy difference: 1.37e-9 Eh (FeCl2). Other differences are
+at most 6.00e-11 Eh. The additional F2-OEO iteration does not change the
+outer thresholds. The TN control retains 7 steps and the same final energy;
+its output counts HVP block actions, not NEO direction counts. The block-LBFGS
+control retains 8 steps and the same final energy. F2-SA2 uses the unchanged
+automatic one-electron preconditioner.
+
+The separate scalar/timer FeCl2 two-step capture made 39 HVPs and recorded
+zero block_factor/block_eigen calls. The earlier saved raw-chart two-step
+capture 1251916 made 39 HVPs and 66 local factorizations (0.0852 s at 32 cores).
+This confirms removal of the intended work, not a measured whole-run speedup.
+Native runs used different nodes; timing and RSS changes must not be attributed
+solely to this optimization. In particular, the slower FeCl2/MnF2 totals are
+retained, not hidden by the improved factorization count.
+
+Rejection investigation
+-----------------------
+The frozen older porphine runs 1251314 both ended in ciah_macro_energy_rejected:
+singlet 23 accepted steps / at least 293 orbital HVPs; triplet 11 / at least 164.
+Their last energies exceed the saved converged PySCF references by 9.64 and
+10.81 mEh. They are NOT converged energy comparisons.
+
+Current keyframe orbitals use an additive raw-coefficient retraction in the
+immutable origin chart. Thus projecting the raw keyframe gradient through the
+origin lift is the derivative of that retraction; a missing exponential-map
+Jacobian is not established by this source inspection.
+
+Macro backtracking does re-solve CI for each energy trial. The trial is seeded
+with the coupled coefficient candidate, but the CI solver retains only the
+requested root columns across calls, not its expanded Davidson subspace.
+The old triplet terminal context recorded 3140 H/S block actions with a peak
+subspace of 438. This is a concrete lead for bounded subspace recycling; its
+wall contribution has not yet been isolated in the porphine run.
+
+New NEO_FAILURE stderr evidence is emitted only on terminal macro rejection:
+iteration, existing rejection count, origin slope/curvature, source and final
+trial energies, next scale, checkpoint restoration, micro stop and macro HVPs.
+No gradient/HVP/metric inverse is added. Scalar tracing records intermediate
+trial/keyframe energies. No rejection policy was modified without evidence.
+
+Porphine diagnostic array 1252369 completed two outer steps per spin from the
+original inputs, with scalar tracing and phase timers, on Hanhai22. Both stop
+at max_iterations (expected executable exit 2), not macro rejection. This is
+an attribution prefix, not convergence or a reproduction of macro 24/12 of
+the older trajectories. No long porphine run was resubmitted.
+
+spin      steps HVP final energy/Eh       GNU wall/s RSS/GiB
+singlet     2    33 -2244.715765044498      260.18     38.620
+triplet     2    30 -2244.757989931521      258.51     38.632
+
+First-step energies agree with saved older prefixes at printed precision.
+Second-step energies differ by 4.73e-7 / 4.14e-7 Eh. Both HVP counts match
+the saved older two-step prefixes (33/30). This is not a convergence comparison;
+the old full-run wall/RSS cannot be treated as two-step measurements.
+
+New decisive attribution: analytic diagonal construction takes 60.64/59.76 s
+on the two singlet points and 56.98/59.10 s on the triplet points. The density
+channel stage uses 112 channels, batch width 2, 32 workers and 65,270,304 bytes
+under its 64 MiB workspace budget, requiring 56 batches per point. It costs
+about 52-55 s per point; core-pair construction adds about 5 s. The width
+depends on worker-owned packed AO outputs as well as shared sources/responses.
+
+By comparison, total HVP wall is 17.76/15.44 s, joint CIAH image wall
+20.37/17.64 s, and chart construction 1.05/0.88 s across the two points.
+Block factor/eigen counts are zero in both spins. Scopes nest: these times
+must not be added. Initial AO integral construction/input remains part of
+the 260 s end-to-end prefix.
+
+Next priority is therefore the analytic-diagonal density-channel contraction:
+an output-owned/shared panel layout or exact reuse of accepted integral
+intermediates, with an explicit total-memory bound. Merely enlarging the
+64 MiB constant or copying more AO arrays per worker is not the remedy.
+This diagnosis precedes changes to that kernel or Davidson recycling.
+
+Artifacts and reproduction
+--------------------------
+results/diagnostics/hanhai22-shared-response-20261012/
+  neo-frame-build-1252355/
+  neo-frame-regression-1252359/
+  neo-frame-porphine-1252369/
+CSV: neo-frame-20261013.csv
+Parser: summarize_neo_frame.py RUNS BASELINE_CSV OUTPUT_CSV
+Slurm scripts: neo-frame-build.sbatch, neo-frame-regression.sbatch,
+              neo-frame-porphine.sbatch
+Unrelated .gitignore and RI edits were excluded from the remote patch and
+the implementation commit.

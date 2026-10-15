@@ -24,7 +24,7 @@ struct AoPairGraph {
   std::vector<int> row_offsets;
   std::vector<int> columns;
   std::vector<double> values;
-  /** CSR rows and edge offsets in original unique-integral order. */
+  /** Unique-integral CSR references ordered by storage position for locality. */
   std::vector<int> integral_rows;
   std::vector<int> integral_edges;
   /**
@@ -97,6 +97,9 @@ struct AoIntegralInput {
 
   /** @brief Canonical AO two-electron integral representation. */
   AoPairGraph pair_graph;
+
+  /** @brief Additional shared exchange image plus peak workspace budget; zero disables it. */
+  std::size_t exact_exchange_memory_budget_bytes = 64 * 1024 * 1024;
 
 };
 

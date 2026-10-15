@@ -2,6 +2,23 @@
 
 namespace xmvb::vb {
 
+/** @brief Allows nonlinear keyframe trials away from physical stationarity.
+ * Uses the invariant dual gradient norm, never a coordinate component. The
+ * existing factor-three trust guard separates trials from final certified
+ * solves; this decision is not an outer convergence certificate.
+ */
+bool neo_trial_allowed(double physical_gradient_norm, double gradient_tolerance);
+
+/** @brief Expresses the absolute early-trial floor in relative gradient units.
+ * This is a candidate-generation safeguard, not a physical KKT certificate.
+ * Budgets already below the coordinate gradient are preserved. A fixed
+ * absolute floor must not make even the zero step eligible for a trial.
+ */
+double neo_trial_residual_target(double coordinate_gradient,
+                                 double physical_gradient,
+                                 double coordinate_target,
+                                 double absolute_target);
+
 /** @brief Outcome of comparing a NEO trial step with its quadratic model. */
 struct NeoGlobalizationResult {
   /** Quadratic-model decrease, `-g^T p - 0.5 p^T H p`. */

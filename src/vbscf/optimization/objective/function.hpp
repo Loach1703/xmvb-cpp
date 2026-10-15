@@ -42,6 +42,7 @@ struct VbScfCoupledKeyframeEvaluation {
   Eigen::VectorXd orbital_gradient;
   Eigen::MatrixXd normalized_structure_coefficients;
   Eigen::MatrixXd structure_residuals;
+  Eigen::MatrixXd coefficient_gradient;
   double energy = 0.0;
 };
 
@@ -137,8 +138,8 @@ class VbScfObjective {
       const Eigen::VectorXd& parameter_vector,
       const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const;
 
-  /** @brief Solves the trial structure problem from a coupled CIAH estimate. */
-  TrialEvaluation evaluate_trial_with_structure_guess(
+  /** @brief Relax CI from the supplied guess without orbital gradient backpropagation. */
+  TrialEvaluation evaluate_trial_energy_with_structure_guess(
       const Eigen::VectorXd& parameter_vector,
       const Eigen::Ref<const Eigen::MatrixXd>& selected_structure_coefficients) const;
 

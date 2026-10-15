@@ -12,6 +12,7 @@
 #include "output/text/report.hpp"
 #include "output/trace/binary.hpp"
 #include "output/molden/writer.hpp"
+#include "output/orbitals/writer.hpp"
 #include "output/trace/accepted_iteration.hpp"
 #include "output/trace/neo.hpp"
 #include "output/trace/tnhvp.hpp"
@@ -42,6 +43,8 @@ int run(Options command_line) {
   const auto command_start_steady_time = std::chrono::steady_clock::now();
   auto load_result =
       xmvb::vb::load_vbscf_input_with_timings(input_path, load_options);
+  load_result.input.ao_integral_input.exact_exchange_memory_budget_bytes =
+      command_line.exact_exchange_memory_budget_bytes;
   if (!command_line.optimizer_backend_explicit) {
     switch (load_result.scf_optimizer) {
       case xmvb::vb::InputScfOptimizer::Lbfgs:
@@ -125,6 +128,16 @@ int run(Options command_line) {
         });
   }
 
+  std::shared_ptr<xmvb::output::NeoTraceWriter> neo_trace_writer;
+  if (!neo_trace_path.empty()) {
+    neo_trace_writer =
+        std::make_shared<xmvb::output::NeoTraceWriter>(neo_trace_path);
+    options.neo_iteration_callback =
+        [neo_trace_writer](const xmvb::vb::NeoIterationRecord& record) {
+          neo_trace_writer->write(record);
+        };
+  }
+
   xmvb::vb::VbScfOptimizer optimizer(options,electronic_backend);
   std::vector<int> selected_states(load_result.state_average_count);
   std::iota(selected_states.begin(), selected_states.end(), 0);
@@ -158,9 +171,6 @@ int run(Options command_line) {
   if (!tnhvp_trace_path.empty()) {
     xmvb::output::write_tnhvp_trace(tnhvp_trace_path, result);
   }
-  if (!neo_trace_path.empty()) {
-    xmvb::output::write_neo_trace(neo_trace_path, result);
-  }
   if (trace_writer != nullptr) {
     trace_writer->finalize(result);
   }
@@ -173,6 +183,10 @@ int run(Options command_line) {
         result.optimized_input.orbital_preparation_input.orbital_value_table);
   }
   const bool command_converged = result.converged || result.energy_only;
+  if (result.converged) {
+    xmvb::output::write_orbital_file(
+        fs::path(input_path), result.optimized_input.orbital_preparation_input);
+  }
   std::optional<fs::path> molden_output_path;
   if (load_result.request_molden_output) {
     molden_output_path =

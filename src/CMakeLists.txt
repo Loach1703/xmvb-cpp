@@ -60,6 +60,7 @@ set(XMVB_INPUT_SOURCES
 
 set(XMVB_OUTPUT_SOURCES
   output/molden/writer.cpp
+  output/orbitals/writer.cpp
   output/text/report.cpp
   output/text/sections.cpp
   output/text/structure.cpp
@@ -245,6 +246,10 @@ add_custom_target(
 add_dependencies(xmvb xmvb_assets)
 
 if (BUILD_TESTING)
+  add_executable(test_output_orbitals ${CMAKE_SOURCE_DIR}/tests/output/test_orbitals.cpp)
+  target_link_libraries(test_output_orbitals PRIVATE xmvb_output xmvb_guess)
+  add_test(NAME output_orbitals COMMAND test_output_orbitals)
+
   add_executable(
     test_output_structure
     output/text/structure.cpp
@@ -271,6 +276,19 @@ if (BUILD_TESTING)
     test_input_auxiliary_basis
     ${CMAKE_SOURCE_DIR}/tests/input/test_auxiliary_basis.cpp)
   target_link_libraries(test_input_auxiliary_basis PRIVATE xmvb_input_deck)
+
+  add_executable(test_libcint_ri ${CMAKE_SOURCE_DIR}/tests/vbscf/unit/test_libcint_ri.cpp)
+  target_link_libraries(test_libcint_ri PRIVATE xmvb_libcint)
+  add_test(NAME libcint_ri COMMAND test_libcint_ri)
+  set_tests_properties(libcint_ri PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+
+  add_executable(test_libcint_shell_screening
+    ${CMAKE_SOURCE_DIR}/tests/vbscf/unit/test_libcint_shell_screening.cpp)
+  target_link_libraries(test_libcint_shell_screening PRIVATE xmvb_libcint)
+  add_test(NAME libcint_shell_screening COMMAND test_libcint_shell_screening)
+  set_tests_properties(libcint_shell_screening PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(
     NAME input_auxiliary_basis
     COMMAND
@@ -282,6 +300,18 @@ if (BUILD_TESTING)
     ${CMAKE_SOURCE_DIR}/tests/input/test_guess_selection.cpp)
   target_link_libraries(test_input_guess_selection PRIVATE xmvb_input_deck)
   add_test(NAME input_guess_selection COMMAND test_input_guess_selection)
+
+  add_executable(
+    test_generated_structures
+    ${CMAKE_SOURCE_DIR}/tests/input/test_generated_structures.cpp)
+  target_link_libraries(test_generated_structures PRIVATE xmvb_input)
+  add_test(NAME generated_structures COMMAND test_generated_structures)
+
+  add_executable(
+    test_full_space
+    ${CMAKE_SOURCE_DIR}/tests/input/test_full_space.cpp)
+  target_link_libraries(test_full_space PRIVATE xmvb_input)
+  add_test(NAME full_space COMMAND test_full_space)
 
   add_test(
     NAME state_average_f2

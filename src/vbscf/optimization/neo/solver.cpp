@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -12,6 +13,8 @@
 #include <Eigen/Eigenvalues>
 
 #include "vbscf/optimization/trust_region/spectral.hpp"
+#include "vbscf/optimization/neo/symmetry.hpp"
+#include "vbscf/optimization/neo/globalization.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -113,7 +116,9 @@ void set_augmented_certificate(
 
 }  // namespace
 
-NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
+NeoResult solve_neo(
+    const NeoProblem& problem, const NeoOptions& options,
+    bool allow_early_trial) {
   if (!(options.trust_radius > 0.0) ||
       !std::isfinite(options.trust_radius) ||
       !(options.relative_residual_tolerance > 0.0) ||
@@ -128,13 +133,21 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
   const int maximum_dimension = options.maximum_subspace_dimension == 0
       ? dimension
       : std::min(dimension, options.maximum_subspace_dimension);
-  const double gradient_norm = problem.gradient().norm();
+  if (options.stop_on_negative_curvature &&
+      !problem.gradient().isZero(0.0)) {
+    throw std::invalid_argument(
+        "NEO negative-curvature probe requires an exactly zero gradient");
+  }
+  const double gradient_norm = problem.dual_norm(problem.gradient());
 
   NeoResult result;
   result.step = Eigen::VectorXd::Zero(dimension);
   result.hessian_step = Eigen::VectorXd::Zero(dimension);
   result.metric_step = Eigen::VectorXd::Zero(dimension);
   result.kkt_residual = problem.gradient();
+  result.minimum_curvature_direction = Eigen::VectorXd::Zero(dimension);
+  result.minimum_curvature_hessian_image = Eigen::VectorXd::Zero(dimension);
+  result.minimum_curvature_metric_image = Eigen::VectorXd::Zero(dimension);
   result.residual_target = options.absolute_residual_tolerance +
       options.relative_residual_tolerance * gradient_norm;
 
@@ -152,7 +165,8 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
 
   // A reproducible generic seed supplies the nonzero-overlap assumption used
   // by matrix-free lowest-root Davidson/Lanczos methods.
-  if (options.require_curvature_certificate && maximum_dimension > 1) {
+  if ((options.require_curvature_certificate ||
+       options.stop_on_negative_curvature) && maximum_dimension > 1) {
     append_direction(
         problem, generic_probe(problem.size()), &basis,
         &result.hessian_actions);
@@ -172,7 +186,10 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
     const double symmetry_factor = 256.0 *
         std::numeric_limits<double>::epsilon() *
         static_cast<double>(projected_metric_action.rows());
-    if (metric_skew.norm() > symmetry_factor * metric_scale) {
+    const double metric_threshold = symmetry_factor * metric_scale;
+    if (metric_skew.norm() > metric_threshold &&
+        metric_skew.norm() > metric_threshold +
+            neo_detail::projection_skew_roundoff(q, mq, projected_metric_action)) {
       throw std::runtime_error("NEO metric action is not symmetric");
     }
     const Eigen::MatrixXd projected_metric = 0.5 *
@@ -189,8 +206,38 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
     const Eigen::MatrixXd projected_skew =
         projected_action - projected_action.transpose();
     const double hessian_scale = std::max(1.0, projected_action.norm());
-    if (projected_skew.norm() > symmetry_factor * hessian_scale) {
-      throw std::runtime_error("NEO Hessian action is not symmetric");
+    const double base_threshold = symmetry_factor * hessian_scale;
+    const double projection_roundoff = projected_skew.norm() > base_threshold
+        ? neo_detail::projection_skew_roundoff(q, hq, projected_action)
+        : 0.0;
+    if (projected_skew.norm() > base_threshold + projection_roundoff) {
+      // Re-evaluate the worst pair only on failure. This distinguishes a
+      // reproducible bilinear defect from a mutable/nonrepeatable action,
+      // without weakening the symmetry certificate or changing valid steps.
+      Eigen::Index i, j;
+      projected_skew.cwiseAbs().maxCoeff(&i, &j);
+      const Eigen::VectorXd hi = problem.apply_hessian(q.col(i));
+      const Eigen::VectorXd hj = problem.apply_hessian(q.col(j));
+      std::ostringstream message;
+      message.precision(17);
+      message << "NEO Hessian action is not symmetric"
+              << "; dimension=" << dimension
+              << "; subspace=" << q.cols()
+              << "; skew_norm=" << projected_skew.norm()
+              << "; threshold=" << base_threshold + projection_roundoff
+              << "; projection_roundoff=" << projection_roundoff
+              << "; action_scale=" << hessian_scale
+              << "; worst_pair=" << i << ',' << j
+              << "; bilinear_skew=" << projected_skew(i, j)
+              << "; repeated_bilinear_skew="
+              << q.col(i).dot(hj) - q.col(j).dot(hi)
+              << "; repeat_error_i=" << (hi - hq.col(i)).norm()
+              << "; repeat_error_j=" << (hj - hq.col(j)).norm()
+              << "; image_norm_i=" << hi.norm()
+              << "; image_norm_j=" << hj.norm()
+              << "; basis_orthogonality_error="
+              << (q.transpose() * q - Eigen::MatrixXd::Identity(q.cols(), q.cols())).norm();
+      throw std::runtime_error(message.str());
     }
     const Eigen::MatrixXd projected_hessian = whitening.transpose() *
         (0.5 * (projected_action + projected_action.transpose())) * whitening;
@@ -208,8 +255,9 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
             spectrum.eigenvalues(),
             spectrum.eigenvectors().transpose() * whitened_gradient,
             options.trust_radius);
-    const Eigen::VectorXd coefficients =
-        whitening * spectrum.eigenvectors() * projected_step.step;
+    const Eigen::VectorXd white_step =
+        spectrum.eigenvectors() * projected_step.step;
+    const Eigen::VectorXd coefficients = whitening * white_step;
 
     result.step.noalias() = q * coefficients;
     result.hessian_step.noalias() = hq * coefficients;
@@ -221,12 +269,9 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
         0.0, result.step.dot(result.metric_step)));
     result.kkt_residual = problem.gradient() + result.hessian_step +
         result.shift * result.metric_step;
-    result.residual_norm = result.kkt_residual.norm();
+    result.residual_norm = problem.dual_norm(result.kkt_residual);
     result.residual_target = options.absolute_residual_tolerance +
-        options.relative_residual_tolerance * std::max({
-            gradient_norm,
-            result.hessian_step.norm(),
-            result.shift * result.metric_step.norm()});
+        options.relative_residual_tolerance * gradient_norm;
     result.predicted_reduction = -problem.gradient().dot(result.step) -
         0.5 * result.step.dot(result.hessian_step);
 
@@ -235,6 +280,14 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
     const Eigen::VectorXd minimum_ritz_vector = q * minimum_coordinates;
     const Eigen::VectorXd minimum_hessian_image = hq * minimum_coordinates;
     const Eigen::VectorXd minimum_metric_image = mq * minimum_coordinates;
+    const double metric_length_squared =
+        minimum_ritz_vector.dot(minimum_metric_image);
+    result.minimum_curvature_direction = minimum_ritz_vector;
+    result.minimum_curvature_hessian_image = minimum_hessian_image;
+    result.minimum_curvature_metric_image = minimum_metric_image;
+    result.minimum_curvature_value =
+        minimum_ritz_vector.dot(minimum_hessian_image) /
+        metric_length_squared;
     const Eigen::VectorXd curvature_residual =
         minimum_hessian_image -
         spectrum.eigenvalues()[0] * minimum_metric_image;
@@ -262,15 +315,55 @@ NeoResult solve_neo(const NeoProblem& problem, const NeoOptions& options) {
             -positivity_tolerance;
     result.global_curvature_certified =
         complete_basis || lower_bound_certifies;
+    // A directly negative Rayleigh quotient witnesses indefiniteness even
+    // before its Ritz residual has converged to final accuracy. The margin
+    // follows local operator accuracy and roundoff. This is only an inertia
+    // witness: its Ritz residual need not converge, and no nonlinear trial or
+    // shifted Newton KKT certificate is implied by the return.
+    if (options.stop_on_negative_curvature) {
+      const double local_action_scale = minimum_ritz_vector.norm() *
+          minimum_hessian_image.norm() / metric_length_squared;
+      const double negative_curvature_margin = std::max(
+          options.relative_residual_tolerance * local_action_scale,
+          symmetry_factor * projected_hessian.norm());
+      if (std::isfinite(result.minimum_curvature_value) &&
+          result.minimum_curvature_value < -negative_curvature_margin) {
+        result.stop_reason = NeoStopReason::NegativeCurvature;
+        set_augmented_certificate(problem, minimum_ritz_vector, &result);
+        return result;
+      }
+    }
+    // A regular boundary step is certified by the exact nonlinear keyframe
+    // and its actual/predicted decrease.  Resolving an unrelated lowest Ritz
+    // vector after the shifted Newton equation has converged only oversolves
+    // the stale quadratic model.  A hard case remains different because the
+    // step itself depends on the minimum-curvature direction.
     const bool need_curvature_certificate =
-        options.require_curvature_certificate || result.boundary ||
-        result.hard_case;
+        options.require_curvature_certificate ||
+        options.stop_on_negative_curvature || result.hard_case;
     const bool required_curvature_converged =
         !need_curvature_certificate || curvature_converged;
     if (stationary && required_curvature_converged && shifted_positive &&
         (result.global_curvature_certified ||
          !problem.hessian_lower_bound())) {
       result.stop_reason = NeoStopReason::Converged;
+      set_augmented_certificate(problem, minimum_ritz_vector, &result);
+      return result;
+    }
+
+    // Match coupled NEO's historical candidate policy, not its physical
+    // stationarity certificate. The caller must validate a real nonlinear
+    // energy/gradient keyframe and disable early trials near convergence.
+    const double coordinate_gradient = problem.gradient().stableNorm();
+    const double coordinate_target = neo_trial_residual_target(
+        coordinate_gradient, gradient_norm,
+        options.absolute_residual_tolerance +
+            coordinate_gradient * coordinate_gradient / (1.0 + coordinate_gradient),
+        options.absolute_residual_tolerance);
+    if (allow_early_trial && !need_curvature_certificate && shifted_positive &&
+        -problem.gradient().dot(result.step) > 0.0 &&
+        result.kkt_residual.stableNorm() <= coordinate_target) {
+      result.stop_reason = NeoStopReason::TrialReady;
       set_augmented_certificate(problem, minimum_ritz_vector, &result);
       return result;
     }

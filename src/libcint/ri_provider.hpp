@@ -5,7 +5,11 @@
 namespace xmvb::vb {
 
 struct LibcintRiIntegralProviderOptions {
-  double metric_eigenvalue_cutoff = 1.0e-10;
+  /** Absolute eigenvalue cutoff in unit-radial Cartesian auxiliary AOs.
+   * Applied only when the Coulomb metric is not Cholesky positive definite,
+   * as in PySCF DF. This is not an orbital/SCF convergence threshold.
+   */
+  double metric_eigenvalue_cutoff = 1.0e-7;
 };
 
 /**

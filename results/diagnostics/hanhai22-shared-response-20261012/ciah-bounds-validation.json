@@ -1,0 +1,28 @@
+{
+  "parent": "827eddef",
+  "build_job": 1250458,
+  "suite_job": 1250459,
+  "cluster": "Hanhai22",
+  "threads": 32,
+  "unit_tests_passed": 5,
+  "new_test": "400 full-metric comparisons plus explicit triangle, reverse-triangle, unresolved and equality cases",
+  "change": "Short-circuit the unchanged keyframe OR predicate on a small actual gradient; otherwise compare the full-norm triangle bounds before evaluating the difference norm. Ambiguous cases retain the full difference calculation.",
+  "unchanged": ["HVP", "coordinates", "preconditioner", "keyframe thresholds", "outer convergence criteria"],
+  "completed_snapshot": [
+    {"case": "241", "steps": 3, "hvp": 21, "energy_Eh": -230.720590392829, "wall_s": 2.301134, "rss_MiB": 822.03125},
+    {"case": "MnF2", "steps": 10, "hvp": 137, "energy_Eh": -1348.893353223757, "wall_s": 5.235947, "rss_MiB": 545.47265625},
+    {"case": "FeCl2", "steps": 12, "hvp": 232, "energy_Eh": -2181.624464863437, "wall_s": 7.663405, "rss_MiB": 513.171875},
+    {"case": "QOCGUM", "steps": 3, "hvp": 37, "energy_Eh": -480.094766681467, "wall_s": 29.402260, "rss_MiB": 1969.109375},
+    {"case": "CERRAS", "steps": 5, "hvp": 41, "energy_Eh": -397.093435003825, "wall_s": 173.955603, "rss_MiB": 1996.515625},
+    {"case": "LOFLEA", "steps": 4, "hvp": 34, "energy_Eh": -399.106646007265, "wall_s": 464.043396, "rss_MiB": 2728.54296875}
+  ],
+  "qocgum_separate_scalar_capture": {"keyframes": 11, "difference_evaluated": 1},
+  "pending_at_snapshot": [],
+  "followup": "Rejected residual-minimizing recycle experiment retained only on codex/metric-residual-reuse at 3f92e4cb; production source and binary restored. QOCGUM CG iterations 13699 -> 13692, native wall 29.40 -> 34.44 s. No performance benefit established.",
+  "limitations": [
+    "Native timings are single runs on non-matched nodes; compare saved data without rerunning old binaries.",
+    "FeCl2 intermediate trajectory changed; its 17 fewer HVPs are not established as a systematic consequence of the norm-bound policy. Its final energy differs from dceaafe2 by 3.3e-9 Eh.",
+    "241 and MnF2 show no speed improvement; all systems have not surpassed the historical baseline.",
+    "Frequent AH residual inverse norms remain; this patch only removes unnecessary keyframe difference evaluations."
+  ]
+}

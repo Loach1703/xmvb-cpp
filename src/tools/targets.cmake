@@ -125,7 +125,8 @@ target_link_libraries(check_exact_two_electron_hvp
     xmvb_output)
 
 add_executable(check_exact_ctx_hvp
-  tools/check_exact_ctx_hvp.cpp)
+  tools/check_exact_ctx_hvp.cpp
+  tools/response_audit.cpp)
 target_link_libraries(check_exact_ctx_hvp
   PRIVATE
     xmvb_vbscf
@@ -147,6 +148,10 @@ target_link_libraries(audit_newton_step
     xmvb_vbscf
     xmvb_input
     xmvb_output)
+
+add_executable(audit_orbital_gradient
+  tools/audit_orbital_gradient.cpp)
+target_link_libraries(audit_orbital_gradient PRIVATE xmvb_input)
 
 add_executable(audit_sparse_orbital_gauge
   tools/audit_sparse_orbital_gauge.cpp)
@@ -173,6 +178,13 @@ target_link_libraries(check_structure_expansion_signs
     xmvb_vbscf
     xmvb_input
     xmvb_output)
+
+add_executable(check_structure_spin
+  tools/check_structure_spin.cpp)
+target_link_libraries(check_structure_spin
+  PRIVATE
+    xmvb_vbscf
+    xmvb_input)
 
 add_executable(check_structure_overlap_against_raw_reference
   tools/check_structure_overlap_against_raw_reference.cpp)
@@ -301,6 +313,13 @@ target_link_libraries(check_direct_libcint_smoke
     xmvb_input
     xmvb_output)
 
+add_executable(audit_ao_fock_entry
+  tools/audit_ao_fock_entry.cpp)
+target_link_libraries(audit_ao_fock_entry
+  PRIVATE
+    xmvb_vbscf
+    xmvb_input)
+
 add_executable(check_libcint_ri_smoke
   tools/check_libcint_ri_smoke.cpp)
 target_link_libraries(check_libcint_ri_smoke
@@ -362,6 +381,7 @@ add_dependencies(debug_exact_raw_vb_overlap_pair xmvb_assets)
 add_dependencies(validate_multi_leaf_open_state_one_electron xmvb_assets)
 add_dependencies(benchmark_union_graph_single_step xmvb_assets)
 add_dependencies(check_direct_libcint_smoke xmvb_assets)
+add_dependencies(audit_ao_fock_entry xmvb_assets)
 add_dependencies(check_libcint_ri_smoke xmvb_assets)
 add_dependencies(compare_ri_active_space_builder xmvb_assets)
 add_dependencies(check_active_overlap_split xmvb_assets)

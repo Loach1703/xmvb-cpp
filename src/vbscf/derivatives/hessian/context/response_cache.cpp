@@ -65,7 +65,8 @@ bool weights_are_equal(const std::vector<double>& weights) {
 
 AcceptedSelectedStateGeneralizedEigenResponseOperator
 build_accepted_selected_state_generalized_eigen_response_operator(
-    const AcceptedPointContext& accepted_point_context) {
+    const AcceptedPointContext& accepted_point_context,
+    bool complete_space) {
   const int n_structures = accepted_point_context.n_structures;
   const int n_selected_states =
       static_cast<int>(accepted_point_context.selected_state_indices.size());
@@ -139,6 +140,14 @@ build_accepted_selected_state_generalized_eigen_response_operator(
     response_operator.selected_root_indices =
         accepted_point_context.selected_state_indices;
   }
+  // These are storage budgets, not accuracy or molecule-dependent switches.
+  // Selected subspaces and equal-weight clusters require their own metric
+  // projection; completeness of the spin-product carrier is insufficient.
+  if (complete_space && !response_operator.use_equal_weight_subspace_response &&
+      response_operator.full_eigenvalues == nullptr) {
+    response_operator.metric_inverse = accepted_point_context.metric_inverse(
+        *response_operator.structure_action);
+  }
   accepted_point_context.structure_solve_accuracy.validate();
   const double selected_energy_scale = std::max(
       1.0,
@@ -170,7 +179,7 @@ AcceptedOuterResponseContext build_accepted_outer_response_context(
   context.accepted_point_context = accepted_point_context;
   context.selected_state_eigen_response_operator =
       build_accepted_selected_state_generalized_eigen_response_operator(
-          *accepted_point_context);
+          *accepted_point_context, input->complete_active_space);
   if (!context.selected_state_eigen_response_operator.structure_action
            ->supports_integral_direction()) {
     context.structure_state = build_accepted_structure_response_state(
@@ -254,6 +263,21 @@ AcceptedSelectedStateGeneralizedEigenResponseOperator::apply_direction_block(
   }
   const StructureDiagonal& diagonal =
       structure_action->preconditioner_diagonal();
+  std::optional<xmvb::core::EigenResponsePreconditioner> metric_preconditioner;
+  if (metric_inverse != nullptr) {
+    const double trace = diagonal.overlap.sum();
+    if (!(trace > 0.0) || !std::isfinite(trace))
+      throw std::runtime_error("structure overlap trace is not positive finite");
+    metric_preconditioner.emplace(xmvb::core::EigenResponsePreconditioner{
+        [this, n_selected_states](const Eigen::Ref<const Eigen::VectorXd>& rhs,
+                                  Eigen::Index column) -> Eigen::VectorXd {
+          const auto c = selected_eigenvectors.col(column % n_selected_states);
+          const auto mc = overlap_selected.col(column % n_selected_states);
+          const Eigen::MatrixXd values = rhs;
+          return metric_inverse->apply(values).col(0) - c * c.dot(rhs) / c.dot(mc);
+        },
+        1.0 / trace});
+  }
   const xmvb::core::GeneralizedEigenAction action =
       [this](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
         StructureActionResult images = structure_action->apply(vectors);
@@ -397,7 +421,8 @@ AcceptedSelectedStateGeneralizedEigenResponseOperator::apply_direction_block(
                 n_structures + 1,
                 effective_relative_residual_tolerance},
             block_recycle_spaces,
-            &block_residuals);
+            &block_residuals,
+            metric_preconditioner ? &*metric_preconditioner : nullptr);
     }
 
     SelectedStateGeneralizedEigenDirectionalResponse result;

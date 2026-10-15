@@ -1,4 +1,5 @@
 #include "libcint/direct_shell.hpp"
+#include "libcint/shell_normalization.hpp"
 
 #include <cmath>
 #include <stdexcept>
@@ -7,6 +8,10 @@
 
 extern "C" {
 #include "cint.h"
+#include "cint_funcs.h"
+
+extern CINTIntegralFunction int2c2e_cart;
+extern CINTIntegralFunction int3c2e_cart;
 
 FINT cint1e_ovlp_cart(
     double* buf,
@@ -40,15 +45,6 @@ FINT cint1e_r_cart(
     FINT* bas,
     FINT nbas,
     double* env);
-FINT cint2c2e_cart(
-    double* buf,
-    FINT* shls,
-    FINT* atm,
-    FINT natm,
-    FINT* bas,
-    FINT nbas,
-    double* env,
-    CINTOpt* opt);
 void cint2c2e_cart_optimizer(
     CINTOpt** opt,
     FINT* atm,
@@ -56,15 +52,6 @@ void cint2c2e_cart_optimizer(
     FINT* bas,
     FINT nbas,
     double* env);
-FINT cint3c2e_cart(
-    double* buf,
-    FINT* shls,
-    FINT* atm,
-    FINT natm,
-    FINT* bas,
-    FINT nbas,
-    double* env,
-    CINTOpt* opt);
 void cint3c2e_cart_optimizer(
     CINTOpt** opt,
     FINT* atm,
@@ -79,6 +66,31 @@ void cint3c2e_cart_optimizer(
 namespace xmvb::vb {
 
 namespace {
+
+/** @brief Evaluate with caller scratch; capacity grows only for larger shells. */
+CACHE_SIZE_T evaluate_cached(
+    CINTIntegralFunction* integral,
+    std::vector<double>& values,
+    FINT* shells,
+    const int* atm, int n_atoms,
+    const int* bas, int n_shells,
+    const double* env, void* optimizer,
+    LibcintShellWorkspace& workspace) {
+  auto* opt = reinterpret_cast<CINTOpt*>(optimizer);
+  const CACHE_SIZE_T size = integral(
+      nullptr, nullptr, shells, const_cast<int*>(atm), n_atoms,
+      const_cast<int*>(bas), n_shells, const_cast<double*>(env), opt, nullptr);
+  if (size <= 0) {
+    throw std::runtime_error("invalid libcint scratch size");
+  }
+  if (workspace.cache.size() < static_cast<std::size_t>(size)) {
+    workspace.cache.resize(static_cast<std::size_t>(size));
+  }
+  return integral(
+      values.data(), nullptr, shells, const_cast<int*>(atm), n_atoms,
+      const_cast<int*>(bas), n_shells, const_cast<double*>(env), opt,
+      workspace.cache.data());
+}
 
 enum class OneElectronIntegralKind {
   Overlap,
@@ -182,6 +194,23 @@ LibcintDirectShellEvaluator::LibcintDirectShellEvaluator(
 
   ao_normalization_ = build_cartesian_ao_normalization(input_);
   auxiliary_ao_normalization_ = build_cartesian_ao_normalization(*auxiliary_input_);
+  // Auxiliary metric truncation is defined in unit-radial Cartesian AOs,
+  // matching PySCF. Primary orbitals remain component-wise unit normalized.
+  for (int shell = 0; shell < auxiliary_input_->n_shells; ++shell) {
+    const int l = auxiliary_input_->bas[shell * BAS_SLOTS + ANG_OF];
+    const int n_cart = cartesian_ao_count(l);
+    const int offset = shell_ao_offset(*auxiliary_input_, shell);
+    const int n_contractions = auxiliary_input_->bas[shell * BAS_SLOTS + NCTR_OF];
+    for (int contraction = 0; contraction < n_contractions; ++contraction) {
+      int component = 0;
+      for (int lx = l; lx >= 0; --lx) {
+        for (int ly = l - lx; ly >= 0; --ly) {
+          auxiliary_ao_normalization_[offset + contraction * n_cart + component++] *=
+              radial_cartesian_scale(lx, ly, l - lx - ly);
+        }
+      }
+    }
+  }
   combined_atm_.assign(input_.atm.begin(), input_.atm.end());
   combined_bas_ = build_combined_basis(input_, *auxiliary_input_);
   combined_env_ = build_combined_env(input_, *auxiliary_input_);
@@ -413,11 +442,12 @@ LibcintVectorShellBlock LibcintDirectShellEvaluator::evaluate_position_shell_pai
   return result;
 }
 
-LibcintShellQuartet LibcintDirectShellEvaluator::evaluate_two_electron_shell_quartet(
+const LibcintShellQuartet& LibcintDirectShellEvaluator::evaluate_two_electron_shell_quartet(
     int shell_i,
     int shell_j,
     int shell_k,
-    int shell_l) const {
+    int shell_l,
+    LibcintShellWorkspace& workspace) const {
   validate_shell_index(shell_i);
   validate_shell_index(shell_j);
   validate_shell_index(shell_k);
@@ -432,20 +462,15 @@ LibcintShellQuartet LibcintDirectShellEvaluator::evaluate_two_electron_shell_qua
   const int ao_count_k = shell_ao_count(input_, shell_k);
   const int ao_count_l = shell_ao_count(input_, shell_l);
 
-  std::vector<double> buffer(
-      ao_count_i *
-          ao_count_j * ao_count_k * ao_count_l,
-      0.0);
+  auto& result = workspace.quartet;
+  auto& buffer = result.values;
+  buffer.resize(static_cast<std::size_t>(ao_count_i) *
+                ao_count_j * ao_count_k * ao_count_l);
   FINT shell_quartet[4] = {shell_i, shell_j, shell_k, shell_l};
-  const FINT status = cint2e_cart(
-      buffer.data(),
-      shell_quartet,
-      const_cast<int*>(input_.atm.data()),
-      input_.n_atoms,
-      const_cast<int*>(input_.bas.data()),
-      input_.n_shells,
-      const_cast<double*>(input_.env.data()),
-      reinterpret_cast<CINTOpt*>(two_electron_optimizer_));
+  const auto status = evaluate_cached(
+      int2e_cart, buffer, shell_quartet, input_.atm.data(), input_.n_atoms,
+      input_.bas.data(), input_.n_shells, input_.env.data(),
+      two_electron_optimizer_, workspace);
 
   if (status != 0) {
     for (int s = 0; s < ao_count_l; ++s) {
@@ -476,7 +501,6 @@ LibcintShellQuartet LibcintDirectShellEvaluator::evaluate_two_electron_shell_qua
     std::fill(buffer.begin(), buffer.end(), 0.0);
   }
 
-  LibcintShellQuartet result;
   result.shell_i = shell_i;
   result.shell_j = shell_j;
   result.shell_k = shell_k;
@@ -489,13 +513,13 @@ LibcintShellQuartet LibcintDirectShellEvaluator::evaluate_two_electron_shell_qua
   result.ao_count_j = ao_count_j;
   result.ao_count_k = ao_count_k;
   result.ao_count_l = ao_count_l;
-  result.values = std::move(buffer);
   return result;
 }
 
-LibcintShellBlock LibcintDirectShellEvaluator::evaluate_auxiliary_metric_shell_pair(
+const LibcintShellBlock& LibcintDirectShellEvaluator::evaluate_auxiliary_metric_shell_pair(
     int left_auxiliary_shell,
-    int right_auxiliary_shell) const {
+    int right_auxiliary_shell,
+    LibcintShellWorkspace& workspace) const {
   validate_auxiliary_shell_index(left_auxiliary_shell);
   validate_auxiliary_shell_index(right_auxiliary_shell);
 
@@ -504,19 +528,15 @@ LibcintShellBlock LibcintDirectShellEvaluator::evaluate_auxiliary_metric_shell_p
   const int left_ao_count = shell_ao_count(*auxiliary_input_, left_auxiliary_shell);
   const int right_ao_count = shell_ao_count(*auxiliary_input_, right_auxiliary_shell);
 
-  std::vector<double> buffer(
-      left_ao_count * right_ao_count,
-      0.0);
+  auto& result = workspace.metric;
+  auto& buffer = result.values;
+  buffer.resize(static_cast<std::size_t>(left_ao_count) * right_ao_count);
   FINT shell_pair[2] = {left_auxiliary_shell, right_auxiliary_shell};
-  const FINT status = cint2c2e_cart(
-      buffer.data(),
-      shell_pair,
-      const_cast<int*>(auxiliary_input_->atm.data()),
-      auxiliary_input_->n_atoms,
-      const_cast<int*>(auxiliary_input_->bas.data()),
-      auxiliary_input_->n_shells,
-      const_cast<double*>(auxiliary_input_->env.data()),
-      reinterpret_cast<CINTOpt*>(auxiliary_metric_optimizer_));
+  const auto status = evaluate_cached(
+      int2c2e_cart, buffer, shell_pair, auxiliary_input_->atm.data(),
+      auxiliary_input_->n_atoms, auxiliary_input_->bas.data(),
+      auxiliary_input_->n_shells, auxiliary_input_->env.data(),
+      auxiliary_metric_optimizer_, workspace);
 
   if (status != 0) {
     for (int column = 0; column < right_ao_count; ++column) {
@@ -535,21 +555,20 @@ LibcintShellBlock LibcintDirectShellEvaluator::evaluate_auxiliary_metric_shell_p
     std::fill(buffer.begin(), buffer.end(), 0.0);
   }
 
-  LibcintShellBlock result;
   result.left_shell = left_auxiliary_shell;
   result.right_shell = right_auxiliary_shell;
   result.left_ao_offset = left_ao_offset;
   result.right_ao_offset = right_ao_offset;
   result.left_ao_count = left_ao_count;
   result.right_ao_count = right_ao_count;
-  result.values = std::move(buffer);
   return result;
 }
 
-LibcintThreeCenterShellBlock LibcintDirectShellEvaluator::evaluate_three_center_shell_block(
+const LibcintThreeCenterShellBlock& LibcintDirectShellEvaluator::evaluate_three_center_shell_block(
     int primary_left_shell,
     int primary_right_shell,
-    int auxiliary_shell) const {
+    int auxiliary_shell,
+    LibcintShellWorkspace& workspace) const {
   validate_shell_index(primary_left_shell);
   validate_shell_index(primary_right_shell);
   validate_auxiliary_shell_index(auxiliary_shell);
@@ -562,24 +581,19 @@ LibcintThreeCenterShellBlock LibcintDirectShellEvaluator::evaluate_three_center_
   const int primary_right_ao_count = shell_ao_count(input_, primary_right_shell);
   const int auxiliary_ao_count = shell_ao_count(*auxiliary_input_, auxiliary_shell);
 
-  std::vector<double> buffer(
-      primary_left_ao_count *
-          primary_right_ao_count * auxiliary_ao_count,
-      0.0);
+  auto& result = workspace.three_center;
+  auto& buffer = result.values;
+  buffer.resize(static_cast<std::size_t>(primary_left_ao_count) *
+                primary_right_ao_count * auxiliary_ao_count);
   FINT shell_triple[3] = {
       primary_left_shell,
       primary_right_shell,
       combined_auxiliary_shell,
   };
-  const FINT status = cint3c2e_cart(
-      buffer.data(),
-      shell_triple,
-      const_cast<int*>(combined_atm_.data()),
-      input_.n_atoms,
-      const_cast<int*>(combined_bas_.data()),
-      input_.n_shells + auxiliary_input_->n_shells,
-      const_cast<double*>(combined_env_.data()),
-      reinterpret_cast<CINTOpt*>(three_center_optimizer_));
+  const auto status = evaluate_cached(
+      int3c2e_cart, buffer, shell_triple, combined_atm_.data(), input_.n_atoms,
+      combined_bas_.data(), input_.n_shells + auxiliary_input_->n_shells,
+      combined_env_.data(), three_center_optimizer_, workspace);
 
   if (status != 0) {
     for (int auxiliary_local = 0; auxiliary_local < auxiliary_ao_count; ++auxiliary_local) {
@@ -605,7 +619,6 @@ LibcintThreeCenterShellBlock LibcintDirectShellEvaluator::evaluate_three_center_
     std::fill(buffer.begin(), buffer.end(), 0.0);
   }
 
-  LibcintThreeCenterShellBlock result;
   result.primary_left_shell = primary_left_shell;
   result.primary_right_shell = primary_right_shell;
   result.auxiliary_shell = auxiliary_shell;
@@ -615,44 +628,45 @@ LibcintThreeCenterShellBlock LibcintDirectShellEvaluator::evaluate_three_center_
   result.primary_left_ao_count = primary_left_ao_count;
   result.primary_right_ao_count = primary_right_ao_count;
   result.auxiliary_ao_count = auxiliary_ao_count;
-  result.values = std::move(buffer);
   return result;
 }
 
-double LibcintDirectShellEvaluator::evaluate_max_abs_raw_two_electron_shell_pair(
+double LibcintDirectShellEvaluator::evaluate_two_electron_shell_pair_bound(
     int shell_i,
-    int shell_j) const {
+    int shell_j,
+    LibcintShellWorkspace& workspace) const {
   validate_shell_index(shell_i);
   validate_shell_index(shell_j);
 
   const int ao_count_i = shell_ao_count(input_, shell_i);
   const int ao_count_j = shell_ao_count(input_, shell_j);
-  std::vector<double> buffer(
-      ao_count_i *
-          ao_count_j * ao_count_i * ao_count_j,
-      0.0);
+  const int offset_i = shell_ao_offset(input_, shell_i);
+  const int offset_j = shell_ao_offset(input_, shell_j);
+  auto& buffer = workspace.quartet.values;
+  buffer.resize(static_cast<std::size_t>(ao_count_i) *
+                ao_count_j * ao_count_i * ao_count_j);
   FINT shell_quartet[4] = {shell_i, shell_j, shell_i, shell_j};
-  const FINT status = cint2e_cart(
-      buffer.data(),
-      shell_quartet,
-      const_cast<int*>(input_.atm.data()),
-      input_.n_atoms,
-      const_cast<int*>(input_.bas.data()),
-      input_.n_shells,
-      const_cast<double*>(input_.env.data()),
-      reinterpret_cast<CINTOpt*>(two_electron_optimizer_));
+  const auto status = evaluate_cached(
+      int2e_cart, buffer, shell_quartet, input_.atm.data(), input_.n_atoms,
+      input_.bas.data(), input_.n_shells, input_.env.data(),
+      two_electron_optimizer_, workspace);
   if (status == 0) {
     return 0.0;
   }
 
-  double max_abs_value = 0.0;
-  for (double value : buffer) {
-    const double abs_value = std::abs(value);
-    if (abs_value > max_abs_value) {
-      max_abs_value = abs_value;
+  double bound = 0.0;
+  for (int j = 0; j < ao_count_j; ++j) {
+    for (int i = 0; i < ao_count_i; ++i) {
+      const std::size_t index = static_cast<std::size_t>(i) +
+          static_cast<std::size_t>(ao_count_i) *
+          (static_cast<std::size_t>(j) + static_cast<std::size_t>(ao_count_j) *
+           (static_cast<std::size_t>(i) + static_cast<std::size_t>(ao_count_i) * j));
+      const double scale =
+          ao_normalization_[offset_i + i] * ao_normalization_[offset_j + j];
+      bound = std::max(bound, std::abs(buffer[index]) * scale * scale);
     }
   }
-  return max_abs_value;
+  return bound;
 }
 
 }  // namespace xmvb::vb

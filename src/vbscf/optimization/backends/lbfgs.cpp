@@ -165,7 +165,8 @@ BackendRunResult run_block_lbfgs_backend(
     const double reduced_gradient_inf_norm =
         gradient_infinity_norm(current_projection.reduced_gradient);
     if (iteration == 0 &&
-        reduced_gradient_inf_norm < options.gradient_tolerance) {
+        orbital_gradient_converged(*objective, parameter_view, current_space,
+            current_projection.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason = "block_lbfgs_initial_tolerance";
       run_result.final_gradient_l2_norm =
@@ -332,8 +333,8 @@ BackendRunResult run_block_lbfgs_backend(
     const double energy_change = energy - previous_energy;
     previous_energy = energy;
     if (std::abs(energy_change) < options.energy_tolerance &&
-        next_reduced_gradient_inf_norm <
-            options.gradient_tolerance) {
+        orbital_gradient_converged(*objective, parameter_view, next_space,
+            next_projection.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason =
           "block_lbfgs_projected_gradient_tolerance";

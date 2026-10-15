@@ -13,6 +13,45 @@
 #include "core/openmp.hpp"
 
 namespace xmvb::vb {
+namespace {
+
+void order_ao_integrals_by_storage(AoPairGraph* graph) {
+  if (graph == nullptr) throw std::invalid_argument("null AO-pair graph");
+  if (!graph->has_row_graph()) return;
+  if (graph->integral_rows.size() != graph->integral_edges.size())
+    throw std::invalid_argument("inconsistent unique AO integral references");
+  if (graph->integral_edges.empty()) return;
+  // Primary edges are injective. Mark them in the existing column buffer,
+  // then scan rows in storage order: exactly the former sorted-reference
+  // order, with O(N_edges + N_pairs) work and no second integral-sized buffer.
+  // A negative column temporarily encodes -1-column; all columns are restored
+  // before publishing the graph. Original pair orientation is preserved.
+  std::vector<int> primary_offsets(graph->row_offsets.size(), 0);
+  for (const int row : graph->integral_rows)
+    ++primary_offsets[static_cast<std::size_t>(row) + 1];
+  for (std::size_t row = 1; row < primary_offsets.size(); ++row)
+    primary_offsets[row] += primary_offsets[row - 1];
+  const int n_threads = xmvb::effective_openmp_thread_count();
+#pragma omp parallel for num_threads(n_threads) schedule(static)
+  for (std::ptrdiff_t index = 0;
+       index < static_cast<std::ptrdiff_t>(graph->integral_edges.size()); ++index) {
+    const int edge = graph->integral_edges[index];
+    graph->columns[edge] = -1 - graph->columns[edge];
+  }
+#pragma omp parallel for num_threads(n_threads) schedule(static)
+  for (std::ptrdiff_t row = 0;
+       row < static_cast<std::ptrdiff_t>(graph->row_offsets.size()) - 1; ++row) {
+    int output = primary_offsets[row];
+    for (int edge = graph->row_offsets[row]; edge < graph->row_offsets[row + 1]; ++edge) {
+      if (graph->columns[edge] >= 0) continue;
+      graph->columns[edge] = -1 - graph->columns[edge];
+      graph->integral_edges[output] = edge;
+      graph->integral_rows[output++] = static_cast<int>(row);
+    }
+  }
+}
+
+}  // namespace
 
 std::vector<std::size_t> AoPairGraph::balanced_row_boundaries(
     int n_partitions) const {
@@ -269,6 +308,7 @@ AoPairGraph build_ao_pair_graph(
   graph.values = std::move(values);
   graph.integral_rows = std::move(left_pairs);
   graph.integral_edges = std::move(right_pairs);
+  order_ao_integrals_by_storage(&graph);
 
   return graph;
 }

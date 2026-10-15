@@ -1,0 +1,114 @@
+Joint structure Hessian, metric and orbital-coupling adjoint
+==========================================================
+
+Based on master 713f7a99 (production e9fd6c7f), not the unmerged CI-only
+extension experiment. No optimizer, coordinate, tolerance, preconditioner,
+root selection, keyframe or microstep policy was changed.
+
+Implementation
+--------------
+StructureAction::apply_response expands one selected response column, applies
+the alpha/beta exterior transforms once and calls sigma.apply_with_adjoint
+once. Its sigma produces Hq; the same transformed q produces Mq. Integral
+and generator adjoints consume the carriers before the overlap buffer is
+overwritten by the adjoint exterior transform. The unshifted sigma is projected
+directly: no subtract-E/add-E cancellation is used to recover the H image.
+
+StructureTangentOperator projects these H/M images, computes the horizontal
+multiplier and calls finish_response. The multiplier contribution reuses
+accepted-state transition one-body densities (upper triangle, transpose view),
+not another carrier traversal. These small active-orbital matrices do not
+scale as the square of the unique-string count. Spin-product temporaries are
+state-local; there is no additional retained carrier bank or thread-local
+copy of integrals/carriers.
+
+CIAH receives Hessian and metric images together and retains the existing
+coarse-preconditioner observer with matching images. The necessary pair-based
+representation still uses its own physical action and adjoint; its already
+computed structure metric image is also reused. Standalone operator interfaces
+remain for other real consumers, sharing the implementation, not a fallback.
+
+For a nonzero direct-CI structure direction the former path had three forward
+exterior maps (metric, H/S, adjoint), three inverse/adjoint maps, and two sigma
+evaluations. The joint path has one forward map, two adjoint maps and one sigma.
+The accepted-state multiplier uses only small cached one-body contractions.
+No orbital HVP is eliminated by this change.
+
+Validation
+----------
+Hanhai22 build/unit job 1251177; seven executables, eight successful invocations
+(direct-CI at both 1 and 32 threads). Tests compare independent H/S actions and
+the differentiated-integral-adjoint implementation with the joint response.
+They cover complete and selected structure spaces, unequal alpha/beta string
+dimensions, two unequal state weights, off-diagonal nonsymmetric multipliers,
+zero response/pure multiplier, and the horizontal coordinate projection.
+CIAH joint callbacks also reproduce dense generalized AH images and roots
+without invoking separate physical callbacks. Existing derivative/chart tests
+remain in the suite.
+
+Native six-molecule array: 1251180, indices 1,3,4,9,11,12.
+Exact Libcint; Davidson; analytic Hessian diagonal; 32 bound OpenMP cores;
+BLAS=1; gradient 1e-3; energy 1e-7 Eh; exact exchange memory 256 MiB.
+GCC 14.1, Release -O3 -DNDEBUG -g1 -fno-omit-frame-pointer.
+Binary SHA256 c546828132dda489d2075a61cbbc1a764a33853f9145b2ddb4f308b1392670fe.
+Unrelated dirty RI source/test and ignore-file changes were not transferred.
+
+Native data: results/history/neo_joint_response_20261013.csv.
+Raw logs: results/diagnostics/hanhai22-shared-response-20261012/.
+Baseline is saved response-local-1250866; NO historical binary was rerun.
+Input/basis hashes match. All six converge with unchanged macro iteration
+counts; FeCl2 HVP changes 254 -> 253, all other counts identical. Maximum
+final-energy difference is 3.812e-9 Eh; this does not require relaxed accuracy.
+Time is application end-to-end wall; RSS is GNU time process peak in MiB.
+
+case     steps old/new  HVP old/new  wall old/new(s)    RSS old/new(MiB)
+241      3/3            21/21        2.049/2.058        797.9/820.0
+MnF2     13/13          189/189      4.948/4.751        553.4/528.5
+FeCl2    12/12          254/253      6.700/7.409        503.7/478.1
+QOCGUM   4/4            52/52        13.029/13.519      2014.8/2001.7
+CERRAS   5/5            51/51        19.974/21.361      2012.3/2035.0
+LOFLEA   4/4            34/34        33.999/45.176      2821.5/2751.7
+
+These are single runs on different nodes, not isolated matched-node speedups.
+In the new array QOCGUM/CERRAS/LOFLEA shared anode33. That is a possible timing
+confounder, NOT evidence that the LOFLEA slowdown is explained by contention.
+There is no demonstrated general end-to-end acceleration in this batch.
+
+Same-binary response-kernel diagnostic
+-------------------------------------
+Job 1251217 uses test_orthogonal_direct_ci --benchmark-response, 32 cores.
+No historical optimizer or binary is replayed: it compares current separate
+public interfaces with the joint interface at the SAME synthetic accepted point.
+Both paths are warmed, then measured for three kernel calls, with matching
+checksums. The carrier is complete but the selected structure space has only
+three columns; this is a kernel check, not a molecular total-time prediction.
+Both spin sectors and nonorthogonal exterior transforms are exercised.
+
+active/spins  strings a/b  separate(3 calls,s)  joint(3 calls,s)  time reduction
+6/(3,3)       20/20        0.014812              0.004766         67.8%
+11/(5,5)      462/462      0.223126              0.168838         24.3%
+11/(5,6)      462/462      0.239206              0.168006         29.8%
+12/(6,6)      924/924      0.834309              0.640949         23.2%
+
+The kernel benefit is measured; a general molecular total-time benefit is not
+established. New-binary LOFLEA exclusive-node job 1251207_12 completed on
+anode56: 4 steps, 34 HVP, -399.106646001531 Eh, 32.762639 s, 2784.726563 MiB.
+This is 3.6% less time than the saved 33.999130 s run, versus 45.175511 s in
+the first shared-node run. Keep BOTH new results; the exclusive run does not
+prove that contention alone caused the first slowdown. The baseline node is
+still different and was not rerun. Input and binary hashes are unchanged.
+
+Older historical context (c2776c4, Hanhai25; not rerun)
+----------------------------------------------------
+case     steps HVP wall(s)
+241      6     9   0.915561
+MnF2     11    199 9.859770
+FeCl2    4     72  5.285014
+QOCGUM   5     13  6.329732
+CERRAS   5     31  28.305941
+LOFLEA   5     23  57.214518
+
+Source: results/history/paired_runs.csv. Cross-cluster absolute times are not
+matched comparisons. The old FeCl2 endpoint -2181.617639896249 Eh is higher
+by about 6.825 mEh and is not the same converged endpoint as the current runs.
+This kernel-only change does not recover historical low HVP counts.

@@ -3,23 +3,27 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 #include <Eigen/Core>
+#include "vbscf/structures/assembly/connection.hpp"
 
 namespace xmvb::vb {
 
 class OrbitalChart;
 class SparseParameterLayout;
 class StructureAction;
+struct StructureActiveIntegralAdjoint;
 struct AcceptedPointContext;
 struct VbScfInput;
 
 /**
  * @brief Selects which HVP sub-components to include.
  *
- * The orbital Hessian-vector product decomposes into three additive
- * contributions (direct core, fixed-upstream pullback, outer response) that
- * can be independently toggled.
+ * These switches select computational contributions, not physical Hessian
+ * blocks. In particular, disabling structure_response also removes the
+ * selected-state normalization gauge; use apply_orbital() for the complete
+ * orbital operator without horizontal structure relaxation.
  */
 struct HvpComponents {
   bool direct_core_response = true;
@@ -64,6 +68,7 @@ struct ResponseSpectrumSummary {
 struct OrbitalCouplingAction {
   Eigen::VectorXd orbital_hessian;
   Eigen::MatrixXd scaled_structure_forcing;
+  std::optional<StructureConnectionDirection> connection;
 };
 
 /** @brief Batched orbital block and one structure-forcing matrix per direction. */
@@ -203,6 +208,15 @@ public:
       const Eigen::VectorXd& reduced_direction) const;
 
   /**
+   * @brief Applies the complete orbital operator without horizontal response.
+   *
+   * Includes selected-state normalization gauge in the fused local backward.
+   * No horizontal structure forcing or response solve is constructed.
+   */
+  Eigen::VectorXd apply_orbital(
+      const Eigen::VectorXd& reduced_direction) const;
+
+  /**
    * @brief Applies @f$\bar A P@f$ and @f$BP@f$ to a bounded direction block.
    *
    * AO one-electron and active two-electron directional transformations are
@@ -224,6 +238,10 @@ public:
 
   /** @brief Returns the canonical lazy accepted-point structure action. */
   const StructureAction& structure_action() const;
+
+  /** @brief Orbital pullback of an already contracted structure response. */
+  Eigen::VectorXd apply_structure_coupling_adjoint(
+      const StructureActiveIntegralAdjoint& adjoint) const;
 
   bool supports_analytic_core_model() const noexcept;
 

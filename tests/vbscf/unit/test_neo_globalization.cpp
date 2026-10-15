@@ -64,6 +64,14 @@ void check_poor_model_agreement_retries_smaller() {
                 "poor model agreement did not quarter the radius");
 }
 
+/** @brief Energy acceptance does not imply that the current radius is reliable. */
+void check_accepted_trial_can_request_contraction() {
+  const auto result = evaluate(0.15, 1.0, true, 0.25);
+  require(result.accepted, "decreasing trial above the acceptance ratio was rejected");
+  require_close(result.next_radius, 0.0625,
+                "accepted low-agreement trial lost its contraction request");
+}
+
 void check_nonpositive_actual_reduction_is_rejected() {
   const auto result = evaluate(-0.2, 1.0);
   require(!result.accepted, "energy-increasing trial was accepted");
@@ -112,6 +120,56 @@ void check_invalid_input_is_rejected() {
   require(threw, "nonfinite trial energy was accepted");
 }
 
+void check_trial_phase_is_coordinate_invariant() {
+  constexpr double tolerance = 1.0e-3;
+  const double raw_gradient = 1.0e-4;
+  const double raw_metric = 1.0e-8;
+  const double scale = 1.0e4;
+  const double transformed_gradient = scale * raw_gradient;
+  const double transformed_metric = scale * scale * raw_metric;
+  const double raw_norm = std::sqrt(raw_gradient * raw_gradient / raw_metric);
+  const double transformed_norm = std::sqrt(
+      transformed_gradient * transformed_gradient / transformed_metric);
+  require(raw_gradient < tolerance && transformed_gradient > tolerance,
+          "fixture does not expose coordinate-component phase misclassification");
+  require_close(raw_norm, transformed_norm, "physical gradient norm changed under chart scaling");
+  require(xmvb::vb::neo_trial_allowed(raw_norm, tolerance) &&
+              xmvb::vb::neo_trial_allowed(transformed_norm, tolerance),
+          "equivalent charts do not select the same nonlinear trial phase");
+  require(!xmvb::vb::neo_trial_allowed(3.0 * tolerance, tolerance) &&
+              !xmvb::vb::neo_trial_allowed(0.0, tolerance),
+          "near-stationary solve unexpectedly enabled approximate trials");
+  bool rejected = false;
+  try {
+    xmvb::vb::neo_trial_allowed(raw_norm, 0.0);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected, "trial phase accepted a nonpositive gradient tolerance");
+}
+
+void check_coordinate_trial_budget_cannot_hide_stagnation() {
+  using xmvb::vb::neo_trial_residual_target;
+  const double coordinate_gradient = 2.0e-4;
+  const double physical_gradient = 4.0e-3;
+  const double physical_target = 1.0e-3;
+  const double target = neo_trial_residual_target(
+      coordinate_gradient, physical_gradient, 1.0e-3, physical_target);
+  require_close(target, 5.0e-5,
+                "absolute coordinate floor hid an unresolved gradient");
+  require_close(neo_trial_residual_target(
+      2.0 * coordinate_gradient, physical_gradient, 1.0e-3, physical_target),
+      2.0 * target, "absolute-floor correction did not track compressed coordinates");
+  require_close(neo_trial_residual_target(0.0045, 0.0078, 0.00102, 0.001),
+                0.00102, "useful historical candidate budget was unnecessarily tightened");
+  require_close(neo_trial_residual_target(1.0, 1.0, 0.1, 0.1), 0.1,
+                "trial safeguard loosened an existing tighter budget");
+  require_close(neo_trial_residual_target(0.01, 1.0, 0.0001, 0.0), 0.0001,
+                "trial safeguard changed the relative-only candidate policy");
+  require_close(neo_trial_residual_target(0.0, 0.0, 1.0, 1.0), 0.0,
+                "zero gradient admitted a nonzero residual budget");
+}
+
 }  // namespace
 
 int main() {
@@ -119,9 +177,12 @@ int main() {
   check_interior_step_does_not_expand_radius();
   check_moderate_model_agreement_keeps_radius();
   check_poor_model_agreement_retries_smaller();
+  check_accepted_trial_can_request_contraction();
   check_nonpositive_actual_reduction_is_rejected();
   check_nonpositive_prediction_is_rejected();
   check_minimum_radius_is_respected();
   check_invalid_input_is_rejected();
+  check_trial_phase_is_coordinate_invariant();
+  check_coordinate_trial_budget_cannot_hide_stagnation();
   return 0;
 }

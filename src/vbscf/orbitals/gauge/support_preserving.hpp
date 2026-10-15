@@ -47,8 +47,9 @@ bool apply_support_preserving_inactive_gauge(
  * For HAO/BDO orbitals, the minimum-AO-norm representative is selected among
  * support-admissible inactive additions, then normalized when active scaling
  * is itself admissible. This preserves each projected active ray and all fixed
- * sparse coefficients. Full-AO OEO can have additional active-subspace gauge
- * and is deliberately not canonicalized by this per-orbital operation.
+ * sparse coefficients. Full-AO OEO removes inactive additions in one block
+ * and normalizes each projected ray; it does not mix different active orbitals
+ * or require closure of the selected structure space under active rotations.
  *
  * @return Whether an active representative changed beyond backward error.
  */

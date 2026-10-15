@@ -279,7 +279,7 @@ std::vector<SparseActivePairCoefficient> build_sparse_active_pair_row(
           {TwoElectronIndexer::packed_pair_index(
                first_active_orbital,
                second_active_orbital),
-           coefficient});
+           coefficient * (first_active_orbital == second_active_orbital ? 2.0 : 1.0)});
     }
   }
 
@@ -425,7 +425,7 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_graph(
           dense_active_coefficients,
           n_basis_functions,
           n_active_orbitals);
-  result.dense_ao_pair_products = pair_products;
+  result.dense_ao_pair_products = std::move(pair_products);
   return result;
 }
 
@@ -450,9 +450,13 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_sparse(
   n_threads = xmvb::effective_openmp_thread_count();
 #endif
 
-  std::vector<std::vector<double>> partial_packed_integrals(
-      n_threads,
-      std::vector<double>(packed_size, 0.0));
+  // Preserve sparse support arithmetic without multiplying a large packed
+  // tensor by the OpenMP team size. A single large image becomes the result.
+  constexpr std::size_t private_elements = 32 * 1024 * 1024 / sizeof(double);
+  n_threads = std::min(n_threads,
+      static_cast<int>(std::max<std::size_t>(1, private_elements / packed_size)));
+  std::vector<std::vector<double>> partial_packed_integrals(n_threads);
+  for (auto& partial : partial_packed_integrals) partial.assign(packed_size, 0.0);
 
 #pragma omp parallel num_threads(n_threads)
   {
@@ -532,19 +536,24 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_sparse(
                   left_active_pair_index,
                   right_active_pair_index);
           local_packed_integrals[packed_index] +=
-              ao_integral_value * coefficient;
+              ao_integral_value * coefficient *
+              (left_active_pair_index == right_active_pair_index ? 2.0 : 1.0);
         }
       }
     }
   }
 
-  std::vector<double> packed_active_two_electron_integrals(packed_size, 0.0);
-  for (const auto& partial_integrals : partial_packed_integrals) {
-    for (std::size_t integral_index = 0;
-         integral_index < packed_active_two_electron_integrals.size();
-         ++integral_index) {
-      packed_active_two_electron_integrals[integral_index] +=
-          partial_integrals[integral_index];
+  std::vector<double> packed_active_two_electron_integrals;
+  if (n_threads == 1) {
+    packed_active_two_electron_integrals = std::move(partial_packed_integrals.front());
+  } else {
+    packed_active_two_electron_integrals.assign(packed_size, 0.0);
+    for (const auto& partial_integrals : partial_packed_integrals) {
+      for (std::size_t integral_index = 0;
+           integral_index < packed_active_two_electron_integrals.size();
+           ++integral_index) {
+        packed_active_two_electron_integrals[integral_index] += partial_integrals[integral_index];
+      }
     }
   }
 

@@ -19,9 +19,9 @@ struct AnalyticOrbitalDiagonal {
 /**
  * @brief MO-basis intermediates for the analytic fixed-structure rotation diagonal.
  *
- * The four-index arrays use row-major logical indexing. `ppaa(p,q,a,b)` is
- * `(pq|ab)` and `papa(p,a,q,b)` is `(pa|qb)`. Only the partial transforms
- * required by the diagonal are stored; a full MO ERI tensor is never formed.
+ * `j_active(p,a,b)=(pp|ab)` and `k_active(p,a,b)=(pa|pb)` are
+ * three-index slices, with row-major logical indexing. `active_eri(a,b,c,d)`
+ * holds only the active-space tensor. No off-diagonal external pair is stored.
  */
 struct AnalyticDiagonalIntermediates {
   int n_core = 0;
@@ -30,8 +30,9 @@ struct AnalyticDiagonalIntermediates {
   Eigen::MatrixXd v_core;
   Eigen::MatrixXd j_pc;
   Eigen::MatrixXd k_pc;
-  std::vector<double> ppaa;
-  std::vector<double> papa;
+  std::vector<double> j_active;
+  std::vector<double> k_active;
+  std::vector<double> active_eri;
 };
 
 /**
@@ -48,7 +49,10 @@ std::vector<double> unpack_symmetric_active_two_rdm(
     int n_active);
 
 /**
- * @brief Builds the fixed-structure orthogonal-frame orbital Hessian diagonal.
+ * @brief Builds the explicit-slice reference for the fixed-structure diagonal.
+ *
+ * Numerical tests use this entry point to compare independently transformed
+ * integrals. Production contracts the required density sources first.
  *
  * The result is an `n_mo x n_mo` matrix. Entry `(p,q)` is the diagonal
  * curvature associated with the antisymmetric orbital rotation between

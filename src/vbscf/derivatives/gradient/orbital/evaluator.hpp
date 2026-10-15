@@ -25,6 +25,7 @@ struct OrbitalFixedStructureGradient {
   OrbitalGradientResult gradient;
   Eigen::MatrixXd normalized_coefficients;
   Eigen::MatrixXd structure_residuals;
+  Eigen::MatrixXd coefficient_gradient;
 };
 
 /**

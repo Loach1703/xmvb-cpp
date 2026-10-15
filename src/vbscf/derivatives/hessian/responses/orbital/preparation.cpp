@@ -437,59 +437,127 @@ AcceptedOrbitalPreparationCache build_accepted_orbital_preparation_cache(
         total_inactive_density_gradient.data(),
         n_basis_functions,
         n_basis_functions);
+    auto pullback = build_orbital_preparation_pullback(
+        input,
+        total_active_auxiliary_gradient,
+        inactive_density_gradient_matrix,
+        cache);
     cache.original_orbital_gradient =
-        Eigen::MatrixXd::Zero(n_basis_functions, n_orbitals);
-
-    if (!cache.has_inactive_orbitals) {
-      cache.original_orbital_gradient.middleCols(
-          0,
-          n_active_orbitals) = total_active_auxiliary_gradient;
-    } else {
-      const auto inactive_orbitals =
-          cache.normalized_orbitals.leftCols(
-              n_inactive_doubly_occupied_orbitals);
-      const auto active_orbitals =
-          cache.normalized_orbitals.middleCols(
-              n_inactive_doubly_occupied_orbitals,
-              n_active_orbitals);
-      const Eigen::MatrixXd original_active_gradient =
-          total_active_auxiliary_gradient -
-          basis_overlap * cache.inactive_density * total_active_auxiliary_gradient;
-      const Eigen::MatrixXd bs_active = basis_overlap * active_orbitals;
-      const Eigen::MatrixXd total_inactive_gradient =
-          inactive_density_gradient_matrix -
-          total_active_auxiliary_gradient * bs_active.transpose();
-      cache.inactive_density_gradient_symmetric =
-          total_inactive_gradient + total_inactive_gradient.transpose();
-      const Eigen::MatrixXd basis_overlap_times_inactive =
-          basis_overlap * inactive_orbitals;
-      Eigen::MatrixXd original_inactive_gradient =
-          Eigen::MatrixXd::Zero(
-              n_basis_functions,
-              n_inactive_doubly_occupied_orbitals);
-      {
-        const Eigen::MatrixXd inactive_overlap_gradient =
-            build_inactive_overlap_gradient(
-                cache.inactive_overlap_inverse,
-                inactive_orbitals,
-                total_inactive_gradient);
-        original_inactive_gradient =
-            build_inactive_projector_pullback_gradient(
-                cache.inactive_density_gradient_symmetric,
-                inactive_orbitals,
-                cache.inactive_auxiliary,
-                basis_overlap_times_inactive,
-                inactive_overlap_gradient);
-      }
-      cache.original_orbital_gradient.leftCols(
-          n_inactive_doubly_occupied_orbitals) = original_inactive_gradient;
-      cache.original_orbital_gradient.middleCols(
-          n_inactive_doubly_occupied_orbitals,
-          n_active_orbitals) = original_active_gradient;
-    }
+        std::move(pullback.original_orbital_gradient);
+    cache.inactive_density_gradient_symmetric =
+        std::move(pullback.inactive_density_gradient_symmetric);
   }
 
   return cache;
+}
+
+OrbitalPreparationPullback build_orbital_preparation_pullback(
+    const OrbitalPreparationInput& input,
+    const Eigen::Ref<const Eigen::MatrixXd>& active_auxiliary_gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>& inactive_density_gradient,
+    const AcceptedOrbitalPreparationCache& geometry) {
+  const int n_basis_functions = input.n_basis_functions;
+  const int n_active_orbitals = input.n_active_orbitals;
+  const int n_inactive_orbitals =
+      (input.n_total_electrons - input.n_active_electrons) / 2;
+  if (active_auxiliary_gradient.rows() != n_basis_functions ||
+      active_auxiliary_gradient.cols() != n_active_orbitals ||
+      inactive_density_gradient.rows() != n_basis_functions ||
+      inactive_density_gradient.cols() != n_basis_functions) {
+    throw std::invalid_argument("orbital pullback upstream dimensions are inconsistent");
+  }
+
+  OrbitalPreparationPullback pullback;
+  pullback.original_orbital_gradient =
+      Eigen::MatrixXd::Zero(n_basis_functions, input.n_orbitals);
+  if (n_inactive_orbitals == 0) {
+    pullback.original_orbital_gradient.middleCols(0, n_active_orbitals) =
+        active_auxiliary_gradient;
+    return pullback;
+  }
+
+  const auto inactive_orbitals =
+      geometry.normalized_orbitals.leftCols(n_inactive_orbitals);
+  const Eigen::MatrixXd basis_overlap_times_inactive =
+      geometry.basis_overlap_times_normalized.leftCols(n_inactive_orbitals);
+  const Eigen::MatrixXd basis_overlap_times_active =
+      geometry.basis_overlap_times_normalized.middleCols(
+          n_inactive_orbitals, n_active_orbitals);
+  const Eigen::MatrixXd effective_inactive_density_gradient =
+      inactive_density_gradient -
+      active_auxiliary_gradient * basis_overlap_times_active.transpose();
+  pullback.inactive_density_gradient_symmetric =
+      effective_inactive_density_gradient +
+      effective_inactive_density_gradient.transpose();
+  const Eigen::MatrixXd inactive_overlap_gradient =
+      build_inactive_overlap_gradient(
+          geometry.inactive_overlap_inverse,
+          inactive_orbitals,
+          effective_inactive_density_gradient);
+  pullback.original_orbital_gradient.leftCols(n_inactive_orbitals) =
+      build_inactive_projector_pullback_gradient(
+          pullback.inactive_density_gradient_symmetric,
+          inactive_orbitals,
+          geometry.inactive_auxiliary,
+          basis_overlap_times_inactive,
+          inactive_overlap_gradient);
+  pullback.original_orbital_gradient.middleCols(
+      n_inactive_orbitals, n_active_orbitals) =
+      apply_occupied_projector_transpose_to_gradient(
+          active_auxiliary_gradient,
+          geometry.inactive_auxiliary,
+          basis_overlap_times_inactive);
+  return pullback;
+}
+
+OrbitalPreparationPullback build_orbital_preparation_pullback(
+    const OrbitalPreparationInput& input,
+    const Eigen::Ref<const Eigen::MatrixXd>& active_auxiliary_gradient,
+    const AcceptedOrbitalPreparationCache& geometry) {
+  const int n_basis_functions = input.n_basis_functions;
+  const int n_active_orbitals = input.n_active_orbitals;
+  const int n_inactive_orbitals =
+      (input.n_total_electrons - input.n_active_electrons) / 2;
+  if (active_auxiliary_gradient.rows() != n_basis_functions ||
+      active_auxiliary_gradient.cols() != n_active_orbitals) {
+    throw std::invalid_argument("orbital pullback upstream dimensions are inconsistent");
+  }
+
+  OrbitalPreparationPullback pullback;
+  pullback.original_orbital_gradient =
+      Eigen::MatrixXd::Zero(n_basis_functions, input.n_orbitals);
+  if (n_inactive_orbitals == 0) {
+    pullback.original_orbital_gradient.middleCols(0, n_active_orbitals) =
+        active_auxiliary_gradient;
+    return pullback;
+  }
+
+  const auto inactive_orbitals =
+      geometry.normalized_orbitals.leftCols(n_inactive_orbitals);
+  const auto basis_overlap_times_inactive =
+      geometry.basis_overlap_times_normalized.leftCols(n_inactive_orbitals);
+  const auto basis_overlap_times_active =
+      geometry.basis_overlap_times_normalized.middleCols(
+          n_inactive_orbitals, n_active_orbitals);
+  const Eigen::MatrixXd inactive_overlap_gradient =
+      geometry.inactive_overlap_inverse *
+      (inactive_orbitals.transpose() * active_auxiliary_gradient) *
+      (basis_overlap_times_active.transpose() * inactive_orbitals) *
+      geometry.inactive_overlap_inverse;
+  pullback.original_orbital_gradient.leftCols(n_inactive_orbitals) =
+      -active_auxiliary_gradient *
+          (basis_overlap_times_active.transpose() * geometry.inactive_auxiliary) -
+      basis_overlap_times_active *
+          (active_auxiliary_gradient.transpose() * geometry.inactive_auxiliary) +
+      basis_overlap_times_inactive *
+          (inactive_overlap_gradient + inactive_overlap_gradient.transpose());
+  pullback.original_orbital_gradient.middleCols(
+      n_inactive_orbitals, n_active_orbitals) =
+      apply_occupied_projector_transpose_to_gradient(
+          active_auxiliary_gradient,
+          geometry.inactive_auxiliary,
+          basis_overlap_times_inactive);
+  return pullback;
 }
 
 namespace {
@@ -694,7 +762,8 @@ OrbitalPreparationDirectionalResult build_orbital_preparation_directional_result
     const DenseOrbitalTangentContext& orbital_tangent_context,
     int n_inactive_doubly_occupied_orbitals,
     int n_active_orbitals,
-    const AcceptedOrbitalPreparationCache& cache) {
+    const AcceptedOrbitalPreparationCache& cache,
+    bool materialize_inactive_density) {
   if (input.n_basis_functions <= 0) {
     throw std::invalid_argument("n_basis_functions must be positive");
   }
@@ -760,21 +829,27 @@ OrbitalPreparationDirectionalResult build_orbital_preparation_directional_result
     result.delta_active_auxiliary_orbitals = delta_active_orbitals;
   }
 
-  result.delta_inactive_density =
-      materialize_low_rank_ao_matrix(
-          delta_inactive_density_low_rank,
-          "cached orbital-preparation inactive-density direction");
+  if (materialize_inactive_density) {
+    result.delta_inactive_density =
+        materialize_low_rank_ao_matrix(
+            delta_inactive_density_low_rank,
+            "cached orbital-preparation inactive-density direction");
+  }
   return result;
 }
 
-std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
+namespace {
+
+std::vector<double> apply_fixed_upstream_orbital_pullback_direction_impl(
     const OrbitalPreparationInput& input,
     const DenseOrbitalTangentContext& orbital_tangent_context,
     const Eigen::Ref<const Eigen::MatrixXd>& total_active_auxiliary_gradient,
     const Eigen::Ref<const Eigen::MatrixXd>& basis_overlap_times_delta_active_orbitals,
-    const std::vector<double>& total_inactive_density_gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>& total_inactive_density_gradient,
     const Eigen::Ref<const Eigen::VectorXd>& input_retract_tangent,
-    const AcceptedOrbitalPreparationCache& cache) {
+    const AcceptedOrbitalPreparationCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& original_orbital_gradient,
+    const Eigen::MatrixXd& inactive_density_gradient_symmetric) {
   if (input.n_basis_functions <= 0 || input.n_orbitals <= 0 ||
       input.n_active_orbitals <= 0) {
     throw std::invalid_argument(
@@ -785,10 +860,14 @@ std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
     throw std::invalid_argument(
         "fixed-upstream input tangent size does not match orbital_value_table");
   }
+  if (total_inactive_density_gradient.rows() != input.n_basis_functions ||
+      total_inactive_density_gradient.cols() != input.n_basis_functions ||
+      original_orbital_gradient.rows() != input.n_basis_functions ||
+      original_orbital_gradient.cols() != input.n_orbitals) {
+    throw std::invalid_argument("fixed-upstream pullback dimensions are inconsistent");
+  }
   const int n_inactive_doubly_occupied_orbitals =
       (input.n_total_electrons - input.n_active_electrons) / 2;
-  const std::size_t ao_matrix_size =
-      input.n_basis_functions * input.n_basis_functions;
   const Eigen::Map<const Eigen::MatrixXd> basis_overlap(
       input.ao_overlap_matrix.data(),
       input.n_basis_functions,
@@ -845,11 +924,17 @@ std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
     const Eigen::MatrixXd delta_basis_overlap_times_inactive =
         basis_overlap * delta_inactive_orbitals;
     const Eigen::MatrixXd total_inactive_gradient =
-        Eigen::Map<const Eigen::MatrixXd>(
-            total_inactive_density_gradient.data(),
-            input.n_basis_functions,
-            input.n_basis_functions) -
+        total_inactive_density_gradient -
         total_active_auxiliary_gradient * bs_active.transpose();
+    Eigen::MatrixXd generated_inactive_density_gradient_symmetric;
+    if (inactive_density_gradient_symmetric.size() == 0) {
+      generated_inactive_density_gradient_symmetric =
+          total_inactive_gradient + total_inactive_gradient.transpose();
+    }
+    const Eigen::MatrixXd& effective_inactive_density_gradient_symmetric =
+        inactive_density_gradient_symmetric.size() == 0
+            ? generated_inactive_density_gradient_symmetric
+            : inactive_density_gradient_symmetric;
     Eigen::MatrixXd delta_original_inactive_gradient =
         Eigen::MatrixXd::Zero(
             input.n_basis_functions,
@@ -871,7 +956,7 @@ std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
       delta_original_inactive_gradient =
           build_inactive_projector_pullback_gradient_direction(
               delta_inactive_density_gradient_symmetric,
-              cache.inactive_density_gradient_symmetric,
+              effective_inactive_density_gradient_symmetric,
               inactive_orbitals,
               delta_inactive_orbitals,
               cache.inactive_auxiliary,
@@ -925,7 +1010,7 @@ std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
           input_retract_tangent[
               orbital_index * input.n_basis_functions + coefficient_index];
       dense_gradient(coefficient_index) =
-          cache.original_orbital_gradient(
+          original_orbital_gradient(
               basis_function_index,
               orbital_index);
       delta_dense_gradient(coefficient_index) =
@@ -971,6 +1056,58 @@ std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
   }
 
   return orbital_value_gradient_direction;
+}
+
+}  // namespace
+
+std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
+    const OrbitalPreparationInput& input,
+    const DenseOrbitalTangentContext& orbital_tangent_context,
+    const Eigen::Ref<const Eigen::MatrixXd>& total_active_auxiliary_gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>& basis_overlap_times_delta_active_orbitals,
+    const std::vector<double>& total_inactive_density_gradient,
+    const Eigen::Ref<const Eigen::VectorXd>& input_retract_tangent,
+    const AcceptedOrbitalPreparationCache& cache) {
+  if (total_inactive_density_gradient.size() !=
+      input.n_basis_functions * input.n_basis_functions) {
+    throw std::invalid_argument(
+        "fixed-upstream inactive-density gradient has inconsistent size");
+  }
+  const Eigen::Map<const Eigen::MatrixXd> inactive_density_gradient(
+      total_inactive_density_gradient.data(),
+      input.n_basis_functions,
+      input.n_basis_functions);
+  return apply_fixed_upstream_orbital_pullback_direction_impl(
+      input,
+      orbital_tangent_context,
+      total_active_auxiliary_gradient,
+      basis_overlap_times_delta_active_orbitals,
+      inactive_density_gradient,
+      input_retract_tangent,
+      cache,
+      cache.original_orbital_gradient,
+      cache.inactive_density_gradient_symmetric);
+}
+
+std::vector<double> apply_fixed_upstream_orbital_pullback_direction(
+    const OrbitalPreparationInput& input,
+    const DenseOrbitalTangentContext& orbital_tangent_context,
+    const Eigen::Ref<const Eigen::MatrixXd>& total_active_auxiliary_gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>& basis_overlap_times_delta_active_orbitals,
+    const Eigen::Ref<const Eigen::MatrixXd>& total_inactive_density_gradient,
+    const Eigen::Ref<const Eigen::VectorXd>& input_retract_tangent,
+    const AcceptedOrbitalPreparationCache& geometry,
+    const OrbitalPreparationPullback& pullback) {
+  return apply_fixed_upstream_orbital_pullback_direction_impl(
+      input,
+      orbital_tangent_context,
+      total_active_auxiliary_gradient,
+      basis_overlap_times_delta_active_orbitals,
+      total_inactive_density_gradient,
+      input_retract_tangent,
+      geometry,
+      pullback.original_orbital_gradient,
+      pullback.inactive_density_gradient_symmetric);
 }
 
 

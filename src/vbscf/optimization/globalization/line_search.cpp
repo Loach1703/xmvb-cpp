@@ -1,4 +1,5 @@
 #include "vbscf/optimization/globalization/line_search.hpp"
+#include "vbscf/diagnostics/performance/phases.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -384,11 +385,14 @@ bool try_armijo_backtracking_nonredundant_direction(
     }
 
     auto trial_evaluation =
-        objective->evaluate_trial(trial_parameters, true);
+        objective->evaluate_trial_energy(trial_parameters, true);
     const double trial_energy = trial_evaluation.energy;
     const double armijo_upper_bound =
         current_energy + armijo_constant * step * directional_derivative;
     if (std::isfinite(trial_energy) && trial_energy <= armijo_upper_bound) {
+      diagnostics::count_phase(diagnostics::Phase::ArmijoAccepted);
+      // Rejected Armijo trials need energy only; reuse the accepted forward state.
+      objective->complete_trial(&trial_evaluation);
       *accepted_parameters = parameter_view.pack(
           trial_evaluation.orbital_preparation_input);
       *accepted_gradient = trial_evaluation.gradient;
@@ -399,6 +403,7 @@ bool try_armijo_backtracking_nonredundant_direction(
       objective->commit(std::move(trial_evaluation));
       return true;
     }
+    diagnostics::count_phase(diagnostics::Phase::ArmijoRejected);
     step *= 0.5;
   }
 

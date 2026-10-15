@@ -33,6 +33,23 @@ struct ExactPackedActiveTwoElectronAdjointCache {
   const ExactCtxPairMatrix* accepted_pair_products = nullptr;
   const ExactCtxDenseMatrix* accepted_active_coefficients = nullptr;
   ExactCtxPairMatrix active_pair_gradient_matrix;
+  /**
+   * @brief Accepted one-orbital contraction, rows (AO, active), columns pairs.
+   *
+   * Uses O(n_bf*n_active^3) shared storage, capped at 64 MiB. This is an
+   * integral intermediate, independent of the active density, not a Hessian.
+   */
+  ExactCtxPairMatrix orbital_pair_products;
+  /**
+   * @brief Density-independent (AO active|AO active) integral image.
+   *
+   * Rows are triangular AO pairs (mu >= kappa), columns (b, d), row-major.
+   * The reverse AO block is the active-index transpose, not a stored copy.
+   * Shared storage plus construction/action workspaces obey the explicit AO
+   * input memory budget. The image is reused throughout the accepted point.
+   * This is a partial integral transform, not an orbital Hessian.
+   */
+  ExactCtxPairMatrix exchange_integrals;
 };
 
 /**

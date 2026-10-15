@@ -6,10 +6,14 @@
 #include <Eigen/Core>
 #include <Eigen/QR>
 
+namespace xmvb::core { class MetricSolveWorkspace; struct MetricImage; }
+
 namespace xmvb::vb {
 
 struct AcceptedPointContext;
 class StructureAction;
+struct StructureActiveIntegralAdjoint;
+class StructureMetricInverse;
 
 /**
  * @brief Horizontal selected-state structure displacement.
@@ -149,11 +153,13 @@ public:
    * coordinates, so no redundant ambient projection is performed.
    */
   StructureCoordinateCouplingAction apply_coupling_coordinates(
-      const Eigen::VectorXd& coordinates) const;
+      const Eigen::VectorXd& coordinates,
+      StructureActiveIntegralAdjoint* adjoint = nullptr) const;
 
   /** @brief Applies several coordinate directions in one H/S block action. */
   StructureCoordinateCouplingBlock apply_coupling_coordinate_block(
-      const Eigen::Ref<const Eigen::MatrixXd>& coordinates) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& coordinates,
+      StructureActiveIntegralAdjoint* adjoint = nullptr) const;
 
   /** @brief Applies the structure trust-region metric @f$PSP@f$. */
   StructureTangent apply_metric(const StructureTangent& tangent) const;
@@ -177,6 +183,26 @@ public:
   /** @brief Jacobi approximation to the dual norm induced by the overlap metric. */
   double diagonal_dual_norm(const Eigen::VectorXd& covector) const;
 
+  /** @brief Complete horizontal overlap dual norm; no dense metric is stored.
+   * The matrix-free Riesz solve certifies its true residual at sqrt(machine
+   * epsilon), matching the orbital metric's numerical accuracy contract.
+   */
+  double dual_norm(const Eigen::VectorXd& covector,
+      core::MetricSolveWorkspace* workspace = nullptr) const;
+
+  /** @brief Complete structure Riesz image, optionally refining a propagated image. */
+  core::MetricImage metric_image(const Eigen::VectorXd& covector,
+      core::MetricSolveWorkspace* workspace = nullptr,
+      const core::MetricImage* initial = nullptr) const;
+
+  /** @brief Positive Jacobi Riesz preconditioner, not a dual-norm substitute. */
+  Eigen::VectorXd apply_inverse_metric_diagonal(const Eigen::VectorXd& covector) const;
+
+  /** @brief Exact admitted complete-space Riesz preconditioner; selected spaces
+   * use their Jacobi model. Both remain subject to the same true-residual solve.
+   */
+  Eigen::VectorXd apply_inverse_metric_model(const Eigen::VectorXd& covector) const;
+
   /**
    * @brief Applies an SPD Jacobi inverse for @f$C+\lambda M_s@f$.
    *
@@ -191,8 +217,11 @@ public:
       double shift) const;
 
   /**
-   * @brief Applies the signed CIAH diagonal
-   * @f$(\operatorname{diag}C-\omega\operatorname{diag}M_s)^{-1}@f$.
+   * @brief Applies the signed CIAH diagonal model in its admitted representation.
+   * Complete spin sectors with a budgeted carrier use the symmetric inverse
+   * @f$G_s^{-1}L^TD^{-1}LG_s^{-1}@f$, where @f$L=FZ@f$ and
+   * @f$D=\operatorname{diag}H_{\mathrm{orth}}-E_s-\omega@f$.
+   * Other variational spaces retain their horizontal raw-structure Jacobi model.
    */
   Eigen::VectorXd apply_inverse_augmented_hessian_diagonal(
       const Eigen::VectorXd& covector,
@@ -207,6 +236,7 @@ private:
 
   std::shared_ptr<const AcceptedPointContext> accepted_point_;
   const StructureAction* action_ = nullptr;
+  const StructureMetricInverse* metric_inverse_ = nullptr;
   Eigen::VectorXd energies_;
   Eigen::VectorXd coordinate_scales_;
   Eigen::VectorXd metric_diagonal_;

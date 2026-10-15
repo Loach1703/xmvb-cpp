@@ -2,7 +2,6 @@
 
 #include <cmath>
 #include <limits>
-#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -40,13 +39,9 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
   n_threads = omp_get_max_threads();
 #endif
 
-  std::vector<std::unique_ptr<LibcintDirectShellEvaluator>> thread_evaluators;
-  if (n_threads > 1) {
-    thread_evaluators.reserve(n_threads - 1);
-    for (int thread_index = 1; thread_index < n_threads; ++thread_index) {
-      thread_evaluators.push_back(std::make_unique<LibcintDirectShellEvaluator>(input));
-    }
-  }
+  // Share immutable normalization/optimizers; only shell output and scratch
+  // belong to a worker. No integral or optimizer replica per thread.
+  std::vector<LibcintShellWorkspace> workspaces(n_threads);
 
   MaterializedAoIntegralBuffers buffers;
   buffers.n_basis_functions = n_basis_functions;
@@ -74,21 +69,11 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
   } else {
 #pragma omp parallel
     {
-      int thread_index = 0;
-#ifdef _OPENMP
-      thread_index = omp_get_thread_num();
-#endif
-      LibcintDirectShellEvaluator* thread_evaluator = &evaluator;
-      if (thread_index > 0) {
-        thread_evaluator =
-            thread_evaluators[thread_index - 1].get();
-      }
-
 #pragma omp for schedule(dynamic)
       for (int left_shell = 0; left_shell < n_shells; ++left_shell) {
         for (int right_shell = 0; right_shell <= left_shell; ++right_shell) {
           const auto core_h_block =
-              thread_evaluator->evaluate_core_hamiltonian_shell_pair(left_shell, right_shell);
+              evaluator.evaluate_core_hamiltonian_shell_pair(left_shell, right_shell);
           for (int column = 0; column < core_h_block.right_ao_count; ++column) {
             const int global_column = core_h_block.right_ao_offset + column;
             for (int row = 0; row < core_h_block.left_ao_count; ++row) {
@@ -105,16 +90,17 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
     }
   }
 
-  std::vector<double> shell_pair_maxima;
-  if (options.use_historical_shell_pair_prescreen) {
-    shell_pair_maxima.assign(
+  std::vector<double> shell_pair_bounds;
+  if (options.use_shell_pair_prescreen) {
+    shell_pair_bounds.assign(
         n_shells * (n_shells + 1) / 2,
         0.0);
     if (n_threads <= 1) {
       for (int shell_i = 0; shell_i < n_shells; ++shell_i) {
         for (int shell_j = 0; shell_j <= shell_i; ++shell_j) {
-          shell_pair_maxima[pair_index(shell_i, shell_j)] =
-              evaluator.evaluate_max_abs_raw_two_electron_shell_pair(shell_i, shell_j);
+          shell_pair_bounds[pair_index(shell_i, shell_j)] =
+              evaluator.evaluate_two_electron_shell_pair_bound(
+                  shell_i, shell_j, workspaces[0]);
         }
       }
     } else {
@@ -124,19 +110,14 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
 #ifdef _OPENMP
         thread_index = omp_get_thread_num();
 #endif
-        LibcintDirectShellEvaluator* thread_evaluator = &evaluator;
-        if (thread_index > 0) {
-          thread_evaluator =
-              thread_evaluators[thread_index - 1].get();
-        }
 
 #pragma omp for schedule(dynamic)
         for (int shell_i = 0; shell_i < n_shells; ++shell_i) {
           for (int shell_j = 0; shell_j <= shell_i; ++shell_j) {
-            shell_pair_maxima[pair_index(shell_i, shell_j)] =
-                thread_evaluator->evaluate_max_abs_raw_two_electron_shell_pair(
+            shell_pair_bounds[pair_index(shell_i, shell_j)] =
+                evaluator.evaluate_two_electron_shell_pair_bound(
                     shell_i,
-                    shell_j);
+                    shell_j, workspaces[thread_index]);
           }
         }
       }
@@ -147,6 +128,10 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
       [&](LibcintDirectShellEvaluator& shell_evaluator,
           int shell_i,
           auto&& visit_integral) {
+        int thread_index = 0;
+#ifdef _OPENMP
+        thread_index = omp_get_thread_num();
+#endif
         // Keep the canonical `(i >= j, i >= k, k >= l)` AO ordering used by
         // the downstream sparse AO kernels, but write the final `(i,j,k,l)`
         // tuples directly instead of staging packed indices and decoding them
@@ -154,19 +139,19 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
         for (int shell_j = 0; shell_j <= shell_i; ++shell_j) {
           for (int shell_k = 0; shell_k <= shell_i; ++shell_k) {
             for (int shell_l = 0; shell_l <= shell_k; ++shell_l) {
-              if (options.use_historical_shell_pair_prescreen) {
+              if (options.use_shell_pair_prescreen) {
                 const double shell_pair_product =
-                    shell_pair_maxima[pair_index(shell_i, shell_j)] *
-                    shell_pair_maxima[pair_index(shell_k, shell_l)];
+                    shell_pair_bounds[pair_index(shell_i, shell_j)] *
+                    shell_pair_bounds[pair_index(shell_k, shell_l)];
                 if (std::sqrt(shell_pair_product) < options.integral_tolerance) {
                   continue;
                 }
               }
-              const auto quartet = shell_evaluator.evaluate_two_electron_shell_quartet(
+              const auto& quartet = shell_evaluator.evaluate_two_electron_shell_quartet(
                   shell_i,
                   shell_j,
                   shell_k,
-                  shell_l);
+                  shell_l, workspaces[thread_index]);
               for (int local_i = 0; local_i < quartet.ao_count_i; ++local_i) {
                 const int i = quartet.ao_offset_i + local_i;
                 for (int local_j = 0; local_j < quartet.ao_count_j; ++local_j) {
@@ -235,20 +220,11 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
     } else {
 #pragma omp parallel
       {
-        int thread_index = 0;
-#ifdef _OPENMP
-        thread_index = omp_get_thread_num();
-#endif
-        LibcintDirectShellEvaluator* thread_evaluator = &evaluator;
-        if (thread_index > 0) {
-          thread_evaluator = thread_evaluators[thread_index - 1].get();
-        }
-
 #pragma omp for schedule(dynamic)
         for (int shell_i = 0; shell_i < n_shells; ++shell_i) {
           std::size_t count = 0;
           visit_shell_i_integrals(
-              *thread_evaluator,
+              evaluator,
               shell_i,
               [&](double, int, int) { ++count; });
           shell_integral_counts[shell_i] = count;
@@ -267,11 +243,10 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
       shell_integral_offsets[shell_i + 1] = previous_offset + shell_count;
     }
     const std::size_t total_integral_count = shell_integral_offsets.back();
-    if (total_integral_count >
-        std::numeric_limits<std::size_t>::max() / 2) {
-      throw std::overflow_error("directed ERI capacity exceeds size_t");
-    }
-    buffers.two_electron_values.reserve(2 * total_integral_count);
+    // This large-basis path is consumed as a once-symmetry-reduced stream;
+    // unlike the CSR path below, it is never expanded into directed edges.
+    // Reserving twice the final value count retained an unused O(N_ERI)
+    // allocation for the entire calculation.
     buffers.two_electron_values.resize(total_integral_count);
     buffers.left_pair_indices.resize(total_integral_count);
     buffers.right_pair_indices.resize(total_integral_count);
@@ -304,18 +279,9 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
     } else {
 #pragma omp parallel
       {
-        int thread_index = 0;
-#ifdef _OPENMP
-        thread_index = omp_get_thread_num();
-#endif
-        LibcintDirectShellEvaluator* thread_evaluator = &evaluator;
-        if (thread_index > 0) {
-          thread_evaluator = thread_evaluators[thread_index - 1].get();
-        }
-
 #pragma omp for schedule(dynamic)
         for (int shell_i = 0; shell_i < n_shells; ++shell_i) {
-          fill_shell_i(*thread_evaluator, shell_i);
+          fill_shell_i(evaluator, shell_i);
         }
       }
     }
@@ -344,20 +310,10 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
 
 #pragma omp parallel
     {
-      int thread_index = 0;
-#ifdef _OPENMP
-      thread_index = omp_get_thread_num();
-#endif
-      LibcintDirectShellEvaluator* thread_evaluator = &evaluator;
-      if (thread_index > 0) {
-        thread_evaluator =
-            thread_evaluators[thread_index - 1].get();
-      }
-
 #pragma omp for schedule(dynamic)
       for (int shell_i = 0; shell_i < n_shells; ++shell_i) {
         visit_shell_i_integrals(
-            *thread_evaluator,
+            evaluator,
             shell_i,
             [&](double value, int left_pair, int right_pair) {
               shell_integral_values[shell_i].push_back(value);

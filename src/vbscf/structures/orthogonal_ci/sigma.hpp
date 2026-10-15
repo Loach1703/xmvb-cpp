@@ -1,9 +1,9 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <initializer_list>
+#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
@@ -18,6 +18,19 @@ struct DirectCiIntegralAdjoint {
   Eigen::MatrixXd pair_kernel;
 };
 
+/** @brief Sigma and integral adjoint sharing one spin-string tile sweep. */
+struct DirectCiResponse {
+  Eigen::MatrixXd sigma;
+  DirectCiIntegralAdjoint integrals;
+};
+
+/** @brief One generator action; inputs are views, output is caller-owned. */
+struct DirectCiGeneratorRequest {
+  Eigen::Ref<const Eigen::MatrixXd> coefficients;
+  Eigen::Ref<const Eigen::MatrixXd> generator;
+  Eigen::MatrixXd* result;
+};
+
 /**
  * @brief Exact Slater--Condon sigma action in an orthonormal active basis.
  */
@@ -26,6 +39,15 @@ public:
   DirectCiSigmaAction(
       const std::vector<std::vector<int>>& alpha_determinants,
       const std::vector<std::vector<int>>& beta_determinants,
+      const OrthogonalActiveIntegrals& integrals);
+
+  /** @brief Reuses immutable spin-string links for another integral kernel.
+   *
+   * Orbitals must have the same ordering and count as the reference action.
+   * Only the numerical integral kernels are rebuilt; links are shared, not copied.
+   */
+  DirectCiSigmaAction(
+      const DirectCiSigmaAction& reference,
       const OrthogonalActiveIntegrals& integrals);
 
   /**
@@ -37,6 +59,12 @@ public:
   Eigen::MatrixXd apply(
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const;
 
+  /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
+   * Uses occupation lists and the retained two-electron kernel, not sigma
+   * probes. The one-electron integrals must belong to this immutable action.
+   */
+  Eigen::MatrixXd diagonal(const Eigen::Ref<const Eigen::MatrixXd>& one_electron) const;
+
   /**
    * @brief Applies a general one-body orbital generator.
    *
@@ -46,6 +74,12 @@ public:
   Eigen::MatrixXd apply_one_body_generator(
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       const Eigen::Ref<const Eigen::MatrixXd>& generator) const;
+
+  /** @brief Applies equally shaped generator requests in one parallel team.
+   * Inputs stay shared; each request must have a distinct, non-aliasing output.
+   */
+  void apply_one_body_generators(
+      std::initializer_list<DirectCiGeneratorRequest> requests) const;
 
   /**
    * @brief Differentiates `left.dot(H * right)` with respect to the integrals.
@@ -59,6 +93,14 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       const Eigen::Ref<const Eigen::MatrixXd>& right) const;
 
+  /** @brief Returns H * response and the integral derivative of response.dot(H * state).
+   * Reuses the response scatter; two shared tiles serve both contractions.
+   * Inputs follow apply() packing and may be non-owning strided blocks.
+   */
+  DirectCiResponse apply_with_adjoint(
+      const Eigen::Ref<const Eigen::MatrixXd>& response,
+      const Eigen::Ref<const Eigen::MatrixXd>& state) const;
+
   /**
    * @brief Unsymmetrized one-body adjoint for an orbital-generator action.
    *
@@ -70,27 +112,10 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       const Eigen::Ref<const Eigen::MatrixXd>& right) const;
 
+  /** @brief Numerical matrices plus referenced links, not exclusively owned bytes. */
   std::size_t dynamic_bytes() const noexcept;
 
 private:
-  struct PairKernelTerm {
-    int first_pair = 0;
-    int second_pair = 0;
-    double coefficient = 0.0;
-  };
-
-  struct HamiltonianConnection {
-    int source = 0;
-    double value = 0.0;
-    int density_pair = -1;
-    double density_sign = 0.0;
-    int one_electron_row = -1;
-    int one_electron_column = -1;
-    double one_electron_sign = 0.0;
-    std::array<PairKernelTerm, 2> pair_terms{};
-    int n_pair_terms = 0;
-  };
-
   struct DensityConnections {
     std::vector<int> sources;
     std::vector<int> pairs;
@@ -110,28 +135,47 @@ private:
   };
 
   struct SpinConnections {
-    std::vector<double> diagonal;
-    std::vector<std::vector<HamiltonianConnection>> off_diagonal;
     std::vector<DensityConnections> singles;
     std::vector<std::vector<int>> occupied;
   };
 
   SpinConnections build_spin_connections(
-      const std::vector<std::vector<int>>& determinants,
-      const OrthogonalActiveIntegrals& integrals) const;
-  Eigen::MatrixXd build_coulomb_diagonal(
       const std::vector<std::vector<int>>& determinants) const;
+  Eigen::MatrixXd build_hamiltonian_pair_kernel(
+      const OrthogonalActiveIntegrals& integrals,
+      int n_electrons) const;
+  /** @brief Scatter into (block_width * alpha_count, orbital_pairs), strings contiguous. */
+  void scatter_one_body_intermediate(
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
+      int alpha_begin,
+      int alpha_count,
+      int beta_target,
+      Eigen::Ref<Eigen::MatrixXd> intermediate) const;
   const SpinConnections& beta_connections() const noexcept;
-  const Eigen::MatrixXd& beta_coulomb_diagonal() const noexcept;
+
+  /** @brief Shared adjoint sweep; non-null sigma additionally receives H * left. */
+  DirectCiIntegralAdjoint contract_adjoint(
+      const Eigen::Ref<const Eigen::MatrixXd>& left,
+      const Eigen::Ref<const Eigen::MatrixXd>& right,
+      Eigen::MatrixXd* sigma) const;
+
+  /** @brief Cooperative sigma contraction inside the current OpenMP team.
+   * Each output beta column has one owner. All workers must call this method.
+   */
+  void apply_sigma_tile(
+      int alpha_begin, int alpha_count, int block_begin, int block_count,
+      int beta_begin, int beta_count,
+      const Eigen::Ref<const Eigen::MatrixXd>& scattered,
+      Eigen::Ref<Eigen::MatrixXd> workspace,
+      Eigen::Ref<Eigen::MatrixXd> sigma) const;
 
   int n_orbitals_ = 0;
   int n_alpha_ = 0;
   int n_beta_ = 0;
   Eigen::MatrixXd pair_kernel_;
-  SpinConnections alpha_;
-  std::optional<SpinConnections> distinct_beta_;
-  Eigen::MatrixXd alpha_coulomb_diagonal_;
-  std::optional<Eigen::MatrixXd> distinct_beta_coulomb_diagonal_;
+  Eigen::MatrixXd hamiltonian_pair_kernel_;
+  std::shared_ptr<const SpinConnections> alpha_;
+  std::shared_ptr<const SpinConnections> distinct_beta_;
 };
 
 }  // namespace xmvb::vb

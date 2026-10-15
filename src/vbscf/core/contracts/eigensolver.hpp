@@ -17,8 +17,10 @@ enum class StructureEigensolver {
  *
  * The energy threshold is converted to a relative eigen-equation backward
  * error with the current Ritz-value scale. The gradient threshold independently
- * limits that backward error. Keeping both requirements at the VBSCF boundary
- * prevents the core solver from inventing a machine-precision target.
+ * limits that backward error. A separate first-order CI stationarity budget
+ * prevents energy convergence alone from accepting inaccurate state vectors.
+ * Neither algebraic residual is a certificate of orbital-gradient accuracy:
+ * small structure gaps can amplify their effect through orbital coupling.
  */
 struct StructureSolveAccuracy {
   double energy_tolerance = 1.0e-7;
@@ -31,6 +33,18 @@ struct StructureSolveAccuracy {
       throw std::invalid_argument(
           "structure solve accuracy tolerances must be positive");
     }
+  }
+
+  /** @brief CI first-order stationarity budget, in hartree.
+   *
+   * Apply the supplied outer energy budget to the linear CI residual as well
+   * as the quadratic energy error; do not infer state-vector accuracy from
+   * energy convergence or normalize this budget by the total Ritz energy.
+   * The gradient budget can tighten, but never relax, this requirement.
+   */
+  double stationarity_tolerance() const {
+    validate();
+    return std::min(energy_tolerance, gradient_tolerance);
   }
 
   /**

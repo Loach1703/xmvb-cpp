@@ -21,6 +21,8 @@ namespace xmvb::vb {
  * determinant coefficient bundles.
  */
 struct AcceptedPointContext {
+  /** Completeness of the variational VB space, not merely its spin carrier. */
+  bool complete_active_space = false;
   /** @brief Outer accuracy contract inherited by structure response solves. */
   StructureSolveAccuracy structure_solve_accuracy;
 
@@ -42,6 +44,11 @@ struct AcceptedPointContext {
    * only if an outer structure response is actually admitted.
    */
   mutable std::optional<StructureAction> structure_action;
+
+  /** @brief Budgeted occupation-block metric factors, shared by all consumers. */
+  const StructureMetricInverse* metric_inverse(const StructureAction& action) const;
+  mutable std::shared_ptr<const StructureMetricInverse> structure_metric_inverse;
+  mutable bool structure_metric_planned = false;
 
   /**
    * @brief Accepted Hamiltonian and overlap images of the selected states.

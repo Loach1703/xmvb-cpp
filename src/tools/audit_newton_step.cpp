@@ -9,6 +9,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -20,6 +21,7 @@
 
 #include "input/loading/loader.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
+#include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/optimization/objective/reduced_hvp.hpp"
 #include "vbscf/optimization/preconditioners/transported_lbfgs.hpp"
@@ -47,6 +49,7 @@ struct Options {
   bool audit_operator = false;
   bool audit_dense_reference = false;
   bool audit_response_heldout = false;
+  bool audit_metric = false;
 };
 
 bool parse_bool(const std::string& value) {
@@ -66,7 +69,8 @@ Options parse_options(int argc, char** argv) {
         "[--dump-trial-orbitals-bin path] [--finite-difference-step value] "
         "[--eigensolver davidson|dense] [--audit-operator true|false] "
         "[--audit-dense-reference true|false] "
-        "[--audit-response-heldout true|false]");
+        "[--audit-response-heldout true|false] "
+        "[--audit-metric true|false]");
   }
   Options options;
   options.input_path = argv[1];
@@ -102,6 +106,8 @@ Options parse_options(int argc, char** argv) {
       options.audit_dense_reference = parse_bool(value);
     } else if (name == "--audit-response-heldout") {
       options.audit_response_heldout = parse_bool(value);
+    } else if (name == "--audit-metric") {
+      options.audit_metric = parse_bool(value);
     } else {
       throw std::invalid_argument("unknown option: " + name);
     }
@@ -177,6 +183,8 @@ std::vector<PackedSecantPair> rebuild_lbfgs_history(
     double nuclear_repulsion_energy,
     StructureEigensolver eigensolver,
     const StructureSolveAccuracy& accuracy,
+    const std::vector<int>& selected_states,
+    const std::vector<double>& state_weights,
     int history_size) {
   OrbitalGradientEvaluator evaluator;
   const Eigen::MatrixXd no_initial_eigenvectors;
@@ -194,7 +202,7 @@ std::vector<PackedSecantPair> rebuild_lbfgs_history(
         &point.orbital_preparation_input);
     const auto evaluated =
         evaluator.evaluate_without_reference_energy_gradient(
-            point, {0}, {1.0}, nuclear_repulsion_energy,
+            point, selected_states, state_weights, nuclear_repulsion_energy,
             eigensolver, accuracy, no_initial_eigenvectors);
     auto chart = build_chart(point, layout, evaluated);
     const Eigen::VectorXd parameters =
@@ -690,6 +698,10 @@ void run_operator_audit(
     double nuclear_repulsion_energy,
     const StructureSolveAccuracy& accuracy) {
   std::cout << std::setprecision(17);
+  const auto& selected_states =
+      accepted.second_order_context->selected_state_indices;
+  const auto& state_weights =
+      accepted.second_order_context->normalized_state_weights;
   run_frozen_response_audit(accepted, input, layout, chart);
   const auto& blocks = recorded_hvp.recorded_blocks();
   std::cout << std::setprecision(17)
@@ -794,8 +806,8 @@ void run_operator_audit(
     const OrbitalGradientResult dense_accepted =
         evaluator.evaluate_without_reference_energy_gradient(
             input,
-            {0},
-            {1.0},
+            selected_states,
+            state_weights,
             nuclear_repulsion_energy,
             StructureEigensolver::Dense,
             accuracy,
@@ -893,8 +905,8 @@ void run_operator_audit(
       const auto evaluated =
           evaluator.evaluate_without_reference_energy_gradient(
               point,
-              {0},
-              {1.0},
+              selected_states,
+              state_weights,
               nuclear_repulsion_energy,
               options.eigensolver,
               accuracy,
@@ -957,8 +969,11 @@ void run_audit(const Options& options) {
   OrbitalGradientEvaluator evaluator;
   const Eigen::MatrixXd no_initial_eigenvectors;
   const StructureSolveAccuracy accuracy;
+  std::vector<int> selected_states(loaded.state_average_count);
+  std::iota(selected_states.begin(), selected_states.end(), 0);
+  const std::vector<double> state_weights(selected_states.size(), 1.0);
   const auto accepted = evaluator.evaluate_without_reference_energy_gradient(
-      input, {0}, {1.0}, loaded.nuclear_repulsion_energy,
+      input, selected_states, state_weights, loaded.nuclear_repulsion_energy,
       options.eigensolver, accuracy, no_initial_eigenvectors);
   const SparseParameterLayout layout(input.orbital_preparation_input);
   auto chart = build_chart(input, layout, accepted);
@@ -967,6 +982,29 @@ void run_audit(const Options& options) {
   const auto projected = chart->project_gradient(packed_gradient);
   const NonredundantRetractionMetric metric(
       *chart, layout, input.orbital_preparation_input);
+  if (options.audit_metric) {
+    std::cout << "metric_dimension = " << chart->reduced_size() << '\n';
+    try {
+      const Eigen::VectorXd riesz_gradient =
+          metric.solve(projected.reduced_gradient);
+      const Eigen::VectorXd residual =
+          projected.reduced_gradient - metric.apply(riesz_gradient);
+      std::cout << "metric_solve_relative_residual = "
+                << residual.stableNorm() /
+                       std::max(
+                           projected.reduced_gradient.stableNorm(),
+                           std::numeric_limits<double>::min())
+                << '\n';
+      std::cout << "metric_dual_gradient_norm = "
+                << std::sqrt(std::max(
+                       0.0,
+                       projected.reduced_gradient.dot(riesz_gradient)))
+                << '\n';
+    } catch (const std::exception& error) {
+      std::cout << "metric_solve_failure = " << error.what() << '\n';
+    }
+    return;
+  }
   AcceptedPointHvp hvp(
       accepted,
       input,
@@ -993,6 +1031,8 @@ void run_audit(const Options& options) {
         loaded.nuclear_repulsion_energy,
         options.eigensolver,
         accuracy,
+        selected_states,
+        state_weights,
         kHistorySize);
     lbfgs_preconditioner =
         std::make_unique<TransportedReducedLbfgsPreconditioner>(
@@ -1195,7 +1235,7 @@ void run_audit(const Options& options) {
     }
   }
   const auto trial_gradient = evaluator.evaluate_without_reference_energy_gradient(
-      trial, {0}, {1.0}, loaded.nuclear_repulsion_energy,
+      trial, selected_states, state_weights, loaded.nuclear_repulsion_energy,
       options.eigensolver, accuracy, no_initial_eigenvectors);
   const SparseParameterLayout trial_layout(trial.orbital_preparation_input);
   auto trial_chart = build_chart(trial, trial_layout, trial_gradient);
@@ -1223,7 +1263,7 @@ void run_audit(const Options& options) {
           input.orbital_preparation_input, direction, displacement);
       const auto evaluated =
           evaluator.evaluate_without_reference_energy_gradient(
-              point, {0}, {1.0}, loaded.nuclear_repulsion_energy,
+              point, selected_states, state_weights, loaded.nuclear_repulsion_energy,
               options.eigensolver, accuracy, no_initial_eigenvectors);
       return std::pair{
           chart->project_reduced_gradient(

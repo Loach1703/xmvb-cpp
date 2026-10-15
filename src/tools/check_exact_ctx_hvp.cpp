@@ -1,19 +1,24 @@
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 #include <Eigen/Core>
+#include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
+#include <Eigen/QR>
 
 #include "input/loading/loader.hpp"
+#include "tools/response_audit.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/operator.hpp"
@@ -21,7 +26,9 @@
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
+#include "vbscf/orbitals/charts/physical_metric.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
+#include "vbscf/optimization/trust_region/retraction.hpp"
 
 namespace {
 
@@ -33,12 +40,20 @@ struct Options {
   xmvb::vb::StandardTwoElectronMode two_electron_mode =
       xmvb::vb::StandardTwoElectronMode::Exact;
   bool preconditioned_direction = false;
+  std::string orbital_sector;
+  std::string packed_direction_path;
+  std::string projected_model_prefix;
+  bool audit_oeo_chart = false;
   double step = 1.0e-4;
   double max_relative_error = std::numeric_limits<double>::infinity();
   double response_tolerance = 1.0e-3;
   bool stream_pair_products = false;
   int diagonal_samples = 0;
   bool coupled_finite_difference = false;
+  int curvature_steps = 0;
+  int response_spectrum_limit = 0;
+  int compare_exchange_mib = 0;
+  int operator_timing_repeats = 0;
 };
 
 void print_usage() {
@@ -51,8 +66,16 @@ void print_usage() {
       << " [--eigensolver dense|davidson]"
       << " [--standard-two-electron-mode exact|ri]"
       << " [--direction gradient|preconditioned_gradient]"
+      << " [--orbital-sector inactive-active|inactive-external|active-external]"
+      << " [--audit-oeo-chart 0|1]"
+      << " [--packed-direction-bin path]"
+      << " [--projected-model-prefix path]"
       << " [--stream-pair-products 0|1]"
-      << " [--diagonal-samples count]\n";
+      << " [--diagonal-samples count]"
+      << " [--curvature-steps count]"
+      << " [--compare-exchange-mib budget]"
+      << " [--operator-timing-repeats count]"
+      << " [--response-spectrum-limit count]\n";
 }
 
 Options parse_arguments(int argc, char** argv) {
@@ -67,6 +90,23 @@ Options parse_arguments(int argc, char** argv) {
     const std::string value = argv[argument + 1];
     if (name == "--orbital-value-table-bin") {
       options.orbital_value_table_bin_path = value;
+    } else if (name == "--packed-direction-bin") {
+      options.packed_direction_path = value;
+    } else if (name == "--projected-model-prefix") {
+      options.projected_model_prefix = value;
+    } else if (name == "--orbital-sector") {
+      if (value != "inactive-active" && value != "inactive-external" &&
+          value != "active-external")
+        throw std::invalid_argument("invalid orbital sector");
+      options.orbital_sector = value;
+    } else if (name == "--audit-oeo-chart") {
+      if (value != "0" && value != "1")
+        throw std::invalid_argument("--audit-oeo-chart must be 0 or 1");
+      options.audit_oeo_chart = value == "1";
+    } else if (name == "--operator-timing-repeats") {
+      options.operator_timing_repeats = std::stoi(value);
+    } else if (name == "--compare-exchange-mib") {
+      options.compare_exchange_mib = std::stoi(value);
     } else if (name == "--step") {
       options.step = std::stod(value);
     } else if (name == "--max-rel-error") {
@@ -108,6 +148,10 @@ Options parse_arguments(int argc, char** argv) {
       options.stream_pair_products = value == "1";
     } else if (name == "--diagonal-samples") {
       options.diagonal_samples = std::stoi(value);
+    } else if (name == "--curvature-steps") {
+      options.curvature_steps = std::stoi(value);
+    } else if (name == "--response-spectrum-limit") {
+      options.response_spectrum_limit = std::stoi(value);
     } else if (name == "--coupled-finite-difference") {
       if (value != "0" && value != "1") {
         throw std::invalid_argument(
@@ -123,7 +167,10 @@ Options parse_arguments(int argc, char** argv) {
     }
   }
   if (!(options.step > 0.0) || !(options.max_relative_error >= 0.0) ||
-      options.diagonal_samples < 0 ||
+      options.diagonal_samples < 0 || options.curvature_steps < 0 ||
+      options.response_spectrum_limit < 0 ||
+      options.compare_exchange_mib < 0 ||
+      options.operator_timing_repeats < 0 || options.operator_timing_repeats > 20 ||
       !(options.response_tolerance > 0.0)) {
     throw std::invalid_argument("finite-difference tolerances must be non-negative");
   }
@@ -156,6 +203,7 @@ struct CoupledReferenceAudit {
   int structure_coordinate_dimension = 0;
   int structure_response_rank = 0;
 };
+
 
 Eigen::VectorXd flatten_structure_tangent(
     const xmvb::vb::StructureTangent& tangent) {
@@ -325,9 +373,9 @@ int main(int argc, char** argv) {
     const Options options = parse_arguments(argc, argv);
     xmvb::vb::VbScfInputLoadOptions load_options;
     load_options.standard_two_electron_mode = options.two_electron_mode;
-    const auto loaded =
+    auto loaded =
         xmvb::vb::load_vbscf_input_with_timings(options.input_path, load_options);
-    xmvb::vb::VbScfInput input = loaded.input;
+    auto& input = loaded.input;
     if (options.two_electron_mode ==
         xmvb::vb::StandardTwoElectronMode::ResolutionOfIdentity) {
       // RI derivative checks must remain factor-native.  Removing any exact
@@ -359,6 +407,9 @@ int main(int argc, char** argv) {
     if (accepted.second_order_context == nullptr) {
       throw std::runtime_error("accepted-point second-order context is unavailable");
     }
+    std::cout << std::setprecision(16)
+              << "accepted_total_energy = " << accepted.scf_result.total_energy
+              << std::setprecision(12) << std::endl;
 
     xmvb::vb::SparseParameterLayout layout(input.orbital_preparation_input);
     const int n_inactive =
@@ -389,23 +440,117 @@ int main(int argc, char** argv) {
             : &accepted.ao_effective_one_electron_result.ao_effective_h1e,
         false,
         input.complete_active_space,
-        analytic_diagonal ? &*analytic_diagonal : nullptr);
+        analytic_diagonal ? &*analytic_diagonal : nullptr,
+        xmvb::vb::OrbitalChart::Coordinates::Unwhitened);
     const Eigen::VectorXd packed_gradient =
         layout.gather_from_full(accepted.sparse_orbital_energy_gradient);
     const Eigen::VectorXd accepted_reduced_gradient =
         chart.project_reduced_gradient(packed_gradient);
+    // Diagnostic only: certify completeness modulo the FULL/OEO gauge, not
+    // merely the total dimension. No global packed-by-reduced matrix is stored.
+    if (options.audit_oeo_chart || !options.orbital_sector.empty()) {
+      if (!chart.uses_active_subspace_gauge() || layout.size() !=
+          input.orbital_preparation_input.n_basis_functions * n_occupied)
+        throw std::invalid_argument("sector audit requires unrestricted FULL OEO");
+      const int n_bf = input.orbital_preparation_input.n_basis_functions;
+      const Eigen::VectorXd raw = layout.pack(input.orbital_preparation_input);
+      Eigen::MatrixXd occupied(n_bf, n_occupied);
+      for (int orbital = 0; orbital < n_occupied; ++orbital)
+        for (int row = 0; row < n_bf; ++row)
+          occupied(row, orbital) = raw[layout.packed_index(orbital, row)];
+      if (options.audit_oeo_chart) {
+        std::vector<Eigen::MatrixXd> tangent(n_occupied,
+            Eigen::MatrixXd::Zero(n_bf, n_bf));
+        std::vector<int> columns(n_occupied, 0);
+        for (int column = 0; column < chart.reduced_size(); ++column) {
+          Eigen::VectorXd unit = Eigen::VectorXd::Zero(chart.reduced_size());
+          unit[column] = 1.0;
+          const Eigen::VectorXd expanded = chart.expand_step(unit);
+          for (int orbital = 0; orbital < n_occupied; ++orbital) {
+            Eigen::VectorXd local(n_bf);
+            for (int row = 0; row < n_bf; ++row)
+              local[row] = expanded[layout.packed_index(orbital, row)];
+            if (!local.isZero(0.0))
+              tangent[orbital].col(columns[orbital]++) = local;
+          }
+        }
+        double gauge_derivative = 0.0;
+        for (int orbital = 0; orbital < n_occupied; ++orbital) {
+          const int gauge_size = orbital < n_inactive ? n_inactive : n_occupied;
+          Eigen::MatrixXd basis(n_bf, gauge_size + columns[orbital]);
+          basis.leftCols(gauge_size) = occupied.leftCols(gauge_size);
+          basis.rightCols(columns[orbital]) =
+              tangent[orbital].leftCols(columns[orbital]);
+          const int rank = basis.colPivHouseholderQr().rank();
+          Eigen::VectorXd local_gradient(n_bf);
+          for (int row = 0; row < n_bf; ++row)
+            local_gradient[row] = packed_gradient[layout.packed_index(orbital, row)];
+          for (int source = 0; source < gauge_size; ++source)
+            gauge_derivative = std::max(gauge_derivative,
+                std::abs(local_gradient.dot(occupied.col(source))) /
+                occupied.col(source).norm());
+          std::cout << "chart_orbital=" << orbital << ",tangent=" << columns[orbital]
+                    << ",gauge=" << gauge_size << ",combined_rank=" << rank << '\n';
+          if (rank != n_bf || columns[orbital] + gauge_size != n_bf)
+            throw std::runtime_error("FULL OEO chart loses a nongauge direction");
+        }
+        std::cout << "gauge_directional_derivative_max=" << gauge_derivative << '\n';
+      }
+    }
     Eigen::VectorXd direction = accepted_reduced_gradient;
+    if (!options.orbital_sector.empty()) {
+      const int n_bf = input.orbital_preparation_input.n_basis_functions;
+      const auto& auxiliary = accepted.orbital_preparation_result.auxiliary_orbital_matrix;
+      const bool active_target = options.orbital_sector == "active-external";
+      const int target_begin = active_target ? n_inactive : 0;
+      const int target_end = active_target ? n_occupied : n_inactive;
+      const int source_begin = options.orbital_sector == "inactive-active"
+          ? n_inactive : n_occupied;
+      Eigen::VectorXd packed = Eigen::VectorXd::Zero(layout.size());
+      for (int orbital = target_begin; orbital < target_end; ++orbital) {
+        Eigen::VectorXd local = Eigen::VectorXd::Zero(n_bf);
+        const int source_end = options.orbital_sector == "inactive-active"
+            ? n_occupied : auxiliary.cols();
+        for (int source = source_begin; source < source_end; ++source)
+          local += std::sin(0.37 * (orbital + 1) * (source + 1)) * auxiliary.col(source);
+        for (int row = 0; row < n_bf; ++row)
+          packed[layout.packed_index(orbital, row)] = local[row];
+      }
+      direction = chart.project_vector(packed).reduced_gradient;
+      std::cout << "orbital_sector=" << options.orbital_sector
+                << ",retained_norm=" << direction.norm() << '\n';
+    }
     if (options.preconditioned_direction) {
       direction = chart.apply_inverse_reduced_block_preconditioner(direction);
+    }
+    if (!options.packed_direction_path.empty()) {
+      std::ifstream stream(options.packed_direction_path, std::ios::binary | std::ios::ate);
+      const auto bytes = static_cast<std::streamoff>(layout.size() * sizeof(double));
+      if (!stream || stream.tellg() != bytes)
+        throw std::invalid_argument("packed direction file has wrong size");
+      stream.seekg(0);
+      Eigen::VectorXd packed(layout.size());
+      stream.read(reinterpret_cast<char*>(packed.data()), bytes);
+      if (!stream || !packed.allFinite())
+        throw std::invalid_argument("invalid packed direction file");
+      direction = chart.project_vector(packed).reduced_gradient;
     }
     if (direction.size() == 0) {
       throw std::runtime_error("nonredundant orbital space is empty");
     }
-    if (direction.norm() <= std::sqrt(std::numeric_limits<double>::epsilon())) {
+    const bool gradient_direction = !options.preconditioned_direction &&
+        options.orbital_sector.empty() && options.packed_direction_path.empty();
+    // A gradient is a covector. Use its AO-tangent Riesz vector and norm so
+    // coordinate rescaling does not change the finite-difference experiment.
+    const double direction_norm = gradient_direction
+        ? chart.coordinate_dual_norm(accepted_reduced_gradient) : direction.norm();
+    if (gradient_direction)
+      direction = chart.inverse_coordinate_metric(accepted_reduced_gradient);
+    if (direction_norm <= std::sqrt(std::numeric_limits<double>::epsilon())) {
       direction.setZero();
       direction[0] = 1.0;
     } else {
-      direction.normalize();
+      direction /= direction_norm;
     }
 
     if (options.stream_pair_products) {
@@ -417,12 +562,287 @@ int main(int argc, char** argv) {
       accepted.second_order_context->prepared_active_space
           .active_space_two_electron_result.dense_ao_pair_products.resize(0, 0);
     }
+    if (options.compare_exchange_mib > 0) {
+      if (options.two_electron_mode != xmvb::vb::StandardTwoElectronMode::Exact)
+        throw std::invalid_argument("exchange comparison requires exact integrals");
+      // Both operators borrow ONE integral graph, chart and accepted context.
+      // Only the second operator constructs the additional exchange image.
+      input.ao_integral_input.exact_exchange_memory_budget_bytes = 0;
+      xmvb::vb::ExactHvpOperator reference(accepted.second_order_context, &input, layout, &chart);
+      input.ao_integral_input.exact_exchange_memory_budget_bytes =
+          static_cast<std::size_t>(options.compare_exchange_mib) * 1024 * 1024;
+      xmvb::vb::ExactHvpOperator transformed(accepted.second_order_context, &input, layout, &chart);
+      std::cout << "exchange_comparison_extra_resident_bytes = "
+                << (transformed.diagnostics().resident_exact_pair_elements -
+                    reference.diagnostics().resident_exact_pair_elements) * sizeof(double)
+                << std::endl;
+      xmvb::vb::StructureTangentOperator structure(accepted.second_order_context, reference.structure_action());
+      Eigen::VectorXd z(structure.tangent_size());
+      for (Eigen::Index i = 0; i < z.size(); ++i) z[i] = std::sin(0.37 * (i + 1));
+      const auto tangent = structure.expand(z);
+      const auto structure_image = structure.apply_coupling(tangent);
+      const Eigen::MatrixXd& q = structure_image.coefficient_response;
+      const Eigen::MatrixXd& multipliers = structure_image.adjoint_multipliers;
+      const Eigen::VectorXd adjoint_ref = reference.apply_structure_coupling_adjoint(q, multipliers);
+      const Eigen::VectorXd adjoint_new = transformed.apply_structure_coupling_adjoint(q, multipliers);
+      const double adjoint_error = relative_matrix_error(adjoint_new, adjoint_ref);
+      std::cout << "exchange_comparison_adjoint_relative_error = " << adjoint_error << std::endl;
+      double worst = adjoint_error;
+      Eigen::VectorXd probe = chart.apply_inverse_reduced_block_preconditioner(accepted_reduced_gradient);
+      for (int sample = 0; sample < 6; ++sample) {
+        if (sample >= 1 && sample <= 3)
+          for (Eigen::Index i = 0; i < probe.size(); ++i)
+            probe[i] = std::sin((sample + 1) * 0.17 * (i + 1));
+        probe.normalize();
+        const auto ref = reference.apply_orbital_coupling(probe);
+        const auto value = transformed.apply_orbital_coupling(probe);
+        const double orbital_error = relative_matrix_error(value.orbital_hessian, ref.orbital_hessian);
+        const double forcing_error = relative_matrix_error(value.scaled_structure_forcing, ref.scaled_structure_forcing);
+        const Eigen::VectorXd ref_preconditioned = chart.apply_inverse_reduced_block_preconditioner(ref.orbital_hessian);
+        const Eigen::VectorXd new_preconditioned = chart.apply_inverse_reduced_block_preconditioner(value.orbital_hessian);
+        const double preconditioned_error = relative_matrix_error(new_preconditioned, ref_preconditioned);
+        std::cout << std::setprecision(17) << "EXCHANGE_COMPARE,sample=" << sample
+                  << ",orbital_inf=" << infinity_norm(value.orbital_hessian - ref.orbital_hessian)
+                  << ",orbital_relative=" << orbital_error
+                  << ",forcing_relative=" << forcing_error
+                  << ",preconditioned_relative=" << preconditioned_error << std::endl;
+        worst = std::max({worst, orbital_error, forcing_error});
+        probe = ref_preconditioned;
+      }
+      if (!std::isfinite(worst) || worst > 1.0e-10)
+        throw std::runtime_error("accepted-point exchange operator comparison failed");
+      if (options.operator_timing_repeats > 0) {
+        // Interleave both equivalent current-code operators on identical
+        // directions. Warm both workspaces before measuring; never time setup.
+        Eigen::VectorXd timed_direction =
+            chart.apply_inverse_reduced_block_preconditioner(-accepted_reduced_gradient);
+        timed_direction.normalize();
+        reference.apply_orbital_coupling(timed_direction);
+        transformed.apply_orbital_coupling(timed_direction);
+        const auto ref_before = reference.diagnostics();
+        const auto new_before = transformed.diagnostics();
+        double ref_seconds = 0.0, new_seconds = 0.0, checksum = 0.0;
+        const auto time_call = [&](const auto& op, double& seconds) {
+          const auto start = std::chrono::steady_clock::now();
+          const auto image = op.apply_orbital_coupling(timed_direction);
+          seconds += std::chrono::duration<double>(
+              std::chrono::steady_clock::now() - start).count();
+          checksum += image.orbital_hessian.squaredNorm();
+        };
+        for (int repeat = 0; repeat < options.operator_timing_repeats; ++repeat) {
+          if (repeat % 2 == 0) {
+            time_call(reference, ref_seconds);
+            time_call(transformed, new_seconds);
+          } else {
+            time_call(transformed, new_seconds);
+            time_call(reference, ref_seconds);
+          }
+        }
+        const auto print_timing = [&](const char* label, double seconds,
+                                     const auto& before, const auto& after) {
+          const double calls = options.operator_timing_repeats;
+          std::cout << "OPERATOR_TIMING,path=" << label << ",calls=" << calls
+                    << ",wall_per_call=" << seconds / calls
+                    << ",ao_per_call=" << (after.ao_effective_one_electron_fused_wall_time_seconds -
+                         before.ao_effective_one_electron_fused_wall_time_seconds) / calls
+                    << ",active_two_electron_per_call=" << (after.active_two_electron_wall_time_seconds -
+                         before.active_two_electron_wall_time_seconds) / calls
+                    << ",setup_per_call=" << (after.core_setup_wall_time_seconds -
+                         before.core_setup_wall_time_seconds) / calls
+                    << ",checksum=" << checksum << std::endl;
+        };
+        print_timing("graph", ref_seconds, ref_before, reference.diagnostics());
+        print_timing("exchange", new_seconds, new_before, transformed.diagnostics());
+      }
+      // The recorded first six microsteps have zero structure dimension and
+      // zero shift. Reproduce that orbital Galerkin prefix on one shared chart
+      // to measure error amplification, without taking an outer orbital step.
+      xmvb::vb::NonredundantRetractionMetric metric(chart, layout, input.orbital_preparation_input);
+      const auto prefix = [&](const xmvb::vb::ExactHvpOperator& op, const char* label,
+                              const Eigen::VectorXd& gradient) {
+        Eigen::MatrixXd basis(direction.size(), 6), images(direction.size(), 6);
+        Eigen::MatrixXd steps(direction.size(), 6);
+        Eigen::VectorXd next = chart.apply_inverse_reduced_block_preconditioner(-gradient);
+        for (int column = 0; column < 6; ++column) {
+          const double raw_direction_norm = next.stableNorm();
+          for (int pass = 0; pass < 2; ++pass) {
+            const Eigen::VectorXd weights = basis.leftCols(column).transpose() * next;
+            next.noalias() -= basis.leftCols(column) * weights;
+          }
+          const double orthogonal_norm = next.stableNorm();
+          next /= orthogonal_norm;
+          basis.col(column) = next;
+          images.col(column) = op.apply_orbital_coupling(next).orbital_hessian;
+          Eigen::MatrixXd projected = basis.leftCols(column + 1).transpose() * images.leftCols(column + 1);
+          projected = (0.5 * (projected + projected.transpose())).eval();
+          const Eigen::VectorXd rhs = -basis.leftCols(column + 1).transpose() * gradient;
+          const Eigen::VectorXd coefficients = projected.ldlt().solve(rhs);
+          steps.col(column).noalias() = basis.leftCols(column + 1) * coefficients;
+          const Eigen::VectorXd residual = gradient + images.leftCols(column + 1) * coefficients;
+          const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(projected);
+          const double min_abs = spectrum.eigenvalues().cwiseAbs().minCoeff();
+          const double max_abs = spectrum.eigenvalues().cwiseAbs().maxCoeff();
+          std::cout << "EXCHANGE_PREFIX,path=" << label << ",micro=" << column + 1
+                    << ",ro=" << metric.dual_norm(residual)
+                    << ",step=" << metric.norm(steps.col(column))
+                    << ",raw_direction_norm=" << raw_direction_norm
+                    << ",retained=" << orthogonal_norm / raw_direction_norm
+                    << ",residual_norm=" << residual.stableNorm()
+                    << ",image_norm=" << images.col(column).stableNorm()
+                    << ",projected_min_abs=" << min_abs
+                    << ",projected_condition=" << max_abs / min_abs << std::endl;
+          next = chart.apply_inverse_reduced_block_preconditioner(-residual);
+        }
+        return steps;
+      };
+      const Eigen::MatrixXd prefix_ref = prefix(reference, "graph", accepted_reduced_gradient);
+      const Eigen::MatrixXd prefix_new = prefix(transformed, "exchange", accepted_reduced_gradient);
+      for (int column = 0; column < 6; ++column)
+        std::cout << "EXCHANGE_PREFIX_DIFFERENCE,micro=" << column + 1
+                  << ",step_norm=" << (prefix_new.col(column) - prefix_ref.col(column)).stableNorm()
+                  << ",physical_step_norm=" << metric.norm(prefix_new.col(column) - prefix_ref.col(column)) << std::endl;
+      // Controlled perturbation, not a reconstruction of an unrecorded old
+      // gradient: isolate input sensitivity from the exchange representation.
+      Eigen::VectorXd perturbation(direction.size());
+      for (Eigen::Index i = 0; i < perturbation.size(); ++i)
+        perturbation[i] = std::sin(0.31 * (i + 1));
+      perturbation *= 1.0e-13 / perturbation.stableNorm();
+      std::cout << "exchange_gradient_perturbation_norm = " << perturbation.stableNorm() << std::endl;
+      const Eigen::MatrixXd perturbed = prefix(transformed, "perturbed_gradient",
+          accepted_reduced_gradient + perturbation);
+      for (int column = 0; column < 6; ++column)
+        std::cout << "EXCHANGE_INPUT_SENSITIVITY,micro=" << column + 1
+                  << ",physical_step_difference=" << metric.norm(perturbed.col(column) - prefix_new.col(column)) << std::endl;
+      return 0;
+    }
     xmvb::vb::ExactHvpOperator exact_hvp(
         accepted.second_order_context,
         &input,
         layout,
         &chart);
+    if (!options.projected_model_prefix.empty()) {
+      const auto read_matrix = [](const std::string& path) {
+        std::ifstream stream(path, std::ios::binary);
+        std::int64_t shape[2] = {};
+        stream.read(reinterpret_cast<char*>(shape), sizeof(shape));
+        if (!stream || shape[0] < 1 || shape[0] > 100000 ||
+            shape[1] < 1 || shape[1] > 512)
+          throw std::runtime_error("invalid diagnostic basis dimensions");
+        Eigen::MatrixXd matrix(shape[0], shape[1]);
+        stream.read(reinterpret_cast<char*>(matrix.data()), matrix.size() * sizeof(double));
+        if (!stream || !matrix.allFinite())
+          throw std::runtime_error("invalid diagnostic basis data");
+        return matrix;
+      };
+      const Eigen::MatrixXd basis = read_matrix(options.projected_model_prefix + "-basis.bin");
+      const Eigen::MatrixXd model = read_matrix(options.projected_model_prefix + "-model.bin");
+      if (basis.rows() != chart.reduced_size() || model.rows() != basis.cols() ||
+          model.cols() != basis.cols())
+        throw std::runtime_error("diagnostic model dimensions do not match chart");
+      const xmvb::vb::NonredundantRetractionMetric metric(
+          chart, layout, input.orbital_preparation_input);
+      Eigen::MatrixXd metric_images(basis.rows(), basis.cols());
+      Eigen::MatrixXd images(basis.rows(), basis.cols());
+      for (Eigen::Index column = 0; column < basis.cols(); ++column) {
+        metric_images.col(column) = metric.apply(basis.col(column));
+        images.col(column) = exact_hvp.apply_reduced(basis.col(column));
+      }
+      const Eigen::MatrixXd gram = basis.transpose() * metric_images;
+      const Eigen::MatrixXd projected = basis.transpose() * images;
+      const Eigen::MatrixXd symmetric = 0.5 * (projected + projected.transpose());
+      Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> complete(symmetric, gram);
+      Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> original(model, gram);
+      if (complete.info() != Eigen::Success || original.info() != Eigen::Success)
+        throw std::runtime_error("projected Schur audit eigensolver failed");
+      const Eigen::VectorXd projected_mode = basis * gram.ldlt().solve(
+          basis.transpose() * metric.apply(direction));
+      std::cout << std::setprecision(14)
+                << "audited_orbital_basis_size = " << basis.cols() << '\n'
+                << "original_projected_min_curvature = " << original.eigenvalues()[0] << '\n'
+                << "complete_schur_projected_min_curvature = " << complete.eigenvalues()[0] << '\n'
+                << "complete_schur_model_difference = " << (symmetric-model).norm() << '\n'
+                << "known_mode_metric_coverage = " << metric.norm(projected_mode) / metric.norm(direction) << '\n'
+                << "projected_hessian_asymmetry = " << (projected-projected.transpose()).norm() << '\n';
+      return 0;
+    }
+    if (options.response_spectrum_limit > 0) {
+      Eigen::MatrixXd forcing;
+      if (input.complete_active_space && selected_states.size() == 1 &&
+          accepted.second_order_context->n_structures >= 2 &&
+          accepted.second_order_context->n_structures <= options.response_spectrum_limit) {
+        forcing = -exact_hvp.apply_orbital_coupling(direction).scaled_structure_forcing;
+      }
+      xmvb::tools::audit_structure_response(exact_hvp.structure_action(),
+                              *accepted.second_order_context,
+                              input.complete_active_space,
+                              options.response_spectrum_limit,
+                              forcing);
+      return 0;
+    }
+    if (options.curvature_steps > 0) {
+      // Diagnostic only: seek a negative Rayleigh witness without forming H.
+      // A nonnegative Ritz value in this incomplete space proves no stability.
+      const int width = std::min<int>(options.curvature_steps, direction.size());
+      Eigen::MatrixXd basis(direction.size(), width);
+      Eigen::MatrixXd images(direction.size(), width);
+      Eigen::MatrixXd block_images(direction.size(), width);
+      std::mt19937_64 generator(42);
+      std::normal_distribution<double> gaussian;
+      Eigen::VectorXd next(direction.size());
+      for (Eigen::Index row = 0; row < next.size(); ++row) next[row] = gaussian(generator);
+      if (options.preconditioned_direction)
+        next = chart.apply_inverse_reduced_block_preconditioner(next);
+      for (int column = 0; column < width; ++column) {
+        for (int pass = 0; pass < 2; ++pass) {
+          const Eigen::VectorXd weights = basis.leftCols(column).transpose() * next;
+          next.noalias() -= basis.leftCols(column) * weights;
+        }
+        const double norm = next.stableNorm();
+        if (!(norm > 0.0) || !std::isfinite(norm)) break;
+        basis.col(column) = next / norm;
+        images.col(column) = exact_hvp.apply_reduced(basis.col(column));
+        block_images.col(column) = options.preconditioned_direction
+            ? chart.apply_reduced_curvature(basis.col(column))
+            : Eigen::VectorXd(basis.col(column));
+        Eigen::MatrixXd projected = basis.leftCols(column + 1).transpose() *
+            images.leftCols(column + 1);
+        const double defect = (projected - projected.transpose()).stableNorm();
+        projected = (0.5 * (projected + projected.transpose())).eval();
+        Eigen::MatrixXd metric = basis.leftCols(column + 1).transpose() *
+            block_images.leftCols(column + 1);
+        metric = (0.5 * (metric + metric.transpose())).eval();
+        Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(projected, metric);
+        if (spectrum.info() != Eigen::Success)
+          throw std::runtime_error("curvature probe eigensolve failed");
+        direction = basis.leftCols(column + 1) * spectrum.eigenvectors().col(0);
+        const Eigen::VectorXd image = images.leftCols(column + 1) *
+            spectrum.eigenvectors().col(0);
+        const Eigen::VectorXd block_image = block_images.leftCols(column + 1) *
+            spectrum.eigenvectors().col(0);
+        next = image - spectrum.eigenvalues()[0] * block_image;
+        std::cout << std::setprecision(16)
+                  << "CURVATURE_PROBE,actions=" << column + 1
+                  << ",rayleigh=" << direction.dot(image)
+                  << ",residual=" << next.stableNorm()
+                  << ",symmetry_defect=" << defect << '\n';
+        // Sign detection is a witness, not extremal-eigenvector convergence.
+        const double scale = std::max(1.0, spectrum.eigenvalues().cwiseAbs().maxCoeff());
+        if (direction.dot(image) < -std::sqrt(std::numeric_limits<double>::epsilon()) * scale)
+          break;
+        if (options.preconditioned_direction)
+          next = chart.apply_inverse_reduced_block_preconditioner(next);
+      }
+      // Reevaluate its full HVP and existing gradient/energy finite differences.
+      direction.normalize();
+    }
     const Eigen::VectorXd analytic = exact_hvp.apply_reduced(direction);
+    const xmvb::vb::OrbitalPhysicalMetric physical_metric(
+        input.orbital_preparation_input, chart.uses_active_subspace_gauge());
+    const double physical_direction_squared_norm = physical_metric.squared_norm(
+        layout, chart.expand_step(direction));
+    if (!(physical_direction_squared_norm > 0.0) ||
+        !std::isfinite(physical_direction_squared_norm))
+      throw std::runtime_error("HVP diagnostic direction has invalid physical norm");
 
     double coupled_orbital_fd_relative_error = 0.0;
     double coupled_structure_fd_relative_error = 0.0;
@@ -473,10 +893,10 @@ int main(int argc, char** argv) {
         Eigen::VectorXd orbital = chart.project_reduced_gradient(
             layout.gather_from_full(
                 fixed.gradient.sparse_orbital_energy_gradient));
-        Eigen::MatrixXd scaled_residuals = fixed.structure_residuals;
+        Eigen::MatrixXd scaled_residuals = fixed.coefficient_gradient;
         for (Eigen::Index state = 0;
              state < scaled_residuals.cols(); ++state) {
-          scaled_residuals.col(state) *= std::sqrt(
+          scaled_residuals.col(state) /= std::sqrt(
               2.0 * accepted.second_order_context
                   ->normalized_state_weights[static_cast<std::size_t>(state)]);
         }
@@ -553,16 +973,26 @@ int main(int argc, char** argv) {
     const xmvb::vb::OrbitalCouplingBlockAction block_coupling =
         exact_hvp.apply_orbital_coupling_batch(coupling_directions);
     Eigen::MatrixXd scalar_orbital_coupling(direction.size(), 2);
+    Eigen::MatrixXd orbital_only_action(direction.size(), 2);
     std::vector<Eigen::MatrixXd> scalar_structure_forcing(2);
     for (Eigen::Index column = 0; column < 2; ++column) {
       xmvb::vb::OrbitalCouplingAction scalar_coupling =
           exact_hvp.apply_orbital_coupling(coupling_directions.col(column));
       scalar_orbital_coupling.col(column) = scalar_coupling.orbital_hessian;
+      orbital_only_action.col(column) =
+          exact_hvp.apply_orbital(coupling_directions.col(column));
       scalar_structure_forcing[static_cast<std::size_t>(column)] =
           std::move(scalar_coupling.scaled_structure_forcing);
     }
     const double coupling_batch_orbital_error = relative_matrix_error(
         block_coupling.orbital_hessian, scalar_orbital_coupling);
+    const double orbital_only_error = relative_matrix_error(
+        orbital_only_action, scalar_orbital_coupling);
+    if (orbital_only_error > 1.0e-10) {
+      throw std::runtime_error(
+          "orbital-only gauge disagrees with the coupled orbital action: " +
+          std::to_string(orbital_only_error));
+    }
     double coupling_batch_structure_error = 0.0;
     for (Eigen::Index column = 0; column < 2; ++column) {
       coupling_batch_structure_error = std::max(
@@ -624,6 +1054,8 @@ int main(int argc, char** argv) {
         std::max(1.0, infinity_norm(analytic));
     if (!options.coupled_finite_difference &&
         component_decomposition_error > 1.0e-10) {
+      std::cerr << "component_decomposition_error = "
+                << component_decomposition_error << '\n';
       throw std::runtime_error(
           "exact HVP component decomposition is inconsistent");
     }
@@ -680,6 +1112,9 @@ int main(int argc, char** argv) {
       if (state_energy_average_error > 1.0e-10 ||
           state_gradient_average_error > 1.0e-9 ||
           state_hvp_average_error > 1.0e-8) {
+        std::cerr << "state_energy_average_error = " << state_energy_average_error
+                  << "\nstate_gradient_average_error = " << state_gradient_average_error
+                  << "\nstate_hvp_average_error = " << state_hvp_average_error << '\n';
         throw std::runtime_error(
             "equal-weight state-average linearity check failed");
       }
@@ -746,6 +1181,21 @@ int main(int argc, char** argv) {
         std::max(1.0, std::abs(energy_directional_curvature));
 
     const double max_abs_difference = infinity_norm(analytic - finite_difference);
+    const Eigen::VectorXd packed_tangent = chart.expand_step(direction);
+    const double raw_derivative = packed_gradient.dot(packed_tangent);
+    const double reduced_derivative = accepted_reduced_gradient.dot(direction);
+    const auto plus_parameters = layout.pack(chart.retract_step(
+        input.orbital_preparation_input, direction, options.step));
+    const auto minus_parameters = layout.pack(chart.retract_step(
+        input.orbital_preparation_input, direction, -options.step));
+    std::cout << "chart_derivative_adjoint_error = "
+              << std::abs(raw_derivative - reduced_derivative) << '\n'
+              << "retraction_tangent_relative_error = "
+              << ((plus_parameters - minus_parameters) / (2.0 * options.step) -
+                  packed_tangent).norm() / std::max(1.0, packed_tangent.norm()) << '\n'
+              << "gradient_energy_fd_absolute_error = "
+              << std::abs((plus_energy - minus_energy) / (2.0 * options.step) -
+                          reduced_derivative) << '\n';
     const double relative_error =
         max_abs_difference / std::max(1.0, infinity_norm(finite_difference));
     const double core_relative_error =
@@ -767,7 +1217,7 @@ int main(int argc, char** argv) {
               << xmvb::vb::structure_eigensolver_name(options.eigensolver)
               << '\n'
               << "direction = "
-              << (options.preconditioned_direction
+              << (options.curvature_steps > 0 ? "curvature_probe" : options.preconditioned_direction
                       ? "preconditioned_gradient"
                       : "gradient") << '\n'
               << "reduced_dimension = " << direction.size() << '\n'
@@ -798,6 +1248,8 @@ int main(int argc, char** argv) {
               << state_hvp_average_error << '\n'
               << "component_decomposition_error = "
               << component_decomposition_error << '\n'
+              << "orbital_only_error = "
+              << orbital_only_error << '\n'
               << "coupling_batch_orbital_error = "
               << coupling_batch_orbital_error << '\n'
               << "coupling_batch_structure_error = "
@@ -830,6 +1282,14 @@ int main(int argc, char** argv) {
               << "max_rel_diff = " << relative_error << '\n'
               << "analytic_directional_curvature = "
               << analytic_directional_curvature << '\n'
+              << "physical_direction_squared_norm = "
+              << physical_direction_squared_norm << '\n'
+              << "physical_rayleigh_curvature = "
+              << analytic_directional_curvature / physical_direction_squared_norm << '\n'
+              << "accepted_coordinate_gradient_norm = "
+              << accepted_reduced_gradient.norm() << '\n'
+              << "accepted_gradient_dot_direction = "
+              << accepted_reduced_gradient.dot(direction) << '\n'
               << "gradient_fd_directional_curvature = "
               << gradient_fd_directional_curvature << '\n'
               << "energy_fd_directional_curvature = "

@@ -5,19 +5,27 @@
 # production build file from accumulating test-specific wiring.
 
 set(_xmvb_vbscf_unit_targets
+  test_spinor_strings
+  test_spinor_projection
   test_active_two_electron_sparse
   test_accepted_pair_tile
   test_block_inverse_bfgs
   test_hessian_diagonal
+  test_keyframe
   test_cofactor_differential
   test_coupled_structure
+  test_ciah
+  test_ci_transport
+  test_representation_overlap
+  test_overlap_pullback
+  test_selected_ci_transport
+  test_orbital_step_geometry
   test_curvature_decomposition
   test_davidson
   test_eigen_response
   test_localized_representative_selector
   test_minres
   test_neo
-  test_neo_response_solver
   test_neo_globalization
   test_normalized_orbital_curvature
   test_oeo_normalization_pullback
@@ -34,6 +42,7 @@ set(_xmvb_vbscf_unit_targets
   test_sparse_orbital_quotient
   test_support_preserving_gauge
   test_spectral_trust_region
+  test_structure_spin
   test_orbital_block_partition)
 
 foreach(target_name IN LISTS _xmvb_vbscf_unit_targets)
@@ -44,10 +53,21 @@ foreach(target_name IN LISTS _xmvb_vbscf_unit_targets)
 endforeach()
 
 if (BUILD_TESTING)
+  add_test(NAME ciah COMMAND test_ciah)
+  add_test(NAME ci_transport COMMAND test_ci_transport)
+  add_test(NAME representation_overlap COMMAND test_representation_overlap)
+  add_test(NAME overlap_pullback COMMAND test_overlap_pullback)
+  add_test(NAME selected_ci_transport COMMAND test_selected_ci_transport)
+  add_test(NAME orbital_step_geometry COMMAND test_orbital_step_geometry)
+  add_test(NAME spinor_strings COMMAND test_spinor_strings)
+  add_test(NAME spinor_projection COMMAND test_spinor_projection)
+  set_tests_properties(spinor_strings spinor_projection PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME active_two_electron_sparse COMMAND test_active_two_electron_sparse)
   add_test(NAME accepted_pair_tile COMMAND test_accepted_pair_tile)
   add_test(NAME block_inverse_bfgs COMMAND test_block_inverse_bfgs)
   add_test(NAME hessian_diagonal COMMAND test_hessian_diagonal)
+  add_test(NAME keyframe COMMAND test_keyframe)
   set_tests_properties(block_inverse_bfgs PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME orbital_block_partition COMMAND test_orbital_block_partition)
@@ -66,9 +86,6 @@ if (BUILD_TESTING)
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME neo COMMAND test_neo)
   set_tests_properties(neo PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME neo_response_solver COMMAND test_neo_response_solver)
-  set_tests_properties(neo_response_solver PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME neo_globalization COMMAND test_neo_globalization)
   add_test(
@@ -147,6 +164,7 @@ if (BUILD_TESTING)
   set_tests_properties(normalized_orbital_curvature PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME spectral_trust_region COMMAND test_spectral_trust_region)
+  add_test(NAME structure_spin COMMAND test_structure_spin)
   set_tests_properties(spectral_trust_region PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME orthonormal_hvp_basis COMMAND test_orthonormal_hvp_basis)

@@ -1,0 +1,96 @@
+diff --git a/src/vbscf/optimization/backends/neo.cpp b/src/vbscf/optimization/backends/neo.cpp
+--- a/src/vbscf/optimization/backends/neo.cpp
++++ b/src/vbscf/optimization/backends/neo.cpp
+@@ -367,4 +367,92 @@
+       return false;
+     }
+ 
++    // Bounded diagnostic executable only: inspect the first candidate at
++    // point four, then return without changing any accepted orbital state.
++    if (record->accepted_iteration_index == 4 &&
++        diagnostics::neo_trace_context.attempt == 1) {
++      const Eigen::VectorXd v = step.step.orbital.normalized();
++      const Eigen::VectorXd packed_v = chart.expand_step(v);
++      const Eigen::VectorXd x0 = parameter_view.pack(accepted_orbitals);
++      HvpComponents core;
++      core.local_active_response = false;
++      core.structure_response = false;
++      HvpComponents fixed = core;
++      fixed.local_active_response = true;
++      HvpComponents full;
++      full.response_relative_residual_tolerance = operator_relative_accuracy;
++      const Eigen::VectorXd h0 = orbital_hessian.apply_reduced(v, core);
++      const Eigen::VectorXd ha = orbital_hessian.apply_reduced(v, fixed);
++      const Eigen::VectorXd hr = orbital_hessian.apply_reduced(v, full);
++      const Eigen::VectorXd local = ha - h0;
++      const Eigen::VectorXd schur = hr - ha;
++      const OrbitalCouplingAction coupling =
++          orbital_hessian.apply_orbital_coupling(v);
++      const StructureResponseBlock response =
++          orbital_hessian.solve_structure_response_block(
++              {coupling.scaled_structure_forcing}, operator_relative_accuracy);
++      const Eigen::VectorXd eliminated =
++          coupling.orbital_hessian +
++          orbital_hessian.apply_structure_coupling_adjoint(
++              response.coefficient_responses.at(0),
++              response.adjoint_multipliers.at(0));
++      const Eigen::MatrixXd coefficients =
++          objective->second_order_context()->selected_state_eigenvectors;
++      const auto print = [](const char* key, double value) {
++        std::fprintf(stderr, "NEO_COMPONENT,%s,%.17g\n", key, value);
++      };
++      print("energy", energy);
++      print("core_norm", h0.norm());
++      print("fixed_norm", ha.norm());
++      print("relaxed_norm", hr.norm());
++      print("local_norm", local.norm());
++      print("schur_norm", schur.norm());
++      print("omitted_norm", (local + schur).norm());
++      print("local_schur_cosine", local.dot(schur) /
++          std::max(std::numeric_limits<double>::min(), local.norm()*schur.norm()));
++      print("core_rayleigh", v.dot(h0));
++      print("local_rayleigh", v.dot(local));
++      print("schur_rayleigh", v.dot(schur));
++      print("relaxed_rayleigh", v.dot(hr));
++      print("coupling_fixed_relative", (coupling.orbital_hessian-ha).norm() /
++          std::max(1.0, ha.norm()));
++      print("gauge_norm", (coupling.orbital_hessian-ha).norm());
++      print("horizontal_schur_norm", (hr-coupling.orbital_hessian).norm());
++      print("coupled_orbital_rayleigh", v.dot(coupling.orbital_hessian));
++      print("horizontal_schur_rayleigh", v.dot(hr-coupling.orbital_hessian));
++      print("schur_elimination_relative", (eliminated-hr).norm() /
++          std::max(1.0, hr.norm()));
++      print("response_residual", response.max_relative_residual);
++      for (const double h : {1e-3, 3e-4, 1e-4, 3e-5}) {
++        const auto plus = objective->evaluate_trial(x0+h*packed_v, false);
++        const auto minus = objective->evaluate_trial(x0-h*packed_v, false);
++        const auto fp = objective->evaluate_coupled_keyframe(
++            x0+h*packed_v, coefficients);
++        const auto fm = objective->evaluate_coupled_keyframe(
++            x0-h*packed_v, coefficients);
++        const Eigen::VectorXd fd_relaxed = chart.project_reduced_gradient(
++            plus.gradient-minus.gradient)/(2*h);
++        const Eigen::VectorXd fd_fixed = chart.project_reduced_gradient(
++            fp.orbital_gradient-fm.orbital_gradient)/(2*h);
++        std::fprintf(stderr,
++            "NEO_COMPONENT_FD,h=%.17g,fixed_rel=%.17g,relaxed_rel=%.17g,"
++            "structure_rel=%.17g,core_rel=%.17g,fixed_fd_rayleigh=%.17g,"
++            "relaxed_fd_rayleigh=%.17g,energy_fd=%.17g,coupled_fixed_rel=%.17g,"
++            "horizontal_structure_rel=%.17g\n",
++            h, (ha-fd_fixed).norm()/std::max(1.0,fd_fixed.norm()),
++            (hr-fd_relaxed).norm()/std::max(1.0,fd_relaxed.norm()),
++            (schur-(fd_relaxed-fd_fixed)).norm()/
++                std::max(1.0,(fd_relaxed-fd_fixed).norm()),
++            (h0-fd_relaxed).norm()/std::max(1.0,fd_relaxed.norm()),
++            v.dot(fd_fixed), v.dot(fd_relaxed),
++            (plus.energy-2*energy+minus.energy)/(h*h),
++            (coupling.orbital_hessian-fd_fixed).norm()/std::max(1.0,fd_fixed.norm()),
++            (hr-coupling.orbital_hessian-fd_relaxed+fd_fixed).norm()/
++                std::max(1.0,(fd_relaxed-fd_fixed).norm()));
++      }
++      std::fprintf(stderr, "NEO_COMPONENT_COMPLETE\n");
++      result->termination_reason = "neo_directional_audit_complete";
++      return false;
++    }
++
+     const Eigen::VectorXd candidate_parameters =

@@ -8,11 +8,86 @@
 
 namespace xmvb::vb {
 
-/** @brief Thread-local buffers reused by repeated fused AO-H1E actions. */
-struct AoH1eFusedWorkspace {
-  std::vector<std::vector<double>> forward;
-  std::vector<std::vector<double>> transpose;
+/** @brief Shared inputs and reused worker outputs for two symmetric channels. */
+struct AoH1eSymmetricWorkspace {
+  using Channels = Eigen::Matrix<double, Eigen::Dynamic, 2, Eigen::RowMajor>;
+  Channels sources;
+  std::vector<Channels> partial;
 };
+
+/** @brief Reused interleaved batch inputs and AO-sized worker reductions. */
+struct AoH1eBatchWorkspace {
+  using Channels = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+  Channels sources;
+  std::vector<Channels> partial;
+  std::vector<Eigen::VectorXd> coulomb;
+};
+
+/** @brief Shared exchange image and small row/projection workspaces.
+ * Worker matrices have only n_bf times a channel/panel width entries, never
+ * n_bf squared entries. Integral storage and density sources are borrowed.
+ */
+struct AoDensityDiagonalWorkspace {
+  using Channels = AoH1eBatchWorkspace::Channels;
+  Channels exchange;
+  Eigen::MatrixXd image;
+  std::vector<Channels> coulomb_rows, coulomb_images, coulomb_partial;
+  std::vector<Eigen::MatrixXd> projection_panels;
+};
+
+/** @brief Exact symmetric 2J-K with exclusive AO output-row ownership.
+ * Uses raw directed CSR integrals. Source/output AO indices are flattened
+ * column-major, with contiguous density channels. No worker AO image or
+ * atomic scatter is allocated. Requires the CSR storage representation.
+ */
+void apply_symmetric_ao_h1e_rows(
+    const AoIntegralInput& ao, int n_threads,
+    const Eigen::Ref<const AoH1eBatchWorkspace::Channels>& sources,
+    AoH1eBatchWorkspace::Channels* response);
+
+/** @brief Project exact K for all sources and J for the leading core sources.
+ * Coulomb rows are projected while resident, rather than retaining an AO
+ * Coulomb image or a core AO-pair transformation. Output columns are densities
+ * and rows are orbitals of the supplied AO-coefficient frame.
+ */
+void apply_ao_density_diagonals(
+    const AoIntegralInput& ao,
+    const Eigen::Ref<const AoH1eBatchWorkspace::Channels>& sources,
+    const Eigen::MatrixXd& frame, int n_core_sources, int n_threads,
+    int projection_width, AoDensityDiagonalWorkspace* workspace,
+    Eigen::MatrixXd* exchange_diagonal, Eigen::MatrixXd* coulomb_diagonal);
+
+/**
+ * @brief Applies one physical symmetric response per source in a shared sweep.
+ *
+ * Columns are flattened symmetric AO matrices. Unlike the forward/adjoint
+ * interface, each direction has only one channel and one complete output.
+ * Sources and integral storage remain shared; worker reductions are reused.
+ */
+void apply_symmetric_ao_h1e_batch(
+    const Eigen::Ref<const Eigen::MatrixXd>& sources,
+    const AoIntegralInput& ao, int n_threads,
+    AoH1eBatchWorkspace* workspace, Eigen::MatrixXd* response);
+
+/** @brief Consume already interleaved workspace sources without copying them.
+ * Each worker retains only packed symmetric AO output channels. The returned
+ * columns are complete physical AO matrices, including doubled raw diagonals.
+ */
+void apply_symmetric_ao_h1e_channels(const AoIntegralInput& ao, int n_threads,
+    AoH1eBatchWorkspace* workspace, Eigen::MatrixXd* response);
+
+/**
+ * @brief Applies two symmetric AO sources with a common two-lane stencil.
+ *
+ * Both inputs must be symmetric. The first output is the complete physical
+ * AO forward matrix; the second is half the physical adjoint matrix, so its
+ * sum with its transpose equals that of the raw unique-ERI transpose.
+ * Input channels are shared; workers retain only AO-sized output buffers.
+ */
+void apply_symmetric_ao_h1e_fused(
+    const double* source, const double* adjoint, const AoIntegralInput& ao,
+    int n_threads, AoH1eSymmetricWorkspace* workspace,
+    std::vector<double>* forward, std::vector<double>* transpose);
 
 /** @brief Applies the exact AO-H1E operator directly from unique AO ERIs. */
 std::vector<double> apply_ao_h1e(
@@ -27,26 +102,18 @@ std::vector<double> apply_ao_h1e_transpose(
     int n_threads);
 
 /**
- * @brief Applies the exact AO-H1E operator and its transpose.
+ * @brief Applies symmetric sources to several directions in one ERI sweep.
  *
- * The unique ERI stream is read once. Caller-owned buffers allow repeated
- * Hessian-vector products to reuse their AO-sized storage.
+ * Columns are flattened symmetric AO matrices. Output conventions match
+ * apply_symmetric_ao_h1e_fused: complete forward and half physical adjoint.
+ * The integral stream and packed source channels are shared by all workers.
  */
-void apply_ao_h1e_fused(
-    const double* source,
-    const double* adjoint,
-    const AoIntegralInput& ao,
-    int n_threads,
-    AoH1eFusedWorkspace* workspace,
-    std::vector<double>* forward,
-    std::vector<double>* transpose);
-
-/** @brief Applies the fused operator to several independent directions. */
-void apply_ao_h1e_fused_batch(
+void apply_symmetric_ao_h1e_fused_batch(
     const Eigen::Ref<const Eigen::MatrixXd>& sources,
     const Eigen::Ref<const Eigen::MatrixXd>& adjoints,
     const AoIntegralInput& ao,
     int n_threads,
+    AoH1eBatchWorkspace* workspace,
     Eigen::MatrixXd* forward,
     Eigen::MatrixXd* transpose);
 

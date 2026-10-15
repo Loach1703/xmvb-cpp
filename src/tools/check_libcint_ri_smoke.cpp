@@ -207,20 +207,22 @@ int main(int argc, char** argv) {
         input.libcint_input,
         auxiliary_input);
 
+    xmvb::vb::LibcintShellWorkspace workspace;
+    // These comparisons intentionally retain independent snapshots.
     const auto metric_block = evaluator.evaluate_auxiliary_metric_shell_pair(
         options.auxiliary_left_shell,
-        options.auxiliary_right_shell);
+        options.auxiliary_right_shell, workspace);
     const auto metric_block_transposed = evaluator.evaluate_auxiliary_metric_shell_pair(
         options.auxiliary_right_shell,
-        options.auxiliary_left_shell);
+        options.auxiliary_left_shell, workspace);
     const auto three_center_block = evaluator.evaluate_three_center_shell_block(
         options.three_center_primary_left_shell,
         options.three_center_primary_right_shell,
-        options.three_center_auxiliary_shell);
+        options.three_center_auxiliary_shell, workspace);
     const auto three_center_block_transposed = evaluator.evaluate_three_center_shell_block(
         options.three_center_primary_right_shell,
         options.three_center_primary_left_shell,
-        options.three_center_auxiliary_shell);
+        options.three_center_auxiliary_shell, workspace);
     xmvb::vb::LibcintRiIntegralProvider ri_provider;
     const auto ri = ri_provider.build(
         input.libcint_input,

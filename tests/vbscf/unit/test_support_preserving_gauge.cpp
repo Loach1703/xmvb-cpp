@@ -189,7 +189,22 @@ void check_active_sparse_gauge_balance() {
   const std::vector<double> before = input.orbital_value_table;
   require(!xmvb::vb::balance_active_gauge(&input) &&
               input.orbital_value_table == before,
-          "per-orbital balancing was applied to the OEO subspace");
+          "full-AO balancing was applied to a restricted OEO layout");
+}
+
+void check_full_ao_active_gauge_balance() {
+  OrbitalPreparationInput input = make_active_gauge_input();
+  input.orbital_type = xmvb::vb::kOrbitalTypeOeo;
+  input.orbital_basis_counts[2] = 4;
+  input.orbital_basis_index_table[11] = 4;
+  input.orbital_value_table[11] = 2.0e-3;
+  require(xmvb::vb::balance_active_gauge(&input), "full-AO active gauge was not balanced");
+  require(input.orbital_value_table[8] == 0.0 && input.orbital_value_table[9] == 0.0,
+          "OEO inactive components were not removed");
+  require(std::abs(input.orbital_value_table[10] - 1.0 / std::sqrt(5.0)) < 1.0e-12 &&
+          std::abs(input.orbital_value_table[11] - 2.0 / std::sqrt(5.0)) < 1.0e-12,
+          "OEO projected ray changed under normalization");
+  require(!xmvb::vb::balance_active_gauge(&input), "OEO gauge is not idempotent");
 }
 
 void check_nonorthogonal_active_ray() {
@@ -229,6 +244,7 @@ int main() {
     check_ill_conditioned_sparse_gauge();
     check_well_conditioned_gauge_is_unchanged();
     check_active_sparse_gauge_balance();
+    check_full_ao_active_gauge_balance();
     check_nonorthogonal_active_ray();
     return 0;
   } catch (const std::exception& error) {

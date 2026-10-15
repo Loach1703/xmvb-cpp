@@ -32,6 +32,7 @@ struct ScaledStructureCoupling {
  * A single state or an equally weighted positive multistate objective is
  * required. No response equation is solved and no accepted-point cache is
  * modified.
+ * Gauge-only input has an empty horizontal forcing; it remains empty.
  */
 ScaledStructureCoupling scale_equal_weight_structure_coupling(
     const xmvb::core::EqualWeightEigenCoupling& coupling,

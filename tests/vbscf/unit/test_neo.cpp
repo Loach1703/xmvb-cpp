@@ -12,6 +12,7 @@
 
 #include "vbscf/optimization/neo/problem.hpp"
 #include "vbscf/optimization/neo/solver.hpp"
+#include "vbscf/optimization/neo/symmetry.hpp"
 
 namespace {
 
@@ -42,17 +43,28 @@ void require_close(
   require((actual - reference).stableNorm() <= tolerance * scale, message);
 }
 
+double physical_dual_norm(
+    const Eigen::MatrixXd& metric,
+    const Eigen::VectorXd& covector) {
+  return std::sqrt(covector.dot(metric.ldlt().solve(covector)));
+}
+
 NeoProblem dense_problem(
     const Eigen::MatrixXd& hessian,
     const Eigen::MatrixXd& metric,
     const Eigen::VectorXd& gradient,
     std::optional<double> hessian_lower_bound = std::nullopt) {
+  const Eigen::MatrixXd metric_inverse = metric.ldlt().solve(
+      Eigen::MatrixXd::Identity(metric.rows(), metric.cols()));
   return NeoProblem(
       gradient,
       [hessian](const Eigen::VectorXd& vector) {
         return hessian * vector;
       },
       [metric](const Eigen::VectorXd& vector) { return metric * vector; },
+      [metric_inverse](const Eigen::VectorXd& covector) {
+        return std::sqrt(covector.dot(metric_inverse * covector));
+      },
       {},
       hessian_lower_bound);
 }
@@ -74,12 +86,12 @@ void verify_kkt(
   const Eigen::VectorXd residual =
       gradient + hessian_step + result.shift * metric_step;
   const double step_norm = std::sqrt(result.step.dot(metric_step));
-  const double residual_norm = residual.stableNorm();
+  const double residual_norm = physical_dual_norm(metric, residual);
   const double residual_scale = std::max({
       1.0,
-      gradient.stableNorm(),
-      hessian_step.stableNorm(),
-      result.shift * metric_step.stableNorm()});
+      physical_dual_norm(metric, gradient),
+      physical_dual_norm(metric, hessian_step),
+      result.shift * physical_dual_norm(metric, metric_step)});
 
   require(step_norm <= radius * (1.0 + 2.0e-10),
           name + ": step violates the physical trust region");
@@ -301,6 +313,111 @@ void check_hidden_negative_curvature() {
           "a complete basis lacks its global curvature certificate");
 }
 
+void check_zero_gradient_curvature_probe() {
+  const Eigen::Matrix3d hessian = hidden_curvature_hessian();
+  Eigen::Matrix3d metric = Eigen::Matrix3d::Zero();
+  metric.diagonal() << 2.0, 3.0, 4.0;
+  const Eigen::Vector3d first_order_gradient(1.0, 0.0, 0.0);
+  const Eigen::Vector3d hidden_mode(0.0, 5.0 / 3.0, 4.0 / 3.0);
+  require_close(first_order_gradient.dot(hidden_mode), 0.0, 0.0,
+                "hidden curvature is not orthogonal to the first-order gradient");
+
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.maximum_subspace_dimension = 3;
+  options.stop_on_negative_curvature = true;
+  const Eigen::Vector3d zero_gradient = Eigen::Vector3d::Zero();
+  const NeoResult result = solve_neo(
+      dense_problem(hessian, metric, zero_gradient), options);
+  require(result.stop_reason == NeoStopReason::NegativeCurvature,
+          "zero-gradient probe missed hidden negative curvature");
+  require(!result.converged(),
+          "curvature witness was mislabeled as KKT convergence");
+  require(result.hessian_actions <= 3,
+          "curvature probe exceeded its action budget");
+  const Eigen::VectorXd& direction = result.minimum_curvature_direction;
+  require_close(direction.dot(metric * direction), 1.0, 2.0e-10,
+                "curvature witness is not metric-normalized");
+  require_close(result.minimum_curvature_hessian_image,
+                hessian * direction, 2.0e-10,
+                "curvature witness has the wrong Hessian image");
+  require_close(result.minimum_curvature_metric_image,
+                metric * direction, 2.0e-10,
+                "curvature witness has the wrong metric image");
+  require_close(result.minimum_curvature_value,
+                direction.dot(hessian * direction) /
+                    direction.dot(metric * direction),
+                2.0e-10, "curvature witness has the wrong Rayleigh quotient");
+  require(result.minimum_curvature_value < -1.0,
+          "curvature witness is not decisively negative");
+  require_close(result.hessian_step, hessian * result.step, 2.0e-10,
+                "curvature probe lost the spectral step Hessian image");
+  require_close(result.metric_step, metric * result.step, 2.0e-10,
+                "curvature probe lost the spectral step metric image");
+
+  bool rejected = false;
+  try {
+    (void)solve_neo(
+        dense_problem(hessian, metric, first_order_gradient), options);
+  } catch (const std::invalid_argument&) {
+    rejected = true;
+  }
+  require(rejected,
+          "curvature-only stopping accepted a nonzero Newton gradient");
+}
+
+void check_positive_zero_gradient_curvature_probe() {
+  Eigen::Matrix2d hessian;
+  hessian << 2.0, 0.5,
+             0.5, 4.0;
+  Eigen::Matrix2d metric;
+  metric << 2.0, 0.25,
+            0.25, 3.0;
+  const Eigen::Vector2d gradient = Eigen::Vector2d::Zero();
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.stop_on_negative_curvature = true;
+  const NeoResult result = solve_neo(
+      dense_problem(hessian, metric, gradient), options);
+  verify_kkt("positive zero-gradient curvature probe", hessian, metric,
+             gradient, options.trust_radius, result);
+  require(result.stop_reason == NeoStopReason::Converged,
+          "positive curvature triggered negative-curvature stopping");
+  require(result.minimum_curvature_value > 0.0,
+          "positive probe returned a nonpositive Ritz value");
+  require_close(result.minimum_curvature_value,
+                result.minimum_curvature_direction.dot(
+                    result.minimum_curvature_hessian_image),
+                2.0e-10, "positive probe returned an inconsistent Ritz value");
+}
+
+/** @brief A negative quadratic form does not require an eigenvector residual. */
+void check_negative_witness_without_spectral_refinement() {
+  Eigen::Matrix3d hessian = Eigen::Matrix3d::Zero();
+  hessian.diagonal() << -30.0, 100.0, 200.0;
+  const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
+  NeoOptions options;
+  options.relative_residual_tolerance = 1.0e-12;
+  options.stop_on_negative_curvature = true;
+  const NeoResult result = solve_neo(
+      dense_problem(hessian, metric, Eigen::Vector3d::Zero()), options);
+  require(result.stop_reason == NeoStopReason::NegativeCurvature,
+          "negative quadratic form was not recognized");
+  require(result.hessian_actions == 1,
+          "negative witness unnecessarily refined an extremal eigenvector");
+  require(result.curvature_residual_norm > std::abs(result.minimum_curvature_value),
+          "fixture no longer distinguishes a witness from an eigenvector");
+  require(!result.global_curvature_certified && !result.converged(),
+          "partial negative witness claimed a complete Newton or spectral certificate");
+  const auto& v = result.minimum_curvature_direction;
+  require(v.dot(hessian * v) < 0.0,
+          "reported witness does not have independently negative curvature");
+  require_close(result.minimum_curvature_hessian_image, hessian * v, 1.0e-12,
+                "negative witness has an inconsistent Hessian image");
+}
+
 void check_certified_lower_bounds() {
   const Eigen::Matrix3d hessian = hidden_curvature_hessian();
   const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
@@ -382,6 +499,74 @@ void check_optional_curvature_certificate() {
           "explicit curvature certification did not inspect extra modes");
 }
 
+void check_anisotropic_dual_residual() {
+  Eigen::Matrix2d hessian = Eigen::Matrix2d::Zero();
+  hessian.diagonal() << 1.0, 1.0e4;
+  Eigen::Matrix2d metric = Eigen::Matrix2d::Zero();
+  metric.diagonal() << 1.0e-4, 1.0;
+  const Eigen::Vector2d gradient(1.0e-4, 1.0e-4);
+  const Eigen::Vector2d newton(-1.0e-4, -1.0e-8);
+
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.absolute_residual_tolerance = 1.0e-3;
+  options.relative_residual_tolerance = 1.0e-8;
+  options.require_curvature_certificate = false;
+  const NeoResult result = solve_neo(
+      dense_problem(hessian, metric, gradient), options);
+
+  require(result.converged(), "anisotropic NEO solve did not converge");
+  require(result.hessian_actions >= 2,
+          "anisotropic NEO accepted its incomplete first direction");
+  require_close(result.step, newton, 1.0e-10,
+                "anisotropic NEO missed the full Newton step");
+  const Eigen::Vector2d residual = gradient + hessian * result.step;
+  require(physical_dual_norm(metric, residual) <= result.residual_target,
+          "anisotropic NEO physical residual exceeds its target");
+  require_close(result.residual_norm, physical_dual_norm(metric, residual),
+                1.0e-12,
+                "anisotropic NEO reported a coordinate residual norm");
+}
+
+void check_coordinate_rescaling_invariance() {
+  Eigen::Matrix2d hessian = Eigen::Matrix2d::Zero();
+  hessian.diagonal() << 1.0, 1.0e4;
+  Eigen::Matrix2d metric = Eigen::Matrix2d::Zero();
+  metric.diagonal() << 1.0e-4, 1.0;
+  const Eigen::Vector2d gradient(1.0e-4, 1.0e-4);
+  Eigen::Matrix2d coordinates = Eigen::Matrix2d::Zero();
+  coordinates.diagonal() << 0.1, 10.0;
+
+  NeoOptions options;
+  options.trust_radius = 1.0;
+  options.absolute_residual_tolerance = 1.0e-3;
+  options.relative_residual_tolerance = 1.0e-8;
+  options.require_curvature_certificate = false;
+  const NeoResult original = solve_neo(
+      dense_problem(hessian, metric, gradient), options);
+  const NeoResult rescaled = solve_neo(
+      dense_problem(coordinates.transpose() * hessian * coordinates,
+                    coordinates.transpose() * metric * coordinates,
+                    coordinates.transpose() * gradient),
+      options);
+
+  require(original.converged() && rescaled.converged(),
+          "coordinate-rescaled NEO solve did not converge");
+  require(rescaled.hessian_actions >= 2,
+          "coordinate-rescaled NEO accepted its incomplete first direction");
+  const Eigen::Vector2d physical_step = coordinates * rescaled.step;
+  require_close(physical_step, original.step, 1.0e-10,
+                "coordinate rescaling changed the physical NEO step");
+  require_close(physical_step, Eigen::Vector2d(-1.0e-4, -1.0e-8),
+                1.0e-10,
+                "coordinate-rescaled NEO missed the full Newton step");
+  const Eigen::Vector2d physical_residual =
+      gradient + hessian * physical_step;
+  require(physical_dual_norm(metric, physical_residual) <=
+              rescaled.residual_target,
+          "coordinate-rescaled NEO residual fails in physical units");
+}
+
 void check_boundary_requires_curvature_certificate() {
   Eigen::Matrix2d hessian;
   hessian << -1.0, 0.5,
@@ -403,6 +588,87 @@ void check_boundary_requires_curvature_certificate() {
           "boundary solve did not expand the curvature residual");
 }
 
+void check_projection_roundoff() {
+  constexpr Eigen::Index n = 37879;
+  Eigen::MatrixXd q(n, 2);
+  q.col(0).setConstant(1.0 / std::sqrt(static_cast<double>(n)));
+  q.col(1).setZero();
+  for (Eigen::Index i = 0; i < n - 1; ++i) {
+    q(i, 1) = (i % 2 == 0 ? 1.0 : -1.0) /
+        std::sqrt(static_cast<double>(n - 1));
+  }
+  Eigen::MatrixXd images = 5.0 * q;
+  images.col(1) += 1.14e-12 * q.col(0);
+  const Eigen::MatrixXd projected = q.transpose() * images;
+  const double bound = xmvb::vb::neo_detail::projection_skew_roundoff(
+      q, images, projected);
+  require((projected - projected.transpose()).norm() < bound,
+          "large-dimensional projection rejects a roundoff-sized defect");
+  const NeoProblem problem(
+      (q.col(0) + q.col(1)).eval(),
+      [&q](const Eigen::VectorXd& v) -> Eigen::VectorXd {
+        return 5.0 * v + 4.0 * q.col(1).dot(v) * q.col(1) +
+            1.14e-12 * q.col(1).dot(v) * q.col(0);
+      },
+      [](const Eigen::VectorXd& v) -> Eigen::VectorXd { return v; },
+      [](const Eigen::VectorXd& v) { return v.norm(); });
+  NeoOptions options;
+  options.require_curvature_certificate = false;
+  options.relative_residual_tolerance = 1e-10;
+  const NeoResult result = solve_neo(problem, options);
+  require(result.converged(),
+          "large-dimensional roundoff regression did not converge");
+  images.col(1) += 1e-4 * q.col(0);
+  const Eigen::MatrixXd invalid = q.transpose() * images;
+  require((invalid - invalid.transpose()).norm() >
+              xmvb::vb::neo_detail::projection_skew_roundoff(q, images, invalid),
+          "roundoff bound hides a materially nonsymmetric action");
+}
+
+void check_core_early_trial_preserves_certificate() {
+  const Eigen::MatrixXd hessian = Eigen::Vector4d(1, 2, 4, 8).asDiagonal();
+  const Eigen::MatrixXd metric = 1e-4 * Eigen::MatrixXd::Identity(4, 4);
+  const Eigen::VectorXd gradient = Eigen::VectorXd::Ones(4);
+  const auto problem = dense_problem(hessian, metric, gradient);
+  NeoOptions options;
+  options.trust_radius = 10;
+  options.relative_residual_tolerance = 1e-12;
+  options.require_curvature_certificate = false;
+  const auto early = solve_neo(problem, options, true);
+  require(early.stop_reason == xmvb::vb::NeoStopReason::TrialReady && !early.converged(),
+          "core candidate falsely claims physical convergence");
+  require(early.residual_norm > early.residual_target,
+          "core early-trial fixture already satisfies the physical certificate");
+  const auto final = solve_neo(problem, options);
+  require(final.converged() && final.residual_norm <= final.residual_target,
+          "disabling early core trials lost physical KKT certification");
+  require(early.hessian_actions < final.hessian_actions,
+          "core candidate did not avoid strict-solve HVPs");
+  require_close(final.step, -hessian.ldlt().solve(gradient), 1e-10,
+                "core candidate policy changed the certified Newton solution");
+  options.require_curvature_certificate = true;
+  require(solve_neo(problem, options, true).converged(),
+          "core trial bypassed an explicitly requested curvature certificate");
+}
+
+void check_core_early_trial_rejects_absolute_floor() {
+  const Eigen::MatrixXd hessian = Eigen::Vector4d(1, 2, 4, 8).asDiagonal();
+  const Eigen::MatrixXd metric = 1e-4 * Eigen::MatrixXd::Identity(4, 4);
+  const Eigen::VectorXd gradient = 2e-4 * Eigen::VectorXd::Ones(4);
+  NeoOptions options;
+  options.trust_radius = 10.0;
+  options.relative_residual_tolerance = 0.1;
+  options.absolute_residual_tolerance = 1e-3;
+  options.require_curvature_certificate = false;
+  const auto step = solve_neo(dense_problem(hessian, metric, gradient), options, true);
+  require(step.converged() || step.stop_reason == NeoStopReason::TrialReady,
+          "compressed-gradient candidate failed");
+  require(step.hessian_actions > 1,
+          "absolute coordinate floor admitted an unresolved first direction");
+  require(step.residual_norm < physical_dual_norm(metric, gradient),
+          "candidate did not reduce its physical residual");
+}
+
 void check_nonsymmetric_hessian_rejected() {
   Eigen::Matrix2d hessian;
   hessian << 2.0, 1.0,
@@ -415,7 +681,12 @@ void check_nonsymmetric_hessian_rejected() {
   bool rejected = false;
   try {
     (void)solve_neo(dense_problem(hessian, metric, gradient), options);
-  } catch (const std::runtime_error&) {
+  } catch (const std::runtime_error& error) {
+    const std::string message = error.what();
+    require(message.find("skew_norm=") != std::string::npos &&
+            message.find("threshold=") != std::string::npos &&
+            message.find("repeated_bilinear_skew=") != std::string::npos,
+            "nonsymmetric Hessian failure lacks reproducibility diagnostics");
     rejected = true;
   }
   require(rejected, "materially nonsymmetric Hessian action was accepted");
@@ -430,11 +701,19 @@ int main() {
     check_indefinite_regular_boundary();
     check_hard_case();
     check_hidden_negative_curvature();
+    check_zero_gradient_curvature_probe();
+    check_negative_witness_without_spectral_refinement();
+    check_positive_zero_gradient_curvature_probe();
     check_certified_lower_bounds();
     check_scalable_lowest_root_convergence();
     check_optional_curvature_certificate();
+    check_anisotropic_dual_residual();
+    check_coordinate_rescaling_invariance();
     check_boundary_requires_curvature_certificate();
+    check_projection_roundoff();
     check_nonsymmetric_hessian_rejected();
+    check_core_early_trial_preserves_certificate();
+    check_core_early_trial_rejects_absolute_floor();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

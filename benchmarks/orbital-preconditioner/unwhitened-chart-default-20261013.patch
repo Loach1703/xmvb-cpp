@@ -1,0 +1,12 @@
+diff --git a/src/vbscf/orbitals/charts/chart.hpp b/src/vbscf/orbitals/charts/chart.hpp
+--- a/src/vbscf/orbitals/charts/chart.hpp
++++ b/src/vbscf/orbitals/charts/chart.hpp
+@@ -30,7 +30,7 @@ public:
+ #ifdef XMVB_AUDIT_UNWHITENED_CHART
+   static constexpr bool default_whitening = false;
+ #else
+-  static constexpr bool default_whitening = true;
++  static constexpr bool default_whitening = false;
+ #endif
+   struct StructuralDiagnostics {
+     int packed_parameter_size = 0;

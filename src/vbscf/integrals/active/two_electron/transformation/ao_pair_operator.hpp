@@ -9,6 +9,18 @@
 
 namespace xmvb::vb::detail {
 
+/** @brief Exact accepted/directional row contraction from compact orbital factors. */
+void apply_generated_ao_pair_rows(
+    const AoIntegralInput&, const Eigen::Ref<const Eigen::MatrixXd>&,
+    const Eigen::MatrixXd*, Eigen::Index row_begin, Eigen::Index row_count,
+    ExactCtxPairMatrix*, ExactCtxPairMatrix*);
+
+/** @brief Shared CSR contraction for forward, directional and backward consumers. */
+void apply_exact_ao_pair_graph(
+    const AoPairGraph& graph,
+    const Eigen::Ref<const ExactCtxPairMatrix>& coefficients,
+    int n_bf, std::size_t n_active_pairs, ExactCtxPairMatrix* result);
+
 /** @brief Applies the symmetric sparse AO-pair ERI operator to a vector block. */
 void apply_exact_ao_pair_kernel(
     const AoIntegralInput& ao_integral_input,

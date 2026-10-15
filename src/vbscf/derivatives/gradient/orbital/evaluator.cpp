@@ -380,6 +380,7 @@ OrbitalGradientEvaluator::evaluate_fixed_structure(
   result.normalized_coefficients =
       std::move(active.normalized_coefficients);
   result.structure_residuals = std::move(active.structure_residuals);
+  result.coefficient_gradient = std::move(active.coefficient_gradient);
   result.gradient = evaluate_from_active_space_gradient_result(
       input, std::move(active.gradient), total_start_time);
   return result;

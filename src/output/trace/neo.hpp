@@ -1,16 +1,24 @@
 #pragma once
 
 #include <filesystem>
+#include <fstream>
 
 namespace xmvb::vb {
-struct VbScfOptimizerResult;
+struct NeoIterationRecord;
 }
 
 namespace xmvb::output {
 
-/** Write the lightweight accepted-step NEO diagnostics as tab-separated data. */
-void write_neo_trace(
-    const std::filesystem::path& output_path,
-    const vb::VbScfOptimizerResult& result);
+/** Write accepted NEO iteration diagnostics as tab-separated rows. */
+class NeoTraceWriter {
+ public:
+  explicit NeoTraceWriter(const std::filesystem::path& output_path);
+
+  void write(const vb::NeoIterationRecord& record);
+
+ private:
+  std::ofstream stream_;
+  std::filesystem::path output_path_;
+};
 
 }  // namespace xmvb::output
