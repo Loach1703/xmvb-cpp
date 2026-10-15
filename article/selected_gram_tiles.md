@@ -1,151 +1,235 @@
-# Selected-space Gram actions and differentiated tile contractions
+# Exact source-factor contraction for selected-space CI transport
 
-## Scope
+## Representation and scope
 
-This derivation concerns CI transport and its orbital pullbacks for an arbitrary
-selected VB structure space. It does not replace the Hamiltonian sigma action,
-change the selected structures, or assume closure of those structures under an
-orbital transformation. All coefficients and orbital charts are real.
-
-Let $W$ map structure coefficients to touched alpha/beta spin-string products.
-For an upper-triangular orbital chart $R$, write
+Let $W$ be the fixed map from selected VB structure coefficients to the original
+alpha/beta spin-string products, and define $X(c)=\operatorname{reshape}(Wc)$.
+The orbital chart $R$ is upper triangular, with the exterior maps
 
 $$
-F(R)c = T_\alpha(R)X(c)T_\beta(R)^T,
-\qquad X(c)=\operatorname{reshape}(Wc),
-\qquad T_\sigma(R)=\wedge^{n_\sigma}R.
+T_\sigma(R)=\wedge^{n_\sigma}R,\qquad
+F(R)c=T_\alpha(R)X(c)T_\beta(R)^T.
 $$
 
-The notation $X$ specifies a linear map, not an instruction to allocate a full
-product array. In the implementation, its coefficients are accumulated only at
-the touched product indices. Alpha and beta need not have the same electron
-number or the same string lists.
+The selected structures can be arbitrary and need not be closed under orbital
+transformations. Alpha and beta string spaces are treated independently.
+This derivation concerns cross overlaps, CI transport, and their orbital
+pullbacks, not the complete Hamiltonian sigma or integral adjoint.
 
-## Exact panel factorization
+## Exact source factorization
 
-For a panel $J$ of output beta strings, define
-
-$$
-B_{\sigma,J}=T_\beta(R_\sigma)[J,:],\qquad
-Y_{\sigma,J}=T_\alpha(R_\sigma)X_\sigma B_{\sigma,J}^T,
-\qquad \sigma\in\{L,R\}.
-$$
-
-Here $L,R$ label the two charts, not the electron spins. Then
+Let $\mathcal J$ contain the beta columns touched by the original selected
+structure expansion. Partition it into panels $J$ and let $E_J$ consist of the
+corresponding columns of the beta identity operator. Then, exactly,
 
 $$
-c_L^T F(R_L)^T F(R_R)c_R
-=\sum_J \langle Y_{L,J},Y_{R,J}\rangle_F.
+X=\sum_J X_JE_J^T,\qquad X_J=XE_J.
 $$
 
-For an action rather than a scalar contraction, each right image is pulled
-through the left alpha transform and sampled at the original touched products.
-All panel contributions are accumulated before applying $W^T$ once.
-No selected-space invariance has been used.
+This identity uses structural zeros only. There is no singular-value truncation,
+numerical rank threshold, or approximation. Its source width
+$r=|\mathcal J|$ is not necessarily the minimal algebraic rank of $X$.
 
-Upper-triangular transforms only move occupied orbital indices downward. Their
-directional derivatives have the same structural reachability, including at
-charts whose off-diagonal numerical entries vanish. The support planner must
-therefore use structural reachability, not a numerical magnitude cutoff.
+For two orbital charts, define the single-spin cross operators
+
+$$
+K_\sigma=T_{\sigma,L}^TT_{\sigma,R}.
+$$
+
+Associativity gives
+
+$$
+F_L^TF_Rc
+=W^T\operatorname{vec}\left[
+\sum_J (K_\alpha X_J)(K_\beta E_J)^T
+\right].
+$$
+
+No $K_\sigma$ matrix is formed: its factors are applied successively.
+For each panel, set $A_J=K_\alpha X_J$ and $B_J=K_\beta E_J$.
+At an original touched product $(a,b)$, accumulate
+
+$$
+z_{ab}\mathrel{+}=A_J[a,:]\cdot B_J[b,:].
+$$
+
+Finally apply $W^T$ once. Crucially, neither the orthogonal product tensor nor
+its reachable product support is generated. The sum is evaluated only at the
+original touched products required by $W^T$.
+
+This replaces the earlier output-panel implementation, which still generated
+panels over the transformed support and compound beta rows. That implementation
+has been removed from the transport path rather than retained as a fallback.
 
 ## Directional action
 
-The panel tangent is
+At fixed structure coefficients, differentiate the same factors:
 
 $$
-\dot Y_J=\dot T_\alpha X B_J^T+T_\alpha X\dot B_J^T.
+\dot A_J=\dot K_\alpha X_J,\qquad
+\dot B_J=\dot K_\beta E_J,\qquad
+\dot K_\sigma
+=\dot T_{\sigma,L}^TT_{\sigma,R}
++T_{\sigma,L}^T\dot T_{\sigma,R}.
 $$
 
-Consequently,
+The sampled output tangent is
 
 $$
-\frac{d}{dt}(F_L^TF_R)c
-=\dot F_L^TF_Rc+F_L^T\dot F_Rc.
+\dot z_{ab}\mathrel{+}=
+\dot A_J[a,:]\cdot B_J[b,:]
++A_J[a,:]\cdot\dot B_J[b,:].
 $$
 
-The primal and tangent use the same panel sweep and exact support. A primal
-structure projection is not computed when only the tangent output is needed.
+Thus the action and its derivative have the same source width and panel
+storage order. Neither needs a generator halo in the product space.
 
-## Pullbacks without a full product carrier
+## Reverse contraction
 
-Let $E_\sigma(K)$ denote the one-body generator on the spin-string sector.
-The exterior representation obeys both differential identities
-
-$$
-\dot T_\sigma=E_\sigma(\dot R R^{-1})T_\sigma
-=T_\sigma E_\sigma(R^{-1}\dot R).
-$$
-
-For an alpha panel, the first identity gives a generator contraction over its
-rows. If $G_\alpha$ is its adjoint with respect to $\dot R R^{-1}$, the chart
-gradient is $G_\alpha R^{-T}$.
-
-For the beta rows, first form the seed using the sparse original coefficients:
+For a scalar $f=c_L^TF_L^TF_Rc_R$, write $X_L=X(c_L)$ and use the source
+panels of $X_R=X(c_R)$. Define
 
 $$
-Q_{L,J}=\left[T_\alpha(R_L)^T Y_{R,J}\right]^T X_L.
+U_J=T_{\alpha,R}X_{R,J},\qquad
+V_J=T_{\beta,R}E_J,\qquad
+A_J=T_{\alpha,L}^TU_J,\qquad
+B_J=T_{\beta,L}^TV_J.
 $$
 
-The second identity yields
+The seeds for the two cross factors are
 
 $$
-\langle Q_{L,J},\dot B_{L,J}\rangle_F
-=\langle Q_{L,J},B_{L,J}E_\beta(R_L^{-1}\dot R_L)\rangle_F.
+P_{\alpha,J}=X_LB_J,\qquad
+P_{\beta,J}=X_L^TA_J.
 $$
 
-If $G_\beta$ is the generator adjoint in this expression, its chart gradient
-is $R_L^{-T}G_\beta$. Sum the alpha and beta contributions and retain only
-upper-triangular entries. Interchanging left and right gives the other chart
-gradient. This does not require neighboring beta output panels or a complete
-product-space transition density.
-
-Only upper one-body generators contribute: in the upper part of
-$G_\alpha R^{-T}$ and $R^{-T}G_\beta$, every accessed generator entry is upper
-triangular. The existing single-spin excitation topology supplies these
-generators; no product-space excitation table is built.
-
-Differentiating these same contractions gives the pullback tangent. With
-$I=R^{-T}$,
+Both are sparse matrix–dense panel products over the original touched
+spin-string products. Form
 
 $$
-\dot I=-I\dot R^T I,
-\qquad
-\dot g_\alpha=\dot G_\alpha I+G_\alpha\dot I,
-\qquad
-\dot g_\beta=\dot I G_\beta+I\dot G_\beta.
+Z_{\alpha,J}=T_{\alpha,L}P_{\alpha,J},\qquad
+Z_{\beta,J}=T_{\beta,L}P_{\beta,J}.
 $$
 
-Each $\dot G$ is obtained by differentiating both bilinear inputs. Thus the
-HVP connection retains the derivative of the inverse chart as well as both
-image tangents; it is not a frozen-chart approximation.
+For a spin-string sector, define the generator adjoint
 
-## Storage and scope of the speed claim
+$$
+[G_\sigma(P,Q)]_{pq}
+=\langle P,E_{\sigma,pq}Q\rangle_F,
+$$
 
-For $s$ touched original products and panel width $b$, the per-RHS action uses
-$O(s)$ coefficients and outputs and $O(b(U_\alpha+U_\beta))$ panel workspace,
-in addition to the structure vectors, per-spin excitation topology, and
-bounded compound-row caches. The pullback has the same panel storage order.
-There is no mandatory full $U_\alpha U_\beta$ coefficient image in this chain.
-For full original support, $s$ itself can equal $U_\alpha U_\beta$; this method
-does not claim to remove the physical full-space scaling.
+where $E_{\sigma,pq}$ is the one-body excitation generator acting on rows.
+Since
 
-The workspace argument bounds panels, not all input/output storage or all
-immutable caches. Caches retain the existing fixed byte limit and are shared
-across threads. A thread may allocate a single-spin support mask, not its own
-product array.
+$$
+\dot T_\sigma=E_\sigma(\dot R R^{-1})T_\sigma,
+$$
 
-This is a support-aware factorization and derivative reformulation, not a proof
-that total SCF time scales linearly with the number of selected structures.
-Beta compound-row generation, generator contractions, AO operations, and
-metric iteration counts can still dominate. Native timings must establish
-the wall-time benefit separately.
+the two chart gradients are
+
+$$
+\nabla_{R_L}f=
+\operatorname{upper}\left\{
+\sum_J[
+G_\alpha(U_J,Z_{\alpha,J})
++G_\beta(V_J,Z_{\beta,J})
+]R_L^{-T}
+\right\},
+$$
+
+$$
+\nabla_{R_R}f=
+\operatorname{upper}\left\{
+\sum_J[
+G_\alpha(Z_{\alpha,J},U_J)
++G_\beta(Z_{\beta,J},V_J)
+]R_R^{-T}
+\right\}.
+$$
+
+Only upper generator entries are needed for an upper-triangular chart.
+The existing single-spin excitation topology supplies them; there is no
+product-space excitation graph or transition-density array.
+
+## Pullback derivative
+
+All of $U,V,A,B,P,Z$ are differentiated, including both inputs of every
+bilinear contraction:
+
+$$
+\dot G(P,Q)=G(\dot P,Q)+G(P,\dot Q).
+$$
+
+With $I=R^{-T}$,
+
+$$
+\dot I=-I\dot R^TI,\qquad
+\dot{\nabla_R f}
+=\operatorname{upper}(\dot G I+G\dot I).
+$$
+
+This retains the derivative of the inverse chart and all changes of the
+seeds. It is the derivative of the same scalar cross overlap, not a
+frozen-chart or frozen-response approximation. Structure-coefficient
+directions are supplied separately by the CI-transport caller.
+
+## Work and memory
+
+Let $s$ be the number of original touched products, $r$ the number of touched
+beta strings, $L_\sigma$ the number of single-spin elementary-transform links,
+and $b$ the source-panel width. Per RHS, the action, its directional derivative,
+and its pullbacks require, up to different constant factors,
+
+$$
+O\!\left[
+r(L_\alpha+L_\beta+U_\alpha+U_\beta+s)
++\operatorname{nnz}(W)
+\right].
+$$
+
+Using $L_\sigma=O(n_{\rm act}^2U_\sigma)$ gives
+
+$$
+O\!\left[
+r\{n_{\rm act}^2(U_\alpha+U_\beta)+s\}
++\operatorname{nnz}(W)
+\right].
+$$
+
+Panel workspace is $O(b(U_\alpha+U_\beta))$; touched coefficients and indexing
+use $O(s+U_\alpha+U_\beta)$ in addition to the existing expansion and
+single-spin topology. Threads share the factors. No thread receives its own
+product tensor.
+
+The byte budget bounds panel temporaries, not the caller-owned vectors and
+immutable topology. It changes batching only, never the physical space.
+This chain does not use the compound-row cache.
+
+For one CAS(12,12) covalent structure, $r=64$ while $U_\alpha=U_\beta=924$.
+The transform's source-column count is therefore reduced by a factor of
+$924/64=14.4375$ relative to a full-column transform; this is an operation-count
+comparison, not an asserted wall-time speedup. For all 132 covalent structures,
+$r=924$, so this particular source-width advantage disappears. The elimination
+of output-product traversal and compound-row generation still applies.
+
+This is not a polynomial-scaling solution to arbitrary full active spaces.
+For a full covalent family with complementary alpha/beta occupations,
+$s=U_\beta$ and $r=U_\beta$, so the work remains quadratic in string counts
+(apart from orbital factors). For dense original product support,
+$s=U_\alpha U_\beta$, the sampled factor products can instead cost
+$O(U_\alpha U_\beta^2)$. The restricted metric solve and separate
+Hamiltonian/response kernels also retain their own costs.
 
 ## Validation
 
-The unit test uses an independent occupied-minor oracle for cross-Gram actions,
-finite differences and adjoint duality for first and second derivatives,
-unequal spin sectors, arbitrary nonclosed selected spaces, identity charts
-with vanishing minors, sparse selected supports, and single-column versus
-wide-panel execution. Production validation uses the existing 240 COV,
-ION(0:1), ION(0:2), ION(0:3), and FULL inputs without changing convergence
-tolerances or rerunning historical executables.
+Small-system tests compare cross-Gram actions to independent occupied minors,
+gradients to directional finite differences, and pullback directions to
+finite differences of the gradient. Cases include arbitrary nonclosed
+selected spaces, sparse supports, unequal spins, identity charts, and narrow
+versus wide source panels.
+
+CAS(12,12) fixed-orbital kernel tests use 1, 3, 20, and 132 covalent structures.
+Production regression uses 240 COV, ION(0:1), ION(0:2), ION(0:3), and FULL with
+unchanged inputs, optimizer, and tolerances. Timings and RSS are reported
+separately from the mathematical operation count; historical binaries are
+not rerun.
