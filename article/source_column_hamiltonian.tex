@@ -41,8 +41,8 @@ projection. The resulting equations preserve the selected variational space
 without a closure assumption or intermediate amplitude truncation. Source
 and channel tiling bound the numerical workspace. Optional spin-exchange
 reduction and causal pruning of the exterior adjoint are derived separately.
-The scope is the Hamiltonian/overlap action and its active-integral adjoint
-at a fixed orbital point.
+The scope is the Hamiltonian/overlap action, its active-integral adjoint,
+and the factor representation of the directional integral adjoint.
 \end{abstract}
 
 \section{The selected VB space}
@@ -607,15 +607,24 @@ The required numerical workspace, measured in doubles, is bounded by
 \begin{equation}
  (U_\alpha+U_\beta)
  \bigl[s_\ell+2s_r+(2+\mathbf 1_{p<d})s_rp\bigr]
- +s_\ell s_rp.
+ +s_\ell s_rp+\max(\omega_\ell s_\ell,\omega_r s_r).
 \end{equation}
 It includes loaded bra/ket base factors, weighted bra factors, ket channel
 panels, channel covectors, and one reusable source moment matrix.
 When $p=d$, the ket $P$ panel also supplies all $Q$ channels; otherwise
-a separate $Q$ panel is required. The immutable source metadata
-and the required returned $d\times d$ gradient are separate. Both source
+a separate $Q$ panel is required. Here $\omega_\ell,\omega_r$ count temporary doubles per source
+column used by the respective factor loaders, excluding their output views.
+They vanish for the original exterior-factor provider; source generation is
+sequential, so the larger loading scratch, not their sum, enters the bound.
+The immutable metadata and the required returned $d\times d$ gradient are
+separate. Both source
 and channel widths can decrease to respect the budget, without changing
 the represented amplitudes or a derivative tolerance.
+If the complete bra factors fit together with one ket column, their storage
+is reserved first and the ket width is maximized within the remaining budget.
+This removes bra regeneration across ket panels without increasing the
+leading Gram/moment arithmetic or the memory budget. Otherwise both families
+are streamed by the same equations.
 
 With complete channel panels, the leading dense arithmetic is
 \begin{equation}
@@ -637,6 +646,68 @@ $Y_r=P_\eta Z$ and the integral derivative commutes with exchange:
 $\ip{Y_\ell}{\delta\Ha Z}=\ip{Y_\ell}{\delta\Ha Y_r}$.
 The caller must establish this identity; the common factor kernel does
 not infer a parity projection from equal spin dimensions.
+
+\subsection{Directional factors and the integral part of an HVP}
+
+Let $R$ be the nonsingular upper-triangular orbital map in the exterior
+transforms and let $\delta R$ be its direction. Define the spatial generator
+and its one-spin representation by
+\begin{equation}
+ \kappa=\delta R R^{-1},\qquad
+ \mathcal G_\sigma(\kappa)=\sum_{pq}\kappa_{pq}
+       a^\dagger_{p\sigma}a_{q\sigma}.
+\end{equation}
+The derivative of an exterior representation obeys
+$\delta T_\sigma=\mathcal G_\sigma(\kappa)T_\sigma$.
+This generator differentiates the CI representation; it does not replace
+the physical nonorthogonal VB orbital coordinates or their finite update.
+For $Y=LF\Tr$, with selected structure coefficients allowed to vary,
+\begin{equation}\label{eq:factor-tangent}
+ \boxed{\quad\delta Y=
+   (\mathcal G_\alpha(\kappa)L)F\Tr
+   +L(\mathcal G_\beta(\kappa)F)\Tr
+   +T_\alpha\,\delta X\,T_\beta\Tr,\qquad
+   \delta X=\Wa\,\delta\vv C.\quad}
+\end{equation}
+The structure map $\Wa$ and its exact support plan are fixed. The last term
+therefore uses the same support factorization with the structure-response
+coefficients; it is not a projection of either orbital derivative onto the
+original support. The two orbital terms generally leave that support and
+retain every contribution through their transformed spin factors.
+
+Each term of Eq.~\eqref{eq:factor-tangent} is another factor source.
+Concatenating them adds their outer products exactly, without SVD truncation
+or a closure assumption. A source panel loads its base factors and applies
+the oriented Slater--Condon generator to the required spin factor only.
+Unlike a Hamiltonian channel, $\kappa$ need not be symmetric: replacing it by
+its symmetric part would give the wrong orbital derivative. The one-factor
+temporary uses at most $\max(U_\alpha,U_\beta)s$ doubles for panel width $s$;
+it is included in the loader workspace term of the preceding bound.
+
+Write $\mathcal J(Y_\ell,Y_r)$ for the symmetric integral adjoint of
+$\langle Y_\ell,\mathcal H Y_r\rangle_{\rm F}$, including the shared
+$K$-kernel pullback. Since each physical integral variation is self-adjoint,
+\begin{equation}\label{eq:factor-adjoint-tangent}
+ \delta\mathcal J(Y,Y)=2\mathcal J(\delta Y,Y).
+\end{equation}
+Thus the integral-gradient derivative needed in an orbital HVP can be
+contracted from the directional factor source directly, without constructing
+$\delta Y$ or any higher-order RDM for this contraction. If the accepted
+and directional factor counts are $r$ and $r_\delta$, the leading dense work is
+\begin{equation}
+ O\left((U_\alpha+U_\beta)
+  [\min(r,r_\delta)d^2+r\,r_\delta d]\right),
+\end{equation}
+plus the one-spin link traversals and source transforms. The count
+$r_\delta$ includes both orbital terms and any structure response, including
+the physical parity reconstruction when required. It must not be estimated
+from the accepted source count alone.
+
+Equation~\eqref{eq:factor-adjoint-tangent} is the integral part of the HVP,
+not its complete orbital pullback. The derivative of the exterior-map
+adjoint, the full carrier residual, and the state-average gauge terms remain
+required. The present implementation keeps those terms while migrating the
+integral contraction to Eq.~\eqref{eq:factor-adjoint-tangent}.
 
 \section{Correspondence with the current implementation}
 
@@ -675,8 +746,9 @@ Fixed-point structure Hamiltonian/overlap actions use the common factor
 sweep. Accepted-state integral gradients choose between the exact factor and
 product contractions by their arithmetic costs. Raw state coefficients are
 retained in structure space. The orthogonal state, its full carrier residual,
-and directional-response consumers still require migration, including the
-exterior-map and factor derivatives. A selected-space eigenvector need not be
+and generator-response consumers still require migration. Directional
+integral adjoints use Eq.~\eqref{eq:factor-adjoint-tangent} when the factor
+order has less estimated arithmetic. A selected-space eigenvector need not be
 stationary on the full carrier: its residual contribution to the
 exterior-transform gradient is retained.
 

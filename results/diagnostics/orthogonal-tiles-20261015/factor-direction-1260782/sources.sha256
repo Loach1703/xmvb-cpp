@@ -1,0 +1,10 @@
+390c299676f0fc9a56c7c11fa421c2606dddb041d9f947a0bf794439fff29125  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/src/vbscf/structures/assembly/source_tiles.cpp
+a85c10aeae1abc80dc8681ab37fbfd487d1765729945cd47a24e21effad9e2d5  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/src/vbscf/structures/assembly/sources.cpp
+53dd3d1ab035a74281233dd12d5010fa77d2da03e7fdde10dcbacb142345e41d  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/src/vbscf/structures/assembly/sources.hpp
+ef85cfea595c562e54249c1fbfabba3fc8f0ad94a3901b07a94bca243910654b  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/src/vbscf/structures/assembly/action.cpp
+c84a9375ead3a6de377a82a83e1e46c3872e8a8193ad879deea6d63652dc3664  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/tests/vbscf/unit/test_structure_tiles.cpp
+9cb09c944f8ca9fbe784afb5d4e5ece77d582ae43e57b027e04fd3e73cfd9de7  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/src/mcscf/ci/factors.cpp
+810e0f154476d6fadbb021c01a0b9492e7b2e6aa8de5576fb1a316bdc1516a7d  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/src/mcscf/ci/factors.hpp
+17f85cf5387ed9f5669e0bea948c7a24487be8ec9300db18a6365483dec81ee2  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/src/mcscf/ci/sigma.cpp
+9a09163497652e51b5d95ecdf8bbc5eeb0a72a64f65463509b24ac78f9c183a5  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/src/mcscf/ci/sigma.hpp
+6b3c85d7d7e474e0e55d59729ccde24278a57a101e604dfa9a8396b83a3d1ff7  /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/src/mcscf/ci/spin_channels.cpp

@@ -14,7 +14,11 @@
 #include "vbscf/structures/assembly/connection.hpp"
 #include "vbscf/structures/expansion/types.hpp"
 
-namespace xmvb::mcscf { class DirectCiSigmaAction; class ProductSupport; }
+namespace xmvb::mcscf {
+class DirectCiSigmaAction;
+class ProductSupport;
+struct DirectCiIntegralAdjoint;
+}
 
 namespace xmvb::vb {
 
@@ -212,6 +216,9 @@ public:
    * `directional_state_multipliers` is the full multiplier @f$M@f$ in
    * @f$HZ-SZ\Lambda+SCM@f$. Equal-weight selected states therefore retain
    * their off-diagonal horizontal-gauge coupling.
+   * `directional_selected_states` expands coefficient responses in this
+   * action's selected structure map. Orbital representation directions,
+   * which need not remain on that support, are supplied separately.
    */
   StructureActiveIntegralAdjoint active_integral_adjoint_direction(
       const StructureAdjointState& state,
@@ -374,6 +381,15 @@ public:
   StructureActionStorage storage() const noexcept;
 
 private:
+  /** @brief Expand one structure vector only on original touched products. */
+  Eigen::VectorXd expand_support(
+      const Eigen::Ref<const Eigen::VectorXd>& coefficients) const;
+  /** @brief Exact integral-adjoint order, including the source-pair moment work. */
+  bool prefer_factor_adjoint(int left_sources, int right_sources) const;
+  /** @brief Contract orbital/structure tangents on bounded source panels. */
+  mcscf::DirectCiIntegralAdjoint source_integral_direction(
+      const StructureAdjointState& state, int index,
+      const Eigen::MatrixXd* orbital_direction, const Eigen::MatrixXd* raw_response) const;
   /** @brief Bounded resident panels through expansion, sigma and projection. */
   StructureActionResult apply_orthogonal_tiled(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,

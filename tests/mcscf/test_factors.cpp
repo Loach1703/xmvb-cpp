@@ -101,6 +101,41 @@ void check_case(int n, int ea, int eb) {
     }
   }
   const auto a = coefficients(alpha.size(), 1, 0.2), b = coefficients(beta.size(), 1, 0.6);
+  {
+    const auto u = coefficients(alpha.size(), 3, 0.3), v = coefficients(beta.size(), 3, 0.8);
+    const auto base = source(u,v);
+    const Eigen::MatrixXd kappa = coefficients(n, n, 0.61); // intentionally nonsymmetric
+    const auto direction = xmvb::mcscf::generator_factors(sigma, base, kappa);
+    const auto combined = xmvb::mcscf::sum_factors({direction, base});
+    Eigen::MatrixXd full = Eigen::MatrixXd::Zero(alpha.size(), beta.size());
+    for (int first = 0; first < combined.count; first += 4) {
+      const int count = std::min(4, combined.count-first);
+      Eigen::MatrixXd x(alpha.size(), count), y(beta.size(), count);
+      combined.load(first, count, x,y);
+      full.noalias() += x * y.transpose();
+    }
+    const Eigen::MatrixXd raw = u * v.transpose();
+    const Eigen::MatrixXd expected = sigma.apply_one_body_generator(raw, kappa) + raw;
+    require((full - expected).norm() < 4e-12,
+            "factor generator/sum lost an oriented spin link or source boundary");
+    const auto gradient = sigma.integral_adjoint(expected, raw);
+    const std::size_t budget = sizeof(double) * (12 * rows + combined.workspace_rows);
+    const auto actual = xmvb::mcscf::factor_integral_adjoint(sigma, combined, base, budget);
+    require((actual.one_electron-gradient.one_electron).norm() < 5e-12 &&
+            (actual.pair_kernel-gradient.pair_kernel).norm() < 5e-12,
+            "directional factor adjoint differs from complete carrier");
+    xmvb::mcscf::FactorActionWorkspace workspace(combined, d, budget);
+    Eigen::MatrixXd image = Eigen::MatrixXd::Zero(alpha.size(), beta.size());
+    const auto work = workspace.apply(sigma, combined,
+        [&](xmvb::mcscf::FactorCrossBlock block) {
+          image.noalias() += 2 * block.alpha * block.beta.transpose();
+        }, [&](xmvb::mcscf::FactorImageBlock block) {
+          image.noalias() += block.same_alpha * block.beta.transpose();
+          image.noalias() += block.alpha * block.same_beta.transpose();
+        });
+    require(work.workspace_bound <= budget && (image-sigma.apply(expected)).norm() < 5e-12,
+            "directional factor sweep changed sigma or exceeded its loading budget");
+  }
   bool limited = false;
   try { xmvb::mcscf::factor_integral_adjoint(sigma, source(a,b), source(a,b), 1); }
   catch (const std::length_error&) { limited = true; }

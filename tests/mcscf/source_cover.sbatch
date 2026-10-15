@@ -51,7 +51,7 @@ for n in 12 14; do
  done
 done
 for n in 12 14; do
- for mode in factor-adjoint factor-adjoint-reference; do
+ for mode in factor-adjoint factor-adjoint-reference factor-direction factor-direction-reference; do
   srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
    /usr/bin/time -v -o "$artifact/$n-$mode.time" \
    "$source_dir/build/src/test_structure_tiles" --"$mode" "$n" \
@@ -70,3 +70,9 @@ srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores 
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  env XMVB_PHASE_TIMING=1 "$source_dir/build/src/test_structure_tiles" --factor-adjoint 14 \
  > "$artifact/adjoint-phases.out" 2> "$artifact/adjoint-phases.err"
+srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+ env XMVB_PHASE_TIMING=1 "$source_dir/build/src/test_structure_tiles" --factor-direction 14 \
+ > "$artifact/direction-phases.out" 2> "$artifact/direction-phases.err"
+if [[ -n ${1:-} ]]; then
+ bash "$source_dir/tests/mcscf/factor_gradient.sbatch" "$1"
+fi

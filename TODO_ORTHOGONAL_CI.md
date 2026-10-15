@@ -17,7 +17,9 @@ or memory-based admission to a different physical representation is allowed.
 - `apply_integral_direction()` allocates stacked product arrays for the base
   coefficients, sigma, coefficient direction and overlap direction.
 - `active_integral_adjoint_direction()` and `contract_response()` still consume
-  those dense carriers. Tiling only the Davidson H/M action is therefore not a
+  those dense carriers for the residual/generator terms. The former now uses
+  exact directional source factors for its integral adjoint when their work is
+  smaller. Tiling only the Davidson H/M action is therefore not a
   bounded-memory VBSCF implementation.
 - `SelectedStateDeterminantCoefficients::coefficient_matrix` is itself dense;
   changing only its downstream consumers cannot remove this allocation.
@@ -77,6 +79,11 @@ full `U * r` factors when a broad support makes those product-sized.
    Include factor tangents, integral tangents, exterior-transform pullbacks and
    their directional terms. Arbitrary selected spaces may not be treated as
    invariant. Do not add relaxed CI response to a coupled action a second time.
+   Partial: `generator_factors` represents both oriented orbital-generator
+   terms, and `sum_factors` includes selected-structure coefficient responses.
+   HVP integral adjoints consume this exact source sum; its temporary loading
+   panel is included in the numerical workspace budget. Full carrier residual
+   and generator-gradient derivatives still need migration.
 6. [ ] Remove obsolete full-product production consumers after migration.
    Explicit full-carrier arrays remain only as independent small-system test
    oracles; broad-support production uses generated product tiles, not a dense

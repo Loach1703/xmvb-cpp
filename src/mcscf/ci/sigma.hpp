@@ -60,6 +60,15 @@ public:
   void gather_spin(bool beta, const Eigen::Ref<const Eigen::MatrixXd>& channels,
       int first, int count, Eigen::Ref<Eigen::MatrixXd> images) const;
 
+  /** @brief Apply sum_pq kappa(p,q) a_p^+ a_q to single-spin source columns.
+   * The generator need not be symmetric. Input and output may be strided views,
+   * but must not alias. Each output spin row has one owner.
+   */
+  void apply_spin_generator(bool beta,
+      const Eigen::Ref<const Eigen::MatrixXd>& factors,
+      const Eigen::Ref<const Eigen::MatrixXd>& generator,
+      Eigen::Ref<Eigen::MatrixXd> image) const;
+
   /** @brief Symmetric K in H = (E_alpha+E_beta)^T K (E_alpha+E_beta).
    * Includes the absorbed one-electron Hamiltonian. Borrowed immutable data.
    */

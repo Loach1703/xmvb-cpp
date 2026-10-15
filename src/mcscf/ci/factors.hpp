@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <vector>
 
 #include <Eigen/Core>
 
@@ -16,7 +17,19 @@ namespace xmvb::mcscf {
 struct SpinFactorSource {
   int n_alpha = 0, n_beta = 0, count = 0;
   std::function<void(int, int, Eigen::Ref<Eigen::MatrixXd>, Eigen::Ref<Eigen::MatrixXd>)> load;
+  /** Temporary doubles per source column during load; excludes output views. */
+  std::size_t workspace_rows = 0;
 };
+
+/** @brief Exact concatenation of factor families; no rank truncation or carrier. */
+SpinFactorSource sum_factors(std::vector<SpinFactorSource> sources);
+
+/** @brief Factor representation of E(kappa)Y = (E_alpha L)F^T + L(E_beta F)^T.
+ * The sigma, generator and the original source's borrowed inputs must outlive
+ * this provider. Its one-factor loading scratch is included in workspace_rows.
+ */
+SpinFactorSource generator_factors(const DirectCiSigmaAction& sigma,
+    const SpinFactorSource& source, const Eigen::Ref<const Eigen::MatrixXd>& generator);
 
 /** @brief Cross-spin Hamiltonian factors after their same-spin use is complete.
  * alpha contains E_(alpha,P) A, beta contains sum_Q K_PQ E_(beta,Q) B.
@@ -59,6 +72,7 @@ public:
 
 private:
   int n_alpha_, n_beta_, channels_, source_tile_, channel_tile_;
+  std::size_t load_rows_;
   bool overlap_only_;
   Eigen::MatrixXd alpha_, beta_, ha_, hb_;
   Eigen::MatrixXd ap_, bp_, va_, vb_, aq_, bq_;

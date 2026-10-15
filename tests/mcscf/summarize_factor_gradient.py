@@ -3,6 +3,7 @@
 
 import argparse
 import csv
+from itertools import product
 from pathlib import Path
 import re
 
@@ -21,11 +22,14 @@ def save(path, rows):
 def kernels(artifacts, output):
     rows = []
     for artifact in artifacts:
-        for n in (12, 14):
-            native = values(artifact / f"{n}-factor-adjoint.out")
-            reference = values(artifact / f"{n}-factor-adjoint-reference.out")
+        for consumer, n in product(("factor-adjoint", "factor-direction"), (12, 14)):
+            path = artifact / f"{n}-{consumer}.out"
+            if not path.exists():
+                continue
+            native = values(path)
+            reference = values(artifact / f"{n}-{consumer}-reference.out")
             rows.append(dict(
-                run=artifact.name, orbitals=n, node=(artifact / "node.txt").read_text().strip(),
+                run=artifact.name, consumer=consumer, orbitals=n, node=(artifact / "node.txt").read_text().strip(),
                 bra_sources=int(native["bra_sources"]), ket_sources=int(native["ket_sources"]),
                 cold_seconds=float(native["cold_adjoint_seconds"]),
                 warm_seconds=float(native["warm_adjoint_seconds"]),

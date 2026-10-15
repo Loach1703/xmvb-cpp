@@ -12,6 +12,16 @@
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
 namespace xmvb::vb {
+Eigen::VectorXd StructureAction::expand_support(
+    const Eigen::Ref<const Eigen::VectorXd>& vectors) const {
+  Eigen::VectorXd coefficients = Eigen::VectorXd::Zero(spin_products_.size());
+#pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
+  for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group)
+    for (std::size_t t = spin_term_offsets_[group]; t < spin_term_offsets_[group + 1]; ++t)
+      coefficients[group] += spin_terms_[t].coefficient * vectors[spin_terms_[t].structure];
+  return coefficients;
+}
+
 bool StructureAction::prefer_source_contraction(const ExteriorOrbitalTransform& alpha,
     const ExteriorOrbitalTransform& beta, const mcscf::DirectCiSigmaAction& sigma) const {
   const long double r = sources_->nodes.size();
@@ -67,13 +77,9 @@ StructureActionResult StructureAction::apply_source_tiles(
       Eigen::MatrixXd::Zero(n_structures_, vectors.cols()),
       Eigen::MatrixXd::Zero(n_structures_, vectors.cols())};
   for (int vector = 0; vector < vectors.cols(); ++vector) {
-    Eigen::VectorXd coefficients = Eigen::VectorXd::Zero(spin_products_.size());
-    Eigen::VectorXd h_products = coefficients, m_products = coefficients;
+    const Eigen::VectorXd coefficients = expand_support(vectors.col(vector));
+    Eigen::VectorXd h_products = Eigen::VectorXd::Zero(spin_products_.size()), m_products = h_products;
     ++result.tiles.expansions;
-#pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
-    for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group)
-      for (std::size_t t = spin_term_offsets_[group]; t < spin_term_offsets_[group + 1]; ++t)
-        coefficients[group] += spin_terms_[t].coefficient * vectors(spin_terms_[t].structure, vector);
 
     const auto source = sources.orthogonal_source(spin_products_, coefficients, alpha, beta);
     const auto cross = [&](mcscf::FactorCrossBlock block) {

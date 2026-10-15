@@ -491,14 +491,22 @@ void check_mixed_source_images() {
 }
 
 /** @brief Production accepted gradient keeps the nonstationary carrier term. */
-void check_factor_accepted_gradient() {
-  const auto fixture = make_fixture(8, 4, 4);
-  Pairing adjacent;
-  for (int i = 0; i < 8; i += 2) adjacent.emplace_back(i, i + 1);
-  const auto expansion = covalent_rumer_terms(8, fixture.alpha, fixture.beta, {adjacent});
+void check_factor_accepted_gradient(bool sparse = false) {
+  const int n = sparse ? 5 : 8;
+  const auto fixture = sparse ? make_fixture(n, 2, 1) : make_fixture(n, 4, 4);
+  CovalentExpansion expansion;
+  if (sparse) {
+    expansion.product_alpha = {fixture.alpha[0], fixture.alpha[0]};
+    expansion.product_beta = {fixture.beta[1], fixture.beta[3]};
+    expansion.terms = {{{0, 0.7}}, {{0, -0.2}}};
+  } else {
+    Pairing adjacent;
+    for (int i = 0; i < n; i += 2) adjacent.emplace_back(i, i + 1);
+    expansion = covalent_rumer_terms(n, fixture.alpha, fixture.beta, {adjacent});
+  }
   const auto cache = topology(fixture, expansion.product_alpha, expansion.product_beta);
   const xmvb::vb::StructureAction action(expansion.terms, 1, cache, fixture.overlap,
-      fixture.one_electron, fixture.two_electron, 8, nullptr,
+      fixture.one_electron, fixture.two_electron, n, nullptr,
       xmvb::vb::StructureActionMode::ActionOnly);
   Eigen::MatrixXd c = Eigen::MatrixXd::Ones(1, 1);
   const auto images = action.apply(c);
@@ -509,7 +517,7 @@ void check_factor_accepted_gradient() {
   require(state.structure_coefficients.rows() == 1 && state.structure_coefficients.cols() == 1,
           "accepted raw state was not retained in the selected structure space");
   const auto integrals = xmvb::vb::orthogonalize_active_integrals(
-      fixture.overlap, fixture.one_electron, fixture.two_electron, 8);
+      fixture.overlap, fixture.one_electron, fixture.two_electron, n);
   const xmvb::mcscf::DirectCiSigmaAction sigma(
       cache.alpha_reuse_table.unique_determinants,
       cache.beta_reuse_table.unique_determinants, integrals);
@@ -526,35 +534,104 @@ void check_factor_accepted_gradient() {
       (actual.one_electron-expected.one_electron).norm() < 2e-11 &&
       (actual.pair_kernel-expected.pair_kernel).norm() < 2e-11,
       "factor accepted gradient differs from complete integral/generator pullback");
-  Eigen::MatrixXd ds(8,8), dh(8,8);
-  for (int j = 0; j < 8; ++j)
+  Eigen::MatrixXd ds(n,n), dh(n,n);
+  for (int j = 0; j < n; ++j)
     for (int i = 0; i <= j; ++i) {
       ds(i,j) = ds(j,i) = 0.003 * std::cos(0.13 * (i + 1) * (j + 2));
       dh(i,j) = dh(j,i) = 0.004 * std::sin(0.17 * (i + 2) * (j + 1));
     }
   std::vector<double> dg(fixture.two_electron.packed_active_two_electron_integrals.size());
   for (int i = 0; i < static_cast<int>(dg.size()); ++i) dg[i] = 0.0003 * std::cos(0.11 * (i + 1));
-  const auto analytic = action.active_integral_adjoint_direction(state, nullptr, nullptr,
-      std::vector<double>(ds.data(), ds.data()+ds.size()),
-      std::vector<double>(dh.data(), dh.data()+dh.size()), dg, nullptr, true);
   constexpr double step = 2e-5;
-  const auto shifted = [&](double scale) {
+  const auto shifted = [&](double scale, double response_scale) {
     auto moved = fixture;
     for (int i = 0; i < static_cast<int>(moved.overlap.size()); ++i) moved.overlap[i] += scale * ds.data()[i];
     moved.one_electron += scale * dh;
     for (int i = 0; i < static_cast<int>(dg.size()); ++i)
       moved.two_electron.packed_active_two_electron_integrals[i] += scale * dg[i];
     const xmvb::vb::StructureAction shifted_action(expansion.terms, 1, cache, moved.overlap,
-        moved.one_electron, moved.two_electron, 8, nullptr,
+        moved.one_electron, moved.two_electron, n, nullptr,
         xmvb::vb::StructureActionMode::ActionOnly);
     return shifted_action.active_integral_adjoint(
-        shifted_action.prepare_active_adjoint(c, {1.0}, {energy}));
+        shifted_action.prepare_active_adjoint((1+response_scale*scale)*c, {1.0}, {energy}));
   };
-  const auto plus = shifted(step), minus = shifted(-step);
-  require(((plus.overlap-minus.overlap)/(2*step)-analytic.overlap).norm() < 2e-7 &&
-      ((plus.one_electron-minus.one_electron)/(2*step)-analytic.one_electron).norm() < 2e-7 &&
-      ((plus.pair_kernel-minus.pair_kernel)/(2*step)-analytic.pair_kernel).norm() < 2e-7,
-      "HVP directional pullback changed after retaining structure rather than raw coefficients");
+  for (bool response : {false, true}) {
+    xmvb::vb::SelectedStateDeterminantMatrices dc;
+    dc.n_unique_alpha = fixture.alpha.size(); dc.n_unique_beta = fixture.beta.size();
+    dc.states.resize(1);
+    dc.states[0].coefficient_matrix = 0.21 * action.expand_structure_block(c);
+    const Eigen::MatrixXd multipliers = Eigen::MatrixXd::Zero(1,1);
+    const auto analytic = action.active_integral_adjoint_direction(state,
+        response ? &dc : nullptr, response ? &multipliers : nullptr,
+        std::vector<double>(ds.data(), ds.data()+ds.size()),
+        std::vector<double>(dh.data(), dh.data()+dh.size()), dg, nullptr, true);
+    const auto plus = shifted(step, response ? 0.21 : 0), minus = shifted(-step, response ? 0.21 : 0);
+    require(((plus.overlap-minus.overlap)/(2*step)-analytic.overlap).norm() < 2e-7 &&
+        ((plus.one_electron-minus.one_electron)/(2*step)-analytic.one_electron).norm() < 2e-7 &&
+        ((plus.pair_kernel-minus.pair_kernel)/(2*step)-analytic.pair_kernel).norm() < 2e-7,
+        "factor HVP differs from the complete orbital/structure gradient derivative");
+  }
+}
+
+/** @brief Factor HVP keeps multistate weights and off-diagonal gauge terms. */
+void check_factor_state_average() {
+  const auto fixture = make_fixture(5,2,1);
+  const auto cache = topology(fixture, {fixture.alpha[0],fixture.alpha[0]},
+      {fixture.beta[1],fixture.beta[3]});
+  const Terms terms = {{{0,1.0}}, {{1,1.0}}};
+  const xmvb::vb::StructureAction action(terms, 2, cache, fixture.overlap,
+      fixture.one_electron, fixture.two_electron, 5, nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const Eigen::MatrixXd c = (Eigen::Matrix2d() << 0.7,0.2,-0.3,0.8).finished();
+  const Eigen::MatrixXd dc = (Eigen::Matrix2d() << 0.02,-0.03,0.04,0.01).finished();
+  const Eigen::MatrixXd mu = (Eigen::Matrix2d() << 0.01,0.02,-0.03,0.005).finished();
+  const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap, fixture.one_electron, fixture.two_electron, 5);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(cache.alpha_reuse_table.unique_determinants,
+      cache.beta_reuse_table.unique_determinants, integrals);
+  const Eigen::MatrixXd ds = 0.001 * Eigen::MatrixXd::Ones(5,5);
+  const Eigen::MatrixXd dh = -0.002 * Eigen::MatrixXd::Ones(5,5);
+  const std::vector<double> overlap(ds.data(), ds.data()+ds.size());
+  const std::vector<double> one(dh.data(), dh.data()+dh.size());
+  const std::vector<double> two(fixture.two_electron.packed_active_two_electron_integrals.size(), 0.0001);
+  const auto direction = xmvb::vb::orthogonalize_active_integral_direction(integrals, overlap, dh, two, 5);
+  const xmvb::mcscf::DirectCiSigmaAction delta_sigma(sigma, direction);
+  const Eigen::MatrixXd kappa = integrals.orbital_transform.transpose()
+      .triangularView<Eigen::Lower>().solve(direction.orbital_transform.transpose()).transpose();
+  const auto y = action.orthogonalize_structure_block(c);
+  const auto dy_c = action.orthogonalize_structure_block(dc);
+  const int nb = fixture.beta.size();
+  const std::vector<double> energies{-1.1,-0.7};
+  xmvb::vb::SelectedStateDeterminantMatrices raw;
+  raw.n_unique_alpha = fixture.alpha.size(); raw.n_unique_beta = nb; raw.states.resize(2);
+  for (int i = 0; i < 2; ++i) raw.states[i].coefficient_matrix = action.expand_structure_block(dc.col(i));
+  for (const std::vector<double>& weights : {std::vector<double>{0.5,0.5}, {0.3,0.7}}) {
+    const auto state = action.prepare_active_adjoint(c, weights, energies);
+    require(state.factor_integrals, "sparse multistate case did not select factor integral order");
+    Eigen::MatrixXd g1 = Eigen::MatrixXd::Zero(5,5), g2 = Eigen::MatrixXd::Zero(15,15), gg = g1;
+    for (int i = 0; i < 2; ++i) {
+      const auto yi = y.middleCols(i*nb, nb);
+      const Eigen::MatrixXd dy = sigma.apply_one_body_generator(yi,kappa) + dy_c.middleCols(i*nb,nb);
+      const Eigen::MatrixXd r = sigma.apply(yi) - energies[i] * yi;
+      Eigen::MatrixXd dr = sigma.apply(dy) + delta_sigma.apply(yi) - energies[i] * dy;
+      for (int j = 0; j < 2; ++j)
+        dr.noalias() += (0.5 * mu(j,i) + 0.5 * mu(i,j) * weights[j] / weights[i]) * y.middleCols(j*nb,nb);
+      const auto integral = sigma.integral_adjoint(dy,yi);
+      g1.noalias() += 2 * weights[i] * integral.one_electron;
+      g2.noalias() += 2 * weights[i] * integral.pair_kernel;
+      gg.noalias() += 2 * weights[i] * (sigma.one_body_generator_adjoint(dr,yi) +
+          sigma.one_body_generator_adjoint(r,dy));
+    }
+    const auto expected = xmvb::vb::backpropagate_orthogonal_active_integral_adjoint_direction(
+        integrals, direction, state.one_electron_gradient, state.pair_kernel_gradient,
+        state.generator_gradient, g1,g2,gg);
+    const auto actual = action.active_integral_adjoint_direction(
+        state, &raw, &mu, overlap, one, two, nullptr, true);
+    require((actual.overlap-expected.overlap).norm() < 2e-11 &&
+        (actual.one_electron-expected.one_electron).norm() < 2e-11 &&
+        (actual.pair_kernel-expected.pair_kernel).norm() < 2e-11,
+        "factor HVP lost a multistate weight, orbital response or gauge multiplier");
+  }
 }
 
 void check_complete_unequal_spin_case() {
@@ -1313,7 +1390,7 @@ void benchmark_source_cover(int n, bool compare_reference) {
 }
 
 /** @brief Physical covalent-state integral adjoint with bounded spin factors. */
-void benchmark_factor_adjoint(int n, bool compare_reference) {
+void benchmark_factor_adjoint(int n, bool compare_reference, bool directional = false) {
   require(n == 12 || n == 14, "factor adjoint benchmark supports 12/14 orbitals");
   const auto fixture = make_fixture(n, n / 2, n / 2);
   Pairing adjacent;
@@ -1338,10 +1415,15 @@ void benchmark_factor_adjoint(int n, bool compare_reference) {
   const xmvb::vb::SpinSources representatives(products, na, nb, parity);
   const auto bra = representatives.orthogonal_source(products, coefficients, ta, tb, true);
   const auto ket = representatives.orthogonal_source(products, coefficients, ta, tb);
+  Eigen::MatrixXd generator = Eigen::MatrixXd::Zero(n,n);
+  for (int j = 0; j < n; ++j)
+    for (int i = 0; i <= j; ++i)
+      generator(i,j) = 0.01 * std::sin(0.17 * (i+1) * (j+2));
+  const auto left = directional ? xmvb::mcscf::generator_factors(sigma, bra, generator) : bra;
   const auto begin = Clock::now();
-  const auto cold = xmvb::mcscf::factor_integral_adjoint(sigma, bra, ket);
+  const auto cold = xmvb::mcscf::factor_integral_adjoint(sigma, left, ket);
   const auto first = Clock::now();
-  const auto warm = xmvb::mcscf::factor_integral_adjoint(sigma, bra, ket);
+  const auto warm = xmvb::mcscf::factor_integral_adjoint(sigma, left, ket);
   const auto finished = Clock::now();
   require((cold.one_electron-warm.one_electron).norm() < 1e-12 &&
       (cold.pair_kernel-warm.pair_kernel).norm() < 1e-12, "factor adjoint is not repeatable");
@@ -1354,8 +1436,9 @@ void benchmark_factor_adjoint(int n, bool compare_reference) {
     Eigen::MatrixXd a(na, bra.count), b(nb, bra.count);
     bra.load(0, bra.count, a, b);
     const Eigen::MatrixXd carrier = a * b.transpose();
+    const Eigen::MatrixXd delta = directional ? sigma.apply_one_body_generator(carrier, generator) : carrier;
     const auto start = Clock::now();
-    reference = sigma.integral_adjoint(carrier, carrier, parity);
+    reference = sigma.integral_adjoint(delta, carrier, parity);
     reference_seconds = std::chrono::duration<double>(Clock::now()-start).count();
     require((warm.one_electron-reference.one_electron).norm() < 2e-10 &&
         (warm.pair_kernel-reference.pair_kernel).norm() < 2e-10,
@@ -1364,7 +1447,8 @@ void benchmark_factor_adjoint(int n, bool compare_reference) {
   std::cout << std::setprecision(17)
             << "orbitals=" << n << '\n' << "structures=1\n"
             << "alpha_strings=" << na << '\n' << "beta_strings=" << nb << '\n'
-            << "bra_sources=" << bra.count << '\n' << "ket_sources=" << ket.count << '\n'
+            << "bra_sources=" << left.count << '\n' << "ket_sources=" << ket.count << '\n'
+            << "directional=" << directional << '\n'
             << "cold_adjoint_seconds=" << std::chrono::duration<double>(first-begin).count() << '\n'
             << "warm_adjoint_seconds=" << std::chrono::duration<double>(finished-first).count() << '\n'
             << "reference_seconds=" << reference_seconds << '\n'
@@ -1483,6 +1567,10 @@ int main(int argc, char** argv) {
       benchmark_factor_adjoint(std::stoi(argv[2]), false);
     } else if (argc == 3 && std::string(argv[1]) == "--factor-adjoint-reference") {
       benchmark_factor_adjoint(std::stoi(argv[2]), true);
+    } else if (argc == 3 && std::string(argv[1]) == "--factor-direction") {
+      benchmark_factor_adjoint(std::stoi(argv[2]), false, true);
+    } else if (argc == 3 && std::string(argv[1]) == "--factor-direction-reference") {
+      benchmark_factor_adjoint(std::stoi(argv[2]), true, true);
     } else if (argc == 3 && std::string(argv[1]) == "--paths12") {
       benchmark_selected12(std::stoi(argv[2]), false, true);
     } else if (argc == 3 && std::string(argv[1]) == "--gram12") {
@@ -1495,6 +1583,8 @@ int main(int argc, char** argv) {
       check_source_cover();
       check_mixed_source_images();
       check_factor_accepted_gradient();
+      check_factor_accepted_gradient(true);
+      check_factor_state_average();
       check_complete_unequal_spin_case();
       check_mixed_exchange_space();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
@@ -1515,7 +1605,7 @@ int main(int argc, char** argv) {
           "usage: test_structure_tiles [--benchmark12|--benchmark12-no-reference|"
           "--selected12 N|--selected12-parity N|--sources12 N|--paths12 N|--gram12 N|"
           "--source-size N|--source-size-parity N|--source-cover-size N|--source-cover-reference N|"
-          "--factor-adjoint N|--factor-adjoint-reference N]");
+          "--factor-adjoint N|--factor-adjoint-reference N|--factor-direction N|--factor-direction-reference N]");
     }
     return 0;
   } catch (const std::exception& error) {

@@ -7,6 +7,33 @@
 
 namespace xmvb::mcscf {
 
+void DirectCiSigmaAction::apply_spin_generator(bool beta,
+    const Eigen::Ref<const Eigen::MatrixXd>& factors,
+    const Eigen::Ref<const Eigen::MatrixXd>& generator,
+    Eigen::Ref<Eigen::MatrixXd> image) const {
+  const auto& graph = beta ? beta_connections() : *alpha_;
+  const int rows = beta ? n_beta_ : n_alpha_;
+  if (factors.rows() != rows || image.rows() != rows ||
+      image.cols() != factors.cols() || generator.rows() != n_orbitals_ ||
+      generator.cols() != n_orbitals_)
+    throw std::invalid_argument("invalid single-spin generator dimensions");
+  const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(),
+      static_cast<std::size_t>(rows) * factors.cols());
+#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
+  for (int index = 0; index < rows * factors.cols(); ++index) {
+    const int column = index / rows, target = index % rows;
+    double value = 0;
+    for (int occupied : graph.occupied[target])
+      value += generator(occupied, occupied) * factors(target, column);
+    const auto& links = graph.singles[target];
+    for (std::size_t link = 0; link < links.size(); ++link)
+      value += links.signs[link] *
+          generator(links.created_orbitals[link], links.annihilated_orbitals[link]) *
+          factors(links.sources[link], column);
+    image(target, column) = value;
+  }
+}
+
 void DirectCiSigmaAction::scatter_spin(bool beta,
     const Eigen::Ref<const Eigen::MatrixXd>& factors, int first, int count,
     Eigen::Ref<Eigen::MatrixXd> result) const {

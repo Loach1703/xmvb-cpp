@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <stdexcept>
+#include <utility>
 
 #include "core/openmp.hpp"
 #include "core/timing.hpp"
@@ -93,20 +94,67 @@ void transpose_product(const Eigen::Ref<const Eigen::MatrixXd>& channels,
 
 } // namespace
 
+SpinFactorSource sum_factors(std::vector<SpinFactorSource> sources) {
+  if (sources.empty()) throw std::invalid_argument("empty factor sum");
+  SpinFactorSource result{sources.front().n_alpha, sources.front().n_beta, 0, {}};
+  for (const auto& source : sources) {
+    if (source.n_alpha != result.n_alpha || source.n_beta != result.n_beta ||
+        source.count < 0 || !source.load)
+      throw std::invalid_argument("incompatible factor sum");
+    result.count += source.count;
+    result.workspace_rows = std::max(result.workspace_rows, source.workspace_rows);
+  }
+  result.load = [sources = std::move(sources)](int first, int width,
+      Eigen::Ref<Eigen::MatrixXd> a, Eigen::Ref<Eigen::MatrixXd> b) {
+    int offset = 0;
+    for (const auto& source : sources) {
+      if (first >= source.count) { first -= source.count; continue; }
+      const int count = std::min(width - offset, source.count - first);
+      source.load(first, count, a.middleCols(offset, count), b.middleCols(offset, count));
+      offset += count; first = 0;
+      if (offset == width) break;
+    }
+  };
+  return result;
+}
+
+SpinFactorSource generator_factors(const DirectCiSigmaAction& sigma,
+    const SpinFactorSource& source, const Eigen::Ref<const Eigen::MatrixXd>& generator) {
+  validate_source(sigma, source);
+  return {source.n_alpha, source.n_beta, 2 * source.count,
+      [&sigma, source, generator](int first, int width,
+          Eigen::Ref<Eigen::MatrixXd> a, Eigen::Ref<Eigen::MatrixXd> b) {
+        int offset = 0;
+        while (offset < width) {
+          const bool beta = first >= source.count;
+          const int local = beta ? first - source.count : first;
+          const int count = std::min(width - offset, source.count - local);
+          auto aa = a.middleCols(offset, count), bb = b.middleCols(offset, count);
+          source.load(local, count, aa, bb);
+          Eigen::MatrixXd image(beta ? source.n_beta : source.n_alpha, count);
+          sigma.apply_spin_generator(beta, beta ? bb : aa, generator, image);
+          if (beta) bb = image; else aa = image;
+          first += count; offset += count;
+        }
+      }, std::max(source.workspace_rows,
+          static_cast<std::size_t>(std::max(source.n_alpha, source.n_beta)))};
+}
+
 FactorActionWorkspace::FactorActionWorkspace(const SpinFactorSource& source, int channels,
     std::size_t workspace_bytes, bool overlap_only)
     : n_alpha_(source.n_alpha), n_beta_(source.n_beta), channels_(channels),
-      overlap_only_(overlap_only) {
+      load_rows_(source.workspace_rows), overlap_only_(overlap_only) {
   if (n_alpha_ <= 0 || n_beta_ <= 0 || source.count < 0 || channels <= 0)
     throw std::invalid_argument("invalid factor workspace dimensions");
   const std::size_t unit_bytes = (static_cast<std::size_t>(n_alpha_) + n_beta_) * sizeof(double);
-  if (workspace_bytes / unit_bytes < (overlap_only ? 2U : 9U))
+  const std::size_t load_bytes = source.workspace_rows * sizeof(double);
+  if (workspace_bytes < unit_bytes * (overlap_only ? 2U : 9U) + load_bytes)
     throw std::length_error("source workspace cannot hold one single-spin channel tile");
   const int columns_per_source = overlap_only ? 2 : 3 * channels + 6;
   source_tile_ = static_cast<int>(std::max<std::size_t>(1,
-      std::min<std::size_t>(source.count, workspace_bytes / unit_bytes / columns_per_source)));
+      std::min<std::size_t>(source.count, workspace_bytes / (unit_bytes * columns_per_source + load_bytes))));
   channel_tile_ = overlap_only ? 0 : static_cast<int>(std::min<std::size_t>(channels,
-      (workspace_bytes / unit_bytes / source_tile_ - 6) / 3));
+      ((workspace_bytes / source_tile_ - load_bytes) / unit_bytes - 6) / 3));
   alpha_.resize(n_alpha_, source_tile_); beta_.resize(n_beta_, source_tile_);
   ha_.resize(n_alpha_, overlap_only ? 0 : source_tile_);
   hb_.resize(n_beta_, overlap_only ? 0 : source_tile_);
@@ -125,7 +173,8 @@ FactorActionWork FactorActionWorkspace::apply(const DirectCiSigmaAction& sigma,
     const std::function<void(FactorImageBlock)>& finish) {
   validate_source(sigma, source);
   if (source.n_alpha != n_alpha_ || source.n_beta != n_beta_ ||
-      sigma.channel_kernel().rows() != channels_ || !finish || (!overlap_only_ && !cross))
+      source.workspace_rows > load_rows_ || sigma.channel_kernel().rows() != channels_ ||
+      !finish || (!overlap_only_ && !cross))
     throw std::invalid_argument("factor action does not match its workspace or consumers");
   FactorActionWork work;
   work.source_tile = source_tile_; work.channel_tile = channel_tile_;
@@ -137,8 +186,8 @@ FactorActionWork FactorActionWorkspace::apply(const DirectCiSigmaAction& sigma,
     const int width = std::min(source_tile_, source.count - first);
     ++work.panels; work.sources += width;
     work.workspace_bound = std::max(work.workspace_bound, sizeof(double) *
-        (static_cast<std::size_t>(n_alpha_) + n_beta_) * width *
-        (overlap_only_ ? 2 : 3 * channel_tile_ + 6));
+        ((static_cast<std::size_t>(n_alpha_) + n_beta_) * width *
+        (overlap_only_ ? 2 : 3 * channel_tile_ + 6) + source.workspace_rows * width));
     auto a = alpha_.leftCols(width), b = beta_.leftCols(width);
     auto ha = ha_.leftCols(overlap_only_ ? 0 : width);
     auto hb = hb_.leftCols(overlap_only_ ? 0 : width);
@@ -202,7 +251,9 @@ DirectCiIntegralAdjoint factor_integral_adjoint(const DirectCiSigmaAction& sigma
   const auto payload = [&](std::size_t l, std::size_t r, std::size_t p) {
     const int channel_families = p < static_cast<std::size_t>(d) ? 3 : 2;
     return static_cast<long double>(rows) * (l + 2 * r + channel_families * r * p) +
-        static_cast<long double>(l) * r * p;
+        static_cast<long double>(l) * r * p +
+        std::max(static_cast<long double>(bra.workspace_rows) * l,
+                 static_cast<long double>(ket.workspace_rows) * r);
   };
   if (payload(1, 1, 1) > capacity)
     throw std::length_error("factor adjoint workspace cannot hold one channel/source panel");
@@ -215,16 +266,24 @@ DirectCiIntegralAdjoint factor_integral_adjoint(const DirectCiSigmaAction& sigma
     }
     p = low;
   }
+  // When possible, retain the complete bra within the SAME slab budget.
+  // This leaves the leading Gram/moment arithmetic unchanged but removes bra
+  // regeneration across ket/channel panels. In particular a directional source
+  // must not redo its exterior maps and one-body generators on every ket tile.
+  const bool resident_bra = payload(bra.count, 1, p) <= capacity;
   int low = 1, high = ket.count;
   while (low < high) {
     const int middle = low + (high - low + 1) / 2;
-    if (payload(middle, middle, p) <= capacity) low = middle; else high = middle - 1;
+    if (payload(resident_bra ? bra.count : middle, middle, p) <= capacity) low = middle;
+    else high = middle - 1;
   }
   const int nr = low;
-  const int families = p < d ? 3 : 2;
-  const int nl = static_cast<int>(std::min<long double>(bra.count,
-      (capacity - static_cast<long double>(rows) * (2 * nr + families * nr * p)) /
-      (static_cast<long double>(rows) + nr * p)));
+  low = nr; high = bra.count;
+  while (low < high) {
+    const int middle = low + (high - low + 1) / 2;
+    if (payload(middle, nr, p) <= capacity) low = middle; else high = middle - 1;
+  }
+  const int nl = low;
   const bool timing = profiling::phase_totals().enabled;
   const auto tick = [&] { return timing ? Clock::now() : Clock::time_point{}; };
   const auto seconds = [](auto a, auto b) { return std::chrono::duration<double>(b-a).count(); };

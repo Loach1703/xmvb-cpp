@@ -1441,6 +1441,45 @@ bool StructureAction::supports_integral_direction() const noexcept {
   return direct_ci_ != nullptr;
 }
 
+bool StructureAction::prefer_factor_adjoint(int left_sources, int right_sources) const {
+  const long double l = left_sources, r = right_sources;
+  const long double d = direct_ci_->sigma.channel_kernel().rows();
+  const long double rows = static_cast<long double>(n_unique_alpha_) + n_unique_beta_;
+  const long double product_rows = spin_exchange_parity_ == 0
+      ? static_cast<long double>(n_unique_alpha_) * n_unique_beta_
+      : static_cast<long double>(n_unique_alpha_) * (n_unique_alpha_ + spin_exchange_parity_) / 2;
+  const long double work = 2 * rows * std::min(l,r) * d * d + 4 * rows * l * r * (d+1);
+  return l > 0 && r > 0 && work < 2 * product_rows * d * d;
+}
+
+mcscf::DirectCiIntegralAdjoint StructureAction::source_integral_direction(
+    const StructureAdjointState& state, int index,
+    const Eigen::MatrixXd* orbital_direction, const Eigen::MatrixXd* raw_response) const {
+  const Eigen::VectorXd values = expand_support(state.structure_coefficients.col(index));
+  const auto ket = sources_->orthogonal_source(spin_products_, values,
+      direct_ci_->alpha_transform, direct_ci_->beta_transform());
+  const auto physical = sources_->orthogonal_source(spin_products_, values,
+      direct_ci_->alpha_transform, direct_ci_->beta_transform(), true);
+  std::vector<mcscf::SpinFactorSource> directions;
+  Eigen::MatrixXd relative_direction;
+  if (orbital_direction != nullptr) {
+    relative_direction = direct_ci_->integrals.orbital_transform.transpose()
+        .template triangularView<Eigen::Lower>().solve(orbital_direction->transpose()).transpose();
+    directions.push_back(mcscf::generator_factors(direct_ci_->sigma, physical, relative_direction));
+  }
+  Eigen::VectorXd response_values;
+  if (raw_response != nullptr) {
+    response_values.resize(spin_products_.size());
+    for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group)
+      response_values[group] = (*raw_response)(spin_products_[group] / n_unique_beta_,
+          spin_products_[group] % n_unique_beta_);
+    directions.push_back(sources_->orthogonal_source(spin_products_, response_values,
+        direct_ci_->alpha_transform, direct_ci_->beta_transform(), true));
+  }
+  return mcscf::factor_integral_adjoint(
+      direct_ci_->sigma, mcscf::sum_factors(std::move(directions)), ket);
+}
+
 StructureAdjointState StructureAction::prepare_active_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
     const std::vector<double>& state_weights,
@@ -1468,15 +1507,8 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
   result.energies = state_energies;
   // Compare the arithmetic of this consumer, independently of the H/M order.
   // Source-pair moments are quadratic in rank and must not be omitted here.
-  const long double rank = sources_->nodes.size();
-  const long double bra_rank = rank * (spin_exchange_parity_ ? 2 : 1);
-  const long double rows = static_cast<long double>(n_unique_alpha_) + n_unique_beta_;
-  const long double product_rows = spin_exchange_parity_ == 0
-      ? static_cast<long double>(n_unique_alpha_) * n_unique_beta_
-      : static_cast<long double>(n_unique_alpha_) * (n_unique_alpha_ + spin_exchange_parity_) / 2;
-  const long double factor_work = 2 * rows * rank * n_pairs * n_pairs +
-      4 * rows * bra_rank * rank * (n_pairs + 1);
-  result.factor_integrals = rank > 0 && factor_work < 2 * product_rows * n_pairs * n_pairs;
+  const int rank = sources_->nodes.size();
+  result.factor_integrals = prefer_factor_adjoint(rank * (spin_exchange_parity_ ? 2 : 1), rank);
   result.one_electron_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);
   result.pair_kernel_gradient = Eigen::MatrixXd::Zero(
@@ -1752,10 +1784,21 @@ StructureAction::active_integral_adjoint_direction(
       }
     }
 
-    const xmvb::mcscf::DirectCiIntegralAdjoint directional_integral_gradient =
-        direct_ci_->sigma.integral_adjoint(
-            directional_orthogonal_coefficients,
-            orthogonal_coefficients, spin_exchange_parity_);
+    // dY = E(dR R^-1)Y + T W dC. Compare this exact factor order
+    // against the product Gram, including every directional source family.
+    const int rank = sources_->nodes.size();
+    const int physical_rank = rank * (spin_exchange_parity_ ? 2 : 1);
+    const int direction_rank = physical_rank *
+        (2 * static_cast<int>(include_integral_response) + static_cast<int>(include_state_response));
+    xmvb::mcscf::DirectCiIntegralAdjoint directional_integral_gradient;
+    if (prefer_factor_adjoint(direction_rank, rank)) {
+      directional_integral_gradient = source_integral_direction(state, state_index,
+          include_integral_response ? &integral_direction.orbital_transform : nullptr,
+          include_state_response ? &directional_selected_states->states[state_index].coefficient_matrix : nullptr);
+    } else {
+      directional_integral_gradient = direct_ci_->sigma.integral_adjoint(
+          directional_orthogonal_coefficients, orthogonal_coefficients, spin_exchange_parity_);
+    }
     orthogonal_one_gradient_direction.noalias() +=
         2.0 * state_weight * directional_integral_gradient.one_electron;
     orthogonal_pair_gradient_direction.noalias() +=
