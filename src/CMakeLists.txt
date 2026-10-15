@@ -306,6 +306,10 @@ if (BUILD_TESTING)
       ${EIGEN3_INCLUDE_DIR})
   add_test(NAME cli_options COMMAND test_cli_options)
 
+  add_executable(test_product_frontier ${CMAKE_SOURCE_DIR}/tests/mcscf/test_product_frontier.cpp)
+  target_link_libraries(test_product_frontier PRIVATE xmvb_mcscf)
+  add_test(NAME product_frontier COMMAND test_product_frontier)
+
   add_executable(
     test_input_auxiliary_basis
     ${CMAKE_SOURCE_DIR}/tests/input/test_auxiliary_basis.cpp)

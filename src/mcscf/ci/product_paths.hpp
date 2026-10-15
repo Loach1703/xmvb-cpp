@@ -53,8 +53,50 @@ public:
       full_ = true;
       return;
     }
-    std::sort(seeds.begin(), seeds.end());
-    seeds.erase(std::unique(seeds.begin(), seeds.end()), seeds.end());
+    // A generator whose occupied indices are no higher in either spin sector
+    // is redundant for every prefix deficit (including the depth-one halo).
+    // Descending total orbital rank puts every possible dominator first, so
+    // only the current maximal frontier needs to be searched. In particular,
+    // a small frontier costs O(seeds * frontier * electrons), rather than an
+    // all-seed pair scan. Incomparable generators remain separate.
+    struct RankedSeed {
+      Seed value;
+      int alpha_rank, beta_rank;
+    };
+    std::vector<RankedSeed> ranked;
+    ranked.reserve(seeds.size());
+    for (const Seed& seed : seeds)
+      ranked.push_back({seed, orbital_rank(seed.first), orbital_rank(seed.second)});
+    std::sort(ranked.begin(), ranked.end(), [](const RankedSeed& left,
+                                                const RankedSeed& right) {
+      const int left_rank = left.alpha_rank + left.beta_rank;
+      const int right_rank = right.alpha_rank + right.beta_rank;
+      if (left_rank != right_rank) return left_rank > right_rank;
+      return left.value > right.value;
+    });
+    ranked.erase(std::unique(ranked.begin(), ranked.end(),
+                             [](const RankedSeed& left, const RankedSeed& right) {
+                               return left.value == right.value;
+                             }), ranked.end());
+    std::vector<RankedSeed> frontier;
+    frontier.reserve(ranked.size());
+    for (const RankedSeed& candidate : ranked) {
+      bool dominated = false;
+      for (const RankedSeed& maximal : frontier) {
+        if (maximal.alpha_rank < candidate.alpha_rank ||
+            maximal.beta_rank < candidate.beta_rank)
+          continue;
+        if (dominates(maximal.value.first, candidate.value.first) &&
+            dominates(maximal.value.second, candidate.value.second)) {
+          dominated = true;
+          break;
+        }
+      }
+      if (!dominated) frontier.push_back(candidate);
+    }
+    seeds.clear();
+    seeds.reserve(frontier.size());
+    for (const RankedSeed& generator : frontier) seeds.push_back(generator.value);
     size_ = seeds.size();
     words_ = (size_ + 63) / 64;
     bounds_.assign(2 * static_cast<std::size_t>(n_) * (n_ + 1) * words_, 0);
@@ -323,12 +365,34 @@ public:
   }
 
   std::size_t metadata_bytes() const noexcept { return bounds_.capacity() * sizeof(Mask); }
+  /** @brief Number of stored maximal generators (zero for certified shortcuts). */
+  std::size_t generator_count() const noexcept { return size_; }
   /** @brief Maximum bitset workspace, excluding the O(n) cursor frames. */
   std::size_t workspace_bytes(int depth) const noexcept {
     return (n_ + 1) * (depth == 0 ? 2 : 5) * words_ * sizeof(Mask);
   }
 
 private:
+  static int orbital_rank(Mask occupied) noexcept {
+    int rank = 0;
+    while (occupied) {
+      rank += __builtin_ctzll(occupied);
+      occupied &= occupied - 1;
+    }
+    return rank;
+  }
+
+  // For equal electron counts, componentwise occupied-index dominance is
+  // equivalent to having no larger prefix count at any orbital.
+  static bool dominates(Mask upper, Mask lower) noexcept {
+    while (lower) {
+      if (__builtin_ctzll(upper) < __builtin_ctzll(lower)) return false;
+      upper &= upper - 1;
+      lower &= lower - 1;
+    }
+    return true;
+  }
+
   std::size_t offset(int spin, int k, int count) const noexcept {
     return ((static_cast<std::size_t>(spin) * n_ + k) * (n_ + 1) + count) * words_;
   }

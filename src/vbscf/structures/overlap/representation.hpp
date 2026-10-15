@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
@@ -7,6 +8,7 @@
 namespace xmvb::vb {
 
 class StructureAction;
+class ExteriorOrbitalTransform;
 
 /** Gradients in the independent upper-triangular entries of the two charts. */
 struct UpperPair {
@@ -28,6 +30,34 @@ public:
       const std::vector<std::vector<int>>& alpha_strings,
       const std::vector<std::vector<int>>& beta_strings,
       int n_active);
+
+  /** Reusable symmetric Gram action for one fixed orbital chart.
+   * The action and spin-string lists supplied to RepresentationOverlap must
+   * outlive this object. No structure-space Gram matrix is formed.
+   */
+  class PreparedMetric {
+  public:
+    Eigen::MatrixXd operator()(
+        const Eigen::Ref<const Eigen::MatrixXd>& structure_coeff_block) const;
+
+  private:
+    friend class RepresentationOverlap;
+    PreparedMetric(const StructureAction& action,
+                   const std::vector<std::vector<int>>& alpha_strings,
+                   const std::vector<std::vector<int>>& beta_strings,
+                   bool complete_carrier,
+                   const Eigen::Ref<const Eigen::MatrixXd>& upper);
+
+    const StructureAction* action_;
+    const std::vector<std::vector<int>>* alpha_;
+    const std::vector<std::vector<int>>* beta_;
+    std::shared_ptr<const ExteriorOrbitalTransform> alpha_transform_;
+    std::shared_ptr<const ExteriorOrbitalTransform> beta_transform_;
+    Eigen::MatrixXd kernel_;
+  };
+
+  PreparedMetric prepare_metric(
+      const Eigen::Ref<const Eigen::MatrixXd>& upper) const;
 
   Eigen::MatrixXd apply(
       const Eigen::Ref<const Eigen::MatrixXd>& left_upper,

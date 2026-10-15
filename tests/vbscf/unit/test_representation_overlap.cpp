@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include <Eigen/Cholesky>
 #include <Eigen/LU>
 #include <Eigen/QR>
 
@@ -175,6 +176,27 @@ void check_case(const std::vector<std::vector<int>>& alpha,
   require(std::abs(scalar - x.dot(reference * y)) < 2e-12,
           "cross-Gram scalar differs from explicit occupied minors");
 
+  const Eigen::MatrixXd metric_reference =
+      reference_cross(right, right, w, alpha, beta);
+  const auto prepared = overlap.prepare_metric(right);
+  require(relative_error(prepared(block), metric_reference * block) < 2e-12 &&
+              relative_error(prepared(block),
+                             overlap.apply(right, right, block)) < 2e-12,
+          "prepared metric multi-RHS action differs from cross-Gram action");
+  require(relative_error(prepared(Eigen::Matrix3d::Identity()),
+                         metric_reference) < 2e-12,
+          "prepared metric matrix differs from explicit occupied minors");
+  require(relative_error(prepared(x), metric_reference * x) < 2e-12,
+          "prepared metric vector action differs from explicit occupied minors");
+  require(Eigen::LLT<Eigen::MatrixXd>(metric_reference).info() == Eigen::Success &&
+              x.dot(prepared(x).col(0)) > 0.0,
+          "prepared representation metric is not positive definite");
+  Eigen::MatrixXd mutable_chart = right;
+  const auto frozen = overlap.prepare_metric(mutable_chart);
+  mutable_chart(0, 0) += 0.2;
+  require(relative_error(frozen(block), metric_reference * block) < 2e-12,
+          "prepared metric did not retain its fixed chart");
+
   const Eigen::MatrixXd reverse =
       overlap.apply(right, left, Eigen::Matrix3d::Identity());
   require(relative_error(reverse, reference.transpose()) < 2e-12,
@@ -257,6 +279,7 @@ int main() {
     const std::vector<std::vector<int>> full_beta = {
         {0}, {1}, {2}, {3}};
     check_case(full_alpha, full_beta, true);
+    check_case(full_beta, full_beta, true);
     check_case({{0, 1}, {0, 2}, {1, 3}}, {{0}, {2}, {3}}, false);
     std::cout << "Selected-space representation cross-Gram and derivatives: passed\n";
     return 0;

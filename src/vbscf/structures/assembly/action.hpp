@@ -21,6 +21,7 @@ namespace xmvb::vb {
 class ExteriorOrbitalTransform;
 
 class StructureMetricInverse;
+class RestrictedMetricInverse;
 
 /** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
 enum class StructureActionMode { Davidson, ActionOnly };
@@ -340,6 +341,7 @@ private:
       const std::function<Eigen::MatrixXd(int)>& coefficients,
       bool collect_images) const;
   friend class StructureMetricInverse;
+  friend class RestrictedMetricInverse;
   struct OrthogonalDirectCiData;
   struct TiledPairData;
   struct StructureTerm {

@@ -1,11 +1,13 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <Eigen/Core>
 
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/preparation/overlap_pullback.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
+#include "vbscf/structures/orthogonal_ci/restricted_metric.hpp"
 
 namespace xmvb::vb {
 struct AcceptedPointContext;
@@ -71,6 +73,11 @@ private:
   Eigen::MatrixXd residual_upper_gradient_;
   Eigen::MatrixXd residual_overlap_gradient_;
   const StructureMetricInverse* inverse_ = nullptr;
+  std::unique_ptr<RestrictedMetricInverse> restricted_inverse_;
+  /** One trial chart, shared by retraction and its gradient solve. */
+  mutable Eigen::MatrixXd metric_upper_;
+  mutable std::optional<RepresentationOverlap::PreparedMetric> prepared_metric_;
+  mutable std::shared_ptr<const RestrictedMetricInverse::Prepared> metric_preconditioner_;
 };
 
 }  // namespace xmvb::vb

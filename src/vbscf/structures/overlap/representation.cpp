@@ -188,6 +188,43 @@ Eigen::MatrixXd carrier_adjoint(
   return action.contract_spin_product_block(image);
 }
 
+Eigen::MatrixXd apply_pair_kernel(
+    const StructureAction& action, const Strings& alpha, const Strings& beta,
+    const Eigen::MatrixXd& kernel,
+    const Eigen::Ref<const Eigen::MatrixXd>& coeff) {
+  const int na = static_cast<int>(alpha.size());
+  const int nb = static_cast<int>(beta.size());
+  Eigen::MatrixXd result(action.n_structures(), coeff.cols());
+  const std::size_t denominator = sizeof(double) *
+      static_cast<std::size_t>(std::max(1, 2 * nb + 1));
+  const int rows_per_tile = std::max(1, std::min(
+      na, static_cast<int>(kRowWorkspaceBytes / denominator)));
+  for (int col = 0; col < coeff.cols(); ++col) {
+    Eigen::MatrixXd one_coeff = coeff.col(col);
+    Eigen::MatrixXd one_result = Eigen::MatrixXd::Zero(action.n_structures(), 1);
+    for (int begin = 0; begin < na; begin += rows_per_tile) {
+      const int rows = std::min(rows_per_tile, na - begin);
+      Eigen::MatrixXd projected = Eigen::MatrixXd::Zero(rows, nb);
+      for (int ar = 0; ar < na; ++ar) {
+        const Eigen::MatrixXd source = row_of(action, one_coeff, ar, nb);
+        for (int ai = 0; ai < rows; ++ai)
+          projected.row(ai).noalias() +=
+              pair_value(kernel, alpha[begin + ai], alpha[ar]) * source.row(0);
+      }
+      Eigen::MatrixXd tile(rows, nb);
+      for (int bl = 0; bl < nb; ++bl) {
+        Eigen::VectorXd overlap(nb);
+        for (int br = 0; br < nb; ++br)
+          overlap[br] = pair_value(kernel, beta[bl], beta[br]);
+        tile.col(bl).noalias() = projected * overlap;
+      }
+      action.add_spin_product_tile(tile, begin, 0, &one_result);
+    }
+    result.col(col) = one_result;
+  }
+  return result;
+}
+
 Eigen::MatrixXd chart_inverse_transpose(
     const Eigen::Ref<const Eigen::MatrixXd>& r) {
   return r.template triangularView<Eigen::Upper>()
@@ -210,6 +247,48 @@ RepresentationOverlap::RepresentationOverlap(
     throw std::invalid_argument("spin strings do not match action carrier");
 }
 
+RepresentationOverlap::PreparedMetric::PreparedMetric(
+    const StructureAction& action, const Strings& alpha, const Strings& beta,
+    bool complete_carrier, const Eigen::Ref<const Eigen::MatrixXd>& upper)
+    : action_(&action), alpha_(&alpha), beta_(&beta) {
+  if (complete_carrier) {
+    alpha_transform_ =
+        std::make_shared<ExteriorOrbitalTransform>(alpha, upper);
+    if (&alpha == &beta || alpha == beta) {
+      beta_transform_ = alpha_transform_;
+    } else {
+      beta_transform_ =
+          std::make_shared<ExteriorOrbitalTransform>(beta, upper);
+    }
+  } else {
+    kernel_ = upper.transpose() * upper;
+  }
+}
+
+Eigen::MatrixXd RepresentationOverlap::PreparedMetric::operator()(
+    const Eigen::Ref<const Eigen::MatrixXd>& coeff) const {
+  if (coeff.rows() != action_->n_structures() || coeff.cols() <= 0 ||
+      !coeff.allFinite()) throw std::invalid_argument("invalid structure block");
+  if (!alpha_transform_)
+    return apply_pair_kernel(*action_, *alpha_, *beta_, kernel_, coeff);
+
+  Eigen::MatrixXd result(action_->n_structures(), coeff.cols());
+  for (int col = 0; col < coeff.cols(); ++col) {
+    Eigen::MatrixXd one = coeff.col(col);
+    Eigen::MatrixXd image = carrier_image(
+        *action_, *alpha_transform_, *beta_transform_, one);
+    result.col(col) = carrier_adjoint(
+        *action_, *alpha_transform_, *beta_transform_, std::move(image));
+  }
+  return result;
+}
+
+RepresentationOverlap::PreparedMetric RepresentationOverlap::prepare_metric(
+    const Eigen::Ref<const Eigen::MatrixXd>& upper) const {
+  validate_chart(upper, n_active_);
+  return PreparedMetric(*action_, alpha_, beta_, complete_carrier_, upper);
+}
+
 Eigen::MatrixXd RepresentationOverlap::apply(
     const Eigen::Ref<const Eigen::MatrixXd>& left_upper,
     const Eigen::Ref<const Eigen::MatrixXd>& right_upper,
@@ -218,8 +297,6 @@ Eigen::MatrixXd RepresentationOverlap::apply(
   validate_chart(right_upper, n_active_);
   if (coeff.rows() != action_->n_structures() || coeff.cols() <= 0 ||
       !coeff.allFinite()) throw std::invalid_argument("invalid structure block");
-  const int na = static_cast<int>(alpha_.size());
-  const int nb = static_cast<int>(beta_.size());
   Eigen::MatrixXd result(action_->n_structures(), coeff.cols());
   if (complete_carrier_) {
     ExteriorOrbitalTransform la(alpha_, left_upper), lb(beta_, left_upper);
@@ -231,35 +308,8 @@ Eigen::MatrixXd RepresentationOverlap::apply(
     }
     return result;
   }
-  const Eigen::MatrixXd k = left_upper.transpose() * right_upper;
-  const std::size_t denominator = sizeof(double) *
-      static_cast<std::size_t>(std::max(1, 2 * nb + 1));
-  const int rows_per_tile = std::max(1, std::min(
-      na, static_cast<int>(kRowWorkspaceBytes / denominator)));
-  for (int col = 0; col < coeff.cols(); ++col) {
-    Eigen::MatrixXd one_coeff = coeff.col(col);
-    Eigen::MatrixXd one_result = Eigen::MatrixXd::Zero(action_->n_structures(), 1);
-    for (int begin = 0; begin < na; begin += rows_per_tile) {
-      const int rows = std::min(rows_per_tile, na - begin);
-      Eigen::MatrixXd projected = Eigen::MatrixXd::Zero(rows, nb);
-      for (int ar = 0; ar < na; ++ar) {
-        const Eigen::MatrixXd source = row_of(*action_, one_coeff, ar, nb);
-        for (int ai = 0; ai < rows; ++ai)
-          projected.row(ai).noalias() +=
-              pair_value(k, alpha_[begin + ai], alpha_[ar]) * source.row(0);
-      }
-      Eigen::MatrixXd tile(rows, nb);
-      for (int bl = 0; bl < nb; ++bl) {
-        Eigen::VectorXd overlap(nb);
-        for (int br = 0; br < nb; ++br)
-          overlap[br] = pair_value(k, beta_[bl], beta_[br]);
-        tile.col(bl).noalias() = projected * overlap;
-      }
-      action_->add_spin_product_tile(tile, begin, 0, &one_result);
-    }
-    result.col(col) = one_result;
-  }
-  return result;
+  return apply_pair_kernel(*action_, alpha_, beta_,
+                           left_upper.transpose() * right_upper, coeff);
 }
 
 Eigen::MatrixXd RepresentationOverlap::apply_direction(
