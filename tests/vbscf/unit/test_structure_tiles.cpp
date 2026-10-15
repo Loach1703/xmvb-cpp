@@ -490,6 +490,54 @@ void check_mixed_source_images() {
   }
 }
 
+/** @brief Sparse coupled responses retain both full-carrier residual terms. */
+void check_factor_structure_response(int parity, bool unequal = false) {
+  const auto fixture = unequal ? make_fixture(5,2,1) : make_fixture(6,3,3);
+  CovalentExpansion expansion;
+  for (int s = 0; s < 2; ++s) {
+    expansion.product_alpha.push_back(fixture.alpha[0]);
+    expansion.product_beta.push_back(fixture.beta[1+2*s]);
+    expansion.terms.push_back({{s,0.7}});
+    if (parity) {
+      expansion.product_alpha.push_back(fixture.alpha[1+2*s]);
+      expansion.product_beta.push_back(fixture.beta[0]);
+      expansion.terms.push_back({{s,0.7*parity}});
+    }
+  }
+  const auto cache = topology(fixture,expansion.product_alpha,expansion.product_beta);
+  const xmvb::vb::StructureAction action(expansion.terms,2,cache,fixture.overlap,
+      fixture.one_electron,fixture.two_electron,fixture.n,nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const Eigen::MatrixXd c = (Eigen::Matrix2d() << 0.7,0.2,-0.3,0.8).finished();
+  const Eigen::MatrixXd q = (Eigen::Matrix2d() << 0.02,-0.03,0.04,0.01).finished();
+  const Eigen::MatrixXd mu = (Eigen::Matrix2d() << 0.01,0.02,-0.03,0.005).finished();
+  const auto accepted = action.prepare_active_adjoint(c,{0.3,0.7},{-1.1,-0.7});
+  xmvb::vb::SelectedStateDeterminantMatrices raw;
+  raw.n_unique_alpha = fixture.alpha.size(); raw.n_unique_beta = fixture.beta.size();
+  raw.states.resize(2);
+  for (int i = 0; i < 2; ++i) raw.states[i].coefficient_matrix = action.expand_structure_block(q.col(i));
+  const auto reference = action.active_integral_adjoint_direction(accepted,
+      &raw,&mu,{}, {}, {},nullptr,false);
+  // No accepted product arrays may be needed by this consumer.
+  auto sparse = accepted;
+  sparse.orthogonal_coefficients.clear(); sparse.residuals.clear();
+  auto sweep = action.apply_response(sparse,q);
+  require(sweep.images.tiles.source_columns > 0 &&
+      sweep.images.tiles.source_workspace_bound <= xmvb::mcscf::kFactorWorkspaceBytes,
+          "sparse structure response missed source contraction or exceeded its workspace");
+  check_images(sweep.images,reference_images(fixture,expansion.terms,
+      expansion.product_alpha,expansion.product_beta,q));
+  const auto actual = action.finish_response(sparse,std::move(sweep),mu);
+  require((actual.overlap-reference.overlap).norm() < 2e-11 &&
+      (actual.one_electron-reference.one_electron).norm() < 2e-11 &&
+      (actual.pair_kernel-reference.pair_kernel).norm() < 2e-11,
+      "source structure response lost residual ordering, parity or multistate gauge");
+  const auto zero = action.apply_response(sparse,Eigen::MatrixXd::Zero(2,2));
+  require(zero.images.hamiltonian.isZero(0) && zero.images.overlap.isZero(0) &&
+      zero.generator.isZero(0) && zero.one_electron.isZero(0) && zero.pair_kernel.isZero(0),
+      "exactly zero structure response performed a nonzero contraction");
+}
+
 /** @brief Production accepted gradient keeps the nonstationary carrier term. */
 void check_factor_accepted_gradient(bool sparse = false) {
   const int n = sparse ? 5 : 8;
@@ -1289,6 +1337,86 @@ void benchmark_selected12(int selected_count, bool compare_reference,
               << (actual.overlap - reference.overlap).norm() << '\n';
 }
 
+/** @brief Complete response consumer; native and oracle runs stay separate. */
+void benchmark_structure_response(int n, int selected_count, bool compare_reference) {
+  require(selected_count == 1 || selected_count == 2 || selected_count == 3 ||
+          selected_count == 20 || selected_count == 132,
+          "structure-response count must be 1, 2, 3, 20, or 132");
+  const auto fixture = make_fixture(n,n/2,n/2);
+  const auto pairings = rumer_pairings(0,n);
+  const auto expansion = covalent_rumer_terms(n,fixture.alpha,fixture.beta,
+      std::vector<Pairing>(pairings.begin(),pairings.begin()+selected_count));
+  const auto cache = topology(fixture,expansion.product_alpha,expansion.product_beta);
+  const xmvb::vb::StructureAction action(expansion.terms,selected_count,cache,fixture.overlap,
+      fixture.one_electron,fixture.two_electron,n,nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  Eigen::MatrixXd c = test_vectors(selected_count,1)/std::sqrt(selected_count);
+  Eigen::MatrixXd q = 0.3*c.array().sin().matrix();
+  if (n == 14 && selected_count > 1) {
+    const auto mc = action.apply_overlap(c);
+    q.noalias() -= c * (q.col(0).dot(mc.col(0))/c.col(0).dot(mc.col(0)));
+    require(q.norm() > 1e-8,"target response has no nontrivial CI tangent");
+    const auto mq = action.apply_overlap(q);
+    q *= 0.2/std::sqrt(q.col(0).dot(mq.col(0)));
+    require(std::abs(c.col(0).dot(action.apply_overlap(q).col(0))) < 1e-12,
+            "target response retained the normalization direction");
+  }
+  const auto begin = Clock::now();
+  const auto accepted = action.prepare_active_adjoint(c,{1.0},{-5.3});
+  const auto prepared = Clock::now();
+  auto cold = action.apply_response(accepted,q);
+  const auto end_cold = Clock::now();
+  auto warm = action.apply_response(accepted,q);
+  const auto end_warm = Clock::now();
+  const auto source_columns = warm.images.tiles.source_columns;
+  const auto workspace = warm.images.tiles.source_workspace_bound;
+  const auto images = warm.images;
+  const Eigen::MatrixXd mu = Eigen::MatrixXd::Constant(1,1,0.017);
+  const auto gradient = action.finish_response(accepted,std::move(warm),mu);
+  const auto cold_gradient = action.finish_response(accepted,std::move(cold),mu);
+  require((gradient.overlap-cold_gradient.overlap).norm() < 1e-12,
+          "warm structure response differs from the cold call");
+  rusage usage{};
+  require(getrusage(RUSAGE_SELF,&usage) == 0,"getrusage failed");
+  const auto native_rss = usage.ru_maxrss;
+  double reference_seconds = 0, image_error = 0, adjoint_error = 0;
+  if (compare_reference) {
+    const auto reference_images = ::reference_images(fixture,expansion.terms,
+        expansion.product_alpha,expansion.product_beta,q);
+    check_images(images,reference_images);
+    image_error = (images.hamiltonian-reference_images.hamiltonian).norm();
+    xmvb::vb::SelectedStateDeterminantMatrices raw;
+    raw.n_unique_alpha = fixture.alpha.size(); raw.n_unique_beta = fixture.beta.size();
+    raw.states.resize(1); raw.states[0].coefficient_matrix = action.expand_structure_block(q);
+    const auto start = Clock::now();
+    // Same-binary product sigma/adjoint consumer, without structure H/M images.
+    const auto reference = action.active_integral_response_adjoint(accepted,raw,mu);
+    reference_seconds = std::chrono::duration<double>(Clock::now()-start).count();
+    adjoint_error = std::max({(gradient.overlap-reference.overlap).norm(),
+        (gradient.one_electron-reference.one_electron).norm(),
+        (gradient.pair_kernel-reference.pair_kernel).norm()});
+    require(adjoint_error < 3e-10*std::max({1.0,reference.overlap.norm(),
+        reference.one_electron.norm(),reference.pair_kernel.norm()}),
+        "structure response differs from the current product reference");
+  }
+  const auto seconds = [](auto a, auto b) { return std::chrono::duration<double>(b-a).count(); };
+  std::cout << std::setprecision(17)
+            << "case=CAS(" << n << ',' << n << ")_structure_response\nstructures=" << selected_count << '\n'
+            << "orbitals=" << n << '\n'
+            << "prepare_seconds=" << seconds(begin,prepared) << '\n'
+            << "cold_response_seconds=" << seconds(prepared,end_cold) << '\n'
+            << "warm_response_seconds=" << seconds(end_cold,end_warm) << '\n'
+            << "source_columns=" << source_columns << '\n'
+            << "source_workspace_bound=" << workspace << '\n'
+            << "checksum=" << images.hamiltonian.sum()+gradient.overlap.sum()+
+                gradient.one_electron.sum()+gradient.pair_kernel.sum() << '\n'
+            << "native_max_rss_kib=" << native_rss << '\n'
+            << "reference_checked=" << compare_reference << '\n'
+            << "reference_adjoint_only_seconds=" << reference_seconds << '\n'
+            << "image_error=" << image_error << '\n'
+            << "adjoint_error=" << adjoint_error << '\n';
+}
+
 /** @brief A target-size single covalent structure, with optional full-carrier oracle. */
 void benchmark_source_size(int n, bool compare_reference) {
   require(n == 12 || n == 14, "source-size benchmark supports 12 or 14 orbitals");
@@ -1656,6 +1784,14 @@ int main(int argc, char** argv) {
       benchmark_selected12(std::stoi(argv[2]), true);
     } else if (argc == 3 && std::string(argv[1]) == "--sources12") {
       benchmark_selected12(std::stoi(argv[2]), true, false, false, true);
+    } else if (argc == 3 && std::string(argv[1]) == "--structure-response12") {
+      benchmark_structure_response(12,std::stoi(argv[2]),false);
+    } else if (argc == 3 && std::string(argv[1]) == "--structure-response12-reference") {
+      benchmark_structure_response(12,std::stoi(argv[2]),true);
+    } else if (argc == 3 && std::string(argv[1]) == "--structure-response14") {
+      benchmark_structure_response(14,std::stoi(argv[2]),false);
+    } else if (argc == 3 && std::string(argv[1]) == "--structure-response14-reference") {
+      benchmark_structure_response(14,std::stoi(argv[2]),true);
     } else if (argc == 3 && std::string(argv[1]) == "--source-size") {
       benchmark_source_size(std::stoi(argv[2]), false);
     } else if (argc == 3 && std::string(argv[1]) == "--source-size-parity") {
@@ -1689,6 +1825,8 @@ int main(int argc, char** argv) {
       check_ionic_sources();
       check_source_cover();
       check_mixed_source_images();
+      for (int parity : {0,1,-1}) check_factor_structure_response(parity);
+      check_factor_structure_response(0,true);
       check_factor_accepted_gradient();
       check_factor_accepted_gradient(true);
       check_factor_state_average();
@@ -1711,6 +1849,8 @@ int main(int argc, char** argv) {
       throw std::invalid_argument(
           "usage: test_structure_tiles [--benchmark12|--benchmark12-no-reference|"
           "--selected12 N|--selected12-parity N|--sources12 N|--paths12 N|--gram12 N|"
+          "--structure-response12 N|--structure-response12-reference N|"
+          "--structure-response14 N|--structure-response14-reference N|"
           "--source-size N|--source-size-parity N|--source-cover-size N|--source-cover-reference N|"
           "--factor-adjoint N|--factor-adjoint-reference N|--factor-direction N|--factor-direction-reference N|"
           "--factor-generator N|--factor-generator-reference N|--factor-generator-check16]");

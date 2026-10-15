@@ -35,12 +35,36 @@ sha256sum "$source_dir/build/src/test_structure_tiles" > "$artifact/binary.sha25
 sha256sum "$source_dir/build/src/test_ci_factors" >> "$artifact/binary.sha256"
 sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_tiles.cpp,sources.cpp,sources.hpp,action.cpp} \
  "$source_dir/tests/vbscf/unit/test_structure_tiles.cpp" > "$artifact/sources.sha256"
+sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_response.cpp,action.hpp} >> "$artifact/sources.sha256"
 sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,factors_internal.hpp,factor_generator.cpp,factor_plan.cpp,sigma.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" \
  -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric)$' \
  --output-on-failure > "$artifact/ctest.out" 2>&1
 [[ ${1:-} == --tests-only ]] && exit 0
+if [[ ${1:-} == --response14 ]]; then
+ for mode in structure-response14 structure-response14-reference; do
+  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+   /usr/bin/time -v -o "$artifact/2-$mode.time" \
+   "$source_dir/build/src/test_structure_tiles" --"$mode" 2 \
+   > "$artifact/2-$mode.out" 2> "$artifact/2-$mode.err"
+ done
+ exit 0
+fi
+if [[ ${1:-} == --responses ]]; then
+ for count in 1 3 20 132; do
+  for mode in structure-response12 structure-response12-reference; do
+   srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+    /usr/bin/time -v -o "$artifact/$count-$mode.time" \
+    "$source_dir/build/src/test_structure_tiles" --"$mode" "$count" \
+    > "$artifact/$count-$mode.out" 2> "$artifact/$count-$mode.err"
+  done
+ done
+ if [[ -n ${2:-} ]]; then
+  bash "$source_dir/tests/mcscf/factor_gradient.sbatch" "$2"
+ fi
+ exit 0
+fi
 if [[ ${1:-} == --generator16 ]]; then
  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
   /usr/bin/time -v -o "$artifact/16-factor-generator.time" \

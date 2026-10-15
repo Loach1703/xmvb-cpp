@@ -1861,6 +1861,9 @@ StructureResponseSweep StructureAction::apply_response(
       coefficients.cols() != static_cast<Eigen::Index>(state.weights.size()) ||
       !coefficients.allFinite())
     throw std::invalid_argument("invalid structure response columns");
+  if (direct_ci_ && prefer_factor_response(direct_ci_->sigma))
+    return source_response(state,coefficients,direct_ci_->alpha_transform,
+        direct_ci_->beta_transform(),direct_ci_->sigma);
   return contract_response(state, [&](int i) {
     return expand_structure_block(coefficients.col(i));
   }, true);

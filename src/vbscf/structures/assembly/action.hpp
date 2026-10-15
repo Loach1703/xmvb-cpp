@@ -409,6 +409,19 @@ private:
       const ExteriorOrbitalTransform& beta_transform,
       const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
       std::size_t workspace_bytes) const;
+  /** @brief Shared source sweep over already expanded original-support columns. */
+  StructureActionResult apply_source_columns(int width,
+      const std::function<Eigen::VectorXd(int)>& support_column,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
+      std::size_t workspace_bytes) const;
+  /** @brief Includes both residual-generator contractions and the H/M images. */
+  bool prefer_factor_response(const mcscf::DirectCiSigmaAction& sigma) const;
+  /** @brief Coupled coefficient response directly from structure-space columns. */
+  StructureResponseSweep source_response(const StructureAdjointState& state,
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma) const;
   /** @brief Compares algebraic operation counts; independent of memory budgets. */
   bool prefer_source_contraction(const ExteriorOrbitalTransform& alpha_transform,
       const ExteriorOrbitalTransform& beta_transform,

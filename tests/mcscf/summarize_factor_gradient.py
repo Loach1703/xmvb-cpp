@@ -115,6 +115,35 @@ def generators(artifacts, output):
     save(output, rows)
 
 
+def responses(artifacts, output):
+    rows = []
+    for artifact in artifacts:
+        for path in sorted(artifact.glob("*-structure-response*.out")):
+            case = re.fullmatch(r"(\d+)-structure-response(\d+)\.out", path.name)
+            if case is None:
+                continue
+            count, n = map(int, case.groups())
+            native = values(path)
+            reference = values(artifact / f"{count}-structure-response{n}-reference.out")
+            rows.append(dict(
+                run=artifact.name, orbitals=n, structures=count,
+                node=(artifact / "node.txt").read_text().strip(),
+                order="source" if int(native["source_columns"]) else "product",
+                cold_seconds=float(native["cold_response_seconds"]),
+                warm_seconds=float(native["warm_response_seconds"]),
+                rss_mib=float(native["native_max_rss_kib"])/1024,
+                prepare_seconds=float(native["prepare_seconds"]),
+                source_columns=int(native["source_columns"]),
+                source_workspace_bound=int(native["source_workspace_bound"]),
+                checksum=float(native["checksum"]),
+                reference_checked=int(reference["reference_checked"]),
+                reference_adjoint_only_seconds=float(reference["reference_adjoint_only_seconds"]),
+                image_error=float(reference["image_error"]),
+                adjoint_error=float(reference["adjoint_error"])))
+    rows.sort(key=lambda row: (row["run"], row["orbitals"], row["structures"]))
+    save(output, rows)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="kind", required=True)
@@ -124,6 +153,9 @@ def main():
     generator = sub.add_parser("generators")
     generator.add_argument("output", type=Path)
     generator.add_argument("artifacts", type=Path, nargs="+")
+    response = sub.add_parser("responses")
+    response.add_argument("output", type=Path)
+    response.add_argument("artifacts", type=Path, nargs="+")
     chain = sub.add_parser("scf")
     chain.add_argument("artifact", type=Path)
     chain.add_argument("baseline", type=Path)
@@ -133,6 +165,8 @@ def main():
         kernels(args.artifacts, args.output)
     elif args.kind == "generators":
         generators(args.artifacts, args.output)
+    elif args.kind == "responses":
+        responses(args.artifacts, args.output)
     else:
         scf(args.artifact, args.baseline, args.output)
 

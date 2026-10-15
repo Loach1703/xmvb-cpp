@@ -222,7 +222,13 @@ already use the latter factor order when advantageous. Full accepted residuals,
 directional carriers and the remaining generator/HVP consumers still require
 migration; these bounds do not yet describe the complete SCF pipeline.
 
-Section8.4 derives the joint source/channel work plan. It counts source
+Section8.4 derives the coefficient-response consumer. It keeps both
+residual-generator terms and the separate state-average gauge term, using
+original-support response values rather than a complete response carrier.
+Its arithmetic-order comparison includes all adjoints and the H/M image sweep.
+The accepted arrays and orbital-direction consumers still require migration.
+
+Section8.5 derives the joint source/channel work plan. It counts source
 regeneration, matching-link visits, range lookups and repeated output traffic.
 Links are generated in packed-channel order, so a channel tile visits its
 exact link interval without a string-by-channel offset table. Scheduling never

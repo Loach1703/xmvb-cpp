@@ -90,6 +90,11 @@ full `U * r` factors when a broad support makes those product-sized.
    HVP integral adjoints consume this exact source sum; its temporary loading
    panel is included in the numerical workspace budget. Full carrier residual
    and generator-gradient derivatives still need migration.
+   The coupled structure-coefficient response now has a bounded factor order:
+   expand its original support once, reuse the common H/M source sweep, and
+   contract the integral derivative plus both residual-generator terms. This
+   consumer needs no accepted or response product array; broad-support cases
+   retain the exact product order when its total adjoint/image work is lower.
 6. [ ] Remove obsolete full-product production consumers after migration.
    Explicit full-carrier arrays remain only as independent small-system test
    oracles; broad-support production uses generated product tiles, not a dense

@@ -1,0 +1,13 @@
+case=CAS(12,12)_structure_response
+structures=20
+prepare_seconds=0.19555536700000001
+cold_response_seconds=0.225725116
+warm_response_seconds=0.216170427
+source_columns=0
+source_workspace_bound=0
+checksum=7.2359405450785337
+native_max_rss_kib=102876
+reference_checked=0
+reference_adjoint_only_seconds=0
+image_error=0
+adjoint_error=0

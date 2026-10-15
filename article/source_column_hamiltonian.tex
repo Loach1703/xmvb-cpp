@@ -42,7 +42,8 @@ without a closure assumption or intermediate amplitude truncation. Source
 and channel tiling bound the numerical workspace. Optional spin-exchange
 reduction and causal pruning of the exterior adjoint are derived separately.
 The scope is the Hamiltonian/overlap action, its active-integral adjoint,
-and the factor representation of the directional integral adjoint.
+directional integral adjoints, oriented residual-generator adjoints, and
+selected-structure coefficient-response contractions.
 \end{abstract}
 
 \section{The selected VB space}
@@ -792,6 +793,66 @@ without $\Ha$, the channel sweep and residual outputs are absent, giving
 $(U_\alpha+U_\beta)(s_\ell+2s_r)+s_\ell s_r$ plus the same loading
 and reduction terms. No per-worker spin/product array is allocated.
 
+\subsection{Selected-structure response without a response carrier}\label{sec:factor-response}
+
+At a fixed orbital point let $Y_i=\Ta\Wa\vv C_i$ and
+$Q_i=\Ta\Wa\vv q_i$, where $\vv q_i$ is a coefficient response in
+the original selected structure space. Write
+$\mathcal J_i=\mathcal J(Y_i,Y_i)$ and
+$\Gamma_i=2\mathcal D((\Ha-E_i)Y_i,Y_i)$ for its unweighted accepted
+integral and exterior-generator adjoints. With $E_i$ fixed, their
+coefficient-response contributions are exactly
+\begin{align}\label{eq:factor-structure-response}
+ \delta\mathcal J_i&=2\mathcal J(Q_i,Y_i),\\
+ \delta\Gamma_i&=2\mathcal D((\Ha-E_i)Q_i,Y_i)
+                    +2\mathcal D((\Ha-E_i)Y_i,Q_i).
+\end{align}
+The first residual is the response of the wave function; the second is the
+response of the generator's right argument. Neither residual may be
+projected into the selected structure space before its generator contraction.
+Both are evaluated by the residual panels of
+Eq.~\eqref{eq:residual-panels}. Thus no $Q_i$, $\Ha Q_i$, or response
+residual product array is required. Each raw response is generated once
+on $\Omega$ and reused by the spin-factor adjoints and the tiled
+$\Wa^*\Ta^*\Ha Q_i$, $\Wa^*\Ta^*Q_i$ projections.
+
+For positive state weights $w_i$ the contributions above are summed with $w_i$.
+The separate overlap-multiplier term is
+\begin{equation}
+ 2\sum_{ij} w_i\mu_{ji}\mathcal D(Y_j,Y_i),\qquad
+ \mu_{ji}=\frac12\left[\lambda_{ji}+\frac{w_j}{w_i}\lambda_{ij}\right],
+\end{equation}
+where $\lambda_{ij}$ are the directional normalization/orthogonality multipliers
+in the structure-response equations. This weight-symmetrized gauge
+contribution is not part of either residual panel.
+An exactly zero $\vv q_i$ contributes no images or derivative tensors;
+this follows from linearity, not an amplitude threshold.
+
+For source counts $r_\ell,r_r$, the leading dense work of the integral
+adjoint and both residual-generator contractions is
+\begin{equation}
+ O\bigl((U_\alpha+U_\beta)
+        [r_r d^2+r_\ell r_r d]\bigr).
+\end{equation}
+Constants include two residual sweeps for each generator contraction;
+the structure-image projection adds another factor sweep. Those costs
+must be included when choosing the contraction order. With equal
+representative source counts $r_r=r$ and physical bra count $r_\ell=l$,
+the leading multiply--add count used for this consumer is
+\begin{equation}
+ W_{\rm source}=12(U_\alpha+U_\beta)rd^2
+            +(U_\alpha+U_\beta)lr(12d+20).
+\end{equation}
+The coefficients count one integral adjoint, two residual-generator
+adjoints and one H/M image sweep. The fused product sigma/Gram has leading
+work $4N_{\rm product}d^2$, with $N_{\rm product}$ reduced only by a
+certified exchange parity. Comparing these leading operation counts
+does not fit timings or change numerical thresholds. Link work,
+source transforms, sampling and finite tile effects still affect wall time.
+A product order
+can still be cheaper for broad support; this is an exact arithmetic-order
+choice, not a change of variational space or a memory admission criterion.
+
 \subsection{Joint source/channel scheduling}\label{sec:factor-schedule}
 
 For source widths $s_\ell,s_r$ and channel width $p$, define
@@ -879,6 +940,8 @@ VB source generation, sampling and $\Wa^*$ &
 \texttt{apply\_source\_tiles()} \\
 Common factor sweep and integral adjoint &
 \path{mcscf/ci/factors.cpp} \\
+Selected-structure response and its adjoints &
+\path{vbscf/structures/assembly/source_response.cpp} \\
 Generator and residual-weighted factor adjoints &
 \path{mcscf/ci/factor_generator.cpp} \\
 Joint source/channel work plan &
@@ -910,6 +973,10 @@ Accepted-state transition densities use Eq.~\eqref{eq:generator-factor}
 when advantageous. The residual-panel kernel of
 Eq.~\eqref{eq:residual-panels} is available and independently tested;
 accepted-state residual storage is not yet removed from the remaining consumers.
+The coupled coefficient-response consumer in
+Section~\ref{sec:factor-response} uses neither accepted nor response product
+arrays when its factor contraction order is cheaper. Orbital-direction
+consumers and the accepted-state producer still require migration.
 
 \paragraph{Main result.}
 Equations~\eqref{eq:Hfactor}--\eqref{eq:final} give the exact

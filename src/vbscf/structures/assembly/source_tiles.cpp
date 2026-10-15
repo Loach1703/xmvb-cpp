@@ -60,6 +60,16 @@ StructureActionResult StructureAction::apply_source_tiles(
     const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
     const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
     std::size_t workspace_bytes) const {
+  return apply_source_columns(vectors.cols(), [&](int column) {
+    return expand_support(vectors.col(column));
+  }, alpha, beta, sigma, overlap_only, workspace_bytes);
+}
+
+StructureActionResult StructureAction::apply_source_columns(int width,
+    const std::function<Eigen::VectorXd(int)>& support_column,
+    const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+    const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
+    std::size_t workspace_bytes) const {
   profiling::ScopedPhase phase(profiling::Phase::CiSigma);
   using Clock = std::chrono::steady_clock;
   const bool timing = profiling::phase_totals().enabled;
@@ -74,10 +84,10 @@ StructureActionResult StructureAction::apply_source_tiles(
   mcscf::FactorActionWorkspace workspace(shape, sigma.channel_kernel().rows(), workspace_bytes, overlap_only);
   int source_tile = 0, channel_tile = 0;
   StructureActionResult result{
-      Eigen::MatrixXd::Zero(n_structures_, vectors.cols()),
-      Eigen::MatrixXd::Zero(n_structures_, vectors.cols())};
-  for (int vector = 0; vector < vectors.cols(); ++vector) {
-    const Eigen::VectorXd coefficients = expand_support(vectors.col(vector));
+      Eigen::MatrixXd::Zero(n_structures_, width),
+      Eigen::MatrixXd::Zero(n_structures_, width)};
+  for (int vector = 0; vector < width; ++vector) {
+    const Eigen::VectorXd coefficients = support_column(vector);
     Eigen::VectorXd h_products = Eigen::VectorXd::Zero(spin_products_.size()), m_products = h_products;
     ++result.tiles.expansions;
 
