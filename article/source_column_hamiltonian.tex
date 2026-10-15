@@ -1,0 +1,521 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=25mm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{newtxtext,newtxmath}
+\usepackage{booktabs,array,microtype}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{1.2em}
+\allowdisplaybreaks[1]
+\newtheorem{proposition}{Proposition}
+\DeclareMathOperator{\ran}{ran}
+\DeclareMathOperator{\rank}{rank}
+\DeclareMathOperator{\supp}{supp}
+\newcommand{\Tr}{^{\mathsf T}}
+\newcommand{\ip}[2]{\left\langle #1,#2\right\rangle_{\mathrm F}}
+\newcommand{\Wa}{\mathcal W}
+\newcommand{\Ta}{\mathcal T}
+\newcommand{\Ha}{\mathcal H}
+\newcommand{\Ea}{\mathcal E}
+\newcommand{\Id}{\mathcal I}
+\renewcommand{\vv}[1]{\mathbf{#1}}
+\title{Exact Orthogonal-CI Contraction for Arbitrary Selected\newline
+Valence-Bond Structure Spaces}
+\author{Theory and implementation note}
+\date{16 October 2026}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+An arbitrary selected valence-bond (VB) structure space is generally not
+invariant under orbital orthogonalization. This does not prevent exact
+evaluation of its Hamiltonian and overlap actions through an orthogonal
+configuration-interaction (CI) representation. The transformed wave function
+must be retained, but its complete spin-string product array need not be
+formed. We derive an exact source-column factorization, apply the
+Slater--Condon one-body generators separately to the two spin factors, and
+contract only the original products needed for the final structure-space
+projection. The resulting equations preserve the selected variational space
+without a closure assumption or intermediate amplitude truncation. Source
+and channel tiling bound the numerical workspace. Optional spin-exchange
+reduction and causal pruning of the exterior adjoint are derived separately.
+The scope is the Hamiltonian/overlap action at a fixed orbital point.
+\end{abstract}
+
+\section{The selected VB space}
+
+Let $n$ be the number of active spatial orbitals, with $n_\alpha$ and
+$n_\beta$ active electrons of each spin. The complete one-spin string
+spaces have dimensions
+\begin{equation}
+ U_\alpha=\binom{n}{n_\alpha},\qquad
+ U_\beta=\binom{n}{n_\beta}.
+\end{equation}
+An index $a$ identifies an $\alpha$ string and $b$ a $\beta$ string.
+For a selected VB structure $I$, let $w_{ab,I}$ be its signed expansion
+coefficient on the corresponding spin-string product, with all normalization
+conventions included. For structure coefficients $\vv C$, define
+\begin{equation}\label{eq:W}
+ X=\Wa\vv C,\qquad X_{ab}=\sum_I w_{ab,I}C_I.
+\end{equation}
+Here $\Wa$ is a sparse linear map from structure coefficients to a matrix
+of spin-string product coefficients. The matrix notation does not prescribe
+a dense allocation: the map can be stored as sparse incidences between
+structures and touched string products. It introduces no determinant-pair
+traversal or separately optimized determinant coefficient vector.
+
+The original support and its two marginal index sets are
+\begin{align}
+ \Omega&=\{(a,b):w_{ab,I}\ne0\text{ for at least one selected }I\},
+ &t&=|\Omega|,\\
+ A_\Omega&=\{a:\exists b,\ (a,b)\in\Omega\},&
+ J&=\{b:\exists a,\ (a,b)\in\Omega\},\qquad r=|J|.
+\end{align}
+Support is determined by the selected structures, not by numerical
+smallness or cancellations in a particular Davidson vector.
+Using the Frobenius inner product, the adjoint structure map is
+\begin{equation}\label{eq:Wadj}
+ (\Wa^*Z)_I=\sum_{(a,b)\in\Omega}w_{ab,I}Z_{ab}.
+\end{equation}
+Thus only entries in $\Omega$ are needed at the \emph{end} of a complete
+action. Nothing in this statement permits dropping intermediate entries
+outside $\Omega$.
+
+\section{Orthogonalization without a closure assumption}
+
+At a fixed orbital point, write the nonorthogonal active orbitals as
+$\phi=\chi R$, where $\chi$ is an orthonormal basis of the same active
+one-particle space. For example, if $O$ is their positive-definite overlap,
+\begin{equation}
+ O=R\Tr R,\qquad \chi=\phi R^{-1}.
+\end{equation}
+This is an evaluation-coordinate change, not a change to the physical
+localization constraints or to the orbital optimization variables.
+Multilinearity of antisymmetrized products gives the exterior maps
+\begin{equation}
+ T_\sigma=\wedge^{n_\sigma}R,\qquad
+ (T_\sigma)_{a i}=\det R[a,i],\qquad \sigma\in\{\alpha,\beta\},
+\end{equation}
+where the row and column subsets contain $n_\sigma$ orbitals with a fixed
+ordering convention. The orthogonal-basis coefficient matrix is
+\begin{equation}\label{eq:T}
+ Y=\Ta X=T_\alpha X T_\beta\Tr,\qquad
+ \Ta^* Z=T_\alpha\Tr Z T_\beta.
+\end{equation}
+The minor matrices $T_\sigma$ are mathematical definitions; the
+implementation applies elementary exterior transforms without assembling
+them densely.
+
+Let $\Ha$ be the active Hamiltonian action in the orthogonal spin-string
+product basis. The selected structure Hamiltonian and overlap are exactly
+\begin{equation}\label{eq:restriction}
+ \boxed{\quad H=\Wa^*\Ta^*\Ha\Ta\Wa,\qquad
+ M=\Wa^*\Ta^*\Ta\Wa.\quad}
+\end{equation}
+An orbital-dependent scalar inactive-plus-nuclear energy $E_0$ contributes
+$E_0M$ to the total structure Hamiltonian and is separate from the active
+action $H$ in this note.
+The variational energy is
+\begin{equation}
+ E=E_0+\frac{\vv C\Tr H\vv C}{\vv C\Tr M\vv C},
+\end{equation}
+with $H$ denoting the active contribution of Eq.~\eqref{eq:restriction}.
+
+\begin{proposition}[Exact selected-space restriction]\label{prop:closure}
+For any selected structure map $\Wa$, Eq.~\eqref{eq:restriction} gives
+the exact selected-space Hamiltonian and overlap, whether or not
+$\Ta\ran\Wa\subseteq\ran\Wa$.
+\end{proposition}
+\begin{proof}
+For arbitrary structure vectors $\vv u$ and $\vv v$, the two physical
+states have orthogonal-basis amplitudes $\Ta\Wa\vv u$ and
+$\Ta\Wa\vv v$. Their Hamiltonian matrix element is
+\begin{equation}
+ \ip{\Ta\Wa\vv u}{\Ha(\Ta\Wa\vv v)}
+ =\vv u\Tr\bigl(\Wa^*\Ta^*\Ha\Ta\Wa\bigr)\vv v.
+\end{equation}
+Replacing $\Ha$ by the identity gives the overlap. No intermediate
+restriction to $\ran\Wa$ was inserted.
+\end{proof}
+
+The nonclosure issue arises only if a different operation is used, for
+example by zeroing transformed amplitudes outside the original selected
+support before applying $\Ha$. That operation changes the wave function.
+Equation~\eqref{eq:restriction} does not do so. Davidson vectors and Ritz
+coefficients remain in the selected VB structure space; the orthogonal
+representation is used internally to evaluate their images.
+For linearly independent selected structures, their eigenproblem remains
+\begin{equation}
+ H\vv C=E_{\rm act}M\vv C.
+\end{equation}
+The adjoint $\Wa^*$ contracts against the selected test structures; it is
+not an inverse coefficient transform. The nonidentity overlap $M$ is
+retained, so this procedure does not replace the selected VB problem by
+an unconstrained orthogonal-CI eigenproblem.
+
+\subsection{A minimal nonclosed example}
+
+Consider a two-by-two coefficient matrix with the single selected product
+$X=e_2e_2\Tr$, and let
+\begin{equation}
+ T_\alpha=\begin{pmatrix}1&a\\0&1\end{pmatrix},\qquad
+ T_\beta=\begin{pmatrix}1&b\\0&1\end{pmatrix}.
+\end{equation}
+This is a linear-algebra example of the coefficient map, not an assertion
+that a single spin product is a spin-adapted VB structure. Its transformed
+amplitudes are
+\begin{equation}\label{eq:example}
+ Y=\begin{pmatrix}ab&a\\b&1\end{pmatrix}
+ =\begin{pmatrix}a\\1\end{pmatrix}
+  \begin{pmatrix}b\\1\end{pmatrix}\Tr.
+\end{equation}
+For nonzero $a$ and $b$, all four products are present, so the original
+one-dimensional selected space is not closed. Nevertheless, two vectors
+represent the complete $Y$ exactly. The overlap is
+$(1+a^2)(1+b^2)$, not the value $1$ obtained by retaining only $Y_{22}$.
+An exact Hamiltonian contraction must likewise use all transformed
+amplitudes, explicitly or implicitly. The factorized route below retains
+them implicitly.
+
+\section{Exact source factors}
+
+Order the original touched $\beta$ columns as $J=(j_1,\ldots,j_r)$, and set
+\begin{equation}\label{eq:source}
+ A_{:\ell}=X_{:j_\ell},\qquad B_{:\ell}=e_{j_\ell},\qquad
+ X=AB\Tr.
+\end{equation}
+This is an identity for every input vector. It is not a truncated singular
+value decomposition, and $r$ is not a fitted rank. Transforming only the
+two factors gives
+\begin{equation}\label{eq:factors}
+ L=T_\alpha A,\qquad F=T_\beta B,\qquad
+ \Ta X=LF\Tr.
+\end{equation}
+The factors have dimensions $U_\alpha\times r$ and $U_\beta\times r$.
+The complete transformed $U_\alpha\times U_\beta$ matrix need not be
+formed, even if every one of its entries is nonzero.
+
+The distinction between $r$ and the number of structures matters. A single
+covalent structure with $m$ disjoint singlet pairs generally touches
+$2^m$ original source columns. Several structures can share most of those
+columns, and a broad selected space can touch all $U_\beta$ columns.
+Thus $\rank X\le r$ is an upper bound, not an identification of $r$ with
+one, with $\rank X$, or with the number of structures.
+
+\section{Hamiltonian action on the factors}
+
+\subsection{One-body channels and the complete active Hamiltonian}
+
+Use real spatial orbitals and real, spin-independent molecular integrals.
+Let $e_{pq}=\sum_\sigma a^\dagger_{p\sigma}a_{q\sigma}$, and use the
+chemists' notation $(pq|rs)$ for two-electron integrals. The active
+Hamiltonian is
+\begin{equation}\label{eq:Hsecond}
+ \hat H=\sum_{pq}h_{pq}e_{pq}
+ +\frac12\sum_{pqrs}(pq|rs)
+       \bigl(e_{pq}e_{rs}-\delta_{qr}e_{ps}\bigr).
+\end{equation}
+Here $h$ includes the effective one-electron contribution of the inactive
+orbitals. Define
+\begin{equation}
+ f_{ps}=h_{ps}-\frac12\sum_q(pq|qs),\qquad
+ N=n_\alpha+n_\beta>0.
+\end{equation}
+Packed pair labels $P=(p,q)$ have $p\ge q$, so there are
+$d=n(n+1)/2$ channels. Define the symmetric generators
+\begin{equation}
+ \hat E_{\sigma P}=\begin{cases}
+ a^\dagger_{p\sigma}a_{p\sigma},&p=q,\\
+ a^\dagger_{p\sigma}a_{q\sigma}
+ +a^\dagger_{q\sigma}a_{p\sigma},&p>q,
+ \end{cases}
+ \qquad \hat E_P=\hat E_{\alpha P}+\hat E_{\beta P}.
+\end{equation}
+Let $f_P=f_{pq}$, $V_{PQ}=(pq|rs)$ for $Q=(r,s)$, and $d_P=1$ for
+diagonal pairs and zero otherwise. A symmetric kernel containing the
+\emph{entire} active Hamiltonian is
+\begin{equation}\label{eq:K}
+ K_{PQ}=\frac12 V_{PQ}
+       +\frac{f_Pd_Q+d_Pf_Q}{2N},\qquad
+ \hat H=\sum_{PQ}K_{PQ}\hat E_P\hat E_Q.
+\end{equation}
+Indeed, $\sum_Pd_P\hat E_P=\hat N=N\hat I$ on the fixed-electron
+space. The second term in $K$ therefore gives
+$\sum_P f_P\hat E_P$; the first term supplies the quadratic part of
+Eq.~\eqref{eq:Hsecond}. The usual integral permutation symmetries account
+for both ordered off-diagonal orbital pairs through $\hat E_P$; no extra
+off-diagonal multiplicity is needed in $K$.
+
+Let $E_{\sigma P}$ be the matrix of $\hat E_{\sigma P}$ on its
+one-spin string space. The Slater--Condon rules make this operation a
+sparse signed occupation/replacement scatter, rather than a dense string
+pair contraction. Its action on a product matrix is
+\begin{equation}
+ \Ea_P(Z)=E_{\alpha P}Z+Z E_{\beta P}\Tr,\qquad
+ \Ha=\sum_{PQ}K_{PQ}\Ea_P\Ea_Q.
+\end{equation}
+These identities require a complete carrier for each fixed-spin sector,
+or an exactly equivalent representation of all required intermediates.
+Arbitrary \emph{selected VB structure spaces} need not be complete.
+The two statements are different.
+
+\subsection{Separation of the two spin factors}
+
+Define the same-spin channel actions
+\begin{equation}
+ D_\sigma=\sum_{PQ}K_{PQ}E_{\sigma P}E_{\sigma Q}.
+\end{equation}
+They include the particular distribution of one-electron terms implied
+by Eq.~\eqref{eq:K}; they are not independently assigned physical
+$\alpha$- and $\beta$-spin Hamiltonians. Expanding the two generators gives
+\begin{align}
+ \Ea_P\Ea_Q(LF\Tr)={}&
+ (E_{\alpha P}E_{\alpha Q}L)F\Tr
+ +L(E_{\beta P}E_{\beta Q}F)\Tr\notag\\
+ &+(E_{\alpha P}L)(E_{\beta Q}F)\Tr
+ +(E_{\alpha Q}L)(E_{\beta P}F)\Tr.
+\end{align}
+The last two terms become identical after summation because $K_{PQ}=K_{QP}$.
+Consequently,
+\begin{equation}\label{eq:Hfactor}
+ \boxed{\ \Ha(LF\Tr)=(D_\alpha L)F\Tr+L(D_\beta F)\Tr
+ +2\sum_{PQ}K_{PQ}(E_{\alpha P}L)(E_{\beta Q}F)\Tr.\ }
+\end{equation}
+The proof uses commutativity of different spin sectors, not commutativity
+of generators within one spin sector. It applies to unequal
+$U_\alpha,U_\beta$, unequal electron counts, ionic structures, and arbitrary
+mixtures of selected structures.
+
+\section{Direct sampling and structure projection}
+
+Introduce the pulled-back factors
+\begin{align}\label{eq:pullbacks}
+ L_0&=T_\alpha\Tr L,&F_0&=T_\beta\Tr F,\\
+ L_H&=T_\alpha\Tr D_\alpha L,&F_H&=T_\beta\Tr D_\beta F,\\
+ L_P&=T_\alpha\Tr E_{\alpha P}L,&
+ G_P&=T_\beta\Tr\sum_Q K_{PQ}E_{\beta Q}F.
+\end{align}
+Combining Eqs.~\eqref{eq:T} and \eqref{eq:Hfactor}, the needed original
+product entries are
+\begin{align}\label{eq:samples}
+ m_{ab}&=\sum_{\ell=1}^r(L_0)_{a\ell}(F_0)_{b\ell},\\
+ h_{ab}&=\sum_{\ell=1}^r\left[\label{eq:hsamples}
+ (L_H)_{a\ell}(F_0)_{b\ell}+(L_0)_{a\ell}(F_H)_{b\ell}
+ +2\sum_P(L_P)_{a\ell}(G_P)_{b\ell}\right],
+ \qquad (a,b)\in\Omega.
+\end{align}
+For any Davidson input $\vv v$, build $X=\Wa\vv v$ and return
+\begin{equation}\label{eq:final}
+ (M\vv v)_I=\sum_{(a,b)\in\Omega}w_{ab,I}m_{ab},\qquad
+ (H\vv v)_I=\sum_{(a,b)\in\Omega}w_{ab,I}h_{ab}.
+\end{equation}
+
+\begin{proposition}[Exact factored selected-space action]
+Equations~\eqref{eq:source}--\eqref{eq:final} evaluate
+Eq.~\eqref{eq:restriction} exactly for arbitrary selected structures,
+without constructing a complete transformed product array.
+\end{proposition}
+\begin{proof}
+Equation~\eqref{eq:source} is the exact decomposition into nonzero original
+columns. Linearity gives Eq.~\eqref{eq:factors}, and expansion of the
+Hamiltonian gives Eq.~\eqref{eq:Hfactor}. Applying $\Ta^*$ to each outer
+product yields Eqs.~\eqref{eq:samples} and \eqref{eq:hsamples}.
+All other final entries have zero
+coefficient in $\Wa^*$ by Eq.~\eqref{eq:Wadj}. The final sampling therefore
+omits no contribution to Eq.~\eqref{eq:restriction}.
+\end{proof}
+
+The contraction can be read as the following sequence:
+\begin{equation}
+ \vv v\ \xrightarrow{\Wa}\ X=AB\Tr
+ \ \xrightarrow{T_\alpha,T_\beta}\ LF\Tr
+ \ \xrightarrow{\text{spin generators}}\ \text{factor images}
+ \ \xrightarrow{T_\alpha\Tr,T_\beta\Tr}\ (h,m)|_\Omega
+ \ \xrightarrow{\Wa^*}\ (H\vv v,M\vv v).
+\end{equation}
+The middle objects are represented by factors and channel panels, not by
+a selected-space approximation to the transformed wave function. This is
+how Slater--Condon evaluation remains available without requiring selected
+structures to form an invariant space.
+
+\section{Two additional exact reductions}
+
+\subsection{Common spin-exchange parity}
+
+An optional reduction is available when the two one-spin bases and their
+orbital maps coincide, and every selected structure has the same certified
+transpose parity $\eta=\pm1$. Define
+\begin{equation}
+ \Pi X=X\Tr,\qquad P_\eta=\tfrac12(\Id+\eta\Pi),\qquad
+ \Pi\Wa=\eta\Wa.
+\end{equation}
+Construct $X_{\rm rep}$ by keeping $a<b$ with coefficient $2X_{ab}$,
+keeping diagonal entries with coefficient $X_{aa}$ for $\eta=+1$, and
+setting the other entries to zero. Odd parity has zero diagonal. Then
+\begin{equation}
+ P_\eta X_{\rm rep}=X.
+\end{equation}
+Since $\Ta$ and a spin-independent $\Ha$ commute with exchange,
+their original-basis composite $\mathcal A=\Ta^*\Ha\Ta$ also commutes.
+Furthermore $\Wa^*P_\eta=\Wa^*$. It follows that
+\begin{equation}
+ \Wa^*\mathcal A X_{\rm rep}
+ =\Wa^*P_\eta\mathcal A X_{\rm rep}
+ =\Wa^*\mathcal A P_\eta X_{\rm rep}
+ =\Wa^*\mathcal A X.
+\end{equation}
+The same proof applies to $\Ta^*\Ta$ for the overlap. Source factorization
+may therefore use $X_{\rm rep}$, but the final output sampling still uses
+\emph{both} halves of $\Omega$. The unprojected image of $X_{\rm rep}$
+is not itself a parity eigenvector.
+
+For a single structure with $m$ independent covalent pairs, this can reduce
+the source count from $2^m$ to $2^{m-1}$. It does not imply that the touched
+column count always halves for an arbitrary selected space. Equal spin
+dimensions alone are insufficient; common parity must be checked from the
+structure map. Parity is not a substitute for total-spin adaptation.
+Without it, the unreduced factorization remains exact.
+
+\subsection{Causal rows of the exterior adjoint}
+
+Only $A_\Omega$ rows of the $\alpha$ pullbacks and $J$ rows of the
+$\beta$ pullbacks enter Eq.~\eqref{eq:samples}. An elementary forward
+exterior shear updates $z_j\leftarrow z_j+s\epsilon z_i$, with orbital
+coefficient $s$ and fermionic sign $\epsilon=\pm1$. Its adjoint updates
+$z_i\leftarrow z_i+s\epsilon z_j$. Starting from the requested final
+rows, traverse the adjoint operations in reverse chronological order.
+Retain an update exactly when its destination is needed, and then mark
+its source as needed. Execute the retained updates in their original
+adjoint order, including the diagonal exterior scaling.
+
+For a row selector $Q_A$, this computes $Q_A T_\sigma\Tr Z$ exactly.
+Every intermediate row that can influence the answer is retained. The
+pruning concerns paths through a linear transformation, not closure of
+the selected VB space and not the magnitude of an amplitude. A bitmap on
+one-spin rows and retained shear-edge indices are sufficient; no product
+array or dense compound matrix is required.
+
+\section{Tiling, storage, and arithmetic}
+
+\subsection{Streaming the exact equations}
+
+Split the $r$ source columns into panels of width $s$, and the $d$ channels
+into panels of width $p$. Different source columns are summed independently
+in Eq.~\eqref{eq:samples}; the Hamiltonian action never couples source
+column labels to one another. For each source panel:
+\begin{enumerate}[label=\arabic*.]
+ \item Build its sparse $A,B$, and apply $T_\alpha,T_\beta$ to obtain $L,F$.
+ \item For a channel panel $\mathcal P$, scatter $E_{\sigma P}$ on the
+       corresponding factors.
+ \item Stream channel panels $\mathcal Q$ to accumulate
+       $V_{\sigma P}=\sum_QK_{PQ}E_{\sigma Q}F_\sigma$,
+       where $F_\alpha=L$ and $F_\beta=F$. This is a channel GEMM on
+       flattened spin-row/source-column panels.
+ \item Gather $\sum_{P\in\mathcal P}E_{\sigma P}V_{\sigma P}$ into
+       the same-spin images. Pull back $E_{\alpha P}L$ and $V_{\beta P}$
+       and add the cross-spin dot products on $\Omega$.
+ \item After all channel panels, pull back the base and same-spin factors,
+       add their samples, and reuse the slabs for the next source panel.
+\end{enumerate}
+Finally apply $\Wa^*$ once to the accumulated support arrays. Source,
+channel, and right-hand-side loops reuse shared backing allocations;
+threads do not receive private copies of the carrier.
+
+The explicit source/channel numerical slabs require
+\begin{equation}\label{eq:memory}
+ O\bigl((U_\alpha+U_\beta)sp\bigr)
+\end{equation}
+storage, plus $O(t)$ support coefficients and images per processed vector.
+Additional persistent storage includes the sparse structure map, one-spin
+link/exterior metadata, and the $d\times d$ kernel $K$. The source slabs
+do not include any $U_\alpha U_\beta$ coefficient array. This is a
+workspace statement, not a bound on the total process memory.
+For an overlap-only action no channel panels or same-spin Hamiltonian
+images are required, and the factor workspace reduces to
+$O((U_\alpha+U_\beta)s)$.
+
+\subsection{Where a speed advantage is obtained}
+
+Let $q_\sigma$ count elementary exterior shear edges. With a full channel
+panel ($p=d$), a leading-work bound per input vector is
+\begin{align}\label{eq:work}
+ O\Bigl(&r(U_\alpha+U_\beta)d^2
+       +rd(q_\alpha+q_\beta)+trd\notag\\
+       &+r\sum_\sigma U_\sigma n_\sigma(n-n_\sigma+1)
+       +\operatorname{nnz}(\Wa)\Bigr).
+\end{align}
+The terms describe channel mixing, exterior pullbacks, final sampling,
+Slater--Condon spin links, and the initial/final structure contractions.
+The displayed shear count is an upper bound; causal pruning reduces the
+selected-row pullbacks. Forward base-factor transforms remain necessary.
+For $p<d$, channel mixing keeps the same leading arithmetic order, while
+spin scatters can repeat across channel panels by a factor up to
+$\lceil d/p\rceil$. A smaller workspace does not change any equation or
+variational space.
+
+A generated-product contraction instead has channel-mixing work of order
+$N_{\rm cl}d^2$, where $N_{\rm cl}$ counts the generated product
+intermediates needed by that contraction order. When this support is broad
+and $r\ll\min(U_\alpha,U_\beta)$, the factorized order replaces the
+product dimension by a source-weighted sum of one-spin dimensions. For
+$U_\alpha\simeq U_\beta=U$ and $N_{\rm cl}\simeq U^2$, the leading
+mixing ratio is approximately $U/(2r)$, before other work is counted.
+
+For broad source support, $r$ can approach $U$ and the factorized order
+need not be faster. Both orders evaluate the same orthogonal-CI action.
+An arithmetic planner may select between them without a memory-based
+admission test for the physical selected space. Exact applicability to
+arbitrary structures therefore does not mean that their costs are equal
+or that selecting one structure universally yields rank one. There is no
+claim of eliminating the exponential growth of the complete one-spin
+spaces.
+
+\section{Correspondence with the current implementation}
+
+The equations were checked against revision \texttt{a5004add}. Paths below
+are relative to \texttt{src/}; this table records the implementation
+boundary rather than introducing additional physical assumptions.
+\begin{center}\small
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.37\linewidth}
+                >{\raggedright\arraybackslash}p{0.54\linewidth}}
+\toprule
+Mathematical operation & Implementation \\
+\midrule
+Original support and source columns &
+\path{vbscf/structures/assembly/sources.hpp} \\
+Source panels, spin scatter/mix/gather, samples and $\Wa^*$ &
+\path{vbscf/structures/assembly/source_tiles.cpp}\newline
+\texttt{apply\_source\_tiles()} \\
+Hamiltonian channel kernel, Eq.~\eqref{eq:K} &
+\path{mcscf/ci/sigma.cpp}\newline
+\texttt{build\_hamiltonian\_pair\_kernel()} \\
+Slater--Condon spin connections &
+\path{mcscf/ci/spin_channels.cpp} \\
+Exterior transforms and causal adjoint rows &
+\path{vbscf/structures/orthogonal_ci/exterior_transform.cpp}\newline
+\texttt{projection()} and \texttt{apply\_adjoint\_left\_block()} \\
+Independent complete-carrier comparisons &
+\path{../tests/vbscf/unit/test_structure_tiles.cpp} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The current change covers fixed-point structure Hamiltonian and overlap
+actions. Integral adjoints, orbital gradients, and Hessian--vector products
+have their own existing consumers; the source-factor cost bound is not yet
+a claim about those complete derivative pipelines. Extending the equations
+to those consumers requires differentiating the exterior maps, factors,
+and Hamiltonian consistently, not simply reusing a fixed-point formula.
+
+\paragraph{Main result.}
+Arbitrary selected VB structures can use the orthogonal spin-string
+Slater--Condon action while Davidson remains in the selected structure
+space. The exact restriction in Eq.~\eqref{eq:restriction} requires no
+selected-space closure. Equations~\eqref{eq:Hfactor}--\eqref{eq:final}
+make that restriction computable through two-sided spin factors rather
+than a complete transformed product array. No intermediate projection,
+coefficient cutoff, or approximate rank compression enters the derivation.
+
+\end{document}

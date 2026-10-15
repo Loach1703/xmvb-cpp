@@ -1,5 +1,10 @@
 # Source-column contraction of arbitrary selected VB structures
 
+The complete derivation, including the selected-space restriction proof,
+Hamiltonian channel kernel, and implementation correspondence, is in
+[the TeX note](source_column_hamiltonian.tex)
+([compiled PDF](source_column_hamiltonian.pdf)).
+
 ## Exact expansion
 
 Let $W$ map a selected VB coefficient vector $c$ to the original nonorthogonal
