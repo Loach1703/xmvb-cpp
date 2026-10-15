@@ -8,7 +8,7 @@
 #include <ctime>
 #include <limits>
 
-namespace xmvb::vb::diagnostics {
+namespace xmvb::profiling {
 
 enum class Phase {
   Chart, Projection, Curvature, BlockFactor, BlockEigen,
@@ -209,4 +209,4 @@ class ScopedPhase {
   std::clock_t cpu_start_{};
 };
 
-}  // namespace xmvb::vb::diagnostics
+}  // namespace xmvb::profiling

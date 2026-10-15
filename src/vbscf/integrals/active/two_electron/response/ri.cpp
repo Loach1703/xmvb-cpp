@@ -13,7 +13,7 @@
 #endif
 
 #include "core/openmp.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -93,7 +93,7 @@ Eigen::MatrixXd build_active_pair_adjoint(
       const int first = static_cast<int>(row > column ? row : column);
       const int second = static_cast<int>(row > column ? column : row);
       const int packed_index =
-          TwoElectronIndexer::packed_pair_of_pairs_index(first, second);
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(first, second);
       double value = packed_gradient[packed_index];
       if (row == column) {
         value *= 2.0;
@@ -442,7 +442,7 @@ compute_ri_packed_active_two_electron_integral_directional_derivative(
   for (Eigen::Index first = 0; first < n_active_pairs; ++first) {
     for (Eigen::Index second = 0; second <= first; ++second) {
       const int packed_index =
-          TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               static_cast<int>(first),
               static_cast<int>(second));
       packed_direction[packed_index] =
@@ -491,7 +491,7 @@ compute_ri_packed_active_two_electron_integral_directional_derivative_batch(
     for (Eigen::Index first = 0; first < n_active_pairs; ++first) {
       for (Eigen::Index second = 0; second <= first; ++second) {
         const int packed_index =
-            TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 static_cast<int>(first), static_cast<int>(second));
         packed_directions(packed_index, direction) =
             one_sided(first, second) + one_sided(second, first);

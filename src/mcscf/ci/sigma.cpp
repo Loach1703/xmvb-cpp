@@ -1,4 +1,4 @@
-#include "vbscf/structures/orthogonal_ci/sigma.hpp"
+#include "mcscf/ci/sigma.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -7,11 +7,11 @@
 #include <unordered_map>
 
 #include "core/openmp.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/structures/orthogonal_ci/planner.hpp"
+#include "core/timing.hpp"
+#include "core/pair_index.hpp"
+#include "mcscf/ci/planner.hpp"
 
-namespace xmvb::vb {
+namespace xmvb::mcscf {
 namespace {
 
 // Use the same contiguous alpha extent for standalone and fused sigma work.
@@ -99,13 +99,16 @@ DirectCiSigmaAction::DensityConnections::dynamic_bytes() const noexcept {
 DirectCiSigmaAction::DirectCiSigmaAction(
     const std::vector<std::vector<int>>& alpha_determinants,
     const std::vector<std::vector<int>>& beta_determinants,
-    const OrthogonalActiveIntegrals& integrals)
+    const ActiveIntegrals& integrals)
     : n_orbitals_(static_cast<int>(integrals.one_electron.rows())),
       n_alpha_(static_cast<int>(alpha_determinants.size())),
       n_beta_(static_cast<int>(beta_determinants.size())),
       pair_kernel_(integrals.pair_kernel) {
   if (n_orbitals_ <= 0 || n_orbitals_ > 63 ||
       integrals.one_electron.cols() != n_orbitals_ ||
+      !integrals.one_electron.allFinite() ||
+      integrals.pair_kernel.rows() != n_orbitals_ * (n_orbitals_ + 1) / 2 ||
+      integrals.pair_kernel.cols() != integrals.pair_kernel.rows() ||
       n_alpha_ <= 0 || n_beta_ <= 0) {
     throw std::invalid_argument("invalid orthogonal direct-CI sigma input");
   }
@@ -132,7 +135,7 @@ DirectCiSigmaAction::DirectCiSigmaAction(
 
 DirectCiSigmaAction::DirectCiSigmaAction(
     const DirectCiSigmaAction& reference,
-    const OrthogonalActiveIntegrals& integrals)
+    const ActiveIntegrals& integrals)
     : n_orbitals_(reference.n_orbitals_),
       n_alpha_(reference.n_alpha_),
       n_beta_(reference.n_beta_),
@@ -156,9 +159,9 @@ Eigen::MatrixXd DirectCiSigmaAction::diagonal(
   Eigen::MatrixXd coulomb(n_orbitals_,n_orbitals_);
   Eigen::MatrixXd exchange(n_orbitals_,n_orbitals_);
   for (int p=0;p<n_orbitals_;++p) for (int q=0;q<n_orbitals_;++q) {
-    const int pp=TwoElectronIndexer::packed_pair_index(p,p);
-    const int qq=TwoElectronIndexer::packed_pair_index(q,q);
-    const int pq=TwoElectronIndexer::packed_pair_index(p,q);
+    const int pp=xmvb::core::PairIndex::packed_pair_index(p,p);
+    const int qq=xmvb::core::PairIndex::packed_pair_index(q,q);
+    const int pq=xmvb::core::PairIndex::packed_pair_index(p,q);
     coulomb(p,q)=pair_kernel_(pp,qq);
     exchange(p,q)=pair_kernel_(pq,pq);
   }
@@ -189,7 +192,7 @@ Eigen::MatrixXd DirectCiSigmaAction::diagonal(
 DirectCiSigmaAction::SpinConnections
 DirectCiSigmaAction::build_spin_connections(
     const std::vector<std::vector<int>>& determinants) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiConnections);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiConnections);
   const int dimension = static_cast<int>(determinants.size());
   std::vector<std::uint64_t> masks(dimension);
   std::unordered_map<std::uint64_t, int> index_by_mask;
@@ -235,7 +238,7 @@ DirectCiSigmaAction::build_spin_connections(
       const double sign = replacement_sign(source_mask, removed, inserted);
       singles.append(
           source,
-          TwoElectronIndexer::packed_pair_index(removed, inserted),
+          xmvb::core::PairIndex::packed_pair_index(removed, inserted),
           sign,
           inserted,
           removed);
@@ -255,7 +258,7 @@ DirectCiSigmaAction::build_spin_connections(
 }
 
 Eigen::MatrixXd DirectCiSigmaAction::build_hamiltonian_pair_kernel(
-    const OrthogonalActiveIntegrals& integrals,
+    const ActiveIntegrals& integrals,
     int n_electrons) const {
   const int n_pairs = static_cast<int>(pair_kernel_.rows());
   if (n_electrons <= 0 || pair_kernel_.cols() != n_pairs ||
@@ -277,8 +280,8 @@ Eigen::MatrixXd DirectCiSigmaAction::build_hamiltonian_pair_kernel(
       double contraction = 0.0;
       for (int orbital = 0; orbital < n_orbitals_; ++orbital) {
         contraction += pair_kernel_(
-            TwoElectronIndexer::packed_pair_index(row, orbital),
-            TwoElectronIndexer::packed_pair_index(orbital, column));
+            xmvb::core::PairIndex::packed_pair_index(row, orbital),
+            xmvb::core::PairIndex::packed_pair_index(orbital, column));
       }
       effective_one_electron(row, column) -= 0.5 * contraction;
     }
@@ -288,11 +291,11 @@ Eigen::MatrixXd DirectCiSigmaAction::build_hamiltonian_pair_kernel(
   Eigen::MatrixXd result = 0.5 * pair_kernel_;
   for (int orbital = 0; orbital < n_orbitals_; ++orbital) {
     const int diagonal_pair =
-        TwoElectronIndexer::packed_pair_index(orbital, orbital);
+        xmvb::core::PairIndex::packed_pair_index(orbital, orbital);
     for (int row = 0; row < n_orbitals_; ++row) {
       for (int column = 0; column <= row; ++column) {
         const int pair =
-            TwoElectronIndexer::packed_pair_index(row, column);
+            xmvb::core::PairIndex::packed_pair_index(row, column);
         const double value = 0.5 * effective_one_electron(row, column);
         result(diagonal_pair, pair) += value;
         result(pair, diagonal_pair) += value;
@@ -341,7 +344,7 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
   for (const int occupied : beta_graph.occupied[beta_target]) {
     add_beta_link(
         beta_target,
-        TwoElectronIndexer::packed_pair_index(occupied, occupied),
+        xmvb::core::PairIndex::packed_pair_index(occupied, occupied),
         1.0);
   }
   const DensityConnections& beta_singles = beta_graph.singles[beta_target];
@@ -365,7 +368,7 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
     for (const int occupied : alpha_->occupied[alpha_target]) {
       add_alpha_link(
           alpha_target,
-          TwoElectronIndexer::packed_pair_index(occupied, occupied),
+          xmvb::core::PairIndex::packed_pair_index(occupied, occupied),
           1.0);
     }
     const DensityConnections& alpha_singles = alpha_->singles[alpha_target];
@@ -380,7 +383,7 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
 
 Eigen::MatrixXd DirectCiSigmaAction::apply(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiSigma);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiSigma);
   if (coefficients.rows() != n_alpha_ || coefficients.cols() <= 0 ||
       coefficients.cols() % n_beta_ != 0) {
     throw std::invalid_argument(
@@ -391,13 +394,17 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
   const int n_pairs = static_cast<int>(hamiltonian_pair_kernel_.rows());
   Eigen::MatrixXd sigma = Eigen::MatrixXd::Zero(
       n_alpha_, coefficients.cols());
-  const int n_threads = std::max(
-      1, std::min(effective_openmp_thread_count(), n_beta_));
-
   // Bound all thread-local scatter, transformed-scatter, and reduction
   // buffers by one explicit workspace budget.  A wider alpha tile increases
   // GEMM efficiency without changing the mathematical action.
   constexpr std::size_t kWorkspaceBytes = 64ULL * 1024ULL * 1024ULL;
+  const std::size_t worker_row_bytes = static_cast<std::size_t>(block_width) *
+      (static_cast<std::size_t>(n_beta_) + 2ULL * n_pairs) * sizeof(double);
+  if (worker_row_bytes > kWorkspaceBytes)
+    throw std::length_error("one direct-CI sigma row exceeds workspace budget");
+  const int n_threads = static_cast<int>(std::min<std::size_t>(
+      std::max(1, std::min(effective_openmp_thread_count(), n_beta_)),
+      kWorkspaceBytes / worker_row_bytes));
   const std::size_t bytes_per_alpha =
       static_cast<std::size_t>(n_threads) * block_width *
       (static_cast<std::size_t>(n_beta_) + 2ULL * n_pairs) * sizeof(double);
@@ -465,7 +472,7 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
           for (const int occupied : alpha_->occupied[alpha_target]) {
             gather_alpha_link(
                 alpha_target,
-                TwoElectronIndexer::packed_pair_index(occupied, occupied),
+                xmvb::core::PairIndex::packed_pair_index(occupied, occupied),
                 1.0);
           }
         const DensityConnections& alpha_singles =
@@ -492,7 +499,7 @@ Eigen::MatrixXd DirectCiSigmaAction::apply(
         for (const int occupied : beta_graph.occupied[beta_target]) {
           gather_beta_link(
               beta_target,
-              TwoElectronIndexer::packed_pair_index(occupied, occupied),
+              xmvb::core::PairIndex::packed_pair_index(occupied, occupied),
               1.0);
         }
         const DensityConnections& beta_singles =
@@ -542,7 +549,7 @@ Eigen::MatrixXd DirectCiSigmaAction::apply_one_body_generator(
 
 void DirectCiSigmaAction::apply_one_body_generators(
     std::initializer_list<DirectCiGeneratorRequest> requests) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiGenerator);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiGenerator);
   if (requests.size() == 0) return;
   const Eigen::Index columns = requests.begin()->coefficients.cols();
   for (const auto& request : requests) {
@@ -605,14 +612,14 @@ void DirectCiSigmaAction::apply_one_body_generators(
 DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     const Eigen::Ref<const Eigen::MatrixXd>& right) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiIntegralAdjoint);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiIntegralAdjoint);
   return contract_adjoint(left, right, nullptr);
 }
 
 DirectCiResponse DirectCiSigmaAction::apply_with_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& response,
     const Eigen::Ref<const Eigen::MatrixXd>& state) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiResponse);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiResponse);
   DirectCiResponse result;
   result.integrals = contract_adjoint(response, state, &result.sigma);
   return result;
@@ -645,7 +652,7 @@ void DirectCiSigmaAction::apply_sigma_tile(
         }
       };
       for (int occupied : alpha_->occupied[target]) {
-        add(target, TwoElectronIndexer::packed_pair_index(occupied, occupied), 1.0);
+        add(target, xmvb::core::PairIndex::packed_pair_index(occupied, occupied), 1.0);
       }
       const auto& links = alpha_->singles[target];
       for (std::size_t link = 0; link < links.size(); ++link) {
@@ -675,7 +682,7 @@ void DirectCiSigmaAction::apply_sigma_tile(
       }
     };
     for (int occupied : beta_graph.occupied[beta]) {
-      add(beta, TwoElectronIndexer::packed_pair_index(occupied, occupied), 1.0);
+      add(beta, xmvb::core::PairIndex::packed_pair_index(occupied, occupied), 1.0);
     }
     const auto& links = beta_graph.singles[beta];
     for (std::size_t link = 0; link < links.size(); ++link) {
@@ -788,7 +795,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
   Eigen::VectorXd absorbed_one_adjoint = Eigen::VectorXd::Zero(n_pairs);
   for (int orbital = 0; orbital < n_orbitals_; ++orbital) {
     const int diagonal_pair =
-        TwoElectronIndexer::packed_pair_index(orbital, orbital);
+        xmvb::core::PairIndex::packed_pair_index(orbital, orbital);
     absorbed_one_adjoint.noalias() +=
         0.5 * (effective_kernel_adjoint.row(diagonal_pair).transpose() +
                effective_kernel_adjoint.col(diagonal_pair));
@@ -806,7 +813,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
   for (int row = 0; row < n_orbitals_; ++row) {
     for (int column = 0; column <= row; ++column) {
       const int pair =
-          TwoElectronIndexer::packed_pair_index(row, column);
+          xmvb::core::PairIndex::packed_pair_index(row, column);
       const double one_weight =
           absorbed_one_adjoint[pair] / static_cast<double>(n_electrons);
       add_symmetric_entry(
@@ -814,8 +821,8 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
       for (int orbital = 0; orbital < n_orbitals_; ++orbital) {
         add_symmetric_entry(
             &result.pair_kernel,
-            TwoElectronIndexer::packed_pair_index(row, orbital),
-            TwoElectronIndexer::packed_pair_index(orbital, column),
+            xmvb::core::PairIndex::packed_pair_index(row, orbital),
+            xmvb::core::PairIndex::packed_pair_index(orbital, column),
             -0.5 * one_weight);
       }
     }
@@ -826,7 +833,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
 Eigen::MatrixXd DirectCiSigmaAction::one_body_generator_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     const Eigen::Ref<const Eigen::MatrixXd>& right) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiGeneratorAdjoint);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiGeneratorAdjoint);
   if (left.rows() != n_alpha_ || right.rows() != n_alpha_ ||
       left.cols() <= 0 || left.cols() != right.cols() ||
       left.cols() % n_beta_ != 0 || !left.allFinite() ||
@@ -924,4 +931,4 @@ std::size_t DirectCiSigmaAction::dynamic_bytes() const noexcept {
   return bytes;
 }
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::mcscf

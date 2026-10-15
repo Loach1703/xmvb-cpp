@@ -7,7 +7,7 @@
 
 #include <Eigen/Core>
 
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 
 namespace xmvb::vb {
 
@@ -200,7 +200,7 @@ double lookup_active_space_two_electron_kernel_value(
     // into a direct table lookup, avoiding an auxiliary-length RI dot product
     // for every requested pair-of-pairs kernel value.
     const int packed_pair_of_pairs_index =
-        TwoElectronIndexer::packed_pair_of_pairs_index(
+        xmvb::core::PairIndex::packed_pair_of_pairs_index(
             row_packed_pair_index,
             column_packed_pair_index);
     return (*packed_active_two_electron_integrals)[
@@ -251,7 +251,7 @@ std::vector<double> apply_active_space_two_electron_kernel_to_sparse_projection(
            row_packed_pair_index < n_packed_active_pairs;
            ++row_packed_pair_index) {
         const int packed_pair_of_pairs_index =
-            TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 row_packed_pair_index,
                 packed_pair_index);
         projected_pair_values[row_packed_pair_index] +=
@@ -316,7 +316,7 @@ Eigen::VectorXd apply_active_space_two_electron_kernel_to_sparse_projection_subs
           throw std::invalid_argument("packed active-pair index out of range");
         }
         const int packed_pair_of_pairs_index =
-            TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 row_packed_pair_index,
                 packed_pair_index);
         projected_value +=
@@ -423,7 +423,7 @@ std::vector<double> reconstruct_packed_active_two_electron_integrals(
          row_packed_pair_index <= column_packed_pair_index;
          ++row_packed_pair_index) {
       const int packed_pair_of_pairs_index =
-          TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               row_packed_pair_index,
               column_packed_pair_index);
       packed_active_two_electron_integrals[

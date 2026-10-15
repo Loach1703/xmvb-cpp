@@ -9,7 +9,7 @@
 #endif
 
 #include "core/openmp.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -109,7 +109,7 @@ void apply_ao_density_diagonals(const AoIntegralInput& ao,
   if (!workspace || !exchange_diagonal || !coulomb_diagonal || frame.rows()!=n ||
       n_core_sources<0 || n_core_sources>width || projection_width<1)
     throw std::invalid_argument("invalid AO density diagonal projection");
-  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::AoH1eFused);
   exchange_diagonal->resize(n_mo,width);
   coulomb_diagonal->setZero(n_mo,n_core_sources);
   if (!width) return;

@@ -5,7 +5,7 @@
 
 #include <Eigen/Core>
 
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/packed_pair_map.hpp"
 
 namespace xmvb::vb {
@@ -73,7 +73,7 @@ std::vector<double> build_memory_dominated_pair_kernel(
   std::vector<double> packed(packed_elements, 0.0);
   for (int column = 0; column < active_pair_factors.cols(); ++column) {
     for (int row = 0; row <= column; ++row) {
-      packed[TwoElectronIndexer::packed_pair_of_pairs_index(row, column)] =
+      packed[xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)] =
           gram(row, column);
     }
   }

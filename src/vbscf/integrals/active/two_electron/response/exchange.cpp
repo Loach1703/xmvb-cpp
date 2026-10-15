@@ -5,7 +5,7 @@
 #include <stdexcept>
 
 #include "core/openmp.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 #include "vbscf/integrals/ao/contracts/input.hpp"
 
 namespace xmvb::vb::detail {
@@ -32,7 +32,7 @@ void build_exchange_integrals(ExactPackedActiveTwoElectronAdjointCache* cache) {
                                        action_values + panel_row);
   const std::size_t available = budget / sizeof(double) - rows * width;
   if (workspace > available) return;
-  diagnostics::ScopedPhase phase(diagnostics::Phase::ExchangeBuild);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ExchangeBuild);
   const ExactCtxPairMatrix coefficients = *cache->accepted_active_coefficients;
   cache->exchange_integrals.resize(rows, n * n);
   const int threads = std::min<int>(effective_openmp_thread_count(), n_bf);
@@ -88,7 +88,7 @@ void build_exchange_integrals(ExactPackedActiveTwoElectronAdjointCache* cache) {
 Eigen::MatrixXd contract_exchange_direction(
     const ExactPackedActiveTwoElectronAdjointCache& cache,
     const Eigen::Ref<const Eigen::MatrixXd>& direction) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::ExchangeAction);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ExchangeAction);
   const Eigen::Index n_bf = cache.n_basis_functions;
   const Eigen::Index n = cache.n_active_orbitals;
   if (direction.rows() != n_bf || direction.cols() != n ||

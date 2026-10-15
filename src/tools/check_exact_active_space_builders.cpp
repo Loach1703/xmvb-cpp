@@ -14,7 +14,7 @@
 #endif
 
 #include "input/loading/loader.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/one_electron/builder.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
 #include "vbscf/integrals/active/two_electron/construction/builder.hpp"
@@ -354,7 +354,7 @@ xmvb::vb::ActiveSpaceTwoElectronResult build_reference_active_space_two_electron
   }
 
   const std::size_t packed_size =
-      xmvb::vb::TwoElectronIndexer::two_electron_storage_index(
+      xmvb::core::PairIndex::two_electron_storage_index(
           n_active_orbitals - 1,
           n_active_orbitals - 1,
           n_active_orbitals - 1,
@@ -367,7 +367,7 @@ xmvb::vb::ActiveSpaceTwoElectronResult build_reference_active_space_two_electron
         const int s_upper = (r == p) ? q : r;
         for (int s = 0; s <= s_upper; ++s) {
           const int packed_index =
-              xmvb::vb::TwoElectronIndexer::two_electron_storage_index(
+              xmvb::core::PairIndex::two_electron_storage_index(
                   p,
                   q,
                   r,

@@ -31,6 +31,15 @@ find_path(EIGEN3_INCLUDE_DIR Eigen/Core
 
 include(vbscf/sources.cmake)
 
+set(XMVB_MCSCF_SOURCES
+  mcscf/ci/sigma.cpp
+  mcscf/ci/planner.cpp
+  mcscf/ci/strings.cpp
+  mcscf/ci/spin.cpp)
+set(XMVB_CASSCF_SOURCES
+  casscf/integrals/active.cpp
+  casscf/driver/casci.cpp)
+
 set(XMVB_INPUT_DECK_SOURCES
   input/deck/model.cpp
   input/deck/metadata.cpp
@@ -78,13 +87,17 @@ file(
   "${CMAKE_CURRENT_SOURCE_DIR}/guess/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/input/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/output/*.cpp")
+  "${CMAKE_CURRENT_SOURCE_DIR}/output/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/casscf/*.cpp")
 set(_xmvb_declared_component_sources
   ${XMVB_INPUT_DECK_SOURCES}
   ${XMVB_LIBCINT_SOURCES}
   ${XMVB_GUESS_SOURCES}
   ${XMVB_INPUT_SOURCES}
-  ${XMVB_OUTPUT_SOURCES})
+  ${XMVB_OUTPUT_SOURCES}
+  ${XMVB_MCSCF_SOURCES}
+  ${XMVB_CASSCF_SOURCES})
 list(SORT _xmvb_declared_component_sources)
 list(SORT _xmvb_discovered_component_sources)
 if (NOT "${_xmvb_declared_component_sources}" STREQUAL
@@ -143,6 +156,44 @@ function(xmvb_add_component target_name)
       ${LAPACKE_INCLUDE}
       ${CINT_INCLUDE})
 endfunction()
+
+xmvb_add_component(xmvb_mcscf
+  core/eigensolver.cpp
+  core/eigen_response.cpp
+  core/pair_index.cpp
+  ${XMVB_MCSCF_SOURCES})
+if (XMVB_ENABLE_EIGEN_BLAS_BACKEND)
+  target_compile_definitions(xmvb_mcscf PUBLIC EIGEN_USE_BLAS=1 EIGEN_USE_LAPACKE=1)
+endif()
+target_link_libraries(xmvb_mcscf PUBLIC ${LAPACKE_LIB} ${LAPACK_LIB} xmvb_openmp m)
+target_link_libraries(xmvb_vbscf PUBLIC xmvb_mcscf)
+
+xmvb_add_component(xmvb_casscf ${XMVB_CASSCF_SOURCES})
+target_link_libraries(xmvb_casscf PUBLIC xmvb_mcscf)
+
+# The common CI and orthogonal model must never depend on VB representations.
+file(GLOB_RECURSE _xmvb_common_headers CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/casscf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/casscf/*.cpp")
+foreach(_xmvb_common_file IN LISTS _xmvb_common_headers)
+  file(STRINGS "${_xmvb_common_file}" _xmvb_vb_includes
+    REGEX "^[ \t]*#[ \t]*include[ \t]*\"vbscf/")
+  if (_xmvb_vb_includes)
+    message(FATAL_ERROR "Common/CASSCF source depends on VBSCF: ${_xmvb_common_file}")
+  endif()
+endforeach()
+unset(_xmvb_common_headers)
+unset(_xmvb_common_file)
+unset(_xmvb_vb_includes)
+
+if (XMVB_BUILD_DEV_TARGETS)
+  add_executable(test_casci ${CMAKE_SOURCE_DIR}/tests/mcscf/test_casci.cpp)
+  target_link_libraries(test_casci PRIVATE xmvb_casscf)
+  if (BUILD_TESTING)
+    add_test(NAME casci COMMAND test_casci)
+    set_tests_properties(casci PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+  endif()
+endif()
 
 xmvb_add_component(xmvb_libcint ${XMVB_LIBCINT_SOURCES})
 target_link_libraries(xmvb_libcint PUBLIC xmvb_vbscf)

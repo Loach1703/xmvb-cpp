@@ -1,4 +1,5 @@
-#include "vbscf/structures/orthogonal_ci/planner.hpp"
+#include "mcscf/ci/planner.hpp"
+#include "mcscf/ci/strings.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -6,24 +7,8 @@
 #include <stdexcept>
 #include <unordered_set>
 
-namespace xmvb::vb {
+namespace xmvb::mcscf {
 namespace {
-
-std::size_t binomial(int n, int k) {
-  if (n < 0 || k < 0 || k > n) {
-    return 0;
-  }
-  k = std::min(k, n - k);
-  std::size_t value = 1;
-  for (int index = 1; index <= k; ++index) {
-    const std::size_t numerator = static_cast<std::size_t>(n - k + index);
-    if (value > std::numeric_limits<std::size_t>::max() / numerator) {
-      throw std::overflow_error("fixed-spin determinant count overflow");
-    }
-    value = value * numerator / static_cast<std::size_t>(index);
-  }
-  return value;
-}
 
 std::size_t saturating_product(
     std::size_t left,
@@ -48,7 +33,7 @@ SpinSpaceAnalysis analyze_spin_space(
     return result;
   }
   result.n_electrons = static_cast<int>(strings.front().size());
-  result.dimension = binomial(n_active_orbitals, result.n_electrons);
+  result.dimension = string_count(n_active_orbitals, result.n_electrons);
   if (strings.size() != result.dimension) {
     return result;
   }
@@ -81,7 +66,7 @@ std::size_t same_spin_connections(int n_orbitals, int n_electrons) {
   const std::size_t virtuals =
       static_cast<std::size_t>(n_orbitals - n_electrons);
   return 1 + occupied * virtuals +
-      binomial(n_electrons, 2) * binomial(n_orbitals - n_electrons, 2);
+      string_count(n_electrons, 2) * string_count(n_orbitals - n_electrons, 2);
 }
 
 std::size_t single_excitation_count(int n_orbitals, int n_electrons) {
@@ -101,7 +86,7 @@ long double exterior_transform_flops(
   const long double shear_count =
       static_cast<long double>(n_orbitals) * (n_orbitals - 1) / 2.0L;
   const long double determinant_pairs = static_cast<long double>(
-      binomial(n_orbitals - 2, n_electrons - 1));
+      string_count(n_orbitals - 2, n_electrons - 1));
   const long double entries_per_shear =
       determinant_pairs * partner_dimension * block_width;
   // Each shear is one multiply-add. Forward and adjoint transforms are both
@@ -187,4 +172,4 @@ DirectCiActionPlan plan_orthogonal_direct_ci_action(
   return plan;
 }
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::mcscf

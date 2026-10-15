@@ -9,7 +9,7 @@
 #include "vbscf/derivatives/hessian/responses/opposite_spin/overlap_contractions_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 
 namespace xmvb::vb::detail {
@@ -30,7 +30,7 @@ void add_packed_outer_product(
       if (partner_projection[partner_channel] == 0.0) {
         continue;
       }
-      (*packed_gradient)[TwoElectronIndexer::packed_pair_of_pairs_index(
+      (*packed_gradient)[xmvb::core::PairIndex::packed_pair_of_pairs_index(
           partner_channel, primary_channel)] +=
           primary_value * partner_projection[partner_channel];
     }
@@ -122,7 +122,7 @@ void add_accepted_projection_channel(
   for (std::size_t entry = 0;
        entry < accepted.packed_pair_indices.size();
        ++entry) {
-    (*packed_gradient)[TwoElectronIndexer::packed_pair_of_pairs_index(
+    (*packed_gradient)[xmvb::core::PairIndex::packed_pair_of_pairs_index(
         directional_channel,
         accepted.packed_pair_indices[entry])] +=
         weight * accepted.packed_pair_values[entry];
@@ -254,7 +254,7 @@ void LocalOppositeSpinTileAccumulator::accumulate_primary(
         for (int right_electron = 0;
              right_electron < n_electrons;
              ++right_electron) {
-          const int channel = TwoElectronIndexer::packed_pair_index(
+          const int channel = xmvb::core::PairIndex::packed_pair_index(
               occupied_right[right_electron],
               occupied_left[left_electron]);
           accepted_weight(left_electron, right_electron) =
@@ -398,7 +398,7 @@ void LocalOppositeSpinTileAccumulator::accumulate_cross_response(
               for (int right_electron = 0;
                    right_electron < static_cast<int>(occupied_right.size());
                    ++right_electron) {
-                if (TwoElectronIndexer::packed_pair_index(
+                if (xmvb::core::PairIndex::packed_pair_index(
                         occupied_right[right_electron],
                         occupied_left[left_electron]) == channel) {
                   pair_weights[pair_offset + left_electron +

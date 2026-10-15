@@ -4,19 +4,20 @@
 
 #include <Eigen/Core>
 
+#include "mcscf/ci/integrals.hpp"
+
 #include "vbscf/integrals/active/two_electron/construction/result.hpp"
 
 namespace xmvb::vb {
 
 /**
- * @brief Active-space integrals in a Cholesky-orthonormal orbital basis.
+ * @brief VB change-of-basis metadata extending the shared physical integrals.
+ * The base owns only h and the Coulomb kernel; ordinary CASSCF constructs
+ * mcscf::ActiveIntegrals directly and never builds this Cholesky metadata.
  */
-struct OrthogonalActiveIntegrals {
+struct OrthogonalActiveIntegrals : mcscf::ActiveIntegrals {
   /** Upper factor in `S_active = R^T R`. */
   Eigen::MatrixXd orbital_transform;
-  Eigen::MatrixXd one_electron;
-  /** Dense Coulomb kernel over packed symmetric orbital pairs. */
-  Eigen::MatrixXd pair_kernel;
   ActiveSpaceTwoElectronResult two_electron;
 };
 

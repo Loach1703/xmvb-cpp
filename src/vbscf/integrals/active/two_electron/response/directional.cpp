@@ -11,7 +11,7 @@
 #include "vbscf/integrals/active/two_electron/response/internal.hpp"
 #include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -183,7 +183,7 @@ void compute_exact_packed_active_two_electron_integral_directional_derivative(
          right_active_pair_index <= left_active_pair_index;
          ++right_active_pair_index) {
       const int packed_index =
-          TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               static_cast<int>(left_active_pair_index),
               static_cast<int>(right_active_pair_index));
       (*delta_packed_active_two_electron_integrals)[
@@ -263,7 +263,7 @@ compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
     for (int left = 0; left < n_active_pairs; ++left) {
       for (int right = 0; right <= left; ++right) {
         packed_directions(
-            TwoElectronIndexer::packed_pair_of_pairs_index(left, right),
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(left, right),
             direction) = contraction(left, right) + contraction(right, left);
       }
     }

@@ -6,14 +6,14 @@
 #include <Eigen/Cholesky>
 #include <lapacke.h>
 
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb {
 
 RawTangentMetric::RawTangentMetric(
     const Eigen::Ref<const Eigen::MatrixXd>& quotient,
     const Eigen::Ref<const Eigen::MatrixXd>& overlap) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartGram);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ChartGram);
   metric_.noalias() = quotient.transpose() * overlap * quotient;
   metric_ = (0.5 * (metric_ + metric_.transpose())).eval();
   if (!quotient.cols()) { inverse_ = metric_; return; }
@@ -30,7 +30,7 @@ RawTangent RawTangentMetric::apply(
     const Eigen::Ref<const Eigen::VectorXd>& coefficients,
     const Eigen::Ref<const Eigen::MatrixXd>& overlap,
     bool sphere) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartGram);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ChartGram);
   if (!quotient.cols()) return {quotient, metric_};
   const Eigen::VectorXd sb = overlap * coefficients;
   const double squared_norm = coefficients.dot(sb);
@@ -83,7 +83,7 @@ RawTangent RawTangentMetric::apply(
 Eigen::VectorXd RawTangentMetric::reference_covector(
     const Eigen::VectorXd& covector, const Eigen::VectorXd& projection) const {
   if (!reference_root_.size()) {
-    diagnostics::ScopedPhase phase(diagnostics::Phase::ChartWhitening);
+    xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ChartWhitening);
     Eigen::MatrixXd vectors = metric_;
     Eigen::VectorXd values(metric_.rows());
     const lapack_int n = static_cast<lapack_int>(metric_.rows());

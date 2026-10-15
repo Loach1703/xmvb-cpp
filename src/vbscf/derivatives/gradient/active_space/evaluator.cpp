@@ -17,7 +17,7 @@
 
 #include "vbscf/integrals/active/preparation/space.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/gradient/active_space/helpers.hpp"
 #include "vbscf/derivatives/hessian/responses/opposite_spin/backward.hpp"
@@ -749,7 +749,7 @@ void write_direct_ci_active_gradient(
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row <= column; ++row) {
       result->packed_active_two_electron_gradient[
-          TwoElectronIndexer::packed_pair_of_pairs_index(row, column)] =
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)] =
           row == column
           ? adjoint.pair_kernel(row, column)
           : adjoint.pair_kernel(row, column) +

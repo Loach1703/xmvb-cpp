@@ -20,7 +20,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_response_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_tile_stream_internal.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 
 namespace {
 
@@ -370,7 +370,7 @@ int main() {
     for (int left_pair = 0; left_pair < n_packed_pairs; ++left_pair) {
       for (int right_pair = 0; right_pair <= left_pair; ++right_pair) {
         exact_two_electron_direction[
-            xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 left_pair, right_pair)] =
             direct_ri.ri_active_pair_factors.col(left_pair).dot(
                 delta_factors.col(right_pair)) +
@@ -659,7 +659,7 @@ int main() {
     for (int row = 0; row < n_pairs; ++row) {
       for (int column = 0; column < n_pairs; ++column) {
         const double value = packed_total[
-            xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 row, column)];
         pair_adjoint(row, column) = row == column ? 2.0 * value : value;
       }

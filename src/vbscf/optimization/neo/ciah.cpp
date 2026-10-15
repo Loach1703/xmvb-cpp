@@ -11,7 +11,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -90,7 +90,7 @@ void CiahWorkspace::reset_rhs() noexcept {
 
 Eigen::VectorXd CiahWorkspace::precondition(
     const Eigen::VectorXd& residual, double eigenvalue) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::NeoPreconditioner);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::NeoPreconditioner);
   const bool trace = diagnostics::neo_event_trace_enabled();
   const auto start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
@@ -110,7 +110,7 @@ Eigen::VectorXd CiahWorkspace::precondition(
 
 bool CiahWorkspace::append(Eigen::VectorXd direction,
     const Eigen::VectorXd* residual, double residual_norm, double shift) {
-  diagnostics::ScopedPhase basis_phase(diagnostics::Phase::NeoBasis);
+  xmvb::profiling::ScopedPhase basis_phase(xmvb::profiling::Phase::NeoBasis);
   if (direction.size() != problem_.size() || !direction.allFinite()) {
     throw std::invalid_argument("invalid CIAH Davidson direction");
   }
@@ -133,7 +133,7 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
   }
   direction /= norm;
   basis_phase.stop();
-  diagnostics::ScopedPhase images_phase(diagnostics::Phase::CiahImages, true);
+  xmvb::profiling::ScopedPhase images_phase(xmvb::profiling::Phase::CiahImages, true);
   const auto metric_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   // Evaluate each image once, only after the direction has been admitted.
@@ -199,7 +199,7 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
   const auto projection_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   const Eigen::Index j = basis_size() - 1;
-  diagnostics::ScopedPhase projection_phase(diagnostics::Phase::NeoProjectionFactor);
+  xmvb::profiling::ScopedPhase projection_phase(xmvb::profiling::Phase::NeoProjectionFactor);
   for (Eigen::Index i = 0; i <= j; ++i) {
     // Keep both orientations: symmetrizing an assumed-symmetric triangle
     // would conceal inconsistent matrix-free images.
@@ -350,7 +350,7 @@ std::optional<CiahOriginRay> CiahWorkspace::origin_ray(
 }
 
 CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
-  diagnostics::ScopedPhase next_phase(diagnostics::Phase::CiahNext);
+  xmvb::profiling::ScopedPhase next_phase(xmvb::profiling::Phase::CiahNext);
   if (current_gradient.size() != problem_.size() ||
       !current_gradient.allFinite()) {
     throw std::invalid_argument("invalid CIAH current gradient");
@@ -393,7 +393,7 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   const auto projection_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   const Eigen::Index m = basis_size();
-  diagnostics::ScopedPhase projection_phase(diagnostics::Phase::NeoProjectedSolve);
+  xmvb::profiling::ScopedPhase projection_phase(xmvb::profiling::Phase::NeoProjectedSolve);
   const Eigen::MatrixXd projected_hessian_action = hessian_projection_.topLeftCorner(m,m);
   const Eigen::MatrixXd projected_metric_action = metric_projection_.topLeftCorner(m,m);
   check_projected_symmetry(
@@ -432,7 +432,7 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   const auto spectrum_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   projection_phase.stop();
-  diagnostics::ScopedPhase spectrum_phase(diagnostics::Phase::NeoSpectrum);
+  xmvb::profiling::ScopedPhase spectrum_phase(xmvb::profiling::Phase::NeoSpectrum);
   Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(
       augmented_hessian, augmented_metric);
   if (spectrum.info() != Eigen::Success) {
@@ -466,7 +466,7 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
       (current_gradient + result.hessian_step -
        result.eigenvalue * result.metric_step);
   spectrum_phase.stop();
-  diagnostics::ScopedPhase residual_phase(diagnostics::Phase::NeoProjectionResidual);
+  xmvb::profiling::ScopedPhase residual_phase(xmvb::profiling::Phase::NeoProjectionResidual);
   const auto norm_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   // CIAH uses a coordinate norm to control its inexact microiterations, as

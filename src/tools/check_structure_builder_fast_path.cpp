@@ -12,7 +12,7 @@
 #include "input/loading/loader.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
-#include "vbscf/structures/orthogonal_ci/planner.hpp"
+#include "mcscf/ci/planner.hpp"
 #include "vbscf/integrals/active/preparation/space.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"

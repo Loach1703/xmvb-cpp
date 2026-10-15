@@ -1,11 +1,11 @@
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 
 #include <algorithm>
 #include <stdexcept>
 
-namespace xmvb::vb {
+namespace xmvb::core {
 
-int TwoElectronIndexer::packed_pair_index(int orbital_index_a, int orbital_index_b) {
+int PairIndex::packed_pair_index(int orbital_index_a, int orbital_index_b) {
   if (orbital_index_a < 0 || orbital_index_b < 0) {
     throw std::invalid_argument("orbital indices must be non-negative");
   }
@@ -15,7 +15,7 @@ int TwoElectronIndexer::packed_pair_index(int orbital_index_a, int orbital_index
   return high_index * (high_index + 1) / 2 + low_index;
 }
 
-int TwoElectronIndexer::packed_pair_of_pairs_index(
+int PairIndex::packed_pair_of_pairs_index(
     int packed_pair_index_a,
     int packed_pair_index_b) {
   if (packed_pair_index_a < 0 || packed_pair_index_b < 0) {
@@ -27,7 +27,7 @@ int TwoElectronIndexer::packed_pair_of_pairs_index(
   return high_index * (high_index + 1) / 2 + low_index;
 }
 
-int TwoElectronIndexer::two_electron_storage_index(
+int PairIndex::two_electron_storage_index(
     int orbital_index_p,
     int orbital_index_q,
     int orbital_index_r,
@@ -37,4 +37,4 @@ int TwoElectronIndexer::two_electron_storage_index(
   return packed_pair_of_pairs_index(first_packed_pair_index, second_packed_pair_index);
 }
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::core

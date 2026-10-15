@@ -4,7 +4,7 @@
 
 #include <Eigen/Cholesky>
 
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 
 namespace xmvb::vb {
@@ -17,11 +17,11 @@ Eigen::MatrixXd pair_transform(
   Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
   for (int new_first = 0; new_first < n_orbitals; ++new_first) {
     for (int new_second = 0; new_second <= new_first; ++new_second) {
-      const int new_pair = TwoElectronIndexer::packed_pair_index(
+      const int new_pair = xmvb::core::PairIndex::packed_pair_index(
           new_first, new_second);
       for (int old_first = 0; old_first < n_orbitals; ++old_first) {
         for (int old_second = 0; old_second <= old_first; ++old_second) {
-          const int old_pair = TwoElectronIndexer::packed_pair_index(
+          const int old_pair = xmvb::core::PairIndex::packed_pair_index(
               old_first, old_second);
           double coefficient =
               orbital_transform(old_first, new_first) *
@@ -47,11 +47,11 @@ Eigen::MatrixXd pair_transform_direction(
   Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
   for (int new_first = 0; new_first < n_orbitals; ++new_first) {
     for (int new_second = 0; new_second <= new_first; ++new_second) {
-      const int new_pair = TwoElectronIndexer::packed_pair_index(
+      const int new_pair = xmvb::core::PairIndex::packed_pair_index(
           new_first, new_second);
       for (int old_first = 0; old_first < n_orbitals; ++old_first) {
         for (int old_second = 0; old_second <= old_first; ++old_second) {
-          const int old_pair = TwoElectronIndexer::packed_pair_index(
+          const int old_pair = xmvb::core::PairIndex::packed_pair_index(
               old_first, old_second);
           double coefficient =
               orbital_direction(old_first, new_first) *
@@ -86,11 +86,11 @@ Eigen::MatrixXd pair_transform_adjoint(
   Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_orbitals, n_orbitals);
   for (int new_first = 0; new_first < n_orbitals; ++new_first) {
     for (int new_second = 0; new_second <= new_first; ++new_second) {
-      const int new_pair = TwoElectronIndexer::packed_pair_index(
+      const int new_pair = xmvb::core::PairIndex::packed_pair_index(
           new_first, new_second);
       for (int old_first = 0; old_first < n_orbitals; ++old_first) {
         for (int old_second = 0; old_second <= old_first; ++old_second) {
-          const int old_pair = TwoElectronIndexer::packed_pair_index(
+          const int old_pair = xmvb::core::PairIndex::packed_pair_index(
               old_first, old_second);
           const double weight = pair_gradient(old_pair, new_pair);
           result(old_first, new_first) +=
@@ -123,7 +123,7 @@ Eigen::MatrixXd unpack_two_electron_kernel(
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row < n_pairs; ++row) {
       result(row, column) = packed[
-          TwoElectronIndexer::packed_pair_of_pairs_index(row, column)];
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)];
     }
   }
   return result;
@@ -139,7 +139,7 @@ void pack_two_electron_kernel(
   for (int column = 0; column < kernel.cols(); ++column) {
     for (int row = 0; row <= column; ++row) {
       result->packed_active_two_electron_integrals[
-          TwoElectronIndexer::packed_pair_of_pairs_index(row, column)] =
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)] =
           kernel(row, column);
     }
   }

@@ -28,7 +28,7 @@
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/structures/assembly/block_kernels.hpp"
 #include "vbscf/structures/assembly/coefficient_blocks.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 
 namespace xmvb::vb {
@@ -178,7 +178,7 @@ OppositeSpinPackedPairProjection build_sparse_packed_pair_projection(
          ++right_row) {
       const int orbital_index_right = occ_R[right_row];
       const int packed_pair_index =
-          TwoElectronIndexer::packed_pair_index(
+          xmvb::core::PairIndex::packed_pair_index(
               orbital_index_right,
               orbital_index_left);
       if (touched_mask[packed_pair_index] == 0u) {

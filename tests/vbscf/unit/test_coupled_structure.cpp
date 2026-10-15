@@ -14,7 +14,7 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 #include "vbscf/optimization/neo/coordinates.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
@@ -149,7 +149,7 @@ StructureFixture make_fixture() {
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row <= column; ++row) {
       two_electron.packed_active_two_electron_integrals[
-          xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               row, column)] = pair_kernel(row, column);
     }
   }

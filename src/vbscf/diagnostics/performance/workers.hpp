@@ -5,7 +5,7 @@
 #include <limits>
 #include <vector>
 
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb::diagnostics {
 
@@ -19,7 +19,7 @@ namespace xmvb::vb::diagnostics {
 class WorkerLoopTimes {
  public:
   explicit WorkerLoopTimes(int workers)
-      : samples_(phase_totals().enabled ? workers : 0) {}
+      : samples_(xmvb::profiling::phase_totals().enabled ? workers : 0) {}
 
   void start(int worker) {
     if (!samples_.empty()) samples_[worker].start = std::chrono::steady_clock::now();
@@ -30,7 +30,7 @@ class WorkerLoopTimes {
           std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::steady_clock::now() - samples_[worker].start).count());
   }
-  void finish(Phase phase) const {
+  void finish(xmvb::profiling::Phase phase) const {
     unsigned long long minimum = std::numeric_limits<unsigned long long>::max();
     unsigned long long maximum = 0, sum = 0, count = 0;
     auto first = std::chrono::steady_clock::time_point::max();
@@ -48,7 +48,7 @@ class WorkerLoopTimes {
           sample.start + std::chrono::nanoseconds(sample.elapsed));
     }
     if (count == 0) return;
-    auto& totals = phase_totals();
+    auto& totals = xmvb::profiling::phase_totals();
     const auto index = static_cast<std::size_t>(phase);
     const auto critical = std::chrono::duration_cast<std::chrono::nanoseconds>(last_end - first).count();
     const auto skew = std::chrono::duration_cast<std::chrono::nanoseconds>(last_start - first).count();

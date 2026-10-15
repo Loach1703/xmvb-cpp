@@ -16,7 +16,7 @@
 #include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 #include "vbscf/integrals/active/two_electron/response/backpropagator.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
 
 namespace xmvb::vb {

@@ -12,7 +12,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 #include "vbscf/determinants/pairs/accepted_tile.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 
 namespace xmvb::vb {
@@ -228,7 +228,7 @@ void accumulate_packed_gradient(
               alpha_value * raw_partner_images(work, beta_channel);
           if (std::abs(contribution) > kContributionTolerance) {
             (*packed_gradient)[
-                TwoElectronIndexer::packed_pair_of_pairs_index(
+                xmvb::core::PairIndex::packed_pair_of_pairs_index(
                     beta_channel, alpha_channel)] += contribution;
           }
         }
@@ -262,7 +262,7 @@ void accumulate_overlap_gradient(
         for (int right_electron = 0;
              right_electron < n_electrons;
              ++right_electron) {
-          const int channel = TwoElectronIndexer::packed_pair_index(
+          const int channel = xmvb::core::PairIndex::packed_pair_index(
               occupied_right[right_electron],
               occupied_left[left_electron]);
           cofactor_weight(left_electron, right_electron) =

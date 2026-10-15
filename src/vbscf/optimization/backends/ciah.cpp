@@ -17,7 +17,7 @@
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 #include "vbscf/diagnostics/orbitals/ciah_keyframe.hpp"
 #include "vbscf/diagnostics/orbitals/step_geometry.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 #include "vbscf/optimization/driver/options.hpp"
 #include "vbscf/optimization/driver/result.hpp"
 #include "vbscf/optimization/globalization/line_search.hpp"
@@ -75,8 +75,8 @@ bool build_ciah_macro_step(
     NeoIterationRecord* record,
     VbScfOptimizerResult* result,
     CiahMacroStep* accepted) {
-  diagnostics::ScopedPhase macro_phase(diagnostics::Phase::CiahMacro, true);
-  diagnostics::ScopedPhase setup_phase(diagnostics::Phase::CiahSetup);
+  xmvb::profiling::ScopedPhase macro_phase(xmvb::profiling::Phase::CiahMacro, true);
+  xmvb::profiling::ScopedPhase setup_phase(xmvb::profiling::Phase::CiahSetup);
   const auto context = objective->second_order_context();
   const auto orbitals = objective->input().orbital_preparation_input;
   const Eigen::Index no = chart.reduced_size();
@@ -115,7 +115,7 @@ bool build_ciah_macro_step(
       image = hessian.apply_orbital(x);
     } else {
       const auto orbital = hessian.apply_orbital_coupling(x.head(no));
-      diagnostics::ScopedPhase structure_phase(diagnostics::Phase::CiahStructure, true);
+      xmvb::profiling::ScopedPhase structure_phase(xmvb::profiling::Phase::CiahStructure, true);
       StructureActiveIntegralAdjoint active_adjoint;
       const bool direct_ci = hessian.structure_action().supports_integral_direction();
       const auto ci = structure.apply_coupling_coordinates(x.tail(ns),
@@ -128,7 +128,7 @@ bool build_ciah_macro_step(
       const Eigen::VectorXd forcing = structure.project_coordinates(
           orbital.scaled_structure_forcing);
       if (orbital.connection.has_value()) {
-        diagnostics::ScopedPhase connection_phase(diagnostics::Phase::CiahConnection, true);
+        xmvb::profiling::ScopedPhase connection_phase(xmvb::profiling::Phase::CiahConnection, true);
         const auto& connection = *orbital.connection;
         const Eigen::VectorXd representation = structure.project_coordinates(
             connection.representation_forcing);
@@ -213,7 +213,7 @@ bool build_ciah_macro_step(
     });
   };
   if (ns) ciah_options.observe_images = [&](const Eigen::VectorXd& x,const Eigen::VectorXd& gx) {
-    diagnostics::ScopedPhase observe_phase(diagnostics::Phase::CiahObserve);
+    xmvb::profiling::ScopedPhase observe_phase(xmvb::profiling::Phase::CiahObserve);
     Eigen::VectorXd v = Eigen::VectorXd::Zero(dimension), g = v;
     v.head(no) = x.head(no);
     g.head(no) = gx.head(no);
@@ -266,7 +266,7 @@ bool build_ciah_macro_step(
     return c;
   };
   const auto evaluate_keyframe = [&](const Eigen::VectorXd& displacement) {
-    diagnostics::ScopedPhase keyframe_phase(diagnostics::Phase::CiahKeyframe, true);
+    xmvb::profiling::ScopedPhase keyframe_phase(xmvb::profiling::Phase::CiahKeyframe, true);
     const auto parameters = build_nonredundant_lifted_trial_parameters(
         orbitals, chart, layout, displacement.head(no));
     Keyframe keyframe;
@@ -493,7 +493,7 @@ bool build_ciah_macro_step(
               energy_model.anchor_energy(),energy_model.energy(),exact.energy);
           break;
         }
-        diagnostics::ScopedPhase refresh_phase(diagnostics::Phase::CiahRefresh);
+        xmvb::profiling::ScopedPhase refresh_phase(xmvb::profiling::Phase::CiahRefresh);
         predicted_gradient = exact.gradient;
         energy_model.refresh(exact.energy, exact.gradient);
         diagnostics::neo_trace("ciah_model_refresh",
@@ -629,7 +629,7 @@ bool build_ciah_macro_step(
   }
   double accepted_prediction = 0.0;
   while (true) {
-    diagnostics::ScopedPhase trial_phase(diagnostics::Phase::CiahTrial, true);
+    xmvb::profiling::ScopedPhase trial_phase(xmvb::profiling::Phase::CiahTrial, true);
     if (step_audit) diagnostics::audit_orbital_step(
         orbitals, chart, scale * displacement.head(no), "macro_trial", micro_steps);
     accepted->trial = objective->evaluate_trial_energy_with_structure_guess(
@@ -697,7 +697,7 @@ bool build_ciah_macro_step(
   }
   // Only the accepted point needs gradient backpropagation and its context.
   // Complete the retained forward evaluation, rather than rebuilding it.
-  diagnostics::ScopedPhase completion_phase(diagnostics::Phase::CiahCompletion, true);
+  xmvb::profiling::ScopedPhase completion_phase(xmvb::profiling::Phase::CiahCompletion, true);
   objective->complete_trial(&accepted->trial);
   completion_phase.stop();
   displacement *= scale;

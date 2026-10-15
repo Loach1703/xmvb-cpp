@@ -7,7 +7,7 @@
 
 #include "vbscf/derivatives/hessian/responses/opposite_spin/backward.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/backward.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 
 namespace xmvb::vb {
@@ -59,7 +59,7 @@ Eigen::MatrixXd apply_regular_ri_pair_space_adjoint(
   Eigen::MatrixXd pair_adjoint(n_pairs, n_pairs);
   for (int row = 0; row < n_pairs; ++row) {
     for (int column = 0; column < n_pairs; ++column) {
-      const int packed = TwoElectronIndexer::packed_pair_of_pairs_index(
+      const int packed = xmvb::core::PairIndex::packed_pair_of_pairs_index(
           row, column);
       const double value =
           same_spin.packed_active_two_electron_gradient[packed] +

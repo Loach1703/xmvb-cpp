@@ -12,7 +12,7 @@
 #include "vbscf/determinants/pairs/accepted_tile.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/determinants/algebra/cofactor_differential.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 
 namespace xmvb::vb {
@@ -192,7 +192,7 @@ std::vector<double> build_dense_active_pair_kernel(
   for (int column_pair = 0; column_pair < n_packed_active_pairs; ++column_pair) {
     for (int row_pair = 0; row_pair < n_packed_active_pairs; ++row_pair) {
       const int packed_pair_of_pairs_index =
-          TwoElectronIndexer::packed_pair_of_pairs_index(row_pair, column_pair);
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(row_pair, column_pair);
       dense_pair_kernel[column_pair *
                             n_packed_active_pairs +
                         row_pair] =
@@ -231,7 +231,7 @@ OppositeSpinPackedPairProjection build_sparse_packed_pair_projection(
     const int orbital_index_left = occ_L[left_column];
     for (int right_row = 0; right_row < static_cast<int>(occ_R.size()); ++right_row) {
       const int orbital_index_right = occ_R[right_row];
-      const int packed_pair_index = TwoElectronIndexer::packed_pair_index(
+      const int packed_pair_index = xmvb::core::PairIndex::packed_pair_index(
           orbital_index_right,
           orbital_index_left);
       if (touched_mask[packed_pair_index] == 0) {

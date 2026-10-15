@@ -5,7 +5,7 @@
 
 #include <Eigen/Core>
 
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/response/ri.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/packed_pair_map.hpp"
 
@@ -83,7 +83,7 @@ std::vector<double> pack_gram(
       0.0);
   for (int first = 0; first < n_pairs; ++first) {
     for (int second = 0; second <= first; ++second) {
-      packed[xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+      packed[xmvb::core::PairIndex::packed_pair_of_pairs_index(
           first, second)] = gram(first, second);
     }
   }

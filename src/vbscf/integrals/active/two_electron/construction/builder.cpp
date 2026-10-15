@@ -12,7 +12,7 @@
 
 #include "core/openmp.hpp"
 #include "vbscf/core/storage/eigen.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
 
 namespace xmvb::vb {
@@ -205,7 +205,7 @@ std::vector<double> contract_pair_coefficients_to_packed_active_integrals(
   for (int left = 0; left < n_active_pairs; ++left) {
     for (int right = 0; right <= left; ++right) {
       const int packed_index =
-          TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               left,
               right);
       packed_active_two_electron_integrals[packed_index] =
@@ -252,7 +252,7 @@ std::vector<SparseActivePairCoefficient> build_sparse_active_pair_row(
         const int second_active_orbital =
             active_sparse_orbital_indices[second_offset];
         pair_coefficients.push_back(
-            {TwoElectronIndexer::packed_pair_index(
+            {xmvb::core::PairIndex::packed_pair_index(
                  first_active_orbital,
                  second_active_orbital),
              coefficient});
@@ -276,7 +276,7 @@ std::vector<SparseActivePairCoefficient> build_sparse_active_pair_row(
       const int second_active_orbital =
           active_sparse_orbital_indices[second_offset];
       pair_coefficients.push_back(
-          {TwoElectronIndexer::packed_pair_index(
+          {xmvb::core::PairIndex::packed_pair_index(
                first_active_orbital,
                second_active_orbital),
            coefficient * (first_active_orbital == second_active_orbital ? 2.0 : 1.0)});
@@ -436,11 +436,11 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_sparse(
     int n_basis_functions,
     int n_active_orbitals) {
   const int last_active_pair_index =
-      TwoElectronIndexer::packed_pair_index(
+      xmvb::core::PairIndex::packed_pair_index(
           n_active_orbitals - 1,
           n_active_orbitals - 1);
   const std::size_t packed_size =
-      TwoElectronIndexer::packed_pair_of_pairs_index(
+      xmvb::core::PairIndex::packed_pair_of_pairs_index(
           last_active_pair_index,
           last_active_pair_index) +
       1;
@@ -505,7 +505,7 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_sparse(
               continue;
             }
             const int packed_index =
-                TwoElectronIndexer::packed_pair_of_pairs_index(
+                xmvb::core::PairIndex::packed_pair_of_pairs_index(
                     left_active_pair_index,
                     right_active_pair_index);
             local_packed_integrals[packed_index] +=
@@ -532,7 +532,7 @@ ActiveSpaceTwoElectronResult build_packed_active_two_electron_integrals_sparse(
               sparse_pair_coefficients.packed_active_pair_indices[
                   right_offset];
           const int packed_index =
-              TwoElectronIndexer::packed_pair_of_pairs_index(
+              xmvb::core::PairIndex::packed_pair_of_pairs_index(
                   left_active_pair_index,
                   right_active_pair_index);
           local_packed_integrals[packed_index] +=

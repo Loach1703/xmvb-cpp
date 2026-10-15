@@ -7,7 +7,7 @@
 #include <unordered_map>
 
 #include "core/openmp.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -273,7 +273,7 @@ void ExteriorOrbitalTransform::apply_inverse_adjoint_right_block(
 
 void ExteriorOrbitalTransform::transform_left(
     Eigen::MatrixXd& coefficients, bool adjoint, bool inverse) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiTransformLeft);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiTransformLeft);
   const bool reverse = adjoint != inverse;
   const int n_shears = static_cast<int>(shears_.size());
   const int workers = bounded_openmp_thread_count(
@@ -306,7 +306,7 @@ void ExteriorOrbitalTransform::transform_left(
 
 void ExteriorOrbitalTransform::transform_right(
     Eigen::Ref<Eigen::MatrixXd> coefficients, bool adjoint, bool inverse) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiTransformRight);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiTransformRight);
   const bool reverse = adjoint != inverse;
   const int n_shears = static_cast<int>(shears_.size());
   const int workers = bounded_openmp_thread_count(
@@ -412,7 +412,7 @@ void ExteriorOrbitalTransform::apply_directional_left(
     const ExteriorTransformDirection& direction,
     Eigen::MatrixXd* coefficients,
     Eigen::MatrixXd* directional_coefficients) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiDirectionalTransform);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiDirectionalTransform);
   if (coefficients == nullptr || directional_coefficients == nullptr ||
       coefficients->rows() != directional_coefficients->rows() ||
       coefficients->cols() != directional_coefficients->cols() ||
@@ -447,7 +447,7 @@ void ExteriorOrbitalTransform::apply_directional_right(
     const ExteriorTransformDirection& direction,
     Eigen::MatrixXd* coefficients,
     Eigen::MatrixXd* directional_coefficients) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiDirectionalTransform);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiDirectionalTransform);
   if (coefficients == nullptr || directional_coefficients == nullptr ||
       coefficients->rows() != directional_coefficients->rows() ||
       coefficients->cols() != directional_coefficients->cols() ||
@@ -482,7 +482,7 @@ void ExteriorOrbitalTransform::apply_directional_adjoint_left(
     const ExteriorTransformDirection& direction,
     Eigen::MatrixXd* coefficients,
     Eigen::MatrixXd* directional_coefficients) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiDirectionalTransform);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiDirectionalTransform);
   if (coefficients == nullptr || directional_coefficients == nullptr ||
       coefficients->rows() != directional_coefficients->rows() ||
       coefficients->cols() != directional_coefficients->cols() ||
@@ -514,7 +514,7 @@ void ExteriorOrbitalTransform::apply_directional_adjoint_right(
     const ExteriorTransformDirection& direction,
     Eigen::MatrixXd* coefficients,
     Eigen::MatrixXd* directional_coefficients) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiDirectionalTransform);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiDirectionalTransform);
   if (coefficients == nullptr || directional_coefficients == nullptr ||
       coefficients->rows() != directional_coefficients->rows() ||
       coefficients->cols() != directional_coefficients->cols() ||

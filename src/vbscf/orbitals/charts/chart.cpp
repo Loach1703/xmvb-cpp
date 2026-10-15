@@ -23,7 +23,7 @@
 #include "vbscf/optimization/preconditioners/one_electron.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
 #include "vbscf/core/contracts/orbital_type.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb {
 
@@ -129,7 +129,7 @@ struct PositiveCurvatureBlock {
 PositiveCurvatureBlock build_positive_curvature_block(
     const Eigen::MatrixXd& curvature_block,
     const Eigen::MatrixXd* coordinate_metric = nullptr) {
-  diagnostics::ScopedPhase block_phase(diagnostics::Phase::BlockFactor);
+  xmvb::profiling::ScopedPhase block_phase(xmvb::profiling::Phase::BlockFactor);
   if (curvature_block.rows() == 0) {
     return {Eigen::MatrixXd::Zero(0, 0), Eigen::MatrixXd::Zero(0, 0)};
   }
@@ -142,7 +142,7 @@ PositiveCurvatureBlock build_positive_curvature_block(
   Eigen::MatrixXd eigenvectors =
       0.5 * (curvature_block + curvature_block.transpose());
   Eigen::VectorXd eigenvalues(curvature_block.rows());
-  diagnostics::ScopedPhase eigen_phase(diagnostics::Phase::BlockEigen);
+  xmvb::profiling::ScopedPhase eigen_phase(xmvb::profiling::Phase::BlockEigen);
   const lapack_int dimension = static_cast<lapack_int>(eigenvalues.size());
   Eigen::MatrixXd metric;
   if (coordinate_metric) metric = *coordinate_metric;
@@ -190,7 +190,7 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
     const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap,
     const std::vector<int>& local_basis_indices,
     bool use_active_subspace_gauge) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartQuotient);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ChartQuotient);
   const int local_size = static_cast<int>(local_basis_indices.size());
   const bool is_active = orbital_index >= n_inactive;
   const int n_active = static_cast<int>(input.n_active_orbitals);
@@ -266,7 +266,7 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
     admissible_source_parameters =
         Eigen::MatrixXd::Identity(source_count, source_count);
   } else {
-    diagnostics::record_matrix_shape(diagnostics::Phase::ChartConstraintSvd,
+    xmvb::profiling::record_matrix_shape(xmvb::profiling::Phase::ChartConstraintSvd,
                                     forbidden_sources.rows(), forbidden_sources.cols());
     Eigen::JacobiSVD<Eigen::MatrixXd> constraint_svd(
         forbidden_sources, Eigen::ComputeFullV);
@@ -327,7 +327,7 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
             local_basis_indices[row], local_basis_indices[column]);
     horizontal_constraints.noalias() = local_gauge_generators.transpose() * local_overlap;
   }
-  diagnostics::record_matrix_shape(diagnostics::Phase::ChartGaugeSvd,
+  xmvb::profiling::record_matrix_shape(xmvb::profiling::Phase::ChartGaugeSvd,
                                   horizontal_constraints.rows(), horizontal_constraints.cols());
   Eigen::JacobiSVD<Eigen::MatrixXd> gauge_svd(
       horizontal_constraints, Eigen::ComputeFullV);
@@ -364,7 +364,7 @@ Eigen::MatrixXd build_exact_local_sparse_quotient_basis(
 Eigen::MatrixXd build_stable_inactive_span_basis(
     const Eigen::Ref<const Eigen::MatrixXd>& inactive_orbitals,
     const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartSpan);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ChartSpan);
   if (inactive_orbitals.cols() == 0) return inactive_orbitals;
   const Eigen::MatrixXd metric =
       inactive_orbitals.transpose() * ao_overlap * inactive_orbitals;
@@ -431,7 +431,7 @@ OrbitalChart::OrbitalChart(
     Coordinates coordinates)
     : whiten_tangent_(coordinates == Coordinates::Whitened),
       packed_parameter_size_(parameter_view.size()) {
-  diagnostics::ScopedPhase chart_phase(diagnostics::Phase::Chart);
+  xmvb::profiling::ScopedPhase chart_phase(xmvb::profiling::Phase::Chart);
   const int n_inactive =
       (input.n_total_electrons - input.n_active_electrons) / 2;
   const int n_occupied = n_inactive + input.n_active_orbitals;
@@ -713,7 +713,7 @@ OrbitalChart::OrbitalChart(
     ++block_index;
   }
   if (ao_effective_h1e || hessian_diagonal) {
-    diagnostics::ScopedPhase curvature_phase(diagnostics::Phase::ChartCurvature);
+    xmvb::profiling::ScopedPhase curvature_phase(xmvb::profiling::Phase::ChartCurvature);
     set_curvature(input, ao_effective_h1e, hessian_diagonal);
   }
 }
@@ -1351,7 +1351,7 @@ Eigen::VectorXd OrbitalChart::augmented_hessian_diagonal() const {
 
 std::function<Eigen::VectorXd(const Eigen::VectorXd&)>
 OrbitalChart::metric_block_inverse(const OrbitalPhysicalMetric& metric) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::MetricBlock);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::MetricBlock);
   struct Block {
     int offset;
     Eigen::MatrixXd inverse;

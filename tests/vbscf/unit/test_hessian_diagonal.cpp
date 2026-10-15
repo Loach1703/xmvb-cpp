@@ -7,7 +7,7 @@
 
 #include <Eigen/Core>
 
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/integrals/ao/pairs/two_electron_index.hpp"
@@ -289,9 +289,9 @@ void check_contracted_density_span() {
       for (int r = 0; r < n; ++r)
         for (int s = 0; s < n; ++s)
           ri_g[eri_index(p,q,r,s,n)] = ri->metric_whitened_ao_pair_factors.col(
-              xmvb::vb::TwoElectronIndexer::packed_pair_index(p,q)).dot(
+              xmvb::core::PairIndex::packed_pair_index(p,q)).dot(
               ri->metric_whitened_ao_pair_factors.col(
-                  xmvb::vb::TwoElectronIndexer::packed_pair_index(r,s)));
+                  xmvb::core::PairIndex::packed_pair_index(r,s)));
   input.ri_factorization = ri;
   for (const bool use_ri : {false,true}) {
   input.standard_two_electron_mode = use_ri
@@ -356,14 +356,14 @@ int main() {
   std::vector<double> packed(static_cast<std::size_t>(n_pairs)*(n_pairs+1)/2);
   for (int p = 0; p < na; ++p)
     for (int q = 0; q <= p; ++q) {
-      const int pq = xmvb::vb::TwoElectronIndexer::packed_pair_index(p,q);
+      const int pq = xmvb::core::PairIndex::packed_pair_index(p,q);
       for (int r = 0; r < na; ++r)
         for (int s = 0; s <= r; ++s) {
-          const int rs = xmvb::vb::TwoElectronIndexer::packed_pair_index(r,s);
+          const int rs = xmvb::core::PairIndex::packed_pair_index(r,s);
           if (rs > pq) continue;
           const int multiplicity =
               (p==q ? 1 : 2) * (r==s ? 1 : 2) * (pq==rs ? 1 : 2);
-          packed[xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(pq,rs)] =
+          packed[xmvb::core::PairIndex::packed_pair_of_pairs_index(pq,rs)] =
               0.5 * multiplicity * dm2[eri_index(p,q,r,s,na)];
         }
     }
@@ -445,8 +445,8 @@ int main() {
     for (int q = 0; q < n; ++q)
       for (int r = 0; r < n; ++r)
         for (int s = 0; s < n; ++s) {
-          const int pq = xmvb::vb::TwoElectronIndexer::packed_pair_index(p,q);
-          const int rs = xmvb::vb::TwoElectronIndexer::packed_pair_index(r,s);
+          const int pq = xmvb::core::PairIndex::packed_pair_index(p,q);
+          const int rs = xmvb::core::PairIndex::packed_pair_index(r,s);
           ri_g[eri_index(p,q,r,s,n)] =
               ri->metric_whitened_ao_pair_factors.col(pq).dot(
                   ri->metric_whitened_ao_pair_factors.col(rs));

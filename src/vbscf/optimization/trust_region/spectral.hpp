@@ -7,7 +7,7 @@
 #include <utility>
 
 #include <Eigen/Core>
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb {
 
@@ -22,7 +22,7 @@ struct SpectralTrustRegionSolution {
 // Only the small HVP-subspace eigensystem is supplied, not an orbital Hessian.
 inline SpectralTrustRegionSolution solve_spectral_trust_region(
     const Eigen::VectorXd& d, const Eigen::VectorXd& g, double radius) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::TrustSecular);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::TrustSecular);
   if (d.size() != g.size() || !d.allFinite() || !g.allFinite() ||
       !(radius > 0.0) || !std::isfinite(radius)) {
     throw std::invalid_argument("invalid spectral trust-region problem");

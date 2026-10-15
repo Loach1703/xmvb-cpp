@@ -19,7 +19,7 @@
 #include "vbscf/structures/expansion/expander.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 
 namespace {
 
@@ -186,7 +186,7 @@ int packed_active_two_electron_size(int n_active_orbitals) {
   if (n_active_orbitals <= 0) {
     throw std::invalid_argument("n_active_orbitals must be positive");
   }
-  return xmvb::vb::TwoElectronIndexer::two_electron_storage_index(
+  return xmvb::core::PairIndex::two_electron_storage_index(
              n_active_orbitals - 1,
              n_active_orbitals - 1,
              n_active_orbitals - 1,

@@ -3,7 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb {
 
@@ -44,7 +44,7 @@ Eigen::VectorXd NonredundantRetractionMetric::tangent(
 
 Eigen::VectorXd NonredundantRetractionMetric::apply(
     const Eigen::VectorXd& reduced_step) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::MetricAction);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::MetricAction);
   return space_.project_reduced_gradient(
       physical_metric_.apply(
           parameter_view_, space_.expand_step(reduced_step)));
@@ -52,7 +52,7 @@ Eigen::VectorXd NonredundantRetractionMetric::apply(
 
 Eigen::VectorXd NonredundantRetractionMetric::solve(
     const Eigen::VectorXd& covector) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::MetricSolve);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::MetricSolve);
   const Eigen::Index dimension = space_.reduced_size();
   if (covector.size() != dimension) {
     throw std::runtime_error(

@@ -9,7 +9,7 @@
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 
 namespace xmvb::vb::detail {
 namespace {
@@ -39,7 +39,7 @@ OppositeSpinPackedPairProjection build_sparse_packed_pair_projection(
     for (int right_row = 0;
          right_row < static_cast<int>(right_occupations.size());
          ++right_row) {
-      const int packed_pair_index = TwoElectronIndexer::packed_pair_index(
+      const int packed_pair_index = xmvb::core::PairIndex::packed_pair_index(
           right_occupations[right_row],
           orbital_index_left);
       if (touched_mask[packed_pair_index] == 0) {
@@ -86,7 +86,7 @@ void fill_exact_kernel_rows(
   for (int row = row_begin; row < row_end; ++row) {
     for (int column = 0; column < n_packed_pairs; ++column) {
       (*rows)(row - row_begin, column) = packed_kernel[
-          TwoElectronIndexer::packed_pair_of_pairs_index(row, column)];
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)];
     }
   }
 }

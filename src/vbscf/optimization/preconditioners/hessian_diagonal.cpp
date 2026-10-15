@@ -14,7 +14,7 @@
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/response/types.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/packed_pair_map.hpp"
@@ -180,10 +180,10 @@ Eigen::MatrixXd build_pair_transform(
   Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
   for (int new_p = 0; new_p < n; ++new_p) {
     for (int new_q = 0; new_q <= new_p; ++new_q) {
-      const int new_pair = TwoElectronIndexer::packed_pair_index(new_p, new_q);
+      const int new_pair = xmvb::core::PairIndex::packed_pair_index(new_p, new_q);
       for (int old_p = 0; old_p < n; ++old_p) {
         for (int old_q = 0; old_q <= old_p; ++old_q) {
-          const int old_pair = TwoElectronIndexer::packed_pair_index(old_p, old_q);
+          const int old_pair = xmvb::core::PairIndex::packed_pair_index(old_p, old_q);
           double value =
               orbital_transform(old_p, new_p) *
               orbital_transform(old_q, new_q);
@@ -257,14 +257,14 @@ std::vector<double> pack_symmetric_dm2(
   std::vector<double> packed(packed_eri_count(n), 0.0);
   for (int p = 0; p < n; ++p) {
     for (int q = 0; q <= p; ++q) {
-      const int pq = TwoElectronIndexer::packed_pair_index(p, q);
+      const int pq = xmvb::core::PairIndex::packed_pair_index(p, q);
       for (int r = 0; r < n; ++r) {
         for (int s = 0; s <= r; ++s) {
-          const int rs = TwoElectronIndexer::packed_pair_index(r, s);
+          const int rs = xmvb::core::PairIndex::packed_pair_index(r, s);
           if (rs > pq) continue;
           const int multiplicity =
               (p == q ? 1 : 2) * (r == s ? 1 : 2) * (pq == rs ? 1 : 2);
-          packed[TwoElectronIndexer::packed_pair_of_pairs_index(pq, rs)] =
+          packed[xmvb::core::PairIndex::packed_pair_of_pairs_index(pq, rs)] =
               0.5 * multiplicity * dm2[tensor4_index(p, q, r, s, n)];
         }
       }
@@ -286,12 +286,12 @@ std::vector<double> unpack_symmetric_active_two_rdm(
       0.0);
   for (int p = 0; p < n_active; ++p) {
     for (int q = 0; q < n_active; ++q) {
-      const int pq = TwoElectronIndexer::packed_pair_index(p, q);
+      const int pq = xmvb::core::PairIndex::packed_pair_index(p, q);
       for (int r = 0; r < n_active; ++r) {
         for (int s = 0; s < n_active; ++s) {
-          const int rs = TwoElectronIndexer::packed_pair_index(r, s);
+          const int rs = xmvb::core::PairIndex::packed_pair_index(r, s);
           const int packed =
-              TwoElectronIndexer::packed_pair_of_pairs_index(pq, rs);
+              xmvb::core::PairIndex::packed_pair_of_pairs_index(pq, rs);
           const int multiplicity =
               (p == q ? 1 : 2) * (r == s ? 1 : 2) * (pq == rs ? 1 : 2);
           dm2[tensor4_index(p, q, r, s, n_active)] =
@@ -474,7 +474,7 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
     for (int a = 0; a < n_active; ++a)
       for (int b = 0; b < n_active; ++b)
         x.j_active[slice_index(p, a, b, n_active)] =
-            contraction[TwoElectronIndexer::packed_pair_index(a, b)];
+            contraction[xmvb::core::PairIndex::packed_pair_index(a, b)];
   }
   ExactCtxPairMatrix active_pair_map;
   build_packed_orbital_pair_map(
@@ -488,8 +488,8 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
       for (int c = 0; c < n_active; ++c)
         for (int d = 0; d < n_active; ++d)
           x.active_eri[tensor4_index(a, b, c, d, n_active)] = active_pairs(
-              TwoElectronIndexer::packed_pair_index(a, b),
-              TwoElectronIndexer::packed_pair_index(c, d));
+              xmvb::core::PairIndex::packed_pair_index(a, b),
+              xmvb::core::PairIndex::packed_pair_index(c, d));
   const auto dm2 = unpack_symmetric_active_two_rdm(packed_dm2,n_active);
   const auto active_end = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};

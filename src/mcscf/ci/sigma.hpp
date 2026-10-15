@@ -8,9 +8,9 @@
 
 #include <Eigen/Core>
 
-#include "vbscf/structures/orthogonal_ci/integrals.hpp"
+#include "mcscf/ci/integrals.hpp"
 
-namespace xmvb::vb {
+namespace xmvb::mcscf {
 
 /** @brief Integral adjoint of one orthonormal direct-CI bilinear form. */
 struct DirectCiIntegralAdjoint {
@@ -39,7 +39,7 @@ public:
   DirectCiSigmaAction(
       const std::vector<std::vector<int>>& alpha_determinants,
       const std::vector<std::vector<int>>& beta_determinants,
-      const OrthogonalActiveIntegrals& integrals);
+      const ActiveIntegrals& integrals);
 
   /** @brief Reuses immutable spin-string links for another integral kernel.
    *
@@ -48,7 +48,7 @@ public:
    */
   DirectCiSigmaAction(
       const DirectCiSigmaAction& reference,
-      const OrthogonalActiveIntegrals& integrals);
+      const ActiveIntegrals& integrals);
 
   /**
    * @brief Applies the Hamiltonian to packed determinant-product blocks.
@@ -142,7 +142,7 @@ private:
   SpinConnections build_spin_connections(
       const std::vector<std::vector<int>>& determinants) const;
   Eigen::MatrixXd build_hamiltonian_pair_kernel(
-      const OrthogonalActiveIntegrals& integrals,
+      const ActiveIntegrals& integrals,
       int n_electrons) const;
   /** @brief Scatter into (block_width * alpha_count, orbital_pairs), strings contiguous. */
   void scatter_one_body_intermediate(
@@ -178,4 +178,4 @@ private:
   std::shared_ptr<const SpinConnections> distinct_beta_;
 };
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::mcscf

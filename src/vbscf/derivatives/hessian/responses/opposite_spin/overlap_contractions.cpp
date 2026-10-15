@@ -11,7 +11,7 @@
 #include "vbscf/determinants/algebra/cofactor_differential.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/derivatives/hessian/responses/opposite_spin/selected_state_pair_graph_internal.hpp"
 
 namespace xmvb::vb {
@@ -276,7 +276,7 @@ void accumulate_overlap_gradient_by_pair_graph(
       }
       for (const int orbital_left : occ_L) {
         for (const int orbital_right : occ_R) {
-          add_target(TwoElectronIndexer::packed_pair_index(
+          add_target(xmvb::core::PairIndex::packed_pair_index(
               orbital_right,
               orbital_left));
         }
@@ -301,7 +301,7 @@ void accumulate_overlap_gradient_by_pair_graph(
         pair_dense_image.resize(n_electrons, n_electrons);
         for (int left_column = 0; left_column < n_electrons; ++left_column) {
           for (int right_row = 0; right_row < n_electrons; ++right_row) {
-            const int channel = TwoElectronIndexer::packed_pair_index(
+            const int channel = xmvb::core::PairIndex::packed_pair_index(
                 occ_R[right_row],
                 occ_L[left_column]);
             pair_dense_image(right_row, left_column) =
@@ -328,7 +328,7 @@ void accumulate_overlap_gradient_by_pair_graph(
         inverse_overlap_gradient.setZero(n_electrons, n_electrons);
         for (int left_column = 0; left_column < n_electrons; ++left_column) {
           for (int right_row = 0; right_row < n_electrons; ++right_row) {
-            const int channel = TwoElectronIndexer::packed_pair_index(
+            const int channel = xmvb::core::PairIndex::packed_pair_index(
                 occ_R[right_row],
                 occ_L[left_column]);
             inverse_overlap_gradient(left_column, right_row) =
@@ -411,7 +411,7 @@ void accumulate_local_overlap_gradient_by_pair_graph(
           static_cast<std::size_t>(n_electrons) * n_electrons);
       for (const int orbital_left : occ_left) {
         for (const int orbital_right : occ_right) {
-          target_channels.push_back(TwoElectronIndexer::packed_pair_index(
+          target_channels.push_back(xmvb::core::PairIndex::packed_pair_index(
               orbital_right,
               orbital_left));
         }

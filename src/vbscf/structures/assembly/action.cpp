@@ -7,14 +7,14 @@
 #include <stdexcept>
 
 #include "core/openmp.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 #include "vbscf/determinants/pairs/accepted_action.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
-#include "vbscf/structures/orthogonal_ci/planner.hpp"
-#include "vbscf/structures/orthogonal_ci/sigma.hpp"
+#include "mcscf/ci/planner.hpp"
+#include "mcscf/ci/sigma.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -382,7 +382,7 @@ struct StructureAction::OrthogonalDirectCiData {
   OrthogonalActiveIntegrals integrals;
   ExteriorOrbitalTransform alpha_transform;
   std::unique_ptr<ExteriorOrbitalTransform> distinct_beta_transform;
-  DirectCiSigmaAction sigma;
+  xmvb::mcscf::DirectCiSigmaAction sigma;
   mutable std::optional<Eigen::MatrixXd> carrier_diagonal;
 
   OrthogonalDirectCiData(
@@ -520,8 +520,8 @@ StructureAction::StructureAction(
         "same-spin pair cache does not match determinant expansion");
   }
 
-  const DirectCiActionPlan direct_ci_plan =
-      plan_orthogonal_direct_ci_action(
+  const xmvb::mcscf::DirectCiActionPlan direct_ci_plan =
+      xmvb::mcscf::plan_orthogonal_direct_ci_action(
           same_spin_pair_cache.alpha_reuse_table.unique_determinants,
           same_spin_pair_cache.beta_reuse_table.unique_determinants,
           n_active_orbitals,
@@ -1288,7 +1288,7 @@ StructureActionResult StructureAction::apply_integral_direction(
     const std::vector<double>& one_electron_direction,
     const std::vector<double>& packed_two_electron_direction,
     StructureIntegralDirection* direct_ci_direction) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::CiIntegralDirection);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiIntegralDirection);
   if (!direct_ci_) {
     throw std::logic_error(
         "integral-direction action requires orthogonal direct CI");
@@ -1311,7 +1311,7 @@ StructureActionResult StructureAction::apply_integral_direction(
           delta_one_electron,
           packed_two_electron_direction,
           n_active_orbitals);
-  const DirectCiSigmaAction sigma_direction(
+  const xmvb::mcscf::DirectCiSigmaAction sigma_direction(
       direct_ci_->sigma,
       integral_direction);
   const Eigen::MatrixXd inverse_orbital_transform =
@@ -1504,7 +1504,7 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
     result.residuals.push_back(
         sigma - state_energies[state] *
             result.orthogonal_coefficients.back());
-    const DirectCiIntegralAdjoint integral_gradient =
+    const xmvb::mcscf::DirectCiIntegralAdjoint integral_gradient =
         direct_ci_->sigma.integral_adjoint(
             result.orthogonal_coefficients.back(),
             result.orthogonal_coefficients.back());
@@ -1621,13 +1621,13 @@ StructureAction::active_integral_adjoint_direction(
 
   ExteriorTransformDirection alpha_transform_direction;
   ExteriorTransformDirection beta_transform_direction;
-  std::unique_ptr<DirectCiSigmaAction> sigma_direction;
+  std::unique_ptr<xmvb::mcscf::DirectCiSigmaAction> sigma_direction;
   if (include_integral_response && direct_ci_direction == nullptr) {
     alpha_transform_direction = direct_ci_->alpha_transform.direction(
         integral_direction.orbital_transform);
     beta_transform_direction = direct_ci_->beta_transform().direction(
         integral_direction.orbital_transform);
-    sigma_direction = std::make_unique<DirectCiSigmaAction>(
+    sigma_direction = std::make_unique<xmvb::mcscf::DirectCiSigmaAction>(
         direct_ci_->sigma,
         integral_direction);
   }
@@ -1738,7 +1738,7 @@ StructureAction::active_integral_adjoint_direction(
       }
     }
 
-    const DirectCiIntegralAdjoint directional_integral_gradient =
+    const xmvb::mcscf::DirectCiIntegralAdjoint directional_integral_gradient =
         direct_ci_->sigma.integral_adjoint(
             directional_orthogonal_coefficients,
             orthogonal_coefficients);
@@ -1860,7 +1860,7 @@ StructureResponseSweep StructureAction::contract_response(
       response = std::move(coefficients);
       direct_ci_->alpha_transform.apply_left(&response);
       direct_ci_->beta_transform().apply_right(&response);
-      DirectCiResponse contracted =
+      xmvb::mcscf::DirectCiResponse contracted =
           direct_ci_->sigma.apply_with_adjoint(response, accepted);
       one_gradient.noalias() +=
           2.0 * state_weight * contracted.integrals.one_electron;

@@ -11,7 +11,7 @@
 #endif
 
 #include "core/openmp.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 #include "vbscf/diagnostics/performance/workers.hpp"
 
 namespace xmvb::vb::detail {
@@ -94,7 +94,7 @@ void apply_exact_ao_pair_kernel(
 void apply_exact_ao_pair_graph(
     const AoPairGraph& graph, const Eigen::Ref<const ExactCtxPairMatrix>& coefficients,
     int n_bf, std::size_t n_active_pairs, ExactCtxPairMatrix* result) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::AoPairAction);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::AoPairAction);
   if (result == nullptr) {
     throw std::invalid_argument("AO-pair result must not be null");
   }
@@ -211,7 +211,7 @@ void apply_exact_ao_pair_graph(
     }
     work.stop(worker);
   }
-  work.finish(diagnostics::Phase::AoPairAction);
+  work.finish(xmvb::profiling::Phase::AoPairAction);
 }
 
 void apply_generated_pair_rows(

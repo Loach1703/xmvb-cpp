@@ -7,7 +7,7 @@
 #include <Eigen/LU>
 
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 
 namespace xmvb::vb {
@@ -334,7 +334,7 @@ DeterminantHamiltonianResult calc_same_spin_hamiltonian(
       eri_act.data(),
       [&eri_act](int row_packed_pair_index, int column_packed_pair_index) {
         const int packed_pair_of_pairs_index =
-            TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 row_packed_pair_index,
                 column_packed_pair_index);
         return eri_act[packed_pair_of_pairs_index];

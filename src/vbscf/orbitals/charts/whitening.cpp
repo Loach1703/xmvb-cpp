@@ -7,7 +7,7 @@
 
 #include <lapacke.h>
 
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -62,7 +62,7 @@ std::pair<double, double> downdated_extremes(
 TangentWhitening::TangentWhitening(
     const Eigen::Ref<const Eigen::MatrixXd>& quotient,
     const Eigen::Ref<const Eigen::MatrixXd>& overlap) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartWhitening);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ChartWhitening);
   if (overlap.rows() != quotient.rows() || overlap.cols() != quotient.rows())
     throw std::invalid_argument("quotient overlap dimensions are inconsistent");
   metric_.noalias() = quotient.transpose() * overlap * quotient;
@@ -88,7 +88,7 @@ WhitenedTangent TangentWhitening::apply(
     const Eigen::Ref<const Eigen::VectorXd>& coefficients,
     const Eigen::Ref<const Eigen::MatrixXd>& overlap,
     bool sphere) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::ChartGram);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ChartGram);
   if (coefficients.size() != basis_.rows() || overlap.rows() != basis_.rows() ||
       overlap.cols() != basis_.rows())
     throw std::invalid_argument("normalized-orbital tangent dimensions are inconsistent");

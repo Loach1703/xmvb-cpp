@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace xmvb::vb {
+namespace xmvb::mcscf {
 
 /**
  * @brief Operation-count model for an orthogonalized direct-CI action.
@@ -61,4 +61,4 @@ DirectCiActionPlan plan_orthogonal_direct_ci_action(
     int n_active_orbitals,
     int block_width);
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::mcscf

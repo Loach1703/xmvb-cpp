@@ -60,7 +60,7 @@ int infer_active_orbital_count_from_packed_integral_count(std::size_t packed_int
  * @brief Evaluates the active-space pair kernel entry `G_{P,Q}`.
  *
  * The packed pair indices `P` and `Q` use the same
- * `TwoElectronIndexer::packed_pair_index(...)` storage convention.
+ * `xmvb::core::PairIndex::packed_pair_index(...)` storage convention.
  */
 double lookup_active_space_two_electron_kernel_value(
     const ActiveSpaceTwoElectronView& two_electron_view,

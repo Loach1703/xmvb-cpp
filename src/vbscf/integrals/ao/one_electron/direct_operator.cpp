@@ -10,7 +10,7 @@
 #endif
 
 #include "core/openmp.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
+#include "core/timing.hpp"
 #include "vbscf/diagnostics/performance/workers.hpp"
 
 namespace xmvb::vb {
@@ -220,7 +220,7 @@ void apply_symmetric_ao_h1e_fused(
     const double* source, const double* adjoint, const AoIntegralInput& ao,
     int n_threads, AoH1eSymmetricWorkspace* workspace,
     std::vector<double>* forward, std::vector<double>* transpose) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::AoH1eFused);
   if (source == nullptr || adjoint == nullptr || workspace == nullptr ||
       forward == nullptr || transpose == nullptr)
     throw std::invalid_argument("symmetric AO-H1E buffers must not be null");
@@ -273,14 +273,14 @@ void apply_symmetric_ao_h1e_fused(
       (*transpose)[partner] = 0.5 * sum[1];
     }
   }
-  work.finish(diagnostics::Phase::AoH1eFused);
+  work.finish(xmvb::profiling::Phase::AoH1eFused);
 }
 
 std::vector<double> apply_ao_h1e(
     const double* source,
     const AoIntegralInput& ao,
     int n_threads) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eForward);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::AoH1eForward);
   if (source == nullptr) {
     throw std::invalid_argument("AO-H1E source must not be null");
   }
@@ -314,7 +314,7 @@ std::vector<double> apply_ao_h1e(
     for (std::size_t index = 0; index < size; ++index)
       result[index] = sum_element(partial, index, team_size);
   }
-  work.finish(diagnostics::Phase::AoH1eForward);
+  work.finish(xmvb::profiling::Phase::AoH1eForward);
   return result;
 }
 
@@ -322,7 +322,7 @@ std::vector<double> apply_ao_h1e_transpose(
     const double* adjoint,
     const AoIntegralInput& ao,
     int n_threads) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eTranspose);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::AoH1eTranspose);
   if (adjoint == nullptr) {
     throw std::invalid_argument("AO-H1E adjoint must not be null");
   }
@@ -356,7 +356,7 @@ std::vector<double> apply_ao_h1e_transpose(
     for (std::size_t index = 0; index < size; ++index)
       result[index] = sum_element(partial, index, team_size);
   }
-  work.finish(diagnostics::Phase::AoH1eTranspose);
+  work.finish(xmvb::profiling::Phase::AoH1eTranspose);
   return result;
 }
 
@@ -364,7 +364,7 @@ std::vector<double> apply_ao_h1e_transpose(
 template<bool Packed>
 void apply_symmetric_channels(const AoIntegralInput& ao,int n_threads,
     AoH1eBatchWorkspace* workspace,Eigen::MatrixXd* response) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::AoH1eFused);
   const std::size_t size=matrix_size(ao);
   if (!workspace || !response || workspace->sources.rows()!=static_cast<Eigen::Index>(size))
     throw std::invalid_argument("invalid interleaved AO response channels");
@@ -425,7 +425,7 @@ void apply_symmetric_channels(const AoIntegralInput& ao,int n_threads,
       }
     }
   }
-  work.finish(diagnostics::Phase::AoH1eFused);
+  work.finish(xmvb::profiling::Phase::AoH1eFused);
 }
 
 void apply_symmetric_ao_h1e_batch(const Eigen::Ref<const Eigen::MatrixXd>& sources,
@@ -451,7 +451,7 @@ void apply_symmetric_ao_h1e_fused_batch(
     AoH1eBatchWorkspace* workspace,
     Eigen::MatrixXd* forward,
     Eigen::MatrixXd* transpose) {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::AoH1eFused);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::AoH1eFused);
   if (workspace == nullptr || forward == nullptr || transpose == nullptr) {
     throw std::invalid_argument("AO-H1E batch outputs must not be null");
   }
@@ -517,7 +517,7 @@ void apply_symmetric_ao_h1e_fused_batch(
       }
     }
   }
-  work.finish(diagnostics::Phase::AoH1eFused);
+  work.finish(xmvb::profiling::Phase::AoH1eFused);
 }
 
 }  // namespace xmvb::vb

@@ -12,7 +12,7 @@
 #include "core/openmp.hpp"
 #include "vbscf/core/storage/eigen.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
 
 namespace xmvb::vb {
@@ -178,12 +178,12 @@ Eigen::MatrixXd build_active_pair_gradient_matrix(
       const auto& column_pair = active_pairs[column_index];
       const int packed_index =
           (row_index >= column_index)
-              ? TwoElectronIndexer::two_electron_storage_index(
+              ? xmvb::core::PairIndex::two_electron_storage_index(
                     row_pair.first,
                     row_pair.second,
                     column_pair.first,
                     column_pair.second)
-              : TwoElectronIndexer::two_electron_storage_index(
+              : xmvb::core::PairIndex::two_electron_storage_index(
                     column_pair.first,
                     column_pair.second,
                     row_pair.first,

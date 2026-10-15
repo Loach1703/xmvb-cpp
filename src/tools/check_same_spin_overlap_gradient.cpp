@@ -13,7 +13,7 @@
 #include "vbscf/determinants/algebra/hamiltonian.hpp"
 #include "vbscf/determinants/algebra/overlap.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
 
 namespace {
@@ -189,7 +189,7 @@ double evaluate_opposite_spin_hamiltonian(
               beta_occ_R[beta_right_row];
           const double beta_cofactor =
               beta_cofactor_1st(beta_right_row, beta_left_column);
-          const int two_electron_index = xmvb::vb::TwoElectronIndexer::two_electron_storage_index(
+          const int two_electron_index = xmvb::core::PairIndex::two_electron_storage_index(
               beta_orbital_right,
               beta_orbital_left,
               alpha_orbital_right,

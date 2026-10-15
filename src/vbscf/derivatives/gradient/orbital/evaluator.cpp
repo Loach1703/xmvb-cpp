@@ -9,7 +9,7 @@
 
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "vbscf/core/storage/eigen.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 
@@ -108,12 +108,12 @@ Eigen::MatrixXd build_active_pair_gradient_matrix(
               column_first * (column_first + 1) / 2 + column_second;
           const int packed_index =
               (row_pair_index >= column_pair_index)
-                  ? TwoElectronIndexer::two_electron_storage_index(
+                  ? xmvb::core::PairIndex::two_electron_storage_index(
                         row_first,
                         row_second,
                         column_first,
                         column_second)
-                  : TwoElectronIndexer::two_electron_storage_index(
+                  : xmvb::core::PairIndex::two_electron_storage_index(
                         column_first,
                         column_second,
                         row_first,

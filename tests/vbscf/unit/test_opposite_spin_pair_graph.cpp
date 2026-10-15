@@ -11,7 +11,7 @@
 #include "vbscf/derivatives/hessian/responses/opposite_spin/packed_contractions_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/active_space/ri_factor_adjoint.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 
 namespace {
@@ -135,7 +135,7 @@ std::vector<double> direct_packed_gradient(
             for (int beta_channel = 0;
                  beta_channel < n_channels;
                  ++beta_channel) {
-              result[xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+              result[xmvb::core::PairIndex::packed_pair_of_pairs_index(
                   beta_channel,
                   alpha_channel)] +=
                   coefficient * alpha_value *
@@ -210,7 +210,7 @@ std::vector<double> direct_local_packed_gradient(
             for (int beta_channel = 0;
                  beta_channel < n_channels;
                  ++beta_channel) {
-              result[xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+              result[xmvb::core::PairIndex::packed_pair_of_pairs_index(
                   beta_channel,
                   alpha_channel)] += coefficient *
                   (channel_value(delta_alpha, alpha_channel) *
@@ -300,7 +300,7 @@ std::vector<double> direct_overlap_gradient(
         for (int column = 0; column < n_channels; ++column) {
           projected_image[row] +=
               packed_kernel[
-                  xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+                  xmvb::core::PairIndex::packed_pair_of_pairs_index(
                       row, column)] *
               partner_image[column];
         }
@@ -322,7 +322,7 @@ std::vector<double> direct_overlap_gradient(
       const int occ_left = primary_determinants[primary_left][0];
       const int occ_right = primary_determinants[primary_right][0];
       const int occupied_channel =
-          xmvb::vb::TwoElectronIndexer::packed_pair_index(
+          xmvb::core::PairIndex::packed_pair_index(
               occ_right, occ_left);
       const double inverse_overlap =
           pair.overlap_result.inverse_overlap_submatrix(0, 0);
@@ -473,7 +473,7 @@ int main() {
   for (int row = 0; row < n_channels; ++row) {
     for (int column = 0; column <= row; ++column) {
       packed_ri_result.packed_active_two_electron_integrals[
-          xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               row, column)] = ri_kernel(row, column);
     }
   }
@@ -483,7 +483,7 @@ int main() {
   for (int row = 0; row < n_channels; ++row) {
     for (int column = 0; column <= row; ++column) {
       packed_ri_direction[
-          xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               row,
               column)] =
           one_sided_ri_direction(row, column) +
@@ -610,7 +610,7 @@ int main() {
   for (int row = 0; row < n_channels; ++row) {
     for (int column = 0; column <= row; ++column) {
       two_electron_result.packed_active_two_electron_integrals[
-          xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               row, column)] =
           0.4 + 0.03 * row - 0.02 * column;
     }
@@ -726,7 +726,7 @@ int main() {
     for (int column = 0; column < n_channels; ++column) {
       const double packed_value =
           accepted_contribution.packed_active_two_electron_gradient[
-              xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+              xmvb::core::PairIndex::packed_pair_of_pairs_index(
                   row,
                   column)];
       packed_adjoint_matrix(row, column) =

@@ -4,7 +4,7 @@
 
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/determinants/algebra/cofactor_differential.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 
 namespace xmvb::vb {
@@ -153,7 +153,7 @@ double evaluate_opposite_spin_coulomb_coupling(
               beta_occ_R[beta_right_row];
           const double beta_cofactor =
               beta_cofactor_1st(beta_right_row, beta_left_column);
-          const int two_electron_index = TwoElectronIndexer::two_electron_storage_index(
+          const int two_electron_index = xmvb::core::PairIndex::two_electron_storage_index(
               beta_orbital_right,
               beta_orbital_left,
               alpha_orbital_right,
@@ -210,7 +210,7 @@ double evaluate_opposite_spin_coulomb_coupling(
           alpha_occ_R[alpha_right_row];
       const double alpha_cofactor =
           alpha_cofactor_1st(alpha_right_row, alpha_left_column);
-      const int alpha_packed_pair_index = TwoElectronIndexer::packed_pair_index(
+      const int alpha_packed_pair_index = xmvb::core::PairIndex::packed_pair_index(
           alpha_orbital_right,
           alpha_orbital_left);
       for (int beta_left_column = 0; beta_left_column < n_beta_electrons; ++beta_left_column) {
@@ -221,7 +221,7 @@ double evaluate_opposite_spin_coulomb_coupling(
               beta_occ_R[beta_right_row];
           const double beta_cofactor =
               beta_cofactor_1st(beta_right_row, beta_left_column);
-          const int beta_packed_pair_index = TwoElectronIndexer::packed_pair_index(
+          const int beta_packed_pair_index = xmvb::core::PairIndex::packed_pair_index(
               beta_orbital_right,
               beta_orbital_left);
           opposite_spin_coulomb_coupling +=
@@ -289,7 +289,7 @@ double evaluate_opposite_spin_coulomb_coupling(
               beta_occ_R[beta_right_row];
           const double beta_cofactor =
               beta_cofactor_1st(beta_right_row, beta_left_column);
-          const int two_electron_index = TwoElectronIndexer::two_electron_storage_index(
+          const int two_electron_index = xmvb::core::PairIndex::two_electron_storage_index(
               beta_orbital_right,
               beta_orbital_left,
               alpha_orbital_right,

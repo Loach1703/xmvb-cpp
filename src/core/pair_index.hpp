@@ -1,6 +1,6 @@
 #pragma once
 
-namespace xmvb::vb {
+namespace xmvb::core {
 
 /**
  * @brief Utility for the packed index convention used by two-electron tensors.
@@ -13,7 +13,7 @@ namespace xmvb::vb {
  * This helper exposes the same convention with zero-based C++ arguments while
  * returning a zero-based linear offset for use with `std::vector<double>`.
  */
-class TwoElectronIndexer {
+class PairIndex {
 public:
   /**
    * @brief Returns the zero-based packed index of an unordered orbital pair.
@@ -54,4 +54,4 @@ public:
       int orbital_index_s);
 };
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::core
