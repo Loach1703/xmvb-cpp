@@ -709,6 +709,91 @@ adjoint, the full carrier residual, and the state-average gauge terms remain
 required. The present implementation keeps those terms while migrating the
 integral contraction to Eq.~\eqref{eq:factor-adjoint-tangent}.
 
+\subsection{Oriented generator and residual contractions}\label{sec:factor-generator}
+
+Define the orbital matrix $\mathcal D(X,Y)$ by
+\begin{equation}
+ [\mathcal D(X,Y)]_{pq}=
+ \langle X,(a^\dagger_{p\alpha}a_{q\alpha}
+                 +a^\dagger_{p\beta}a_{q\beta})Y\rangle_{\rm F}.
+\end{equation}
+It is the coefficient of $\kappa_{pq}$ in
+$\langle X,\mathcal G(\kappa)Y\rangle_{\rm F}$ and need not be symmetric.
+For $Y=L_rF_r\Tr$, form only the weighted single-spin panels
+\begin{equation}
+ W_\alpha=XF_r,\qquad W_\beta=X\Tr L_r.
+\end{equation}
+Then
+\begin{equation}\label{eq:generator-factor}
+ [\mathcal D(X,Y)]_{pq}=
+ \sum_j\langle (W_\alpha)_j,
+      a^\dagger_{p\alpha}a_{q\alpha}(L_r)_j\rangle
+ +\sum_j\langle (W_\beta)_j,
+      a^\dagger_{p\beta}a_{q\beta}(F_r)_j\rangle.
+\end{equation}
+If $X=L_\ell F_\ell\Tr$, each weighted panel is obtained from source-pair
+moments, $XF_r=L_\ell(F_\ell\Tr F_r)$ and
+$X\Tr L_r=F_\ell(L_\ell\Tr L_r)$. The final contractions traverse the
+oriented single-spin occupation/replacement links. They are not symmetric
+Hamiltonian-channel derivatives. For real coefficients,
+$\mathcal D(X,Y)=\mathcal D(Y,X)\Tr$; this permits a transposed
+contraction order but not an unqualified interchange of sources.
+
+For the residual $Z=(\Ha-E)X$, the required panels can also be obtained
+without $Z$ or $\Ha X$. Using the same-spin actions $D_\sigma$ and
+the ket channel mixtures
+\begin{equation}
+ V_{\alpha P}=\sum_QK_{PQ}E_{\alpha Q}L_r,\qquad
+ V_{\beta P}=\sum_QK_{PQ}E_{\beta Q}F_r,
+\end{equation}
+the exact residual-weighted panels are
+\begin{align}\label{eq:residual-panels}
+ Z_\alpha={}&D_\alpha W_\alpha+X(D_\beta F_r)
+       +2\sum_P E_{\alpha P}(X V_{\beta P})-E W_\alpha,\\
+ Z_\beta={}&D_\beta W_\beta+X\Tr(D_\alpha L_r)
+       +2\sum_P E_{\beta P}(X\Tr V_{\alpha P})-E W_\beta.
+\end{align}
+Thus $Z_\alpha=ZF_r$ and $Z_\beta=Z\Tr L_r$. Replacing
+$W_\alpha,W_\beta$ by $Z_\alpha,Z_\beta$ in
+Eq.~\eqref{eq:generator-factor} gives $\mathcal D((\Ha-E)X,Y)$.
+The spectator actions have been moved to the ket using self-adjointness
+of $D_\sigma$; the crossed term follows from Eq.~\eqref{eq:Hfactor}.
+Self-adjointness of $\Ha$ does \emph{not} justify exchanging the two
+sources here, because $\Ha$ generally does not commute with an oriented
+one-body generator.
+
+The implementation reuses the factor/channel sweep twice: once for the
+weighted panels to produce $D_\sigma W_\sigma$, and once for the ket
+panels to produce the spectator and crossed terms. After same-spin gather,
+the ket's raw channel buffers are reused for $X V_{\beta P}$ and
+$X\Tr V_{\alpha P}$, then consumed by the crossed gather. No separate
+channel scatter/mixing implementation or product-space residual is required.
+
+With complete channel panels, the leading dense arithmetic is
+$O((U_\alpha+U_\beta)[r_r d^2+r_\ell r_r d])$, plus the oriented
+single-spin link contractions. Without $\Ha$, it reduces to
+\begin{equation}
+ O\left((U_\alpha+U_\beta)r_\ell r_r
+  +r_r\sum_{\sigma}U_\sigma n_\sigma(n-n_\sigma+1)\right).
+\end{equation}
+Accepted-state transition densities use this estimate to choose between
+factor moments and product-space links. Their planner does not reuse the
+Hamiltonian-channel cost estimate.
+
+A conservative numerical workspace bound for the residual contraction,
+in doubles, is
+\begin{equation}
+ (U_\alpha+U_\beta)[s_\ell+(3p+9)s_r]
+ +s_\ell s_r\max(1,p)
+ +\max(\omega_\ell s_\ell,\omega_r s_r)+(t+1)n^2,
+\end{equation}
+where $t$ bounds the number of workers and the last term covers the small
+orbital-matrix reduction and its temporary result. The required returned
+$n\times n$ matrix and immutable metadata are separate. For a generator
+without $\Ha$, the channel sweep and residual outputs are absent, giving
+$(U_\alpha+U_\beta)(s_\ell+2s_r)+s_\ell s_r$ plus the same loading
+and reduction terms. No per-worker spin/product array is allocated.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};
@@ -728,6 +813,8 @@ VB source generation, sampling and $\Wa^*$ &
 \texttt{apply\_source\_tiles()} \\
 Common factor sweep and integral adjoint &
 \path{mcscf/ci/factors.cpp} \\
+Generator and residual-weighted factor adjoints &
+\path{mcscf/ci/factor_generator.cpp} \\
 Hamiltonian channel kernel, Eq.~\eqref{eq:K} &
 \path{mcscf/ci/sigma.cpp}\newline
 \texttt{build\_hamiltonian\_pair\_kernel()} \\
@@ -751,6 +838,10 @@ integral adjoints use Eq.~\eqref{eq:factor-adjoint-tangent} when the factor
 order has less estimated arithmetic. A selected-space eigenvector need not be
 stationary on the full carrier: its residual contribution to the
 exterior-transform gradient is retained.
+Accepted-state transition densities use Eq.~\eqref{eq:generator-factor}
+when advantageous. The residual-panel kernel of
+Eq.~\eqref{eq:residual-panels} is available and independently tested;
+accepted-state residual storage is not yet removed from the remaining consumers.
 
 \paragraph{Main result.}
 Equations~\eqref{eq:Hfactor}--\eqref{eq:final} give the exact

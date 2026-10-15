@@ -14,6 +14,8 @@ or memory-based admission to a different physical representation is allowed.
   not as a product matrix. Its integral adjoint can stream spin factors using
   the exact factor/product arithmetic planner. Orthogonal coefficient matrices
   and residuals remain on the full product carrier for every selected state.
+  Transition one-body densities now have an exact streamed factor order,
+  chosen by their own moment/link work rather than the Hamiltonian-channel cost.
 - `apply_integral_direction()` allocates stacked product arrays for the base
   coefficients, sigma, coefficient direction and overlap direction.
 - `active_integral_adjoint_direction()` and `contract_response()` still consume
@@ -73,6 +75,10 @@ full `U * r` factors when a broad support makes those product-sized.
    direct-CI gradient entry no longer builds an unused raw selected-state bundle.
    Integral gradients choose the exact factor or product contraction by work;
    their nonstationary full-carrier generator term is retained, not discarded.
+   `factor_generator_adjoint` now supplies oriented transition densities to this
+   producer. `factor_residual_generator_adjoint` computes residual-weighted
+   panels without a residual carrier, reusing the shared channel sweep; remaining
+   residual consumers must migrate before deleting accepted residual storage.
    Route exact structure diagonals through an appropriate contraction consumer,
    without probing every global basis vector or adding quadratic structure work.
 5. [ ] Differentiate that same factor graph for orbital HVP and CI responses.
@@ -111,6 +117,16 @@ the oriented creation/annihilation indices from the existing spin links; do not
 silently symmetrize that adjoint when sharing the channel implementation.
 
 ## Required numerical and resource evidence
+
+Immediate larger-scale qualification: native generator job1260873 is CAS16/16
+with256 physical bra and128 ket factors. The present residual planner chooses
+`left_tile=1,right_tile=1,channel_tile=105` at64 MiB. Two channel panels cause
+`128 * (2+2) * 256 = 131072` bra-source loads. A feasible resident-bra point
+exists at `left_tile=256,right_tile=1,channel_tile=20`, with the same budget.
+Do not assume the larger channel tile is optimal. Joint source/channel planning
+must count exterior/generator regeneration, repeated spin-link traversals and
+repeated output updates across bra panels. Preserve the running job and collect
+its actual time/RSS; do not rerun historical binaries or increase the budget.
 
 - Exact source reconstruction, both spin-exchange parities, mixed parity,
   unequal spin lists, ionic diagonal support and multiple right-hand sides.

@@ -386,6 +386,11 @@ private:
       const Eigen::Ref<const Eigen::VectorXd>& coefficients) const;
   /** @brief Exact integral-adjoint order, including the source-pair moment work. */
   bool prefer_factor_adjoint(int left_sources, int right_sources) const;
+  /** @brief One-body transition work; distinct from Hamiltonian-channel work. */
+  bool prefer_factor_generator() const;
+  /** @brief Oriented transition density from structure coefficients and spin factors. */
+  Eigen::MatrixXd source_generator_adjoint(
+      const StructureAdjointState& state, int left, int right) const;
   /** @brief Contract orbital/structure tangents on bounded source panels. */
   mcscf::DirectCiIntegralAdjoint source_integral_direction(
       const StructureAdjointState& state, int index,

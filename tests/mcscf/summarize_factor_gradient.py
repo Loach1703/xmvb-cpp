@@ -72,12 +72,37 @@ def scf(artifact, baseline, output):
     save(output, rows)
 
 
+def generators(artifacts, output):
+    rows = []
+    for artifact in artifacts:
+        for n in (12, 14):
+            native = values(artifact / f"{n}-factor-generator.out")
+            reference = values(artifact / f"{n}-factor-generator-reference.out")
+            rows.append(dict(
+                run=artifact.name, orbitals=n, node=(artifact / "node.txt").read_text().strip(),
+                generator_seconds=float(native["warm_generator_seconds"]),
+                residual_seconds=float(native["warm_residual_seconds"]),
+                rss_mib=float(native["native_max_rss_kib"])/1024,
+                paired_generator_seconds=float(reference["warm_generator_seconds"]),
+                paired_residual_seconds=float(reference["warm_residual_seconds"]),
+                reference_generator_seconds=float(reference["generator_reference_seconds"]),
+                reference_sigma_seconds=float(reference["sigma_reference_seconds"]),
+                reference_cached_residual_seconds=float(reference["residual_generator_reference_seconds"]),
+                reference_residual_total_seconds=float(reference["residual_total_reference_seconds"]),
+                generator_error=float(reference["generator_error"]),
+                residual_error=float(reference["residual_error"])))
+    save(output, rows)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="kind", required=True)
     kernel = sub.add_parser("kernels")
     kernel.add_argument("output", type=Path)
     kernel.add_argument("artifacts", type=Path, nargs="+")
+    generator = sub.add_parser("generators")
+    generator.add_argument("output", type=Path)
+    generator.add_argument("artifacts", type=Path, nargs="+")
     chain = sub.add_parser("scf")
     chain.add_argument("artifact", type=Path)
     chain.add_argument("baseline", type=Path)
@@ -85,6 +110,8 @@ def main():
     args = parser.parse_args()
     if args.kind == "kernels":
         kernels(args.artifacts, args.output)
+    elif args.kind == "generators":
+        generators(args.artifacts, args.output)
     else:
         scf(args.artifact, args.baseline, args.output)
 

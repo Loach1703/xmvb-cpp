@@ -1,4 +1,5 @@
 #include "mcscf/ci/factors.hpp"
+#include "mcscf/ci/factors_internal.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -10,7 +11,7 @@
 #include "core/timing.hpp"
 
 namespace xmvb::mcscf {
-namespace {
+namespace detail {
 
 using Clock = std::chrono::steady_clock;
 
@@ -92,7 +93,14 @@ void transpose_product(const Eigen::Ref<const Eigen::MatrixXd>& channels,
   }
 }
 
-} // namespace
+} // namespace detail
+
+using detail::add_channel_gram;
+using detail::add_product;
+using detail::mix_channels;
+using detail::transpose_product;
+using detail::validate_source;
+using detail::Clock;
 
 SpinFactorSource sum_factors(std::vector<SpinFactorSource> sources) {
   if (sources.empty()) throw std::invalid_argument("empty factor sum");
@@ -227,7 +235,7 @@ FactorActionWork FactorActionWorkspace::apply(const DirectCiSigmaAction& sigma,
         sigma.gather_spin(false, va, p, np, ha);
         sigma.gather_spin(true, vb, p, np, hb);
         work.gather_seconds += seconds(gathered, tick());
-        cross({first, width, p, np, ap, vb});
+        cross({first, width, p, np, ap, bp, va, vb});
       }
     }
     finish({first, width, a, b, ha, hb});

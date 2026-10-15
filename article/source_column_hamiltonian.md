@@ -215,6 +215,9 @@ Channel tiling can repeat spin-link scatters between channel panels, but it
 does not alter the two-body formula. Only source columns and channel blocks
 are stored; discarded panels are consumed immediately.
 
-This implementation targets the fixed-point H/M action. Integral adjoints,
-orbital gradients and HVP are still evaluated by their existing exact kernels;
-the source-order scaling is not claimed for those consumers yet.
+The TeX note extends these equations to streamed integral adjoints and their
+directional factor sources (Sections8.1-8.2), plus oriented generator and
+residual-weighted contractions (Section8.3). Accepted-state transition densities
+already use the latter factor order when advantageous. Full accepted residuals,
+directional carriers and the remaining generator/HVP consumers still require
+migration; these bounds do not yet describe the complete SCF pipeline.

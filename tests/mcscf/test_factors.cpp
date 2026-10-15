@@ -6,6 +6,7 @@
 
 #include "mcscf/ci/factors.hpp"
 #include "mcscf/ci/strings.hpp"
+#include "core/openmp.hpp"
 
 namespace {
 
@@ -44,6 +45,18 @@ void check_case(int n, int ea, int eb) {
   const auto active = integrals(n, 0.4);
   const xmvb::mcscf::DirectCiSigmaAction sigma(alpha.occupations(), beta.occupations(), active);
   const int d = sigma.channel_kernel().rows(), rows = alpha.size() + beta.size();
+  for (bool spin : {false,true}) {
+    const int count = spin ? beta.size() : alpha.size();
+    const auto a = coefficients(count,3,0.27), b = coefficients(count,3,0.82);
+    Eigen::MatrixXd padded_a(count+2,3), padded_b(count+3,3), image(count,3);
+    padded_a.topRows(count) = a; padded_b.topRows(count) = b;
+    const Eigen::MatrixXd kappa = coefficients(n,n,0.91);
+    sigma.apply_spin_generator(spin,padded_b.topRows(count),kappa,image);
+    const auto density = sigma.spin_generator_adjoint(
+        spin,padded_a.topRows(count),padded_b.topRows(count));
+    require(std::abs((density.array()*kappa.array()).sum()-(a.array()*image.array()).sum()) < 1e-12,
+            "strided single-spin generator/adjoint pairing changed oriented indices");
+  }
   for (const int rank : {0, 1, 5}) {
     auto a = coefficients(alpha.size(), rank, 0.2);
     auto b = coefficients(beta.size(), rank, 0.7);
@@ -56,7 +69,7 @@ void check_case(int n, int ea, int eb) {
         Eigen::MatrixXd h = Eigen::MatrixXd::Zero(alpha.size(), beta.size()), m = h;
         const auto work = workspace.apply(sigma, factors,
             [&](xmvb::mcscf::FactorCrossBlock block) {
-              h.noalias() += 2 * block.alpha * block.beta.transpose();
+              h.noalias() += 2 * block.alpha_channels * block.mixed_beta.transpose();
             }, [&](xmvb::mcscf::FactorImageBlock block) {
               h.noalias() += block.same_alpha * block.beta.transpose();
               h.noalias() += block.alpha * block.same_beta.transpose();
@@ -78,6 +91,19 @@ void check_case(int n, int ea, int eb) {
     const auto f = coefficients(beta.size(), ranks.second, 1.1);
     const auto bra = source(a,b), ket = source(c,f);
     const Eigen::MatrixXd x = a * b.transpose(), y = c * f.transpose();
+    const Eigen::MatrixXd generator_reference = sigma.one_body_generator_adjoint(x,y);
+    const Eigen::MatrixXd residual = sigma.apply(x) - 0.37 * x;
+    const Eigen::MatrixXd residual_reference = sigma.one_body_generator_adjoint(residual,y);
+    const std::size_t reductions = (xmvb::effective_openmp_thread_count()+1) * n * n;
+    for (const auto bytes : {64ULL * 1024 * 1024,
+        static_cast<unsigned long long>((13 * rows + 1 + reductions) * sizeof(double))}) {
+      const auto actual = xmvb::mcscf::factor_generator_adjoint(sigma,bra,ket,bytes);
+      const auto relaxed = xmvb::mcscf::factor_residual_generator_adjoint(sigma,bra,ket,0.37,bytes);
+      require((actual-generator_reference).norm() < 8e-12 * std::max(1.0,generator_reference.norm()),
+              "factor generator adjoint lost an oriented one-body index");
+      require((relaxed-residual_reference).norm() < 8e-12 * std::max(1.0,residual_reference.norm()),
+              "factor residual generator changed H-left ordering or partial-channel contraction");
+    }
     const auto reference = sigma.integral_adjoint(x,y);
     const auto direction = integrals(n, 1.3);
     const xmvb::mcscf::DirectCiSigmaAction delta(sigma, direction);
@@ -128,7 +154,7 @@ void check_case(int n, int ea, int eb) {
     Eigen::MatrixXd image = Eigen::MatrixXd::Zero(alpha.size(), beta.size());
     const auto work = workspace.apply(sigma, combined,
         [&](xmvb::mcscf::FactorCrossBlock block) {
-          image.noalias() += 2 * block.alpha * block.beta.transpose();
+          image.noalias() += 2 * block.alpha_channels * block.mixed_beta.transpose();
         }, [&](xmvb::mcscf::FactorImageBlock block) {
           image.noalias() += block.same_alpha * block.beta.transpose();
           image.noalias() += block.alpha * block.same_beta.transpose();

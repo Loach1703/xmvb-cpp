@@ -608,6 +608,11 @@ void check_factor_state_average() {
   for (const std::vector<double>& weights : {std::vector<double>{0.5,0.5}, {0.3,0.7}}) {
     const auto state = action.prepare_active_adjoint(c, weights, energies);
     require(state.factor_integrals, "sparse multistate case did not select factor integral order");
+    for (int i = 0; i < 2; ++i)
+      for (int j = 0; j <= i; ++j)
+        require((state.overlap_generators[i*(i+1)/2+j] -
+            sigma.one_body_generator_adjoint(y.middleCols(j*nb,nb),y.middleCols(i*nb,nb))).norm() < 2e-11,
+            "factor transition density lost an off-diagonal state orientation");
     Eigen::MatrixXd g1 = Eigen::MatrixXd::Zero(5,5), g2 = Eigen::MatrixXd::Zero(15,15), gg = g1;
     for (int i = 0; i < 2; ++i) {
       const auto yi = y.middleCols(i*nb, nb);
@@ -1459,6 +1464,80 @@ void benchmark_factor_adjoint(int n, bool compare_reference, bool directional = 
               << "pair_kernel_error=" << (warm.pair_kernel-reference.pair_kernel).norm() << '\n';
 }
 
+/** @brief Generator/residual adjoints; full carriers are reference-process only. */
+void benchmark_factor_generators(int n, bool compare_reference) {
+  require(n == 12 || n == 14 || n == 16, "factor generator benchmark supports 12/14/16 orbitals");
+  const auto fixture = make_fixture(n,n/2,n/2);
+  Pairing adjacent;
+  for (int i = 0; i < n; i += 2) adjacent.emplace_back(i,i+1);
+  const auto expansion = covalent_rumer_terms(n,fixture.alpha,fixture.beta,{adjacent});
+  const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap,fixture.one_electron,fixture.two_electron,n);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(fixture.alpha,fixture.beta,integrals);
+  const xmvb::vb::ExteriorOrbitalTransform ta(fixture.alpha,integrals.orbital_transform);
+  const xmvb::vb::ExteriorOrbitalTransform tb(fixture.beta,integrals.orbital_transform);
+  std::map<int,int> indices;
+  for (int i = 0; i < static_cast<int>(fixture.alpha.size()); ++i)
+    indices.emplace(occupation_mask(fixture.alpha[i]),i);
+  const int na = fixture.alpha.size(), nb = fixture.beta.size(), parity = (n/2)%2 ? -1 : 1;
+  std::vector<int> products;
+  Eigen::VectorXd coefficients(expansion.terms.size());
+  for (int i = 0; i < static_cast<int>(expansion.terms.size()); ++i) {
+    products.push_back(indices.at(occupation_mask(expansion.product_alpha[i])) * nb +
+        indices.at(occupation_mask(expansion.product_beta[i])));
+    coefficients[i] = expansion.terms[i][0].coefficient;
+  }
+  const xmvb::vb::SpinSources plan(products,na,nb,parity);
+  const auto bra = plan.orthogonal_source(products,coefficients,ta,tb,true);
+  const auto ket = plan.orthogonal_source(products,coefficients,ta,tb);
+  const auto begin = Clock::now();
+  const auto cold_g = xmvb::mcscf::factor_generator_adjoint(sigma,bra,ket);
+  const auto middle = Clock::now();
+  const auto g = xmvb::mcscf::factor_generator_adjoint(sigma,bra,ket);
+  const auto before_r = Clock::now();
+  const auto cold_r = xmvb::mcscf::factor_residual_generator_adjoint(sigma,bra,ket,0.37);
+  const auto warm_start = Clock::now();
+  const auto r = xmvb::mcscf::factor_residual_generator_adjoint(sigma,bra,ket,0.37);
+  const auto finished = Clock::now();
+  require((g-cold_g).norm() < 1e-12 && (r-cold_r).norm() < 1e-12,
+          "factor generator kernels are not repeatable");
+  rusage usage{};
+  require(getrusage(RUSAGE_SELF,&usage) == 0, "getrusage failed");
+  const auto native_rss = usage.ru_maxrss;
+  double sigma_seconds = 0, g_seconds = 0, r_seconds = 0, g_error = 0, r_error = 0;
+  if (compare_reference) {
+    Eigen::MatrixXd a(na,bra.count), b(nb,bra.count);
+    bra.load(0,bra.count,a,b);
+    const Eigen::MatrixXd y = a * b.transpose();
+    const auto g_start = Clock::now();
+    const auto expected_g = sigma.one_body_generator_adjoint(y,y);
+    const auto sigma_start = Clock::now();
+    const Eigen::MatrixXd residual = sigma.apply(y,parity) - 0.37 * y;
+    const auto r_start = Clock::now();
+    const auto expected_r = sigma.one_body_generator_adjoint(residual,y);
+    const auto reference_end = Clock::now();
+    g_seconds = std::chrono::duration<double>(sigma_start-g_start).count();
+    sigma_seconds = std::chrono::duration<double>(r_start-sigma_start).count();
+    r_seconds = std::chrono::duration<double>(reference_end-r_start).count();
+    g_error = (g-expected_g).norm(); r_error = (r-expected_r).norm();
+    require(g_error < 2e-10 && r_error < 2e-10,
+            "physical factor generator differs from complete-carrier reference");
+  }
+  std::cout << std::setprecision(17) << "orbitals=" << n << '\n'
+            << "bra_sources=" << bra.count << '\n' << "ket_sources=" << ket.count << '\n'
+            << "cold_generator_seconds=" << std::chrono::duration<double>(middle-begin).count() << '\n'
+            << "warm_generator_seconds=" << std::chrono::duration<double>(before_r-middle).count() << '\n'
+            << "cold_residual_seconds=" << std::chrono::duration<double>(warm_start-before_r).count() << '\n'
+            << "warm_residual_seconds=" << std::chrono::duration<double>(finished-warm_start).count() << '\n'
+            << "generator_reference_seconds=" << g_seconds << '\n'
+            << "sigma_reference_seconds=" << sigma_seconds << '\n'
+            << "residual_generator_reference_seconds=" << r_seconds << '\n'
+            << "residual_total_reference_seconds=" << sigma_seconds+r_seconds << '\n'
+            << "generator_error=" << g_error << '\n' << "residual_error=" << r_error << '\n'
+            << "native_max_rss_kib=" << native_rss << '\n'
+            << "reference_checked=" << compare_reference << '\n';
+}
+
 void benchmark12(bool compare_reference) {
   const auto start = Clock::now();
   const Fixture fixture = make_fixture(12, 6, 6);
@@ -1571,6 +1650,10 @@ int main(int argc, char** argv) {
       benchmark_factor_adjoint(std::stoi(argv[2]), false, true);
     } else if (argc == 3 && std::string(argv[1]) == "--factor-direction-reference") {
       benchmark_factor_adjoint(std::stoi(argv[2]), true, true);
+    } else if (argc == 3 && std::string(argv[1]) == "--factor-generator") {
+      benchmark_factor_generators(std::stoi(argv[2]), false);
+    } else if (argc == 3 && std::string(argv[1]) == "--factor-generator-reference") {
+      benchmark_factor_generators(std::stoi(argv[2]), true);
     } else if (argc == 3 && std::string(argv[1]) == "--paths12") {
       benchmark_selected12(std::stoi(argv[2]), false, true);
     } else if (argc == 3 && std::string(argv[1]) == "--gram12") {
@@ -1605,7 +1688,8 @@ int main(int argc, char** argv) {
           "usage: test_structure_tiles [--benchmark12|--benchmark12-no-reference|"
           "--selected12 N|--selected12-parity N|--sources12 N|--paths12 N|--gram12 N|"
           "--source-size N|--source-size-parity N|--source-cover-size N|--source-cover-reference N|"
-          "--factor-adjoint N|--factor-adjoint-reference N|--factor-direction N|--factor-direction-reference N]");
+          "--factor-adjoint N|--factor-adjoint-reference N|--factor-direction N|--factor-direction-reference N|"
+          "--factor-generator N|--factor-generator-reference N]");
     }
     return 0;
   } catch (const std::exception& error) {

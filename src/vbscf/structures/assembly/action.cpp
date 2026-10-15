@@ -1452,6 +1452,29 @@ bool StructureAction::prefer_factor_adjoint(int left_sources, int right_sources)
   return l > 0 && r > 0 && work < 2 * product_rows * d * d;
 }
 
+bool StructureAction::prefer_factor_generator() const {
+  const long double na = n_unique_alpha_, nb = n_unique_beta_;
+  const long double n = direct_ci_->sigma.n_orbitals();
+  const long double ea = direct_ci_->alpha_transform.n_electrons();
+  const long double eb = direct_ci_->beta_transform().n_electrons();
+  const long double a_links = ea * (n-ea+1), b_links = eb * (n-eb+1);
+  const long double r = sources_->nodes.size(), l = r * (spin_exchange_parity_ ? 2 : 1);
+  const long double factor_work = 2 * (na+nb) * l * r + r * (na*a_links + nb*b_links);
+  return r > 0 && factor_work < na * nb * (a_links+b_links);
+}
+
+Eigen::MatrixXd StructureAction::source_generator_adjoint(
+    const StructureAdjointState& state, int left, int right) const {
+  const Eigen::VectorXd a = expand_support(state.structure_coefficients.col(left));
+  Eigen::VectorXd b;
+  if (right != left) b = expand_support(state.structure_coefficients.col(right));
+  const auto bra = sources_->orthogonal_source(spin_products_, a,
+      direct_ci_->alpha_transform, direct_ci_->beta_transform(), true);
+  const auto ket = sources_->orthogonal_source(spin_products_, right == left ? a : b,
+      direct_ci_->alpha_transform, direct_ci_->beta_transform());
+  return mcscf::factor_generator_adjoint(direct_ci_->sigma,bra,ket);
+}
+
 mcscf::DirectCiIntegralAdjoint StructureAction::source_integral_direction(
     const StructureAdjointState& state, int index,
     const Eigen::MatrixXd* orbital_direction, const Eigen::MatrixXd* raw_response) const {
@@ -1566,10 +1589,13 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
             result.orthogonal_coefficients.back());
   }
 
+  const bool factor_transitions = prefer_factor_generator();
   for (std::size_t i = 0; i < result.weights.size(); ++i)
     for (std::size_t j = 0; j <= i; ++j) {
       if (result.weights[i] == 0.0 || result.weights[j] == 0.0)
         result.overlap_generators.push_back(Eigen::MatrixXd::Zero(n_orbitals, n_orbitals));
+      else if (factor_transitions)
+        result.overlap_generators.push_back(source_generator_adjoint(result,j,i));
       else
         result.overlap_generators.push_back(direct_ci_->sigma.one_body_generator_adjoint(
             result.orthogonal_coefficients[j], result.orthogonal_coefficients[i]));

@@ -69,12 +69,21 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& generator,
       Eigen::Ref<Eigen::MatrixXd> image) const;
 
+  /** @brief Unsymmetrized single-spin contraction sum_j <left_j, E_pq right_j>.
+   * Input panels may be non-owning views. Only small orbital-matrix reductions
+   * are thread-local; no spin/product array is copied per worker.
+   */
+  Eigen::MatrixXd spin_generator_adjoint(bool beta,
+      const Eigen::Ref<const Eigen::MatrixXd>& left,
+      const Eigen::Ref<const Eigen::MatrixXd>& right) const;
+
   /** @brief Symmetric K in H = (E_alpha+E_beta)^T K (E_alpha+E_beta).
    * Includes the absorbed one-electron Hamiltonian. Borrowed immutable data.
    */
   const Eigen::MatrixXd& channel_kernel() const noexcept { return hamiltonian_pair_kernel_; }
   int n_alpha_strings() const noexcept { return n_alpha_; }
   int n_beta_strings() const noexcept { return n_beta_; }
+  int n_orbitals() const noexcept { return n_orbitals_; }
 
   /** @brief Pulls a K-channel cotangent back to symmetric h/(pq|rs) adjoints.
    * Shared by product and source-factor contractions; includes the absorbed

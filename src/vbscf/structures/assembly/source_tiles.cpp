@@ -84,15 +84,15 @@ StructureActionResult StructureAction::apply_source_tiles(
     const auto source = sources.orthogonal_source(spin_products_, coefficients, alpha, beta);
     const auto cross = [&](mcscf::FactorCrossBlock block) {
       const auto pulling = tick();
-      alpha.apply_adjoint_left_block(block.alpha, alpha_projection);
-      beta.apply_adjoint_left_block(block.beta, beta_projection);
+      alpha.apply_adjoint_left_block(block.alpha_channels, alpha_projection);
+      beta.apply_adjoint_left_block(block.mixed_beta, beta_projection);
       const auto sampled = tick();
       pullback_time += seconds(pulling, sampled);
 #pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
       for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group) {
         const int i = spin_products_[group] / n_unique_beta_;
         const int j = spin_products_[group] % n_unique_beta_;
-        h_products[group] += 2 * block.alpha.row(i).dot(block.beta.row(j));
+        h_products[group] += 2 * block.alpha_channels.row(i).dot(block.mixed_beta.row(j));
       }
       sample_time += seconds(sampled, tick());
     };

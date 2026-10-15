@@ -32,13 +32,14 @@ SpinFactorSource generator_factors(const DirectCiSigmaAction& sigma,
     const SpinFactorSource& source, const Eigen::Ref<const Eigen::MatrixXd>& generator);
 
 /** @brief Cross-spin Hamiltonian factors after their same-spin use is complete.
- * alpha contains E_(alpha,P) A, beta contains sum_Q K_PQ E_(beta,Q) B.
+ * alpha_channels/beta_channels contain E_(spin,P) factors; mixed_alpha/beta
+ * contain their K-channel mixtures. Same-spin gather has already consumed them.
  * Column P*width+j belongs to one channel/source. The consumer may overwrite
  * the views, but must finish before returning and may not retain them.
  */
 struct FactorCrossBlock {
   int source, width, channel, channels;
-  Eigen::Ref<Eigen::MatrixXd> alpha, beta;
+  Eigen::Ref<Eigen::MatrixXd> alpha_channels, beta_channels, mixed_alpha, mixed_beta;
 };
 
 /** @brief Base and same-spin images; all channel consumers have finished.
@@ -87,6 +88,23 @@ private:
  */
 DirectCiIntegralAdjoint factor_integral_adjoint(const DirectCiSigmaAction& sigma,
     const SpinFactorSource& left, const SpinFactorSource& right,
+    std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL);
+
+/** @brief Oriented one-body adjoint <left, E(kappa) right> from spin factors.
+ * No symmetry of the returned orbital matrix or closure of a selected space
+ * is assumed. Shared slabs and provider scratch obey the numerical budget;
+ * immutable metadata and the required returned orbital matrix are separate.
+ */
+Eigen::MatrixXd factor_generator_adjoint(const DirectCiSigmaAction& sigma,
+    const SpinFactorSource& left, const SpinFactorSource& right,
+    std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL);
+
+/** @brief Oriented adjoint <(H-energy) left, E(kappa) right>, without a residual carrier.
+ * H acts on the LEFT source. Exchanging sources is generally invalid even if
+ * H is self-adjoint. Reuses the common factor/channel sweep, not a new sigma.
+ */
+Eigen::MatrixXd factor_residual_generator_adjoint(const DirectCiSigmaAction& sigma,
+    const SpinFactorSource& left, const SpinFactorSource& right, double energy,
     std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL);
 
 } // namespace xmvb::mcscf

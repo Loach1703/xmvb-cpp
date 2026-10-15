@@ -7,6 +7,38 @@
 
 namespace xmvb::mcscf {
 
+Eigen::MatrixXd DirectCiSigmaAction::spin_generator_adjoint(bool beta,
+    const Eigen::Ref<const Eigen::MatrixXd>& left,
+    const Eigen::Ref<const Eigen::MatrixXd>& right) const {
+  const auto& graph = beta ? beta_connections() : *alpha_;
+  const int rows = beta ? n_beta_ : n_alpha_;
+  if (left.rows() != rows || right.rows() != rows || left.cols() != right.cols())
+    throw std::invalid_argument("invalid single-spin generator-adjoint dimensions");
+  const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(),
+      static_cast<std::size_t>(rows) * left.cols());
+  std::vector<Eigen::MatrixXd> partials(workers, Eigen::MatrixXd::Zero(n_orbitals_, n_orbitals_));
+#pragma omp parallel if(workers > 1) num_threads(workers)
+  {
+    int worker = 0;
+#ifdef _OPENMP
+    worker = omp_get_thread_num();
+#endif
+    auto& density = partials[worker];
+#pragma omp for schedule(static)
+    for (int target = 0; target < rows; ++target) {
+      const double value = left.row(target).dot(right.row(target));
+      for (int occupied : graph.occupied[target]) density(occupied,occupied) += value;
+      const auto& links = graph.singles[target];
+      for (std::size_t link = 0; link < links.size(); ++link)
+        density(links.created_orbitals[link], links.annihilated_orbitals[link]) +=
+            links.signs[link] * left.row(target).dot(right.row(links.sources[link]));
+    }
+  }
+  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_orbitals_, n_orbitals_);
+  for (const auto& partial : partials) result += partial;
+  return result;
+}
+
 void DirectCiSigmaAction::apply_spin_generator(bool beta,
     const Eigen::Ref<const Eigen::MatrixXd>& factors,
     const Eigen::Ref<const Eigen::MatrixXd>& generator,

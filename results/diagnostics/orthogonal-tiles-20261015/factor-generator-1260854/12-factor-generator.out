@@ -1,0 +1,15 @@
+orbitals=12
+bra_sources=64
+ket_sources=32
+cold_generator_seconds=0.004977268
+warm_generator_seconds=0.0024189400000000001
+cold_residual_seconds=0.064554550000000002
+warm_residual_seconds=0.054376283999999997
+generator_reference_seconds=0
+sigma_reference_seconds=0
+residual_generator_reference_seconds=0
+residual_total_reference_seconds=0
+generator_error=0
+residual_error=0
+native_max_rss_kib=55068
+reference_checked=0

@@ -35,11 +35,19 @@ sha256sum "$source_dir/build/src/test_structure_tiles" > "$artifact/binary.sha25
 sha256sum "$source_dir/build/src/test_ci_factors" >> "$artifact/binary.sha256"
 sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_tiles.cpp,sources.cpp,sources.hpp,action.cpp} \
  "$source_dir/tests/vbscf/unit/test_structure_tiles.cpp" > "$artifact/sources.sha256"
-sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,sigma.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
+sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,factors_internal.hpp,factor_generator.cpp,sigma.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" \
  -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric)$' \
  --output-on-failure > "$artifact/ctest.out" 2>&1
+[[ ${1:-} == --tests-only ]] && exit 0
+if [[ ${1:-} == --generator16 ]]; then
+ srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+  /usr/bin/time -v -o "$artifact/16-factor-generator.time" \
+  "$source_dir/build/src/test_structure_tiles" --factor-generator 16 \
+  > "$artifact/16-factor-generator.out" 2> "$artifact/16-factor-generator.err"
+ exit 0
+fi
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  bash -c 'grep Cpus_allowed_list /proc/self/status' > "$artifact/affinity.txt"
 for n in 12 14; do
@@ -51,7 +59,7 @@ for n in 12 14; do
  done
 done
 for n in 12 14; do
- for mode in factor-adjoint factor-adjoint-reference factor-direction factor-direction-reference; do
+ for mode in factor-adjoint factor-adjoint-reference factor-direction factor-direction-reference factor-generator factor-generator-reference; do
   srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
    /usr/bin/time -v -o "$artifact/$n-$mode.time" \
    "$source_dir/build/src/test_structure_tiles" --"$mode" "$n" \
@@ -73,6 +81,9 @@ srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores 
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  env XMVB_PHASE_TIMING=1 "$source_dir/build/src/test_structure_tiles" --factor-direction 14 \
  > "$artifact/direction-phases.out" 2> "$artifact/direction-phases.err"
+srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+ env XMVB_PHASE_TIMING=1 "$source_dir/build/src/test_structure_tiles" --factor-generator 14 \
+ > "$artifact/generator-phases.out" 2> "$artifact/generator-phases.err"
 if [[ -n ${1:-} ]]; then
  bash "$source_dir/tests/mcscf/factor_gradient.sbatch" "$1"
 fi
