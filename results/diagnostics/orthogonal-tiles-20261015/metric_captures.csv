@@ -1,0 +1,3 @@
+run,reason,application_exit,accepted_steps,recorded_orbital_hvp,initial_energy_Eh,final_energy_Eh,scf_seconds,total_seconds,rss_mib,raw_orbitals_saved
+metric-capture-1261206,"CIAH metric action is not symmetric: skew=1.9859389523314919e-12, tolerance=1.8740279937557322e-12, dot_roundoff=1.2041131578103953e-12, action_norm=2.9463166069661981, basis_norm=2, images_norm=39.37228091729029, dimension=682, subspace=4",2,13,136,-384.380227811199,-395.883611336482,107.605323,111.498021,2559.1796875,True
+metric-capture-1261218,max_iterations,2,25,265,-384.380227811199,-396.0722136998,200.724075,204.74812,2567.77734375,True

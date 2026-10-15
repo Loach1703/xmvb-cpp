@@ -32,12 +32,15 @@ or memory-based admission to a different physical representation is allowed.
   bounded-memory VBSCF implementation.
 - `SelectedStateDeterminantCoefficients::coefficient_matrix` is itself dense;
   changing only its downstream consumers cannot remove this allocation.
-  In particular, `finalize_active_space_second_order_context()` still builds
-  accepted raw product states merely because pair providers exist, even for a
-  direct-CI action. Its direct-CI consumers should instead use the support
-  coefficients. Update the response-work estimate in `backends/neo.cpp` to
-  use topology/state dimensions, not the presence of those numerical arrays;
-  deleting the array alone would silently change response admission.
+  The accepted-point producer now skips those arrays for direct CI; the NEO
+  response-work estimate uses topology/state dimensions, independent of numerical
+  array residency. `test_keyframe --accepted-state16` exercises the complete
+  gradient producer and confirms zero raw/orthogonal/residual product doubles
+  at 12870 strings per spin (117.48 MiB process peak, constructed 16-AO input).
+  Response producers remain: `ExactHvpOperator::State::apply_structure_response_adjoint()`
+  and the gauge-coefficient branches of `exact/apply.cpp` still build dense
+  selected-state bundles. Migrate their direct-CI interface to structure
+  coefficient columns; do not remove the producer without migrating its consumers.
 - Without a supplied Davidson diagonal, `StructureAction` still evaluates a
   double loop over the expansion terms of each structure through spin-pair
   matrix elements. This must not survive as an accidental cofactor bottleneck
@@ -49,15 +52,18 @@ or memory-based admission to a different physical representation is allowed.
 
 ## Ordered milestones
 
-Production correctness gate: the new real CAS(12,12) one-structure LOFLEA
-SCF (job1261175) reaches24 accepted steps but fails the unchanged CIAH orbital
-metric symmetry check. Its other selected cases were not started. Diagnose
-the chart/physical-metric action at the saved failing point before claiming
-large-active-space end-to-end qualification; do not weaken the certificate.
-Job1261192 passed the old failure iteration on a different trajectory and was
-cancelled, not certified; its final raw-orbital exporter was not reached.
-Capture the exact native failing point before selecting a repair. This is
-separate from the qualified source/product derivative kernel comparisons.
+Production correctness gate: job1261206 captured an actual LOFLEA CAS(12,12)
+metric-symmetry failure and its exact raw orbitals after13 accepted steps.
+The metric norm used a physical tangent map while its action used independent
+projector simplifications. The action now uses the strict adjoint of that same
+map, with no changed certificate, coordinate whitening or new inverse solve.
+At the identical point, the action/feature-Gram gap drops from1.14e-9 to2.56e-11
+and skew from1.90e-10 to8.55e-12 (jobs1261210/1261230). New cancelling-representative
+and accepted-cache tests pass. A bounded original-input capture reaches25 steps
+without that error but is not converged (job1261218); do not report complete
+CAS12 molecular qualification. Keep its slow convergence distinct from the
+qualified source/product derivative kernels and the captured-point repair.
+See `article/orbital_metric_pullback.tex` and the metric consistency report.
 
 Target ownership, without a new generic SCF class hierarchy:
 

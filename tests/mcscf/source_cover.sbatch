@@ -46,6 +46,16 @@ srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2
 [[ ${1:-} == --tests-only ]] && exit 0
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  bash -c 'grep Cpus_allowed_list /proc/self/status' > "$artifact/affinity.txt"
+if [[ ${1:-} == --accepted-state16 ]]; then
+ cmake --build "$source_dir/build" --target test_keyframe -j8 > "$artifact/accepted-build.log" 2>&1
+ sha256sum "$source_dir/build/src/test_keyframe" >> "$artifact/binary.sha256"
+ sha256sum "$source_dir/tests/vbscf/unit/test_keyframe.cpp" >> "$artifact/sources.sha256"
+ srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+  /usr/bin/time -v -o "$artifact/accepted-state16.time" \
+  "$source_dir/build/src/test_keyframe" --accepted-state16 \
+  > "$artifact/accepted-state16.out" 2> "$artifact/accepted-state16.err"
+ exit 0
+fi
 if [[ ${1:-} == --production || ${1:-} == --selected-scf ]]; then
  if [[ ${1:-} == --production ]]; then
   bash "$source_dir/tests/mcscf/factor_gradient.sbatch" "$2"

@@ -54,6 +54,10 @@ foreach(target_name IN LISTS _xmvb_vbscf_unit_targets)
   target_link_libraries(${target_name} PRIVATE xmvb_vbscf)
 endforeach()
 
+add_executable(test_metric_point EXCLUDE_FROM_ALL
+  ${CMAKE_SOURCE_DIR}/tests/vbscf/diagnostics/metric_point.cpp)
+target_link_libraries(test_metric_point PRIVATE xmvb_input xmvb_vbscf)
+
 if (BUILD_TESTING)
   add_test(NAME ciah COMMAND test_ciah)
   add_test(NAME ci_transport COMMAND test_ci_transport)

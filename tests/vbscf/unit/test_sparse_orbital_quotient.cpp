@@ -1320,6 +1320,38 @@ void check_metric_blocks(const OrbitalPreparationInput& input, bool active_span)
   std::cout << "analytic physical metric orbital blocks: passed\n";
 }
 
+/** @brief The norm and action share an adjoint even with cancelling representatives. */
+void check_metric_feature_adjoint() {
+  Eigen::MatrixXd coefficients = Eigen::MatrixXd::Zero(6,4);
+  coefficients(0,0) = coefficients(0,1) = 1.0;
+  coefficients(1,1) = 1e-5;
+  coefficients(0,2) = 1000.0;
+  coefficients(2,2) = 1.0;
+  coefficients(1,3) = -2000.0;
+  coefficients(3,3) = 1.0;
+  const auto input = make_input(coefficients,
+      {{0,1,2,3,4,5},{0,1,2,3,4,5},{0,1,2,3,4,5},{0,1,2,3,4,5}},2);
+  const SparseParameterLayout layout(input);
+  for (const bool span : {false,true}) {
+    const OrbitalPhysicalMetric metric(input,span);
+    for (int probe = 0; probe < 8; ++probe) {
+      Eigen::VectorXd x(layout.size()), y(layout.size());
+      for (int i = 0; i < layout.size(); ++i) {
+        x[i] = std::sin(0.31*(i+1)*(probe+2));
+        y[i] = std::cos(0.19*(i+2)*(probe+1));
+      }
+      const auto mx = metric.apply(layout,x), my = metric.apply(layout,y);
+      const double nx = metric.squared_norm(layout,x), ny = metric.squared_norm(layout,y);
+      const double bilinear = 0.25*(metric.squared_norm(layout,x+y)-metric.squared_norm(layout,x-y));
+      const double scale = std::sqrt(nx*ny);
+      require(std::abs(x.dot(mx)-nx) < 1e-10*nx &&
+                  std::abs(x.dot(my)-bilinear) < 1e-10*scale &&
+                  std::abs(x.dot(my)-y.dot(mx)) < 1e-10*scale,
+              "metric action is not the adjoint of its physical feature map");
+    }
+  }
+}
+
 void check_metric_inverse_certificates(const OrbitalPreparationInput& input,
                                       bool active_span = false) {
   const SparseParameterLayout view(input);
@@ -1715,6 +1747,7 @@ int main() {
     check_preconditioner_geometry(full);
     check_preconditioner_geometry(oeo, true);
     check_metric_inverse_certificates(oeo, true);
+    check_metric_feature_adjoint();
     check_metric_blocks(partial, false);
     check_metric_blocks(frozen, false);
     check_metric_blocks(full, false);

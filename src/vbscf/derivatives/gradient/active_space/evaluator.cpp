@@ -590,7 +590,9 @@ finalize_active_space_second_order_context(
     context->full_structure_eigenvalues =
         std::move(forward_context->eigen_result.eigenvalues);
   }
-  if (context->use_pair_graph_opposite_spin_adjoint) {
+  const bool direct_ci = context->structure_action &&
+      context->structure_action->supports_integral_direction();
+  if (context->use_pair_graph_opposite_spin_adjoint && !direct_ci) {
     context->selected_state_matrices =
         build_selected_state_determinant_matrices_from_selected_columns(
             input.structure_data,

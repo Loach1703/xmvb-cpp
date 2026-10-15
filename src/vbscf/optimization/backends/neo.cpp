@@ -53,12 +53,14 @@ bool admit_structure_response(
   const long double core_pair_work = ao_pair_actions * n_active_pairs;
   // The orthogonal direct-CI branch uses pair-channel GEMM on spin products,
   // not the U_alpha^2 U_beta + U_alpha U_beta^2 cofactor sandwiches.
+  // These are mathematical dimensions, independent of whether any numerical
+  // product array is resident at the accepted point.
   const auto& selected = context.selected_state_matrices;
   const long double response_work =
       structure_action.supports_integral_direction()
-          ? static_cast<long double>(selected.n_unique_alpha) *
-              selected.n_unique_beta * n_active_pairs * n_active_pairs *
-              selected.states.size()
+          ? static_cast<long double>(context.same_spin_pair_cache.n_unique_alpha) *
+              context.same_spin_pair_cache.n_unique_beta * n_active_pairs * n_active_pairs *
+              context.selected_state_indices.size()
           : estimate_selected_state_contraction_work(selected);
 
   // A coupled orbital basis vector evaluates Bp in addition to the core HVP.
