@@ -27,7 +27,7 @@ lscpu > "$artifact/cpu.txt"
 module list > "$artifact/modules.txt" 2>&1
 printenv OMP_NUM_THREADS OMP_PLACES OMP_PROC_BIND OMP_MAX_ACTIVE_LEVELS \
  OPENBLAS_NUM_THREADS MKL_NUM_THREADS > "$artifact/environment.txt"
-sha256sum "$source_dir/tests/mcscf/product_paths.hpp" \
+sha256sum "$source_dir/src/mcscf/ci/product_paths.hpp" \
  "$source_dir/tests/vbscf/unit/test_structure_tiles.cpp" \
  "$source_dir/src/mcscf/ci/product_support.hpp" \
  "$source_dir/src/mcscf/ci/sigma_tiles.cpp" > "$artifact/sources.sha256"

@@ -20,7 +20,7 @@
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
-#include "../../mcscf/product_paths.hpp"
+#include "mcscf/ci/product_paths.hpp"
 
 namespace {
 
@@ -488,10 +488,10 @@ void check_product_support_oracle(
         return true;
     return false;
   };
-  std::vector<xmvb::test::ProductPaths::Seed> seeds;
+  std::vector<xmvb::mcscf::ProductPaths::Seed> seeds;
   for (const int product : products)
     seeds.emplace_back(alpha[product / nb], beta[product % nb]);
-  const xmvb::test::ProductPaths paths(fixture.n, fixture.alpha[0].size(),
+  const xmvb::mcscf::ProductPaths paths(fixture.n, fixture.alpha[0].size(),
                                       fixture.beta[0].size(), seeds);
   // Full masks exist only in this small independent oracle, not in paths.
   std::vector<unsigned char> generated(na * nb, 0), generated_halo(na * nb, 0);
@@ -506,6 +506,18 @@ void check_product_support_oracle(
   };
   check_paths(0, generated);
   check_paths(1, generated_halo);
+  for (int depth = 0; depth <= 1; ++depth)
+    for (int b = 0; b < nb; ++b) {
+      std::vector<unsigned char> column(na, 0);
+      paths.visit_column(beta[b], depth, [&](auto a_mask, auto b_mask, bool in_support) {
+        const auto a = std::find(alpha.begin(), alpha.end(), a_mask) - alpha.begin();
+        require(a < na && b_mask == beta[b] && !column[a]++, "invalid fixed-beta path");
+        require(in_support == direct(a, b), "fixed-beta support label mismatch");
+      });
+      for (int a = 0; a < na; ++a)
+        require(column[a] == (depth == 0 ? generated : generated_halo)[a * nb + b],
+                "fixed-beta generator differs from full cursor");
+    }
   for (int a = 0; a < na; ++a)
     for (int b = 0; b < nb; ++b) {
       const bool expected = direct(a, b);
@@ -560,7 +572,7 @@ void check_generic_product_support() {
   check_product_support_oracle(make_fixture(4, 0, 2), {3});
   // No SpinStrings tables: a huge universe with tiny support is generated
   // directly. This is an ionic product test, not a 30-orbital covalent VB run.
-  using Paths = xmvb::test::ProductPaths;
+  using Paths = xmvb::mcscf::ProductPaths;
   const auto low = (std::uint64_t{1} << 15) - 1;
   const Paths sparse(30, 15, 15, {{low, low}});
   const auto sparse0 = sparse.visit(0, [](auto, auto, bool) {});
@@ -614,17 +626,12 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
       [&](int b, const std::vector<int>& rows, const Eigen::Ref<const Eigen::MatrixXd>& values) {
         for (int v = 0; v < width; ++v)
           for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
-            require(support.contains(rows[i], b), "sigma wrote outside the output support");
             actual(rows[i], v * nb + b) += values(i, v);
           }
       }, &support);
   auto expected = sigma.apply(carrier);
-  for (int a = 0; a < na; ++a)
-    for (int b = 0; b < nb; ++b)
-      if (!support.contains(a, b))
-        for (int v = 0; v < width; ++v) expected(a, v * nb + b) = 0;
   require((actual - expected).norm() <= 2e-11 * std::max(1.0, expected.norm()),
-          "support/closure sigma differs from independently projected full sigma");
+          "generated closure sigma differs from full sigma, including outside-S outputs");
   Eigen::MatrixXd generator = Eigen::MatrixXd::Ones(n, n);
   const auto one_body = sigma.apply_one_body_generator(carrier, generator);
   double outside_input = 0.0;
@@ -636,7 +643,7 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
   // Independently contract the ordered E_pq E_rs Hamiltonian using only
   // generated I paths. Dense generator images are small-test oracles, not
   // proposed production storage. This checks paths that leave S and return.
-  std::vector<xmvb::test::ProductPaths::Seed> seeds;
+  std::vector<xmvb::mcscf::ProductPaths::Seed> seeds;
   if (products.empty()) {
     const std::uint64_t full = (std::uint64_t{1} << n) - 1;
     for (const auto a : alpha) seeds.emplace_back(a, full ^ a);
@@ -644,7 +651,7 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
     for (const int product : products)
       seeds.emplace_back(alpha[product / nb], beta[product % nb]);
   }
-  const xmvb::test::ProductPaths paths(n, n_alpha, n_beta_electrons, seeds);
+  const xmvb::mcscf::ProductPaths paths(n, n_alpha, n_beta_electrons, seeds);
   std::vector<Eigen::MatrixXd> moments;
   for (int p = 0; p < n; ++p)
     for (int q = 0; q < n; ++q) {
@@ -759,12 +766,12 @@ void benchmark_selected12(int selected_count, bool compare_reference, bool paths
     products.push_back(alpha_index.at(occupation_mask(expansion.product_alpha[i])) *
         static_cast<int>(fixture.beta.size()) +
         beta_index.at(occupation_mask(expansion.product_beta[i])));
-  std::vector<xmvb::test::ProductPaths::Seed> seeds;
+  std::vector<xmvb::mcscf::ProductPaths::Seed> seeds;
   for (const int product : products)
     seeds.emplace_back(alpha_masks[product / fixture.beta.size()],
                        beta_masks[product % fixture.beta.size()]);
   const auto paths_begin = Clock::now();
-  const xmvb::test::ProductPaths paths(12, 6, 6, seeds);
+  const xmvb::mcscf::ProductPaths paths(12, 6, 6, seeds);
   const auto paths_built = Clock::now();
   const auto generated0 = paths.visit(0, [](auto, auto, bool) {});
   const auto paths_zero = Clock::now();
@@ -827,6 +834,15 @@ void benchmark_selected12(int selected_count, bool compare_reference, bool paths
   require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
   std::cout << "cold_apply_seconds=" << seconds(start, cold) << '\n'
             << "warm_apply_seconds=" << seconds(cold, warmed) << '\n'
+            << "expansions=" << warm.tiles.expansions << '\n'
+            << "structure_projections=" << warm.tiles.structure_projections << '\n'
+            << "input_panels=" << warm.tiles.input_panels << '\n'
+            << "hamiltonian_projections=" << warm.tiles.hamiltonian_projections << '\n'
+            << "overlap_projections=" << warm.tiles.overlap_projections << '\n'
+            << "input_evictions=" << warm.tiles.input_evictions << '\n'
+            << "output_evictions=" << warm.tiles.output_evictions << '\n'
+            << "input_resident_bytes=" << warm.tiles.input_resident_bytes << '\n'
+            << "output_resident_bytes=" << warm.tiles.output_resident_bytes << '\n'
             << "max_rss_kib=" << usage.ru_maxrss << '\n'
             << "rayleigh_energy=" << energy << '\n'
             << "reference_checked=" << static_cast<int>(compare_reference) << '\n';

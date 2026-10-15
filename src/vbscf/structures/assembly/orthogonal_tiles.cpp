@@ -40,9 +40,11 @@ public:
       if (consume_) consume_(last.index, last.values);
       index_.erase(last.index);
       panels_.pop_back();
+      ++evictions;
     }
     panels_.push_front({index, std::move(values)});
     resident_bytes_ += bytes;
+    peak_bytes = std::max(peak_bytes, resident_bytes_);
     index_[index] = panels_.begin();
     return panels_.front().values;
   }
@@ -54,6 +56,8 @@ public:
     index_.clear();
     resident_bytes_ = 0;
   }
+
+  std::size_t evictions = 0, peak_bytes = 0;
 
 private:
   struct Panel { int index; Eigen::MatrixXd values; };
@@ -111,6 +115,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
   const auto* support=product_support_.get();
 
   for (int vector_begin = 0; vector_begin < vectors.cols(); vector_begin += batch_width) {
+    ++result.tiles.expansions;
     const int width = std::min<int>(batch_width, vectors.cols() - vector_begin);
     // Expand once per RHS, not once per beta panel. For a covalent space
     // these groups are exactly (A, complement(A)): only O(U) coefficients.
@@ -142,6 +147,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
       }
     };
     const auto contract = [&]() {
+      ++result.tiles.structure_projections;
       // Apply P^T only after all panels have contributed to each spin pair.
 #pragma omp parallel for schedule(static) if(n_structures_ > 32)
       for (int structure = 0; structure < n_structures_; ++structure) {
@@ -163,6 +169,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
 
     std::vector<bool> overlap_consumed(count, false);
     ColumnPanels input(cache_bytes, [&](int panel) -> Eigen::MatrixXd {
+      ++result.tiles.input_panels;
       const auto row_tile = beta_rows(panel);
       const Eigen::MatrixXd& rows = *row_tile;
       Eigen::MatrixXd values = Eigen::MatrixXd::Zero(n_unique_alpha_, width * rows.rows());
@@ -185,6 +192,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
             panel * extent, rows.rows());
       else alpha_transform.apply_left(&values);
       if (!overlap_consumed[panel]) {
+        ++result.tiles.overlap_projections;
         Eigen::MatrixXd overlap = values;
         project(panel, rows, overlap, m_products);
         overlap_consumed[panel] = true;
@@ -193,6 +201,8 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
     });
     if (overlap_only) {
       for (int panel = 0; panel < count; ++panel) input.get(panel);
+      result.tiles.input_evictions += input.evictions;
+      result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes, input.peak_bytes);
       contract();
       continue;
     }
@@ -207,6 +217,7 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
               width * std::min(extent, n_unique_beta_ - panel * extent));
         },
         [&](int panel, Eigen::MatrixXd& image) {
+          ++result.tiles.hamiltonian_projections;
           const auto rows = beta_rows(panel);
           project(panel, *rows, image, h_products);
         });
@@ -226,6 +237,10 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
               panel(alpha_rows[row], vector * panel_width + beta % extent) += column(row, vector);
         }, support);
     output.finish();
+    result.tiles.input_evictions += input.evictions;
+    result.tiles.output_evictions += output.evictions;
+    result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes, input.peak_bytes);
+    result.tiles.output_resident_bytes = std::max(result.tiles.output_resident_bytes, output.peak_bytes);
     contract();
   }
   return result;

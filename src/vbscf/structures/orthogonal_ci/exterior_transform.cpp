@@ -248,8 +248,12 @@ void ExteriorOrbitalTransform::apply_supported_left(
     for (Eigen::Index column = 0; column < coefficients->cols(); ++column) {
       auto values = coefficients->col(column);
       const int beta = beta_begin + column % beta_count;
+      std::fill(allowed.begin(), allowed.end(), 0);
+      auto paths = support.column(beta, 0);
+      int alpha_index, beta_index;
+      bool in_support;
+      while (paths.next(alpha_index, beta_index, in_support)) allowed[alpha_index] = 1;
       for (int alpha = 0; alpha < dimension(); ++alpha) {
-        allowed[alpha] = support.contains(alpha, beta);
         if (!allowed[alpha]) values[alpha] = 0.0;
         else if (!adjoint) values[alpha] *= determinant_scales_[alpha];
       }

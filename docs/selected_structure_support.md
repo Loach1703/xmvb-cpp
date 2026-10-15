@@ -314,8 +314,8 @@ complexity bound based only on the number of structures. Additional tensor
 compression or analytically established cancellations would be a separate
 algorithm, not a consequence of triangular support alone.
 
-The first verification implements the streaming prefix generator in
-`tests/mcscf/product_paths.hpp`. Small independent enumeration checks exact
+The streaming prefix generator is implemented in
+`src/mcscf/ci/product_paths.hpp`. Small independent enumeration checks exact
 support, one-generator closure, unequal spins, ionic products, shared seeds,
 and empty/complete cases. An ordered-generator Hamiltonian contraction checks
 that paths outside the output support are retained correctly. CAS(12,12)
@@ -324,6 +324,107 @@ ordered and packed contractions share the one-body-generator implementation;
 this checks support and contraction consistency, not an independent fermionic
 sign implementation. The test also requires a nonzero Hamiltonian contribution
 from $\mathcal I\setminus\mathcal S$, so omission of the halo is detectable. The
-production sigma scheduler and derivative consumers are **not yet replaced**
-by this prototype; their end-to-end speed and memory cannot be inferred from
-support generation alone.
+production tiled sigma now consumes this generator; derivative consumers are
+not migrated by this change. End-to-end speed must still be measured rather
+than inferred from support generation alone.
+
+## Generated-node tile implementation
+
+The production cursor uses a beta-first traversal, followed by the compatible
+alpha traversal for each completed beta string. This is a reordering of the
+same paired-seed intersections, not a Cartesian scan followed by membership
+testing. Its prefix-depth bound is $2m+2$ rather than $m+1$; the asymptotic
+enumeration bound above is unchanged. A fixed-beta cursor supplies the exact
+support of each exterior-transform column without scanning every alpha
+index and testing it against every seed.
+
+`DirectCiSigmaAction::apply_tiled` consumes consecutive generated nodes for
+one beta string, subdividing the alpha list to fit its workspace target.
+It reads that column's alpha excitation halo and only its actual beta
+single-excitation neighbors. It then scatters generator channels, contracts
+the integral kernel, and gathers through the reverse excitation links.
+Input coefficients outside $\mathcal S$ are zero. The sigma callback may
+receive output outside $\mathcal S$; the subsequent supported adjoint
+transform discards those entries before projection. Thus the low-level
+sigma can be compared to the full, unrestricted sigma, while the selected
+structure action remains $F^\dagger H_{\mathrm{orth}}F$.
+
+The shared numerical payload for a tile of $t$ alpha targets, excitation
+halo size $h$, beta single-excitation degree $d_\beta$, and $b$ RHS is
+
+$$
+8b\,[3h+t(d_\beta+2d)]\quad\text{bytes},
+$$
+
+where $d=m(m+1)/2$ is the packed channel count. Thread workers own disjoint
+rows of this shared payload; no worker has a complete beta-range reduction
+array. Index maps of size $U_\alpha$ remain single shared metadata arrays.
+The 64 MiB sigma target determines tile extent, not physical-space admission;
+the minimum one-row tile can exceed this target for an exceptionally wide
+caller block. Likewise, the panel-cache target excludes a transient incoming
+panel and allows at least one panel. These targets must not be reported as a
+strict process-memory cap.
+
+The structure action expands $Pc$ once and contracts $P^T$ once per RHS batch.
+Input and output panel caches expose build, projection, eviction, and retained
+payload counters. If all needed panels fit, each input panel is built once,
+and each H and M panel is projected once. If panels are evicted, replay is
+still possible and is reported explicitly. This is not a claim of no replay
+at arbitrary active-space size, nor does it remove the separate derivative
+path's remaining dense-carrier limitations.
+
+### CAS(12,12) measurements, 2026-10-15
+
+Hanhai22 Slurm jobs 1259362 (8 cores) and 1259369 (32 cores) tested the first
+1, 3, 20, and 132 singlet Rumer structures of the same synthetic integral
+fixture. 132 is the complete covalent structure set. Timings include the
+complete structure H/M action, not only support enumeration or sigma; they
+are not molecular SCF timings. RSS below comes from native processes without
+the full-carrier reference allocation. Separate parity processes compare
+the entire H/M image, not merely a Rayleigh quotient.
+
+The old executable was not rerun. Saved jobs 1259142 (8 cores, anode26) and
+1259097 (32 cores, anode20) supply the baseline. New jobs ran on anode40 and
+anode24, respectively; all report AMD EPYC 9654, but these are not same-node
+matched timings. The anode20 request was cancelled while pending because
+that node was fully occupied.
+
+| Cores | Structures | Old cold / warm action (s) | New cold / warm action (s) | Old / new peak RSS (MiB) |
+| --- | --- | --- | --- | --- |
+| 8 | 1 | 0.1657 / 0.1289 | 0.2322 / 0.1976 | 52.2 / 34.8 |
+| 8 | 3 | 0.2054 / 0.1578 | 0.2513 / 0.2158 | 53.8 / 35.9 |
+| 8 | 20 | 0.3461 / 0.2995 | 0.2941 / 0.2523 | 58.2 / 31.8 |
+| 8 | 132 | 0.1767 / 0.1369 | 0.2409 / 0.1979 | 57.9 / 32.0 |
+| 32 | 1 | 0.1209 / 0.0559 | 0.3413 / 0.2695 | 79.6 / 37.1 |
+| 32 | 3 | 0.1420 / 0.0642 | 0.3715 / 0.2943 | 86.4 / 33.7 |
+| 32 | 20 | 0.1896 / 0.0988 | 0.4401 / 0.3481 | 88.9 / 37.2 |
+| 32 | 132 | 0.1306 / 0.0602 | 0.3817 / 0.2795 | 90.1 / 37.9 |
+
+The largest 32-core full-image errors were $1.34\times10^{-14}$ for H and
+$1.91\times10^{-15}$ for M. Each RHS was expanded and projected once; each
+of the four panels was built once and projected once per operator, with
+zero input or output evictions. The 8-core run used 15 smaller panels with
+the same once-only property. All 12 selected regression tests passed.
+
+This implementation establishes the generated-node numerical path and reduces
+measured memory, but **does not yet achieve a time improvement**. In particular,
+32-core execution regresses markedly. The column-at-a-time scheduler performs
+serial neighbor callbacks and several team barriers per beta column, splitting
+the integral contraction into small per-worker matrix products. This is the
+next scheduling issue to measure and remove, not a reason to change numerical
+thresholds or assume that a smaller support automatically makes the code faster.
+
+A bounded phase-timing run of the new binary (1259375, anode24, 32 cores)
+locates 84--86% of the combined cold-plus-warm action time inside `ci_sigma`:
+0.525, 0.576, 0.666, and 0.560 s for the four structure counts. These include
+the scheduler's callbacks and synchronization, not just GEMM. Thus the main
+remaining cost is in the generated-node sigma execution, not repeated
+structure expansion/projection. The phase timer does not separate callback,
+barrier, and arithmetic time; attributing their individual shares requires
+finer instrumentation. The next implementation should batch independent beta
+node groups into larger tasks, while retaining shared bounded storage and
+exclusive output ownership.
+
+Raw logs: `results/diagnostics/orthogonal-tiles-20261015/selected-1259362/`
+and `selected-1259369/`; saved baselines: `selected-1259142/` and
+`selected-1259097/` under the same directory.

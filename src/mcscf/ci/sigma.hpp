@@ -68,11 +68,13 @@ public:
    * `(alpha_rows.size(), block_width)` column slab. The
    * reader fills its slab from an immutable input carrier; the accumulator
    * adds its slab to a caller-owned, initially zero output carrier. Neither
-   * callback may alias the two temporary slabs across calls. Shared alpha
-   * excitation halos and worker scatter/reduction tiles are sized together
-   * under a workspace target; workers never copy the complete carrier.
-   * With product support, input/output are restricted to its exact support
-   * and the intermediate uses its one-generator closure, not that support.
+   * callback may retain a temporary slab across calls. Generated targets
+   * share a beta string; only their actual single-excitation neighbors are
+   * read. The team shares bounded halos and channel slabs, not carrier copies.
+   * With product support, the reader must return zero outside S and targets
+   * are generated in its one-generator closure I. The adjoint returns the
+   * full Hamiltonian image, including rows outside S; a selected-structure
+   * caller projects those out in its exterior-transform adjoint.
    */
   void apply_tiled(
       int block_width,

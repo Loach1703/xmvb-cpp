@@ -25,15 +25,21 @@ class StructureMetricInverse;
 /** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
 enum class StructureActionMode { Davidson, ActionOnly };
 
-/**
- * @brief Result of applying the structure Hamiltonian and overlap to a vector block.
- *
- * Both matrices have shape `(n_structures, block_width)`. No dense
- * `n_structures x n_structures` matrix is formed.
+/** @brief Tile replay counts and retained panel payload (not process peak RSS). */
+struct StructureTileWork {
+  std::size_t expansions = 0, structure_projections = 0;
+  std::size_t input_panels = 0, hamiltonian_projections = 0, overlap_projections = 0;
+  std::size_t input_evictions = 0, output_evictions = 0;
+  std::size_t input_resident_bytes = 0, output_resident_bytes = 0;
+};
+
+/** @brief Structure H/S images, each of shape `(n_structures, block_width)`.
+ * No dense structure-by-structure matrix is formed.
  */
 struct StructureActionResult {
   Eigen::MatrixXd hamiltonian;
   Eigen::MatrixXd overlap;
+  StructureTileWork tiles;
 };
 
 /** @brief Active-integral adjoint of selected structure-space states. */
