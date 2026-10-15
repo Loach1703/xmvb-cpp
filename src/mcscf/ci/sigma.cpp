@@ -17,6 +17,26 @@ namespace {
 // Use the same contiguous alpha extent for standalone and fused sigma work.
 constexpr int kSigmaAlphaTile = 160;
 
+/** @brief Packed rows of a rectangular tile intersected with an exchange triangle.
+ * Offsets are exact arithmetic prefix sums; no product-sized index array.
+ */
+struct AdjointRows {
+  int alpha_begin, alpha_count, beta_begin, block_count, parity;
+
+  int count(int beta) const {
+    return parity == 0 ? alpha_count :
+        std::min(alpha_count, beta_begin + beta - alpha_begin + (parity > 0));
+  }
+
+  int offset(int beta) const {
+    if (parity == 0) return beta * alpha_count * block_count;
+    const int first = beta_begin - alpha_begin + (parity > 0);
+    const int ramp = std::clamp(alpha_count - first, 0, beta);
+    return block_count * (ramp * first + ramp * (ramp - 1) / 2 +
+                          (beta - ramp) * alpha_count);
+  }
+};
+
 std::uint64_t determinant_mask(
     const std::vector<int>& occupied,
     int n_orbitals) {
@@ -611,44 +631,46 @@ void DirectCiSigmaAction::apply_one_body_generators(
 
 DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
-    const Eigen::Ref<const Eigen::MatrixXd>& right) const {
+    const Eigen::Ref<const Eigen::MatrixXd>& right, int exchange_parity) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiIntegralAdjoint);
-  return contract_adjoint(left, right, nullptr);
+  return contract_adjoint(left, right, nullptr, exchange_parity);
 }
 
 DirectCiResponse DirectCiSigmaAction::apply_with_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& response,
-    const Eigen::Ref<const Eigen::MatrixXd>& state) const {
+    const Eigen::Ref<const Eigen::MatrixXd>& state, int exchange_parity) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiResponse);
   DirectCiResponse result;
-  result.integrals = contract_adjoint(response, state, &result.sigma);
+  result.integrals = contract_adjoint(response, state, &result.sigma, exchange_parity);
   return result;
 }
 
 void DirectCiSigmaAction::apply_sigma_tile(
     int alpha_begin, int alpha_count, int block_begin, int block_count,
-    int beta_begin, int beta_count,
+    int beta_begin, int beta_count, int exchange_parity,
     const Eigen::Ref<const Eigen::MatrixXd>& scattered,
     Eigen::Ref<Eigen::MatrixXd> workspace,
     Eigen::Ref<Eigen::MatrixXd> sigma) const {
-  const int rows = alpha_count * block_count;
+  const AdjointRows layout{alpha_begin, alpha_count, beta_begin, block_count, exchange_parity};
   const int n_pairs = static_cast<int>(hamiltonian_pair_kernel_.rows());
   // Alpha links only change the row: each beta target owns its output columns.
 #pragma omp for schedule(static)
   for (int beta = 0; beta < beta_count; ++beta) {
+    const int count = layout.count(beta);
+    const int rows = count * block_count;
     // The previous adjoint no longer needs this storage. Change its layout to
     // contiguous per-beta matrices and consume each GEMM while it is local.
     Eigen::Map<Eigen::MatrixXd> transformed(
-        workspace.data() + static_cast<Eigen::Index>(beta) * rows * n_pairs,
+        workspace.data() + static_cast<Eigen::Index>(layout.offset(beta)) * n_pairs,
         rows, n_pairs);
-    transformed.noalias() = scattered.middleRows(beta * rows, rows) *
+    transformed.noalias() = scattered.middleRows(layout.offset(beta), rows) *
         hamiltonian_pair_kernel_.transpose();
-    for (int alpha = 0; alpha < alpha_count; ++alpha) {
+    for (int alpha = 0; alpha < count; ++alpha) {
       const int target = alpha_begin + alpha;
       const auto add = [&](int source, int pair, double sign) {
         for (int block = 0; block < block_count; ++block) {
           sigma(source, (block_begin + block) * n_beta_ + beta_begin + beta) +=
-              sign * transformed(block * alpha_count + alpha, pair);
+              sign * transformed(block * count + alpha, pair);
         }
       };
       for (int occupied : alpha_->occupied[target]) {
@@ -669,14 +691,17 @@ void DirectCiSigmaAction::apply_sigma_tile(
   for (int beta = 0; beta < n_beta_; ++beta) {
     const auto add = [&](int source_beta, int pair, double sign) {
       if (source_beta < beta_begin || source_beta >= beta_begin + beta_count) return;
+      const int local_beta = source_beta - beta_begin;
+      const int count = layout.count(local_beta);
+      const int rows = count * block_count;
       for (int block = 0; block < block_count; ++block) {
         const double* source = workspace.data() +
-            (static_cast<Eigen::Index>(source_beta - beta_begin) * n_pairs + pair) * rows +
-            block * alpha_count;
+            static_cast<Eigen::Index>(layout.offset(local_beta)) * n_pairs + pair * rows +
+            block * count;
         double* target = sigma.col((block_begin + block) * n_beta_ + beta).data() +
             alpha_begin;
 #pragma omp simd
-        for (int alpha = 0; alpha < alpha_count; ++alpha) {
+        for (int alpha = 0; alpha < count; ++alpha) {
           target[alpha] += sign * source[alpha];
         }
       }
@@ -694,7 +719,11 @@ void DirectCiSigmaAction::apply_sigma_tile(
 DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     const Eigen::Ref<const Eigen::MatrixXd>& right,
-    Eigen::MatrixXd* sigma) const {
+    Eigen::MatrixXd* sigma, int exchange_parity) const {
+  if (exchange_parity < -1 || exchange_parity > 1 ||
+      (exchange_parity != 0 && distinct_beta_)) {
+    throw std::invalid_argument("direct-CI adjoint exchange sector requires identical spin lists");
+  }
   if (left.rows() != n_alpha_ || right.rows() != n_alpha_ ||
       left.cols() <= 0 || left.cols() != right.cols() ||
       left.cols() % n_beta_ != 0 || !left.allFinite() ||
@@ -705,6 +734,8 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
 
   const int n_pairs = static_cast<int>(pair_kernel_.rows());
   const int block_width = static_cast<int>(left.cols()) / n_beta_;
+  const bool same_input = left.data() == right.data() &&
+      left.outerStride() == right.outerStride() && left.innerStride() == right.innerStride();
   // Flatten the contracted spin-string rows into two shared, bounded tiles.
   // Each output block has one owner: no thread-private pair-square gradient
   // and no serial reduction of those gradients are needed.
@@ -720,7 +751,8 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
   // A fused tile also feeds sigma's link gather. Retain its established alpha
   // extent instead of using the entire alpha space as an adjoint-only tile.
   // The remaining budget becomes beta rows, not extra per-worker storage.
-  const int alpha_limit = sigma == nullptr ? n_alpha_ : std::min(n_alpha_, kSigmaAlphaTile);
+  const int alpha_limit = sigma == nullptr && exchange_parity == 0
+      ? n_alpha_ : std::min(n_alpha_, kSigmaAlphaTile);
   const int alpha_tile = static_cast<int>(std::min<std::size_t>(
       alpha_limit, workspace_bytes / bytes_per_alpha));
   const int rows_per_beta = alpha_tile * block_tile;
@@ -748,17 +780,32 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
       const auto right_block = right.middleCols(block_begin * n_beta_, block_count * n_beta_);
       for (int alpha_begin = 0; alpha_begin < n_alpha_; alpha_begin += alpha_tile) {
         const int alpha_count = std::min(alpha_tile, n_alpha_ - alpha_begin);
-        const int rows = alpha_count * block_count;
-        for (int beta_begin = 0; beta_begin < n_beta_; beta_begin += beta_tile) {
+        const int beta_first = exchange_parity == 0 ? 0 : alpha_begin + (exchange_parity < 0);
+        for (int beta_begin = beta_first; beta_begin < n_beta_; beta_begin += beta_tile) {
           const int beta_count = std::min(beta_tile, n_beta_ - beta_begin);
+          const AdjointRows layout{alpha_begin, alpha_count, beta_begin, block_count, exchange_parity};
+          const int used_rows = layout.offset(beta_count);
 #pragma omp for schedule(static)
           for (int beta = 0; beta < beta_count; ++beta) {
-            auto active_left = left_intermediate.middleRows(beta * rows, rows);
-            auto active_right = right_intermediate.middleRows(beta * rows, rows);
+            const int count = layout.count(beta);
+            const int rows = count * block_count;
+            auto active_left = left_intermediate.middleRows(layout.offset(beta), rows);
+            auto active_right = right_intermediate.middleRows(layout.offset(beta), rows);
             scatter_one_body_intermediate(
-                left_block, alpha_begin, alpha_count, beta_begin + beta, active_left);
-            scatter_one_body_intermediate(
-                right_block, alpha_begin, alpha_count, beta_begin + beta, active_right);
+                left_block, alpha_begin, count, beta_begin + beta, active_left);
+            if (same_input) active_right = active_left;
+            else scatter_one_body_intermediate(
+                right_block, alpha_begin, count, beta_begin + beta, active_right);
+            if (exchange_parity != 0) {
+              // Q^T D Q weights one operand only; omitted rows are never scattered.
+              active_left *= 2.0;
+              const int diagonal = beta_begin + beta - alpha_begin;
+              if (exchange_parity > 0 && diagonal < alpha_count) {
+                for (int block = 0; block < block_count; ++block) {
+                  active_left.row(block * count + diagonal) *= 0.5;
+                }
+              }
+            }
           }
           // The scatter barrier publishes every shared row before GEMM; the
           // following barrier prevents overwriting the tile during contraction.
@@ -777,18 +824,35 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
             if (first == end || row_first == row_end) continue;
             effective_kernel_adjoint.block(
                 row_first, first, row_end - row_first, end - first).noalias() +=
-                left_intermediate.topRows(rows * beta_count)
+                left_intermediate.topRows(used_rows)
                     .middleCols(row_first, row_end - row_first).transpose() *
-                right_intermediate.topRows(rows * beta_count).middleCols(first, end - first);
+                right_intermediate.topRows(used_rows).middleCols(first, end - first);
           }
           if (sigma != nullptr) {
             // The adjoint has consumed the right tile. Reuse its storage for
             // K times the response scatter, without regenerating that scatter.
             apply_sigma_tile(alpha_begin, alpha_count, block_begin, block_count,
-                beta_begin, beta_count, left_intermediate, right_intermediate, *sigma);
+                beta_begin, beta_count, exchange_parity, left_intermediate, right_intermediate, *sigma);
           }
         }
       }
+    }
+  }
+
+  if (sigma != nullptr && exchange_parity != 0) {
+    // H commutes with exchange. P_eta E^T Q^T D K Q E X = H X.
+    // Each unordered pair has one owner; no transpose-sized temporary.
+#pragma omp parallel for schedule(static) if(n_threads > 1) num_threads(n_threads)
+    for (int column = 0; column < block_width * n_beta_; ++column) {
+      const int beta = column % n_beta_;
+      const int offset = column - beta;
+      for (int alpha = 0; alpha < beta; ++alpha) {
+        const double value = 0.5 * ((*sigma)(alpha, column) +
+            exchange_parity * (*sigma)(beta, offset + alpha));
+        (*sigma)(alpha, column) = value;
+        (*sigma)(beta, offset + alpha) = exchange_parity * value;
+      }
+      if (exchange_parity < 0) (*sigma)(beta, column) = 0.0;
     }
   }
 

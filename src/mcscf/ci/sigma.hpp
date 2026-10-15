@@ -130,18 +130,24 @@ public:
    * their inner products with symmetric integral directions equal the exact
    * directional derivative of the bilinear form. The traversal uses the same
    * Slater--Condon connection graph as `apply()`.
+   * A nonzero exchange_parity certifies X^T = parity * X for every input
+   * block in identical alpha/beta string lists. Zero makes no such assumption.
    */
   DirectCiIntegralAdjoint integral_adjoint(
       const Eigen::Ref<const Eigen::MatrixXd>& left,
-      const Eigen::Ref<const Eigen::MatrixXd>& right) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& right,
+      int exchange_parity = 0) const;
 
   /** @brief Returns H * response and the integral derivative of response.dot(H * state).
    * Reuses the response scatter; two shared tiles serve both contractions.
    * Inputs follow apply() packing and may be non-owning strided blocks.
+   * With certified exchange parity, sigma is reconstructed as a full image,
+   * not the unprojected representative used by apply_tiled().
    */
   DirectCiResponse apply_with_adjoint(
       const Eigen::Ref<const Eigen::MatrixXd>& response,
-      const Eigen::Ref<const Eigen::MatrixXd>& state) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& state,
+      int exchange_parity = 0) const;
 
   /**
    * @brief Unsymmetrized one-body adjoint for an orbital-generator action.
@@ -199,14 +205,14 @@ private:
   DirectCiIntegralAdjoint contract_adjoint(
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       const Eigen::Ref<const Eigen::MatrixXd>& right,
-      Eigen::MatrixXd* sigma) const;
+      Eigen::MatrixXd* sigma, int exchange_parity) const;
 
   /** @brief Cooperative sigma contraction inside the current OpenMP team.
    * Each output beta column has one owner. All workers must call this method.
    */
   void apply_sigma_tile(
       int alpha_begin, int alpha_count, int block_begin, int block_count,
-      int beta_begin, int beta_count,
+      int beta_begin, int beta_count, int exchange_parity,
       const Eigen::Ref<const Eigen::MatrixXd>& scattered,
       Eigen::Ref<Eigen::MatrixXd> workspace,
       Eigen::Ref<Eigen::MatrixXd> sigma) const;

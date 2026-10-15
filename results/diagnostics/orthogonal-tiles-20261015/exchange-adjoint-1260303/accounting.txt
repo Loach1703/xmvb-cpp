@@ -1,0 +1,10 @@
+JobID|State|ExitCode|Elapsed|TotalCPU|AllocCPUS|MaxRSS|NodeList
+1260303|COMPLETED|0:0|00:00:40|01:07.590|8||anode26
+1260303.batch|COMPLETED|0:0|00:00:40|00:36.851|8|3.80M|anode26
+1260303.extern|COMPLETED|0:0|00:00:40|00:00.001|8|0|anode26
+1260303.0|COMPLETED|0:0|00:00:02|00:03.758|2|0|anode26
+1260303.1|COMPLETED|0:0|00:00:01|00:00.007|8|0|anode26
+1260303.2|COMPLETED|0:0|00:00:03|00:26.971|8|0|anode26
+
+Slurm sampled MaxRSS is unavailable for the short kernel step (reported zero).
+Use the GNU time maximum in kernel.time, not Slurm's zero.

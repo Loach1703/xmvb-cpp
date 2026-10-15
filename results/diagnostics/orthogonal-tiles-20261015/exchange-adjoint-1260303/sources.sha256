@@ -1,0 +1,4 @@
+a7c67f3ca9b59efeea2d77b0fdd1dcd8de3fe98d6421a737d4577c4b55b8df44  /home/guqqgroup/xiatao/work/xmvb-exchange-adjoint-20261015/src/mcscf/ci/sigma.cpp
+3db8a1cb739f707e672b23ec795cbb455e46289d5ce8b5b546a94e4f12e84e50  /home/guqqgroup/xiatao/work/xmvb-exchange-adjoint-20261015/src/mcscf/ci/sigma.hpp
+532f7fb40e6943c92aaf8abc38a6d58e5212e4fb2ed798db68b717e80ee19949  /home/guqqgroup/xiatao/work/xmvb-exchange-adjoint-20261015/src/vbscf/structures/assembly/action.cpp
+ad7539be230b8c7981e0174d046d6a5a79580156ecf4d85ec6bf42cc09f2c100  /home/guqqgroup/xiatao/work/xmvb-exchange-adjoint-20261015/tests/vbscf/unit/test_orthogonal_direct_ci.cpp

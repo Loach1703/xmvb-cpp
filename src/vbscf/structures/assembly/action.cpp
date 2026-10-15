@@ -1478,17 +1478,14 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
         result.source_coefficients.back();
     direct_ci_->alpha_transform.apply_left(&orthogonal_coefficients);
     direct_ci_->beta_transform().apply_right(&orthogonal_coefficients);
-    const Eigen::MatrixXd sigma =
-        direct_ci_->sigma.apply(orthogonal_coefficients);
+    auto contracted = direct_ci_->sigma.apply_with_adjoint(
+        orthogonal_coefficients, orthogonal_coefficients, spin_exchange_parity_);
     result.orthogonal_coefficients.push_back(
         std::move(orthogonal_coefficients));
     result.residuals.push_back(
-        sigma - state_energies[state] *
+        contracted.sigma - state_energies[state] *
             result.orthogonal_coefficients.back());
-    const xmvb::mcscf::DirectCiIntegralAdjoint integral_gradient =
-        direct_ci_->sigma.integral_adjoint(
-            result.orthogonal_coefficients.back(),
-            result.orthogonal_coefficients.back());
+    const auto& integral_gradient = contracted.integrals;
     result.one_electron_gradient.noalias() +=
         state_weight * integral_gradient.one_electron;
     result.pair_kernel_gradient.noalias() +=
@@ -1722,7 +1719,7 @@ StructureAction::active_integral_adjoint_direction(
     const xmvb::mcscf::DirectCiIntegralAdjoint directional_integral_gradient =
         direct_ci_->sigma.integral_adjoint(
             directional_orthogonal_coefficients,
-            orthogonal_coefficients);
+            orthogonal_coefficients, spin_exchange_parity_);
     orthogonal_one_gradient_direction.noalias() +=
         2.0 * state_weight * directional_integral_gradient.one_electron;
     orthogonal_pair_gradient_direction.noalias() +=
@@ -1842,7 +1839,7 @@ StructureResponseSweep StructureAction::contract_response(
       direct_ci_->alpha_transform.apply_left(&response);
       direct_ci_->beta_transform().apply_right(&response);
       xmvb::mcscf::DirectCiResponse contracted =
-          direct_ci_->sigma.apply_with_adjoint(response, accepted);
+          direct_ci_->sigma.apply_with_adjoint(response, accepted, spin_exchange_parity_);
       one_gradient.noalias() +=
           2.0 * state_weight * contracted.integrals.one_electron;
       pair_gradient.noalias() +=

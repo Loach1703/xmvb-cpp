@@ -90,13 +90,66 @@ $$
 One must not claim that the intermediate vector before $F^T$ is the full
 Hamiltonian image. It is generally not exchange symmetric. It is an exact
 representative for contraction with any left vector in the prescribed sector.
-Consequently, the quotient option is used only by the selected-structure
-projection interface; ordinary full-carrier sigma retains its full-image
-contract.
+The selected-structure projection interface can therefore consume this vector
+directly. A full-carrier response must instead apply the sector projector
+described below; the representative alone does not meet its interface contract.
 
 Input columns needed by the original overlap action may not all be requested
 by the quotient Hamiltonian sweep. Their Gram contributions must still be
 evaluated. The implementation tracks consumed overlap panels separately.
+
+## Integral adjoint and complete response
+
+For two inputs $L$ and $R$ in the same sector, define $d_L=\mathcal E L$
+and $d_R=\mathcal E R$. The adjoint of the channel kernel is
+
+$$
+\overline K=d_L^T d_R=(Qd_L)^T D(Qd_R).
+$$
+
+The existing chain rule from $K$ to the one- and two-electron integrals is
+unchanged. The identity applies to accepted-state densities and to transition
+densities with unequal $L$ and $R$, including orbital and CI derivatives:
+spatial orbital generators act identically on both spin sectors and commute
+with $\Pi$. It also applies separately to every root of a state average if
+the structure basis has one common exchange parity. Mixed-parity bases and
+unequal spin lists retain the unreduced contraction.
+
+A fused response additionally requires the complete vector $HL$, not just its
+projection onto the selected structures. Let
+
+$$
+P_\eta=\tfrac12(I+\eta\Pi),\qquad
+z=\mathcal E^T Q^T D K Q\mathcal E L.
+$$
+
+The representative weights obey
+$P_\eta Q^T DQ P_\eta=P_\eta$. Both $\mathcal E$ and $K$ preserve the
+exchange sector, hence
+
+$$
+HL=P_\eta z,\qquad
+(HL)_{ab}=\tfrac12(z_{ab}+\eta z_{ba}).
+$$
+
+The projection is performed in place, with one owner per unordered pair.
+It needs linear carrier work and no extra full-carrier array. Omitting this
+projection would give an incorrect response even though a final same-sector
+scalar contraction could still pass.
+
+The implementation packs only representative rows into each tile, including
+tiles crossing the diagonal. For identical lists of size $U$, there are
+$U(U+\eta)/2$ rows rather than $U^2$ per right-hand side. Prefix offsets are
+arithmetic sums of row lengths; no full product index array is constructed.
+This approximately halves scatter and channel-GEMM work, but does not change
+their polynomial scaling. Two shared workspaces retain the same
+64 MiB total bound. There is no per-thread carrier or pair-kernel adjoint.
+
+At an accepted point $L=R$, sigma and the integral adjoint share one scatter.
+The second operand is copied within the existing bounded workspace before
+applying multiplicities, rather than regenerating its one-body links. Thus
+the former standalone sigma plus two adjoint scatters become one link sweep.
+This fusion also applies when exchange reduction is unavailable.
 
 ## Derivatives and limits
 

@@ -2124,6 +2124,80 @@ void benchmark_structure_response() {
   }
 }
 
+/** @brief Check the complete response image, not just a projected scalar. */
+void check_exchange_adjoint(bool benchmark = false) {
+  using Clock = std::chrono::steady_clock;
+  if (benchmark)
+    std::cout << "n_orbitals,width,parity,kind,wall_seconds,checksum,max_error\n"
+              << std::setprecision(17);
+  for (int n : (benchmark ? std::vector<int>{6, 10, 12} : std::vector<int>{4, 10})) {
+    const auto spin = complete_space(n, n / 2);
+    const int count = static_cast<int>(spin.size());
+    const int pairs = xmvb::vb::packed_active_pair_count(n);
+    xmvb::vb::OrthogonalActiveIntegrals integrals;
+    integrals.one_electron = Eigen::MatrixXd::Identity(n, n);
+    integrals.one_electron(0, 1) = integrals.one_electron(1, 0) = 0.13;
+    Eigen::MatrixXd factors(7, pairs);
+    for (int j = 0; j < pairs; ++j)
+      for (int i = 0; i < factors.rows(); ++i)
+        factors(i,j) = 0.07 * std::sin(0.17 * (i+1) * (j+2));
+    integrals.pair_kernel = factors.transpose() * factors;
+    const xmvb::mcscf::DirectCiSigmaAction action(spin, spin, integrals);
+    const int width = n == 12 ? 1 : 2;
+    // A row-sliced matrix exercises non-owning inputs with an outer stride.
+    Eigen::MatrixXd left_storage(count + 3, width * count);
+    Eigen::MatrixXd right_storage(count + 3, width * count);
+    auto left = left_storage.topRows(count);
+    auto right = right_storage.topRows(count);
+    for (int parity : {-1, 1}) {
+      for (int block = 0; block < width; ++block)
+        for (int beta = 0; beta < count; ++beta)
+          for (int alpha = 0; alpha <= beta; ++alpha) {
+            const double a = (alpha == beta && parity < 0) ? 0.0 :
+                std::sin(0.031 * (alpha+1) * (beta+2+block)) / count;
+            const double b = (alpha == beta && parity < 0) ? 0.0 :
+                std::cos(0.027 * (alpha+3) * (beta+1+block)) / count;
+            left(alpha, block*count+beta) = a;
+            left(beta, block*count+alpha) = parity * a;
+            right(alpha, block*count+beta) = b;
+            right(beta, block*count+alpha) = parity * b;
+          }
+      const auto full = action.apply_with_adjoint(left, right);
+      const auto quotient = action.apply_with_adjoint(left, right, parity);
+      const auto adjoint = action.integral_adjoint(left, right, parity);
+      const double error = std::max({
+          (full.sigma - quotient.sigma).cwiseAbs().maxCoeff(),
+          (full.integrals.one_electron - quotient.integrals.one_electron).cwiseAbs().maxCoeff(),
+          (full.integrals.pair_kernel - quotient.integrals.pair_kernel).cwiseAbs().maxCoeff(),
+          (adjoint.one_electron - full.integrals.one_electron).cwiseAbs().maxCoeff(),
+          (adjoint.pair_kernel - full.integrals.pair_kernel).cwiseAbs().maxCoeff()});
+      require(error < 3e-11, "exchange quotient changed the full sigma or integral adjoint");
+      require((quotient.sigma - action.apply(left)).norm() < 3e-10,
+          "reconstructed exchange sigma differs from independent full sigma");
+      const auto accepted = action.apply_with_adjoint(left, left, parity);
+      const Eigen::MatrixXd copy = left;
+      const auto independent = action.integral_adjoint(left, copy);
+      require((accepted.integrals.pair_kernel - independent.pair_kernel).norm() < 3e-11 &&
+              (accepted.integrals.one_electron - independent.one_electron).norm() < 3e-11,
+          "shared accepted-point scatter changed integral adjoint");
+      if (!benchmark) continue;
+      for (int sector : {0, parity}) {
+        for (bool same : {false, true}) {
+          const auto start = Clock::now();
+          const auto result = same ? action.apply_with_adjoint(left, left, sector)
+                                   : action.apply_with_adjoint(left, right, sector);
+          const double wall = std::chrono::duration<double>(Clock::now() - start).count();
+          std::cout << n << ',' << width << ',' << parity << ','
+                    << (sector == 0 ? "full_" : "quotient_")
+                    << (same ? "accepted" : "response") << ',' << wall << ','
+                    << result.sigma.squaredNorm() + result.integrals.pair_kernel.squaredNorm()
+                    << ',' << error << '\n';
+        }
+      }
+    }
+  }
+}
+
 /** @brief Bounded kernel timings; keep separate from convergence benchmarks. */
 void benchmark_sigma() {
   using Clock = std::chrono::steady_clock;
@@ -2195,6 +2269,10 @@ void benchmark_sigma() {
 
 int main(int argc, char** argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--benchmark-exchange") {
+      check_exchange_adjoint(true);
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--benchmark-response") {
       benchmark_structure_response();
       return 0;
@@ -2210,6 +2288,7 @@ int main(int argc, char** argv) {
     check_sigma_tile_boundary();
     check_distinct_spin_sigma_action();
     check_fused_spin_sectors();
+    check_exchange_adjoint();
     check_demand_driven_structure_diagonal();
     std::cout << "orthogonal direct-CI planner and exterior transform: passed\n";
     return 0;
