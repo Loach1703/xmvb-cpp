@@ -34,7 +34,7 @@ invariant under orbital orthogonalization. This does not prevent exact
 evaluation of its Hamiltonian and overlap actions through an orthogonal
 configuration-interaction (CI) representation. The transformed wave function
 must be retained, but its complete spin-string product array need not be
-formed. We derive an exact source-column factorization, apply the
+formed. We derive an exact source-factor representation, apply the
 Slater--Condon one-body generators separately to the two spin factors, and
 contract only the original products needed for the final structure-space
 projection. The resulting equations preserve the selected variational space
@@ -181,6 +181,8 @@ them implicitly.
 
 \section{Exact source factors}
 
+\subsection{Column decomposition}
+
 Order the original touched $\beta$ columns as $J=(j_1,\ldots,j_r)$, and set
 \begin{equation}\label{eq:source}
  A_{:\ell}=X_{:j_\ell},\qquad B_{:\ell}=e_{j_\ell},\qquad
@@ -203,6 +205,62 @@ $2^m$ original source columns. Several structures can share most of those
 columns, and a broad selected space can touch all $U_\beta$ columns.
 Thus $\rank X\le r$ is an upper bound, not an identification of $r$ with
 one, with $\rank X$, or with the number of structures.
+
+\subsection{A minimum mixed row/column cover}\label{sec:cover}
+
+Grouping every source on the $\beta$ side is not always economical. View
+the original input support as a bipartite graph: vertices are the touched
+$\alpha$ and $\beta$ strings, and each supported product $(a,b)$ is one
+edge. Choose a vertex cover $C_\alpha\cup C_\beta$, so that every edge
+touches at least one chosen vertex. Assign an edge to its $\alpha$ endpoint
+if that endpoint is in $C_\alpha$; otherwise assign it to its covered
+$\beta$ endpoint. With this disjoint assignment,
+\begin{equation}\label{eq:cover}
+ X=\sum_{a\in C_\alpha}e_a u_a\Tr
+   +\sum_{b\in C_\beta}v_b e_b\Tr=AB\Tr.
+\end{equation}
+Here $(u_a)_b=X_{ab}$ only for edges assigned to row $a$, and
+$(v_b)_a=X_{ab}$ only for edges assigned to column $b$; the remaining
+entries are zero. Thus no coefficient is counted twice, including edges
+whose two endpoints are both covered. Each chosen vertex defines one
+coordinate-anchored outer product.
+
+Let $\nu(\Omega)$ be the maximum matching size, i.e., the largest number
+of edges with no shared endpoints. A minimum cover has cardinality
+\begin{equation}
+ r_* = |C_\alpha|+|C_\beta|=\nu(\Omega)
+ \le\min(|A_\Omega|,|J|).
+\end{equation}
+For completeness, the cover can be certified directly from a maximum
+matching. Start at unmatched $\alpha$ vertices and follow alternating
+unmatched/matched edges. If the reached vertex sets are $Z_\alpha$ and
+$Z_\beta$, then
+$(A_\Omega\setminus Z_\alpha)\cup Z_\beta$ covers every edge and
+contains exactly one endpoint per matched edge. Any cover must contain
+at least one endpoint of each disjoint matched edge, establishing
+minimality. The implementation uses layered augmenting paths, with
+$O(t\sqrt{U_\alpha+U_\beta})$ worst-case planning work and linear graph
+storage. The plan is independent of the numerical Davidson vector.
+
+This is a minimal factor count for \emph{support-only coordinate-anchored}
+decompositions, not a numerical rank claim. In particular,
+$\rank X\le\nu(\Omega)$; additional coefficient relations can lower the
+actual rank further. A diagonal support needs one source per edge. In
+contrast, the support
+\begin{equation}
+ \{(a_0,b_j):1\le j\le m\}
+ \cup\{(a_i,b_0):1\le i\le m\}
+\end{equation}
+needs only two mixed sources, although either a pure row or pure column
+decomposition needs $m+1$ sources. This reduces the factor dimension,
+rather than enlarging a tile or imposing an amplitude threshold.
+
+All subsequent Hamiltonian and sampling equations apply unchanged, with
+$r=r_*$ and the factors of Eq.~\eqref{eq:cover}. When a common exchange
+parity is used, construct the graph from the \emph{representative input}
+support of Section~6.1; the final projection still uses the complete
+original $\Omega$. If the original column cover is already minimal, its
+ordering may be retained to avoid changing established summation order.
 
 \section{Hamiltonian action on the factors}
 
@@ -474,17 +532,18 @@ spaces.
 
 \section{Correspondence with the current implementation}
 
-The equations were checked against revision \texttt{a5004add}. Paths below
-are relative to \texttt{src/}; this table records the implementation
-boundary rather than introducing additional physical assumptions.
+The original column contraction corresponds to revision \texttt{a5004add};
+Section~\ref{sec:cover} adds the minimum mixed-support decomposition.
+Paths below are relative to \texttt{src/}; this table records the
+implementation boundary rather than introducing physical assumptions.
 \begin{center}\small
 \begin{tabular}{>{\raggedright\arraybackslash}p{0.37\linewidth}
                 >{\raggedright\arraybackslash}p{0.54\linewidth}}
 \toprule
 Mathematical operation & Implementation \\
 \midrule
-Original support and source columns &
-\path{vbscf/structures/assembly/sources.hpp} \\
+Original support and minimum source cover &
+\path{vbscf/structures/assembly/sources.cpp} \\
 Source panels, spin scatter/mix/gather, samples and $\Wa^*$ &
 \path{vbscf/structures/assembly/source_tiles.cpp}\newline
 \texttt{apply\_source\_tiles()} \\

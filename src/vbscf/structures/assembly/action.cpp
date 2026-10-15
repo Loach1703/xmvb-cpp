@@ -637,7 +637,7 @@ StructureAction::StructureAction(
       pending_terms.push_back(PendingSpinTerm{
           spin_product,
           StructureTerm{
-              spin_product, term.structure_index, term.coefficient}});
+              0, term.structure_index, term.coefficient}});
     }
   }
 
@@ -672,7 +672,7 @@ StructureAction::StructureAction(
       }
       if (coefficient != 0.0) {
         spin_terms_.push_back(
-            StructureTerm{spin_product, structure, coefficient});
+            StructureTerm{static_cast<int>(spin_products_.size()) - 1, structure, coefficient});
       }
     }
     spin_term_offsets_.push_back(spin_terms_.size());
@@ -700,7 +700,10 @@ StructureAction::StructureAction(
     if (direct_ci_->alpha_transform.occupations() ==
         direct_ci_->beta_transform().occupations())
       spin_exchange_parity_ = detect_spin_exchange();
-    sources_ = std::make_unique<SpinSources>(spin_products_, n_unique_alpha_, n_unique_beta_, spin_exchange_parity_);
+    auto sources = std::make_unique<SpinSources>(spin_products_, n_unique_alpha_, n_unique_beta_, spin_exchange_parity_);
+    sources->alpha_projection = direct_ci_->alpha_transform.projection(sources->alpha_rows);
+    sources->beta_projection = direct_ci_->beta_transform().projection(sources->columns);
+    sources_ = std::move(sources);
     std::vector<int> touched;
     touched.reserve(spin_products_.size());
     for (std::size_t group=0; group<spin_products_.size(); ++group)
@@ -755,8 +758,8 @@ StructureAction::StructureAction(
             spin_terms_[structure_term_indices_[right_position]];
         const DeterminantPairScalars pair = evaluate_spin_product_pair(
             same_spin_pair_cache,
-            left.spin_product,
-            right.spin_product,
+            spin_products_[left.group],
+            spin_products_[right.group],
             n_unique_beta_,
             two_electron_view,
             n_active_orbitals,
@@ -793,8 +796,8 @@ Eigen::MatrixXd StructureAction::contract_spin_product_block(
          ++position) {
       const StructureTerm& term =
           spin_terms_[structure_term_indices_[position]];
-      const int alpha = term.spin_product / n_unique_beta_;
-      const int beta = term.spin_product % n_unique_beta_;
+      const int alpha = spin_products_[term.group] / n_unique_beta_;
+      const int beta = spin_products_[term.group] % n_unique_beta_;
       for (int vector = 0; vector < block_width; ++vector) {
         result(structure, vector) +=
             term.coefficient *

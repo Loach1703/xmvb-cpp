@@ -95,7 +95,9 @@ struct StructureActionStorage {
   std::size_t expansion_bytes = 0;
   /** Hamiltonian and overlap diagonal model retained by Davidson. */
   std::size_t diagonal_bytes = 0;
-  /** Whether the action uses the complete-space orthogonal direct-CI form. */
+  /** Whether complete one-spin carriers permit orthogonal direct CI.
+   * The selected VB structure space itself need not be complete.
+   */
   bool orthogonal_direct_ci = false;
   /** Persistent bytes owned by the orthogonal direct-CI representation. */
   std::size_t direct_ci_bytes = 0;
@@ -105,18 +107,18 @@ struct StructureActionStorage {
  * @brief Matrix-free structure-space Hamiltonian and overlap action.
  *
  * Let `C` map structure coefficients directly onto unique alpha/beta string
- * products, and reshape `X = C V` over those two spin spaces. The spin-product
- * Hamiltonian action is factorized as
+ * products, and reshape `X = C V` over those two spin spaces. Complete one-spin
+ * carriers use the exact orthogonal-CI congruence `C^T T^T H_orth T C`, with
+ * no closure assumption on the selected structure space. Its contraction uses
+ * minimum row/column source factors or generated product tiles, sharing sparse
+ * Slater--Condon spin links and bounded numerical slabs. Incomplete one-spin
+ * carriers use the mathematically distinct accepted-pair representation.
  *
- * `H_alpha X S_beta^T + S_alpha X H_beta^T`
- *
- * plus one factored alpha/beta product per active-orbital pair channel. This
- * replaces the quadratic full-determinant pair traversal with dense spin-space
- * contractions. The sparse `C` and `C^T` contractions are applied without an
- * intermediate determinant vector, and dense structure-space matrices are
- * never allocated. The constructed action owns every expansion, factor, and
- * diagonal needed by `apply()`; its lifetime is independent of the
- * construction inputs.
+ * H/M application introduces no determinant coefficient vector, complete
+ * transformed product array, or dense structure matrix. The constructed action
+ * owns its expansion, numerical data and shared support plans independently
+ * of the construction inputs. Derivative preparation has separate storage
+ * contracts; bounded H/M application does not imply bounded derivative storage.
  */
 class StructureAction {
 public:
@@ -165,7 +167,7 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
       std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
 
-  /** @brief Exact H/M through original source-column factors and channel tiles.
+  /** @brief Exact H/M through minimum row/column source factors and channel tiles.
    * Arbitrary selected structures need no closure. This explicit contraction
    * order also permits independent comparisons against the product-tile order.
    */
@@ -395,7 +397,8 @@ private:
   struct OrthogonalDirectCiData;
   struct TiledPairData;
   struct StructureTerm {
-    int spin_product = 0;
+    /** Index into shared original support, not the full product-grid address. */
+    int group = 0;
     int structure = 0;
     double coefficient = 0.0;
   };

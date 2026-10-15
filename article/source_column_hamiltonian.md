@@ -31,6 +31,24 @@ $$
 All subsequent contractions can be performed on $L$ and $R$, without
 materializing the transformed product $Y$.
 
+The current source plan improves the initial beta-column grouping by a minimum
+mixed row/column cover of the original input support. In its bipartite graph,
+each product is an edge between an alpha and a beta string. Assign every edge
+to one covered endpoint, once only, giving the exact factorization
+
+$$
+X=\sum_{a\in C_\alpha}e_a u_a^T+
+  \sum_{b\in C_\beta}v_b e_b^T=AB^T.
+$$
+
+Maximum matching certifies the minimum number of these coordinate-anchored
+factors. Thus all formulas below also apply with
+$r=|C_\alpha|+|C_\beta|\leq\min(|A_\Omega|,|J|)$.
+This is not a numerical rank approximation. With a parity quotient the cover
+uses representative input edges, while final sampling retains all original
+output products. Section 3.2 of the TeX note gives the proof and an example
+where a pure column grouping needs many sources but a mixed cover needs two.
+
 If every selected structure has the same exact exchange parity $\eta$,
 an additional source reduction is possible. Let $\Pi X=X^T$ and
 $P_\eta=(I+\eta\Pi)/2$. Choose original product representatives

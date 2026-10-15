@@ -94,9 +94,7 @@ Eigen::MatrixXd StructureAction::cross_overlap(
       for (std::size_t offset = structure_term_offsets_[structure];
            offset < structure_term_offsets_[structure + 1]; ++offset) {
         const auto& term = spin_terms_[structure_term_indices_[offset]];
-        const auto group = std::lower_bound(spin_products_.begin(), spin_products_.end(),
-            term.spin_product) - spin_products_.begin();
-        result(structure, column) += term.coefficient * products[group];
+        result(structure, column) += term.coefficient * products[term.group];
       }
   }
   return result;

@@ -37,7 +37,7 @@ void mix_channels(const Eigen::Ref<const Eigen::MatrixXd>& channels, const Eigen
 
 bool StructureAction::prefer_source_contraction(const ExteriorOrbitalTransform& alpha,
     const ExteriorOrbitalTransform& beta, const mcscf::DirectCiSigmaAction& sigma) const {
-  const long double r = sources_->representatives.size();
+  const long double r = sources_->nodes.size();
   const long double na = n_unique_alpha_, nb = n_unique_beta_;
   const long double pairs = sigma.channel_kernel().rows();
   const int n = alpha.n_orbitals(), ea = alpha.n_electrons(), eb = beta.n_electrons();
@@ -81,8 +81,8 @@ StructureActionResult StructureAction::apply_source_tiles(
   double scatter_time = 0, mix_time = 0, gather_time = 0, pullback_time = 0, sample_time = 0;
   const auto& sources = *sources_;
   const auto& kernel = sigma.channel_kernel();
-  const auto alpha_projection = alpha.projection(sources.alpha_rows);
-  const auto beta_projection = beta.projection(sources.columns);
+  const auto& alpha_projection = sources.alpha_projection;
+  const auto& beta_projection = sources.beta_projection;
   const int pairs = kernel.rows();
   const std::size_t spin_rows = static_cast<std::size_t>(n_unique_alpha_) + n_unique_beta_;
   // At most three channel pairs plus six source/image pairs coexist. Tile
@@ -92,7 +92,7 @@ StructureActionResult StructureAction::apply_source_tiles(
     throw std::length_error("source workspace cannot hold one single-spin channel tile");
   const int columns_per_source = overlap_only ? 2 : 3 * pairs + 6;
   const int source_tile = static_cast<int>(std::max<std::size_t>(1,
-      std::min<std::size_t>(sources.representatives.size(), workspace_bytes / unit_bytes / columns_per_source)));
+      std::min<std::size_t>(sources.nodes.size(), workspace_bytes / unit_bytes / columns_per_source)));
   const int channel_tile = overlap_only ? 0 : static_cast<int>(std::min<std::size_t>(pairs,
       (workspace_bytes / unit_bytes / source_tile - 6) / 3));
   StructureActionResult result{
@@ -121,8 +121,8 @@ StructureActionResult StructureAction::apply_source_tiles(
       for (std::size_t t = spin_term_offsets_[group]; t < spin_term_offsets_[group + 1]; ++t)
         coefficients[group] += spin_terms_[t].coefficient * vectors(spin_terms_[t].structure, vector);
 
-    for (int first = 0; first < static_cast<int>(sources.representatives.size()); first += source_tile) {
-      const int width = std::min<int>(source_tile, sources.representatives.size() - first);
+    for (int first = 0; first < static_cast<int>(sources.nodes.size()); first += source_tile) {
+      const int width = std::min<int>(source_tile, sources.nodes.size() - first);
       ++result.tiles.source_tiles;
       result.tiles.source_columns += width;
       result.tiles.source_workspace_bound = std::max(result.tiles.source_workspace_bound,
@@ -132,12 +132,17 @@ StructureActionResult StructureAction::apply_source_tiles(
       auto hb = hb_buffer.leftCols(overlap_only ? 0 : width);
       a.setZero(); b.setZero(); ha.setZero(); hb.setZero();
       for (int j = 0; j < width; ++j) {
-        const int source = sources.representatives[first + j];
-        b(source, j) = 1.0;
-        for (int group : sources.beta_groups[source]) {
+        const int index = first + j;
+        const auto& source = sources.nodes[index];
+        if (source.beta) b(source.string, j) = 1.0;
+        else a(source.string, j) = 1.0;
+        for (int entry = sources.offsets[index]; entry < sources.offsets[index + 1]; ++entry) {
+          const int group = sources.groups[entry];
           const int row = spin_products_[group] / n_unique_beta_;
-          if (spin_exchange_parity_ && (row > source || (row == source && spin_exchange_parity_ < 0))) continue;
-          a(row, j) = coefficients[group] * (spin_exchange_parity_ && row != source ? 2 : 1);
+          const int column = spin_products_[group] % n_unique_beta_;
+          const double value = coefficients[group] * (spin_exchange_parity_ && row != column ? 2 : 1);
+          if (source.beta) a(row, j) = value;
+          else b(column, j) = value;
         }
       }
       alpha.apply_left_block(a);
@@ -211,10 +216,8 @@ StructureActionResult StructureAction::apply_source_tiles(
       double h = 0, m = 0;
       for (std::size_t t = structure_term_offsets_[structure]; t < structure_term_offsets_[structure + 1]; ++t) {
         const auto& term = spin_terms_[structure_term_indices_[t]];
-        const auto group = std::lower_bound(spin_products_.begin(), spin_products_.end(),
-            term.spin_product) - spin_products_.begin();
-        h += term.coefficient * h_products[group];
-        m += term.coefficient * m_products[group];
+        h += term.coefficient * h_products[term.group];
+        m += term.coefficient * m_products[term.group];
       }
       result.hamiltonian(structure, vector) = h;
       result.overlap(structure, vector) = m;
@@ -222,7 +225,7 @@ StructureActionResult StructureAction::apply_source_tiles(
   }
   if (profiling::phase_totals().enabled)
     std::fprintf(stderr, "XMVB_SOURCES,structures=%d,sources=%zu,products=%zu,source_tile=%d,channel_tile=%d\n",
-        n_structures_, sources.representatives.size(), spin_products_.size(), source_tile, channel_tile);
+        n_structures_, sources.nodes.size(), spin_products_.size(), source_tile, channel_tile);
   if (timing)
     std::fprintf(stderr, "XMVB_SOURCE_TIME,scatter=%.9f,mix=%.9f,gather=%.9f,pullback=%.9f,sample=%.9f\n",
         scatter_time, mix_time, gather_time, pullback_time, sample_time);

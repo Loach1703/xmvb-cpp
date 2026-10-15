@@ -25,6 +25,7 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/assembly/orthogonal_tiles.cpp
   vbscf/structures/assembly/overlap_tiles.cpp
   vbscf/structures/assembly/source_tiles.cpp
+  vbscf/structures/assembly/sources.cpp
   vbscf/structures/assembly/hamiltonian_overlap.cpp
   vbscf/structures/reference/overlap.cpp
   vbscf/structures/assembly/selected_coefficients.cpp

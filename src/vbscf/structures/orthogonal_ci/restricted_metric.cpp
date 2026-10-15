@@ -176,10 +176,10 @@ RestrictedMetricInverse::RestrictedMetricInverse(
     if (first == last)
       throw std::invalid_argument("metric completion has an empty selected column");
     const Pattern pattern = product_patterns.at(
-        action.spin_terms_[action.structure_term_indices_[first]].spin_product);
+        action.spin_products_[action.spin_terms_[action.structure_term_indices_[first]].group]);
     for (auto i = first + 1; i < last; ++i)
       if (product_patterns.at(
-              action.spin_terms_[action.structure_term_indices_[i]].spin_product) != pattern)
+              action.spin_products_[action.spin_terms_[action.structure_term_indices_[i]].group]) != pattern)
         throw std::invalid_argument("selected structure crosses occupation blocks");
     groups.at(pattern).selected.push_back(s);
   }
@@ -240,7 +240,7 @@ RestrictedMetricInverse::RestrictedMetricInverse(
   std::vector<Eigen::Triplet<double, int>> triplets;
   triplets.reserve(action.spin_terms_.size() + q_nonzeros_bound);
   for (const auto& term : action.spin_terms_)
-    triplets.emplace_back(term.spin_product, term.structure, term.coefficient);
+    triplets.emplace_back(action.spin_products_[term.group], term.structure, term.coefficient);
 
   int next_q = n_selected_;
   for (auto& [pattern, group] : groups) {
@@ -256,7 +256,7 @@ RestrictedMetricInverse::RestrictedMetricInverse(
       for (auto i = action.structure_term_offsets_[structure];
            i < action.structure_term_offsets_[structure + 1]; ++i) {
         const auto& term = action.spin_terms_[action.structure_term_indices_[i]];
-        selected(product_local[term.spin_product], col) += term.coefficient;
+        selected(product_local[action.spin_products_[term.group]], col) += term.coefficient;
       }
     }
 

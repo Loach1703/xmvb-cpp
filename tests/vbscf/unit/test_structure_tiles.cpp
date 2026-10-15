@@ -18,6 +18,7 @@
 #include "mcscf/ci/product_support.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
@@ -394,6 +395,75 @@ void check_ionic_sources() {
       expansion.product_alpha, expansion.product_beta, vectors);
   check_images(action.apply_sources(vectors), reference);
   check_images(action.apply(vectors), reference);
+}
+
+/** @brief Exhaustive small graphs certify cover size and unique edge ownership. */
+void check_source_cover() {
+  for (int mask = 1; mask < (1 << 9); ++mask) {
+    std::vector<int> products;
+    for (int edge = 0; edge < 9; ++edge)
+      if (mask & (1 << edge)) products.push_back(edge);
+    const xmvb::vb::SpinSources sources(products, 3, 3);
+    int minimum = 6;
+    for (int cover = 0; cover < (1 << 6); ++cover) {
+      bool valid = true;
+      for (const int edge : products)
+        valid = valid && ((cover & (1 << (edge / 3))) || (cover & (1 << (3 + edge % 3))));
+      if (!valid) continue;
+      int count = 0;
+      for (int bits = cover; bits; bits &= bits - 1) ++count;
+      minimum = std::min(minimum, count);
+    }
+    require(sources.nodes.size() == static_cast<std::size_t>(minimum),
+            "source count differs from exhaustive minimum vertex cover");
+    std::vector<int> visits(products.size(), 0);
+    for (int node = 0; node < static_cast<int>(sources.nodes.size()); ++node)
+      for (int offset = sources.offsets[node]; offset < sources.offsets[node + 1]; ++offset) {
+        const int group = sources.groups[offset], edge = products[group];
+        const auto& source = sources.nodes[node];
+        require((source.beta ? edge % 3 : edge / 3) == source.string,
+                "source factor owns an unrelated product");
+        ++visits[group];
+      }
+    require(std::all_of(visits.begin(), visits.end(), [](int count) { return count == 1; }),
+            "support factorization lost or duplicated an input product");
+  }
+}
+
+/** @brief Row, mixed row/column and parity-representative factors match full CI. */
+void check_mixed_source_images() {
+  for (const int parity : {0, 1, -1}) {
+    const auto fixture = make_fixture(4, 2, 2);
+    const int nb = fixture.beta.size();
+    std::map<int, std::vector<xmvb::vb::StructureExpansionTerm>> products;
+    for (int b = 1; b < nb; ++b) {
+      products[b].push_back({0, 0.1 * b});
+      if (parity) products[b * nb].push_back({0, parity * 0.1 * b});
+      else products[b * nb].push_back({1, -0.07 * (b + 1)});
+    }
+    Terms terms;
+    Strings a, b;
+    for (const auto& [product, coefficients] : products) {
+      terms.push_back(coefficients);
+      a.push_back(fixture.alpha[product / nb]); b.push_back(fixture.beta[product % nb]);
+    }
+    const auto cache = topology(fixture, a, b);
+    const int structures = parity ? 1 : 2;
+    const xmvb::vb::StructureAction action(terms, structures, cache,
+        fixture.overlap, fixture.one_electron, fixture.two_electron, fixture.n,
+        nullptr, xmvb::vb::StructureActionMode::ActionOnly);
+    const auto vectors = test_vectors(structures, 3);
+    const auto expected = reference_images(fixture, terms, a, b, vectors);
+    const auto actual = action.apply_sources(vectors);
+    check_images(actual, expected);
+    check_images(action.apply(vectors), expected);
+    require(actual.tiles.source_columns == vectors.cols() * (parity ? 1 : 2),
+            "star support did not reduce to the minimal source cover");
+    check_images(action.apply_sources(vectors, 9 * sizeof(double) *
+        (fixture.alpha.size() + fixture.beta.size())), expected);
+    require((action.apply_overlap(vectors) - expected.overlap).norm() < 1e-12,
+            "mixed-source metric differs from full CI");
+  }
 }
 
 void check_complete_unequal_spin_case() {
@@ -1097,6 +1167,60 @@ void benchmark_source_size(int n, bool compare_reference) {
               << "overlap_reference_error=" << (warm.overlap-reference.overlap).norm() << '\n';
 }
 
+/** @brief Arbitrary cross support: two exact sources instead of U beta columns.
+ * This is an algebraic selected-space stress test, not a molecular benchmark.
+ */
+void benchmark_source_cover(int n, bool compare_reference) {
+  require(n == 12 || n == 14, "source-cover benchmark supports 12/14 orbitals");
+  const auto fixture = make_fixture(n, n / 2, n / 2);
+  const int nb = fixture.beta.size();
+  Terms terms;
+  Strings alpha, beta;
+  for (int spin = 0; spin < 2; ++spin)
+    for (int string = 1; string < nb; ++string) {
+      alpha.push_back(fixture.alpha[spin ? string : 0]);
+      beta.push_back(fixture.beta[spin ? 0 : string]);
+      terms.push_back({{spin, std::sin(0.17 * (string + 1)) / std::sqrt(nb)}});
+    }
+  const auto cache = topology(fixture, alpha, beta);
+  const auto begin = Clock::now();
+  const xmvb::vb::StructureAction action(terms, 2, cache, fixture.overlap,
+      fixture.one_electron, fixture.two_electron, n, nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const auto built = Clock::now();
+  const auto vectors = test_vectors(2, 1);
+  const auto cold = action.apply(vectors);
+  const auto first = Clock::now();
+  const auto warm = action.apply(vectors);
+  const auto finished = Clock::now();
+  check_images(cold, warm);
+  require(warm.tiles.source_columns == 2, "large cross support did not select two sources");
+  xmvb::vb::StructureActionResult reference;
+  if (compare_reference) {
+    reference = reference_images(fixture, terms, alpha, beta, vectors);
+    check_images(warm, reference);
+  }
+  rusage usage{};
+  require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
+  const auto seconds = [](auto a, auto b) { return std::chrono::duration<double>(b-a).count(); };
+  std::cout << std::setprecision(17)
+            << "orbitals=" << n << '\n' << "structures=2\n"
+            << "alpha_strings=" << nb << '\n' << "beta_strings=" << nb << '\n'
+            << "original_beta_sources=" << nb << '\n' << "products=" << terms.size() << '\n'
+            << "construct_seconds=" << seconds(begin, built) << '\n'
+            << "cold_apply_seconds=" << seconds(built, first) << '\n'
+            << "warm_apply_seconds=" << seconds(first, finished) << '\n'
+            << "source_columns=" << warm.tiles.source_columns << '\n'
+            << "source_workspace_bound=" << warm.tiles.source_workspace_bound << '\n'
+            << "rayleigh_energy=" << vectors.col(0).dot(warm.hamiltonian.col(0)) /
+                vectors.col(0).dot(warm.overlap.col(0)) << '\n'
+            << "reference_checked=" << compare_reference << '\n'
+            << "max_rss_kib=" << usage.ru_maxrss << '\n';
+  if (compare_reference)
+    std::cout << "hamiltonian_reference_error=" << (warm.hamiltonian-reference.hamiltonian).norm() << '\n'
+              << "overlap_reference_error=" << (warm.overlap-reference.overlap).norm() << '\n';
+}
+
 void benchmark12(bool compare_reference) {
   const auto start = Clock::now();
   const Fixture fixture = make_fixture(12, 6, 6);
@@ -1197,6 +1321,10 @@ int main(int argc, char** argv) {
       benchmark_source_size(std::stoi(argv[2]), false);
     } else if (argc == 3 && std::string(argv[1]) == "--source-size-parity") {
       benchmark_source_size(std::stoi(argv[2]), true);
+    } else if (argc == 3 && std::string(argv[1]) == "--source-cover-size") {
+      benchmark_source_cover(std::stoi(argv[2]), false);
+    } else if (argc == 3 && std::string(argv[1]) == "--source-cover-reference") {
+      benchmark_source_cover(std::stoi(argv[2]), true);
     } else if (argc == 3 && std::string(argv[1]) == "--paths12") {
       benchmark_selected12(std::stoi(argv[2]), false, true);
     } else if (argc == 3 && std::string(argv[1]) == "--gram12") {
@@ -1206,6 +1334,8 @@ int main(int argc, char** argv) {
       check_rumer_case(6);
       check_selected_unequal_spin_case();
       check_ionic_sources();
+      check_source_cover();
+      check_mixed_source_images();
       check_complete_unequal_spin_case();
       check_mixed_exchange_space();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
@@ -1225,7 +1355,7 @@ int main(int argc, char** argv) {
       throw std::invalid_argument(
           "usage: test_structure_tiles [--benchmark12|--benchmark12-no-reference|"
           "--selected12 N|--selected12-parity N|--sources12 N|--paths12 N|--gram12 N|"
-          "--source-size N|--source-size-parity N]");
+          "--source-size N|--source-size-parity N|--source-cover-size N|--source-cover-reference N]");
     }
     return 0;
   } catch (const std::exception& error) {

@@ -48,9 +48,9 @@ std::vector<std::vector<int>> StructureMetricInverse::occupation_groups(
     const auto first = action.structure_term_offsets_[structure];
     const auto last = action.structure_term_offsets_[structure + 1];
     if (first == last) throw std::invalid_argument("structure metric expansion has an empty column");
-    const Pattern occupation = pattern(action.spin_terms_[action.structure_term_indices_[first]].spin_product);
+    const Pattern occupation = pattern(action.spin_products_[action.spin_terms_[action.structure_term_indices_[first]].group]);
     for (auto position = first + 1; position < last; ++position) {
-      if (pattern(action.spin_terms_[action.structure_term_indices_[position]].spin_product) != occupation)
+      if (pattern(action.spin_products_[action.spin_terms_[action.structure_term_indices_[position]].group]) != occupation)
         throw std::invalid_argument("structure spans multiple spatial occupation patterns");
     }
     groups[occupation].push_back(structure);

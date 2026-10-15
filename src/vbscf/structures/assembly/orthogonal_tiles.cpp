@@ -194,10 +194,8 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
           for (std::size_t offset = structure_term_offsets_[structure];
                offset < structure_term_offsets_[structure + 1]; ++offset) {
             const auto& term = spin_terms_[structure_term_indices_[offset]];
-            const auto group = std::lower_bound(spin_products_.begin(),
-                spin_products_.end(), term.spin_product) - spin_products_.begin();
-            h += term.coefficient * h_products(group, vector);
-            m += term.coefficient * m_products(group, vector);
+            h += term.coefficient * h_products(term.group, vector);
+            m += term.coefficient * m_products(term.group, vector);
           }
           result.hamiltonian(structure, vector_begin + vector) = h;
           result.overlap(structure, vector_begin + vector) = m;

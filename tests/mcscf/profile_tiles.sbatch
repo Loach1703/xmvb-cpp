@@ -16,9 +16,12 @@ set -eo pipefail
 module purge
 module load gcc/14.1.0 cmake/3.30.5
 source_dir="$SLURM_SUBMIT_DIR"
+mode="${1:-selected12}"
+size="${2:-132}"
 deps=/home/guqqgroup/xiatao/software/xmvb-deps-20261012
 mkdir -p "$source_dir/tile-profile-$SLURM_JOB_ID"
 cd "$source_dir/tile-profile-$SLURM_JOB_ID"
+printf '%s %s\n' "$mode" "$size" > input.txt
 export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK" OMP_PLACES=cores OMP_PROC_BIND=close
 export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 export LD_LIBRARY_PATH="$deps/lib:${LD_LIBRARY_PATH:-}"
@@ -27,12 +30,12 @@ lscpu > cpu.txt
 sha256sum "$source_dir/build/src/test_structure_tiles" > binary.sha256
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  env XMVB_PHASE_TIMING=1 /usr/bin/time -v -o native.time \
- "$source_dir/build/src/test_structure_tiles" --selected12 132 > native.out 2> native.err
+ "$source_dir/build/src/test_structure_tiles" --"$mode" "$size" > native.out 2> native.err
 srun --exact --ntasks=1 --cpus-per-task=1 --cpu-bind=cores \
  bash -c 'command -v gprofng' > profiler.txt 2> profiler.err || exit 0
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  gprofng collect app -p hi -o capture.er \
- "$source_dir/build/src/test_structure_tiles" --selected12 132 > capture.out 2> capture.err
+ "$source_dir/build/src/test_structure_tiles" --"$mode" "$size" > capture.out 2> capture.err
 srun --exact --ntasks=1 --cpus-per-task=1 --cpu-bind=cores \
  gprofng display text -header -statistics capture.er > quality.txt
 srun --exact --ntasks=1 --cpus-per-task=1 --cpu-bind=cores \
