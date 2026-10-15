@@ -428,3 +428,162 @@ exclusive output ownership.
 Raw logs: `results/diagnostics/orthogonal-tiles-20261015/selected-1259362/`
 and `selected-1259369/`; saved baselines: `selected-1259142/` and
 `selected-1259097/` under the same directory.
+
+### Column-batch generation and direct adjoint accumulation
+
+The column-at-a-time path was followed by a multi-column implementation. Its
+first version still generated every intermediate product serially, reconstructed
+beta groups from that stream, formed a rectangular output slab, and copied the
+slab into resident exterior-transform panels. Those steps are scheduling and
+storage choices, not requirements of the Hamiltonian.
+
+For either support depth, define its beta projection by
+
+$$
+\mathcal B_d=\{b:\exists a,\ (a,b)\in\mathcal S_d\},
+\qquad \mathcal S_0=\mathcal S,\quad \mathcal S_1=\mathcal I.
+$$
+
+The beta prefix traversal generates exactly this projection: any surviving
+seed can be paired with the earliest alpha string, whose prefix counts dominate
+every seed alpha string. Complete-covalent traversal uses the corresponding
+combined-prefix bound. No alpha products need to be visited to generate
+the beta columns. A separate fixed-beta traversal then generates only its
+compatible alpha strings. Different columns are independent and can be generated
+in parallel. Only the beta list is retained, not the complete product list.
+
+A numerical batch reserves bounded alpha slots for its beta columns and merges
+their single-excitation neighborhoods. Large alpha columns are split with a
+resumable cursor; a continuation does not restart the column. Each worker fills
+disjoint slots of one shared index buffer. Compaction removes unused slots,
+not physical directions. The planner retains the same 64 MiB slab target and
+the previous conservative two-panel bound, so this change is not a larger-tile
+experiment. Per-column cursor stacks contain only prefix metadata.
+
+Let $Q=KZ$ denote the integral-contracted generator channels in a batch.
+The adjoint contribution to an output coordinate is
+
+$$
+y_{ab}\mathrel{+}=\sum_{t,\lambda}
+ E_{\lambda,t;ab}\,Q_{t\lambda}.
+$$
+
+The temporary scalar sum can be added directly to the caller's output panel.
+Storing all such sums in an intermediate rectangular image and then adding that
+image is algebraically unnecessary. The accumulator callback now performs this
+addition directly; the rectangular output slab and its subsequent copy are
+deleted. The output owner pins one panel until its taskgroup finishes, then may
+evict it. Beta/RHS columns and disjoint alpha ranges provide exclusive writes,
+without atomics or thread-private carrier arrays.
+
+For a batch with $h$ alpha halo rows, $B$ source beta columns, $r$ intermediate
+products, $d$ generator channels and $b$ RHS, numerical slab storage changes from
+
+$$
+16b(hB+rd)\quad\text{to}\quad 8b(hB+2rd)\quad\text{bytes}.
+$$
+
+Index metadata, bounded input/output panel caches, library workspaces and
+allocator retention are separate; this is not a bound on process RSS.
+
+For the selected-structure caller, $F=P_{\mathcal S}F$ implies
+$F^\dagger=F^\dagger P_{\mathcal S}$. Its output panel therefore requests the
+accumulator only on exact depth-zero support rows. The byte support mask is
+generated once per resident panel by fixed-beta paths, shared by its RHS, and
+charged to the panel-cache budget. Eviction discards both the panel and its
+mask. Small cases may fit all panels in that fixed budget; this is not an
+allocation sized unconditionally as $U_\alpha U_\beta$. With increasing carrier
+size, residency is capped and panels are evicted. The existing minimum-one-panel
+exception can exceed the target, with storage linear in $U_\alpha$ for a single
+beta column. There is no separately allocated global product mask or retained
+list of $\mathcal I$.
+Importantly, this restriction applies to final output, not the generator-channel
+intermediates on $\mathcal I$: paths leaving and returning to $\mathcal S$
+remain intact. Generic sigma callers request all rows and retain the full image;
+tests independently compare that image and the selected structure H/M action.
+
+### Batch revision measurements, 2026-10-15
+
+Slurm 1259723 passed all 12 regression tests. Jobs 1259728 (32 cores, anode20)
+and 1259729 (8 cores, anode26) then ran only the new executable on the historical
+benchmark nodes. Old executables were not rerun. Core placement and concurrent
+node load are not matched: the historical 32-core affinity was 64--95, whereas
+1259728 received 96--119,184--191. These are same-node, not identical-resource
+comparisons. Native RSS is measured by GNU time; reference parity runs are
+separate processes.
+
+| Cores | Structures | Historical warm (s) | Previous batch warm (s) | Revised warm (s) | Historical / previous / revised RSS (MiB) |
+| --- | --- | --- | --- | --- | --- |
+| 8 | 1 | 0.12890 | 0.15363 | 0.08652 | 52.2 / 76.3 / 64.4 |
+| 8 | 3 | 0.15780 | 0.16092 | 0.09286 | 53.8 / 76.7 / 65.3 |
+| 8 | 20 | 0.29955 | 0.17830 | 0.11420 | 58.2 / 74.7 / 68.2 |
+| 8 | 132 | 0.13694 | 0.16194 | 0.11302 | 57.9 / 71.7 / 68.0 |
+| 32 | 1 | 0.05588 | 0.11438 | 0.06652 | 79.6 / 76.8 / 63.0 |
+| 32 | 3 | 0.06419 | 0.14468 | 0.08477 | 86.4 / 81.8 / 72.6 |
+| 32 | 20 | 0.09876 | 0.16202 | 0.09388 | 88.9 / 79.9 / 75.9 |
+| 32 | 132 | 0.06015 | 0.15225 | 0.11017 | 90.1 / 82.0 / 78.1 |
+
+The previous-batch jobs are 1259630/1259632, not the older single-column
+regression 1259362/1259369. Full image absolute norm errors across the revised
+8/32-core comparisons are at most 1.51e-14 (H) and 2.02e-15 (M), with unchanged
+tolerances. Complete sigma images, selected structure images, unequal spin
+sectors, multiple RHS, and forced panel eviction are covered by the regression
+suite. No molecular convergence or energy improvement is claimed by this fixture.
+
+The 32-core phase runs 1259633 and 1259725 (both anode15) reduce warm path/batch
+preparation from 47.9 to 13.0 ms. Input reads change from 5.2 to 6.1 ms. Because
+the fused writer now includes the adjoint arithmetic, compare compute+write
+together: 87.7 to 81.6 ms, not the compute fields in isolation. Kernel batch
+count rises from 23 to 32 and source elements read rise from 9.29 to 10.64 million;
+this speedup does not come from larger tiles. Numerical slab plus target-index
+peak decreases from 42,546,096 to 34,899,120 bytes (not process RSS).
+
+The intermediate fused writer initially regressed because its column-major task
+order concentrated heavy alpha-adjoint columns on too few workers. Alpha-stripe
+ownership fixes that scheduling mistake. All intermediate results, including
+this failed variant, are retained in `batch_comparison.csv` rather than hidden.
+
+The revised path is faster and lower-RSS than the preceding beta-batch version,
+but **does not eliminate the historical 32-core regression**: 132 structures
+still take about 1.83 times the saved historical warm time. Its cold action is
+0.19668 s versus historical 0.13061 s. At 8 cores all four warm actions beat the
+saved historical times, but RSS remains above that older implementation.
+This tradeoff and the remaining repeated beta-neighborhood reads must be kept
+visible; passing parity alone does not establish a completed performance goal.
+
+Evidence: `results/diagnostics/orthogonal-tiles-20261015/batch_comparison.csv`,
+`selected-1259723/`, `selected-1259728/`, `selected-1259729/`, and
+`tile-profile-1259725/`. Earlier candidate stages are identified in the CSV.
+
+### Planned end-to-end structure-space comparison
+
+After the selected-action implementation is validated, benchmark complete
+CAS(12,12) molecular optimizations on Hanhai22, not just fixed-point H/M
+actions. Use the nested structure spaces COV, ION(0,1), ION(0,2), and successive
+ionic levels through FULL. Verify the generated spaces and their nesting;
+do not infer structure counts from the input labels alone.
+
+Keep geometry, AO basis, initial orbital coefficients, spin, integral backend,
+optimizer, convergence criteria, thread count, and node type fixed. Retain
+structure-basis Davidson throughout. Reuse existing historical results rather
+than rerunning old executables; clearly label any unmatched historical setup.
+
+For each space record:
+
+- VB structure count and the separate alpha/beta unique-spin-string counts;
+- convergence status, initial and final energies, outer iterations, HVP count,
+  and Davidson action count;
+- complete wall time from process start to completion and native peak RSS;
+- nonoverlapping phase times for initialization, initial CI solution, orbital
+  optimization, and final output, with nested CI/action timings identified as
+  such rather than added twice to the total;
+- source revision, job ID, node, CPU affinity, and input/output artifacts.
+
+The primary comparison is total time to convergence and peak RSS across the
+structure-space ladder. Single-action timings diagnose costs but do not replace
+this end-to-end result. Different structure spaces need not converge to the same
+energy. The variational minimum cannot increase on enlarging a nested space,
+but a local optimizer can reach different stationary branches; record such cases
+rather than treating the observed final energies as guaranteed global minima.
+Unconverged or resource-limited tasks remain explicit results, not omitted rows.
+This is a pending benchmark plan, not a completed performance claim.

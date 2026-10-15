@@ -20,10 +20,11 @@ class ColumnPanels {
 public:
   using Build = std::function<Eigen::MatrixXd(int)>;
   using Consume = std::function<void(int, Eigen::MatrixXd&)>;
+  using BuildMask = std::function<std::vector<std::uint8_t>(int)>;
 
-  ColumnPanels(std::size_t bytes, Build build, Consume consume = {})
+  ColumnPanels(std::size_t bytes, Build build, Consume consume = {}, BuildMask mask = {})
       : budget_bytes_(std::max<std::size_t>(1, bytes)),
-        build_(std::move(build)), consume_(std::move(consume)) {}
+        build_(std::move(build)), consume_(std::move(consume)), mask_(std::move(mask)) {}
 
   Eigen::MatrixXd& get(int index) {
     auto found = index_.find(index);
@@ -32,21 +33,28 @@ public:
       return found->second->values;
     }
     Eigen::MatrixXd values = build_(index);
-    const auto bytes = static_cast<std::size_t>(values.size()) * sizeof(double);
+    auto allowed = mask_ ? mask_(index) : std::vector<std::uint8_t>{};
+    const auto bytes = static_cast<std::size_t>(values.size()) * sizeof(double) + allowed.capacity();
     while (!panels_.empty() &&
            (bytes > budget_bytes_ || resident_bytes_ > budget_bytes_ - bytes)) {
       auto& last = panels_.back();
-      resident_bytes_ -= static_cast<std::size_t>(last.values.size()) * sizeof(double);
+      resident_bytes_ -= static_cast<std::size_t>(last.values.size()) * sizeof(double) +
+                         last.allowed.capacity();
       if (consume_) consume_(last.index, last.values);
       index_.erase(last.index);
       panels_.pop_back();
       ++evictions;
     }
-    panels_.push_front({index, std::move(values)});
+    panels_.push_front({index, std::move(values), std::move(allowed)});
     resident_bytes_ += bytes;
     peak_bytes = std::max(peak_bytes, resident_bytes_);
     index_[index] = panels_.begin();
     return panels_.front().values;
+  }
+
+  /** @brief Support of a resident panel; valid until the next cache mutation. */
+  const std::vector<std::uint8_t>& mask(int index) const {
+    return index_.at(index)->allowed;
   }
 
   void finish() {
@@ -60,11 +68,12 @@ public:
   std::size_t evictions = 0, peak_bytes = 0;
 
 private:
-  struct Panel { int index; Eigen::MatrixXd values; };
+  struct Panel { int index; Eigen::MatrixXd values; std::vector<std::uint8_t> allowed; };
   std::size_t budget_bytes_;
   std::size_t resident_bytes_ = 0;
   Build build_;
   Consume consume_;
+  BuildMask mask_;
   std::list<Panel> panels_;
   std::unordered_map<int, std::list<Panel>::iterator> index_;
 };
@@ -220,21 +229,108 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
           ++result.tiles.hamiltonian_projections;
           const auto rows = beta_rows(panel);
           project(panel, *rows, image, h_products);
+        },
+        [&](int panel) {
+          // F^T = F^T P_S: only exact structural support S contributes to
+          // the selected VB image. I\S is still kept in the sigma channels.
+          // This byte mask belongs to one bounded output panel, not a global
+          // product-space table, and is shared by every RHS in the panel.
+          std::vector<std::uint8_t> allowed;
+          if (!support) return allowed;
+          const int first = panel * extent;
+          const int columns = std::min(extent, n_unique_beta_ - first);
+          allowed.resize(static_cast<std::size_t>(n_unique_alpha_) * columns, 0);
+          int team = 1;
+#ifdef _OPENMP
+          team = omp_get_num_threads();
+#endif
+#pragma omp taskloop num_tasks(team) shared(allowed)
+          for (int column = 0; column < columns; ++column) {
+            auto paths = support->column(first + column, 0);
+            int a, b;
+            bool label;
+            auto* mask = allowed.data() + static_cast<std::size_t>(column) * n_unique_alpha_;
+            while (paths.next(a, b, label)) mask[a] = 1;
+          }
+          return allowed;
         });
     sigma.apply_tiled(width,
-        [&](int beta, const std::vector<int>& alpha_rows, Eigen::Ref<Eigen::MatrixXd> column) {
-          const Eigen::MatrixXd& panel = input.get(beta / extent);
-          const int panel_width = static_cast<int>(panel.cols()) / width;
-          for (int vector = 0; vector < width; ++vector)
-            for (int row = 0; row < static_cast<int>(alpha_rows.size()); ++row)
-              column(row, vector) = panel(alpha_rows[row], vector * panel_width + beta % extent);
+        [&](const std::vector<int>& betas, const std::vector<int>& alpha_rows,
+            Eigen::Ref<Eigen::MatrixXd> columns) {
+          int team = 1;
+#ifdef _OPENMP
+          team = omp_get_num_threads();
+#endif
+          for (int first = 0; first < static_cast<int>(betas.size());) {
+            const int panel_id = betas[first] / extent;
+            int last = first + 1;
+            while (last < static_cast<int>(betas.size()) && betas[last] / extent == panel_id) ++last;
+            const Eigen::MatrixXd& panel = input.get(panel_id);
+            const int panel_width = static_cast<int>(panel.cols()) / width;
+            const double* source = panel.data();
+            double* target = columns.data();
+            const Eigen::Index source_stride = panel.outerStride(), target_stride = columns.outerStride();
+            // Implicit taskgroup completion pins this panel until all reads
+            // finish; only then may the next get() mutate or evict the LRU.
+#pragma omp taskloop num_tasks(team) shared(betas, alpha_rows)
+            for (int packed = 0; packed < (last - first) * width; ++packed) {
+              const int j = first + packed / width, v = packed % width;
+              const double* from = source + (v * panel_width + betas[j] % extent) * source_stride;
+              double* to = target + (j * width + v) * target_stride;
+              for (int row = 0; row < static_cast<int>(alpha_rows.size()); ++row)
+                to[row] = from[alpha_rows[row]];
+            }
+            first = last;
+          }
         },
-        [&](int beta, const std::vector<int>& alpha_rows, const Eigen::Ref<const Eigen::MatrixXd>& column) {
-          Eigen::MatrixXd& panel = output.get(beta / extent);
-          const int panel_width = static_cast<int>(panel.cols()) / width;
-          for (int vector = 0; vector < width; ++vector)
-            for (int row = 0; row < static_cast<int>(alpha_rows.size()); ++row)
-              panel(alpha_rows[row], vector * panel_width + beta % extent) += column(row, vector);
+        [&](const std::vector<int>& betas, const std::vector<int>& alpha_rows,
+            const mcscf::DirectCiColumnAccumulator& accumulate) {
+          int team = 1;
+#ifdef _OPENMP
+          team = omp_get_num_threads();
+#endif
+          for (int first = 0; first < static_cast<int>(betas.size());) {
+            const int panel_id = betas[first] / extent;
+            int last = first + 1;
+            while (last < static_cast<int>(betas.size()) && betas[last] / extent == panel_id) ++last;
+            Eigen::MatrixXd& panel = output.get(panel_id);
+            const auto& allowed = output.mask(panel_id);
+            const auto* mask = allowed.empty() ? nullptr : allowed.data();
+            const int panel_width = static_cast<int>(panel.cols()) / width;
+            double* target = panel.data();
+            const Eigen::Index target_stride = panel.outerStride();
+            // Split alpha ranges as well as columns: the alpha-adjoint work
+            // is concentrated in target beta columns. Tasks add directly to
+            // disjoint destination ranges, without an image slab or atomics.
+            const int chunks = std::min<int>(team, alpha_rows.size());
+            const int column_count = (last - first) * width;
+#pragma omp taskloop num_tasks(team) shared(betas, alpha_rows, accumulate)
+            for (int packed = 0; packed < column_count * chunks; ++packed) {
+              // Every task sees all beta columns over its alpha stripe.
+              // Column-major task order would concentrate the expensive
+              // alpha adjoint (target columns only) on a few workers.
+              const int column = packed % column_count;
+              const int chunk = packed / column_count;
+              const int j = first + column / width, v = column % width;
+              double* to = target + (v * panel_width + betas[j] % extent) * target_stride;
+              const int begin = alpha_rows.size() * chunk / chunks;
+              const int end = alpha_rows.size() * (chunk + 1) / chunks;
+              if (!mask) {
+                accumulate(j, v, begin, end, to);
+                continue;
+              }
+              const auto* column_mask = mask +
+                  static_cast<std::size_t>(betas[j] % extent) * n_unique_alpha_;
+              int row = begin;
+              while (row < end) {
+                while (row < end && !column_mask[alpha_rows[row]]) ++row;
+                const int run = row;
+                while (row < end && column_mask[alpha_rows[row]]) ++row;
+                if (run < row) accumulate(j, v, run, row, to);
+              }
+            }
+            first = last;
+          }
         }, support);
     output.finish();
     result.tiles.input_evictions += input.evictions;

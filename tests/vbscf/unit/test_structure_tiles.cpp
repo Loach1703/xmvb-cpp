@@ -397,15 +397,20 @@ void check_sigma_columns(const Fixture& fixture, int width) {
     for (int i = 0; i < carrier.rows(); ++i)
       carrier(i, j) = std::sin(0.14 * (i + 2) * (j + 1));
   Eigen::MatrixXd tiled = Eigen::MatrixXd::Zero(carrier.rows(), carrier.cols());
-  const auto read = [&](int beta, const std::vector<int>& alpha_rows, Eigen::Ref<Eigen::MatrixXd> block) {
-        for (int vector = 0; vector < width; ++vector)
-          for (int row = 0; row < static_cast<int>(alpha_rows.size()); ++row)
-            block(row, vector) = carrier(alpha_rows[row], vector * n_beta + beta);
+  const auto read = [&](const std::vector<int>& betas, const std::vector<int>& alpha_rows,
+                        Eigen::Ref<Eigen::MatrixXd> block) {
+        for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
+          for (int vector = 0; vector < width; ++vector)
+            for (int row = 0; row < static_cast<int>(alpha_rows.size()); ++row)
+              block(row, beta_local * width + vector) =
+                  carrier(alpha_rows[row], vector * n_beta + betas[beta_local]);
       };
-  const auto add = [&](int beta, const std::vector<int>& alpha_rows, const Eigen::Ref<const Eigen::MatrixXd>& block) {
-        for (int vector = 0; vector < width; ++vector)
-          for (int row = 0; row < static_cast<int>(alpha_rows.size()); ++row)
-            tiled(alpha_rows[row], vector * n_beta + beta) += block(row, vector);
+  const auto add = [&](const std::vector<int>& betas, const std::vector<int>& alpha_rows,
+                       const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
+        for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
+          for (int vector = 0; vector < width; ++vector)
+            accumulate(beta_local, vector, 0, static_cast<int>(alpha_rows.size()),
+                tiled.col(vector * n_beta + betas[beta_local]).data());
       };
   sigma.apply_tiled(width, read, add);
   const Eigen::MatrixXd ordinary = sigma.apply(carrier);
@@ -416,7 +421,7 @@ void check_sigma_columns(const Fixture& fixture, int width) {
     bool read_failed = false, write_failed = false;
     try {
       sigma.apply_tiled(width,
-          [](int, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>) {
+          [](const std::vector<int>&, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>) {
             throw std::runtime_error("reader failure");
           }, add);
     } catch (const std::runtime_error& error) {
@@ -424,7 +429,8 @@ void check_sigma_columns(const Fixture& fixture, int width) {
     }
     try {
       sigma.apply_tiled(width, read,
-          [](int, const std::vector<int>&, const Eigen::Ref<const Eigen::MatrixXd>&) {
+          [](const std::vector<int>&, const std::vector<int>&,
+             const xmvb::mcscf::DirectCiColumnAccumulator&) {
             throw std::runtime_error("writer failure");
           });
     } catch (const std::runtime_error& error) {
@@ -506,6 +512,31 @@ void check_product_support_oracle(
   };
   check_paths(0, generated);
   check_paths(1, generated_halo);
+  for (int depth = 0; depth <= 1; ++depth) {
+    auto columns = support.cursor(depth);
+    std::vector<unsigned char> visited(nb, 0);
+    int b;
+    while (columns.next_column(b)) {
+      require(b >= 0 && b < nb && !visited[b]++, "invalid generated beta column");
+      auto column = support.column(b, depth);
+      int a, returned_beta;
+      bool label;
+      bool nonempty = false;
+      while (column.next(a, returned_beta, label)) {
+        require(returned_beta == b, "column cursor changed beta");
+        require(label == direct(a, b), "column cursor support label mismatch");
+        nonempty = true;
+      }
+      require(nonempty, "beta-only traversal emitted an empty column");
+    }
+    for (int beta_index = 0; beta_index < nb; ++beta_index) {
+      bool nonempty = false;
+      for (int a = 0; a < na; ++a)
+        nonempty |= (depth == 0 ? generated : generated_halo)[a * nb + beta_index];
+      require(static_cast<bool>(visited[beta_index]) == nonempty,
+              "beta-only traversal omitted or added a column");
+    }
+  }
   for (int depth = 0; depth <= 1; ++depth)
     for (int b = 0; b < nb; ++b) {
       std::vector<unsigned char> column(na, 0);
@@ -618,16 +649,20 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
     }
   Eigen::MatrixXd actual = Eigen::MatrixXd::Zero(na, width * nb);
   sigma.apply_tiled(width,
-      [&](int b, const std::vector<int>& rows, Eigen::Ref<Eigen::MatrixXd> values) {
-        for (int v = 0; v < width; ++v)
-          for (int i = 0; i < static_cast<int>(rows.size()); ++i)
-            values(i, v) = carrier(rows[i], v * nb + b);
+      [&](const std::vector<int>& betas, const std::vector<int>& rows,
+          Eigen::Ref<Eigen::MatrixXd> values) {
+        for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
+          for (int v = 0; v < width; ++v)
+            for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+              values(i, beta_local * width + v) =
+                  carrier(rows[i], v * nb + betas[beta_local]);
       },
-      [&](int b, const std::vector<int>& rows, const Eigen::Ref<const Eigen::MatrixXd>& values) {
-        for (int v = 0; v < width; ++v)
-          for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
-            actual(rows[i], v * nb + b) += values(i, v);
-          }
+      [&](const std::vector<int>& betas, const std::vector<int>& rows,
+          const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
+        for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
+          for (int v = 0; v < width; ++v)
+            accumulate(beta_local, v, 0, static_cast<int>(rows.size()),
+                actual.col(v * nb + betas[beta_local]).data());
       }, &support);
   auto expected = sigma.apply(carrier);
   require((actual - expected).norm() <= 2e-11 * std::max(1.0, expected.norm()),

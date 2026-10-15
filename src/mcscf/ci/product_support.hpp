@@ -75,19 +75,41 @@ public:
       Mask a, b;
       if (!paths_.next(a, b, in_support)) return false;
       const auto ai = support_->alpha_index_.find(a);
-      const auto bi = support_->beta_index_.find(b);
-      if (ai == support_->alpha_index_.end() || bi == support_->beta_index_.end())
+      if (ai == support_->alpha_index_.end())
         throw std::logic_error("generated product is absent from the spin strings");
       alpha = ai->second;
-      beta = bi->second;
+      beta = beta_index(b);
+      return true;
+    }
+
+    /** @brief Emit each reachable beta index without generating alpha products.
+     * This traversal requires its own cursor, separate from next().
+     */
+    bool next_column(int& beta) {
+      Mask b;
+      if (!paths_.next_column(b)) return false;
+      beta = beta_index(b);
       return true;
     }
 
     ProductPaths::Counts counts() const noexcept { return paths_.counts(); }
 
   private:
+    int beta_index(Mask mask) {
+      if (!cached_beta_ || *cached_beta_ != mask) {
+        const auto found = support_->beta_index_.find(mask);
+        if (found == support_->beta_index_.end())
+          throw std::logic_error("generated product is absent from the spin strings");
+        cached_beta_ = mask;
+        cached_beta_index_ = found->second;
+      }
+      return cached_beta_index_;
+    }
+
     const ProductSupport* support_;
     ProductPaths::Cursor paths_;
+    std::optional<Mask> cached_beta_;
+    int cached_beta_index_ = -1;
   };
 
   Cursor cursor(int depth) const { return Cursor(*this, paths_->cursor(depth)); }

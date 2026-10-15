@@ -113,6 +113,9 @@ public:
 
     /** @brief Emit the next unique product and its depth-zero support label. */
     bool next(Mask& alpha, Mask& beta, bool& in_support) {
+      if (column_mode_)
+        throw std::logic_error("cannot mix product and beta-column cursor traversal");
+      product_mode_ = true;
       for (;;) {
         if (alpha_active_) {
           if (next_alpha(alpha, beta, in_support)) return true;
@@ -129,6 +132,25 @@ public:
         if (!next_beta()) return false;
         start_alpha();
       }
+    }
+
+    /** @brief Emit each reachable beta string once, without traversing alpha.
+     * Use a separate cursor for this traversal; next() and next_column() must
+     * not be mixed. A column(beta, depth) cursor subsequently enumerates its
+     * compatible alpha strings.
+     */
+    bool next_column(Mask& beta) {
+      if (fixed_ || product_mode_)
+        throw std::logic_error("beta-column traversal requires a separate free cursor");
+      column_mode_ = true;
+      if (column_started_) {
+        beta_stack_.pop_back();
+        column_started_ = false;
+      }
+      if (!next_beta()) return false;
+      beta = beta_stack_.back().mask;
+      column_started_ = true;
+      return true;
     }
 
     Counts counts() const noexcept { return counts_; }
@@ -187,8 +209,10 @@ public:
 
     void start_alpha() {
       const int k = paths_->n_;
+      bool support = true;
       if (paths_->words_ != 0) {
         const auto* beta = beta_live_.data() + k * beta_modes_ * paths_->words_;
+        support = std::any_of(beta, beta + paths_->words_, [](Mask word) { return word != 0; });
         auto* alpha = alpha_live_.data();
         std::copy_n(beta, paths_->words_, alpha);
         if (depth_ == 1) {
@@ -197,7 +221,7 @@ public:
                       alpha + 2 * paths_->words_);
         }
       }
-      alpha_stack_.push_back({0, 0, 0, 0, true});
+      alpha_stack_.push_back({0, 0, 0, 0, support});
       alpha_active_ = true;
       ++counts_.prefixes;
     }
@@ -242,8 +266,14 @@ public:
     bool next_alpha(Mask& alpha, Mask& beta, bool& in_support) {
       while (!alpha_stack_.empty()) {
         Frame& top = alpha_stack_.back();
-        if (top.k == paths_->n_) {
+        if (top.k == paths_->n_ || top.count == paths_->na_ ||
+            paths_->na_ - top.count == paths_->n_ - top.k) {
+          // Fixed electron count leaves only a zero or one tail. A saturated
+          // prefix dominates every seed; an all-one tail cannot lose prefix
+          // dominance. Emit it directly instead of revisiting unary nodes.
           alpha = top.mask;
+          if (top.count < paths_->na_)
+            alpha |= ((Mask{1} << paths_->n_) - 1) ^ ((Mask{1} << top.k) - 1);
           beta = beta_stack_.back().mask;
           in_support = top.support;
           alpha_stack_.pop_back();
@@ -264,6 +294,7 @@ public:
     const ProductPaths* paths_;
     int depth_;
     bool fixed_, fixed_started_ = false, alpha_active_ = false;
+    bool product_mode_ = false, column_mode_ = false, column_started_ = false;
     int beta_modes_, alpha_modes_;
     Counts counts_;
     std::vector<Frame> beta_stack_, alpha_stack_;

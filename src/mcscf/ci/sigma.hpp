@@ -15,6 +15,13 @@ namespace xmvb::mcscf {
 
 class ProductSupport;
 
+/** @brief Add one adjoint column range directly to a caller-owned spin column.
+ * Arguments are local beta, RHS, first/last indices into alpha_rows, and a
+ * destination indexed by the original alpha string. Disjoint ranges may run
+ * concurrently; the callback must complete before the batch is released.
+ */
+using DirectCiColumnAccumulator = std::function<void(int, int, int, int, double*)>;
+
 /** @brief Integral adjoint of one orthonormal direct-CI bilinear form. */
 struct DirectCiIntegralAdjoint {
   Eigen::MatrixXd one_electron;
@@ -64,13 +71,17 @@ public:
 
   /** @brief Stream the exact Hamiltonian action through beta-column callbacks.
    *
-   * Each callback receives the requested alpha row indices and a
-   * `(alpha_rows.size(), block_width)` column slab. The
-   * reader fills its slab from an immutable input carrier; the accumulator
-   * adds its slab to a caller-owned, initially zero output carrier. Neither
-   * callback may retain a temporary slab across calls. Generated targets
-   * share a beta string; only their actual single-excitation neighbors are
-   * read. The team shares bounded halos and channel slabs, not carrier copies.
+   * Each callback receives sorted, distinct beta and alpha indices and a
+   * `(alpha_rows.size(), betas.size()*block_width)` slab, with column
+   * `beta_local*block_width+rhs`. The
+   * reader fills its slab from an immutable input carrier. The writer receives
+   * a column accumulator, which gathers directly into caller-owned output;
+   * no intermediate image slab or copy is needed. Neither callback may retain
+   * batch views or the accumulator across calls. Generated targets
+   * span multiple beta strings; their excitation neighborhoods are merged
+   * within the batch. Callbacks run in an OpenMP single region and may use
+   * taskgroups, but must finish their tasks before returning. The team shares
+   * bounded halos and channel slabs, not carrier copies.
    * With product support, the reader must return zero outside S and targets
    * are generated in its one-generator closure I. The adjoint returns the
    * full Hamiltonian image, including rows outside S; a selected-structure
@@ -78,8 +89,8 @@ public:
    */
   void apply_tiled(
       int block_width,
-      const std::function<void(int, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_column,
-      const std::function<void(int, const std::vector<int>&, const Eigen::Ref<const Eigen::MatrixXd>&)>& add_column,
+      const std::function<void(const std::vector<int>&, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_columns,
+      const std::function<void(const std::vector<int>&, const std::vector<int>&, const DirectCiColumnAccumulator&)>& add_columns,
       const ProductSupport* support = nullptr) const;
 
   /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
