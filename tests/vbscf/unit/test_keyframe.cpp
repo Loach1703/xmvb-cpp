@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <chrono>
 #include <iomanip>
@@ -8,7 +9,10 @@
 
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
+#include "vbscf/derivatives/hessian/exact/operator.hpp"
 #include "vbscf/integrals/ao/pairs/two_electron_index.hpp"
+#include "vbscf/orbitals/charts/chart.hpp"
+#include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/expansion/expander.hpp"
 
 namespace {
@@ -18,7 +22,7 @@ void require(bool condition, const char* message) {
 }
 
 /** @brief Complete accepted-gradient producer, not only a StructureAction consumer. */
-void benchmark_accepted_state16() {
+void benchmark_accepted_state16(bool check_hvp = false) {
   constexpr int n = 16;
   xmvb::vb::VbScfInput input;
   auto& orbitals = input.orbital_preparation_input;
@@ -54,6 +58,8 @@ void benchmark_accepted_state16() {
   const auto start = std::chrono::steady_clock::now();
   const auto gradient = xmvb::vb::OrbitalGradientEvaluator().evaluate_without_reference_energy_gradient(
       input,{0},{1.0},0.0,xmvb::vb::StructureEigensolver::Davidson,{1e-7,1e-3},Eigen::MatrixXd{});
+  const double gradient_seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
   const auto& accepted = *gradient.second_order_context;
   const auto& state = *accepted.structure_adjoint_state;
   require(accepted.selected_state_matrices.states.empty() && state.source_factors &&
@@ -61,6 +67,44 @@ void benchmark_accepted_state16() {
           "accepted-gradient producer retained a full product state");
   std::size_t raw_doubles = 0;
   for (const auto& s : accepted.selected_state_matrices.states) raw_doubles += s.coefficient_matrix.size();
+  double hvp_seconds = 0, hvp_fd_error = 0, hvp_norm = 0;
+  if (check_hvp) {
+    const xmvb::vb::SparseParameterLayout layout(orbitals);
+    const auto& prepared = gradient.orbital_preparation_result;
+    const xmvb::vb::OrbitalChart chart(orbitals,layout,
+        prepared.auxiliary_orbital_matrix.leftCols(n),
+        prepared.physical_orbital_frame.normalized_orbital_matrix,
+        nullptr,false,false,nullptr,xmvb::vb::OrbitalChart::Coordinates::Unwhitened);
+    Eigen::VectorXd p(chart.reduced_size());
+    for (int i = 0; i < p.size(); ++i) p[i] = std::sin(0.17*(i+1));
+    p.normalize();
+    const xmvb::vb::ExactHvpOperator hessian(gradient.second_order_context,&input,layout,&chart);
+    const auto hvp_start = std::chrono::steady_clock::now();
+    const auto image = hessian.apply_orbital_coupling(p);
+    hvp_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now()-hvp_start).count();
+    hvp_norm = image.orbital_hessian.norm();
+    require(hessian.diagnostics().outer_response_selected_state_rebuild_wall_time_seconds == 0,
+            "production direct-CI HVP rebuilt a raw product response bundle");
+    require(image.orbital_hessian.allFinite() && image.scaled_structure_forcing.allFinite(),
+            "production source HVP has a nonfinite orbital or structure image");
+    // A single structure has no horizontal CI tangent; normalization/gauge
+    // response is still required. Differentiate in the same linear raw lift.
+    constexpr double step = 1e-4;
+    const Eigen::VectorXd origin = layout.pack(orbitals), tangent = chart.expand_step(p);
+    const auto shifted_gradient = [&](double scale) -> Eigen::VectorXd {
+      auto moved = input;
+      layout.unpack(origin+scale*tangent,&moved.orbital_preparation_input);
+      const auto value = xmvb::vb::OrbitalGradientEvaluator().evaluate_without_reference_energy_gradient(
+          moved,{0},{1.0},0.0,xmvb::vb::StructureEigensolver::Davidson,{1e-7,1e-3},Eigen::MatrixXd{});
+      return chart.project_reduced_gradient(layout.gather_from_full(value.sparse_orbital_energy_gradient));
+    };
+    const Eigen::VectorXd plus = shifted_gradient(step), minus = shifted_gradient(-step);
+    hvp_fd_error = ((plus-minus)/(2*step)-image.orbital_hessian).norm();
+    require(hvp_fd_error < 2e-7*std::max(1.0,hvp_norm),
+            "production source HVP differs from the relaxed-gradient derivative");
+    require(accepted.selected_state_matrices.states.empty(),
+            "production HVP repopulated the accepted product cache");
+  }
   rusage usage{};
   getrusage(RUSAGE_SELF,&usage);
   const auto& cache = accepted.same_spin_pair_cache;
@@ -72,7 +116,10 @@ void benchmark_accepted_state16() {
             << "alpha_strings=" << cache.n_unique_alpha << "\nbeta_strings=" << cache.n_unique_beta
             << "\naccepted_raw_product_doubles=" << raw_doubles << "\naccepted_orthogonal_product_doubles=0\naccepted_residual_product_doubles=0\n"
             << "removed_raw_product_bytes=" << removed_bytes << "\nenergy_Eh=" << gradient.scf_result.total_energy
-            << "\ngradient_seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()
+            << "\ngradient_seconds=" << gradient_seconds
+            << "\nhvp_seconds=" << hvp_seconds << "\nhvp_norm=" << hvp_norm
+            << "\nhvp_fd_error=" << hvp_fd_error
+            << "\ntotal_seconds=" << std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()
             << "\nrss_mib=" << usage.ru_maxrss/1024.0 << '\n';
 }
 
@@ -177,11 +224,12 @@ void check_keyframe(bool complete_carrier) {
 
 int main(int argc, char** argv) {
   try {
-    if (argc == 2 && std::string(argv[1]) == "--accepted-state16") {
-      benchmark_accepted_state16();
+    if (argc == 2 && (std::string(argv[1]) == "--accepted-state16" ||
+                      std::string(argv[1]) == "--accepted-hvp16")) {
+      benchmark_accepted_state16(std::string(argv[1]) == "--accepted-hvp16");
       return 0;
     }
-    if (argc != 1) throw std::invalid_argument("usage: test_keyframe [--accepted-state16]");
+    if (argc != 1) throw std::invalid_argument("usage: test_keyframe [--accepted-state16|--accepted-hvp16]");
     check_keyframe(true);
     check_keyframe(false);
     std::cout << "fixed-state keyframe actions and derivatives: passed\n";

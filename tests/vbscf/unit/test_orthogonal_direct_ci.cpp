@@ -27,6 +27,7 @@
 #include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 
 namespace {
@@ -76,9 +77,6 @@ void check_joint_structure_response(const xmvb::vb::StructureAction& action,
   for (bool zero : {false, true}) {
     if (zero) raw.setZero();
     else raw = raw.array().cos().matrix();
-    auto response = states;
-    for (int i = 0; i < 2; ++i)
-      response.states[i].coefficient_matrix = action.expand_structure_block(raw.col(i));
     auto sweep = action.apply_response(accepted, raw);
     const auto images = action.apply(raw);
     require((sweep.images.hamiltonian-images.hamiltonian).norm() <
@@ -87,7 +85,7 @@ void check_joint_structure_response(const xmvb::vb::StructureAction& action,
         3e-11*std::max(1.0,images.overlap.norm()), "joint response changed H/S images");
     const auto joint = action.finish_response(accepted, std::move(sweep), multipliers);
     const auto reference = action.active_integral_adjoint_direction(accepted,
-        &response, &multipliers, {}, {}, {}, nullptr, false);
+        &raw, &multipliers, {}, {}, {}, nullptr, false);
     require((joint.overlap-reference.overlap).norm() <
         3e-11*std::max(1.0,reference.overlap.norm()) &&
         (joint.one_electron-reference.one_electron).norm() <
@@ -2100,9 +2098,7 @@ void benchmark_structure_response() {
       xmvb::vb::StructureActiveIntegralAdjoint adjoint;
       if (joint) adjoint = action.finish_response(accepted,std::move(sweep),multiplier);
       else {
-        auto response = states;
-        response.states[0].coefficient_matrix = action.expand_structure_block(q);
-        adjoint = action.active_integral_response_adjoint(accepted,response,multiplier);
+        adjoint = action.active_integral_response_adjoint(accepted,q,multiplier);
       }
       return metric.squaredNorm()+images.hamiltonian.squaredNorm()+
           adjoint.overlap.squaredNorm()+adjoint.one_electron.squaredNorm()+

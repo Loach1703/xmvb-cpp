@@ -37,10 +37,12 @@ or memory-based admission to a different physical representation is allowed.
   array residency. `test_keyframe --accepted-state16` exercises the complete
   gradient producer and confirms zero raw/orthogonal/residual product doubles
   at 12870 strings per spin (117.48 MiB process peak, constructed 16-AO input).
-  Response producers remain: `ExactHvpOperator::State::apply_structure_response_adjoint()`
-  and the gauge-coefficient branches of `exact/apply.cpp` still build dense
-  selected-state bundles. Migrate their direct-CI interface to structure
-  coefficient columns; do not remove the producer without migrating its consumers.
+  The direct-CI response interface now also borrows structure coefficient columns:
+  `apply_structure_response_adjoint()` and the gauge/relaxed-response branches
+  of `exact/apply.cpp` no longer create a raw selected-state product bundle.
+  Source-order consumers expand only original touched support. Product-order
+  consumers expand one state locally, not an upstream multi-state response bundle.
+  Pure response adjoints omit unused structure H/M output projection.
 - Without a supplied Davidson diagonal, `StructureAction` still evaluates a
   double loop over the expansion terms of each structure through spin-pair
   matrix elements. This must not survive as an accidental cofactor bottleneck
@@ -130,6 +132,26 @@ full `U * r` factors when a broad support makes those product-sized.
    Hamiltonian replay; only Hq is projected to structures. This
    consumer needs no accepted or response product array; broad-support cases
    retain the exact product order when its total adjoint/image work is lower.
+   The exact-HVP producer now passes both horizontal and normalization/gauge
+   coefficient responses directly in structure space. The old raw-response
+   public overload is removed, and the source-only adjoint uses the same sweep
+   with structure output collection disabled. Nine focused tests passed in
+   job1261329; complete 240 subspaces and arbitrary 1/3-structure SCF regressions
+   passed in job1261339 without changing steps or HVP counts.
+   Production CAS16/16 probe1261340 now covers the accepted-gradient producer,
+   one complete orbital/coupling HVP (including normalization response), and
+   central differences of two relaxed gradients in the same raw linear lift.
+   It passes at1.73e-9 absolute HVP error, with155.70 MiB process peak and no
+   accepted product arrays or raw response rebuild. This is a constructed
+   16-AO Hamiltonian, not a converged molecular SCF benchmark. Its HVP still
+   costs153.49 s; stage attribution and contraction reduction remain necessary.
+   Next exact simplification: each minimum-cover source has one constant
+   coordinate anchor, so its coefficient tangent belongs only to the opposite
+   factor. Merge that tangent into the corresponding orbital-generator factor
+   family instead of concatenating a third family. The combined tangent then
+   needs at most twice the accepted source count, not three times; physical
+   parity reconstruction must be applied to both consistently. Derive, test
+   and measure this change before claiming a runtime gain.
 6. [ ] Remove obsolete full-product production consumers after migration.
    Explicit full-carrier arrays remain only as independent small-system test
    oracles; broad-support production uses generated product tiles, not a dense
@@ -138,8 +160,8 @@ full `U * r` factors when a broad support makes those product-sized.
    coefficient readers, so broad-support accepted gradients and orbital
    directions stream too. Share the H-image consumer, retain oriented generator
    terms and their support halo, and do not instantiate another full carrier.
-   Also move structure-response expansion at its remaining selected-state
-   producer; optimizing only downstream readers does not remove that array.
+   Structure-response producer migration is complete for direct CI. The separate
+   non-direct pair consumers retain their own explicit numerical representation.
 7. [ ] Validate the complete SCF chain on 240 COV/ION/FULL and selected CAS(12,12)
    spaces, then larger covalent cases. Report convergence, energy, HVP count,
    total wall time and native peak RSS, not only a fixed-point kernel speedup.

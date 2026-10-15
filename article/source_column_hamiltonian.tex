@@ -674,6 +674,25 @@ coefficients; it is not a projection of either orbital derivative onto the
 original support. The two orbital terms generally leave that support and
 retain every contribution through their transformed spin factors.
 
+The response interface therefore carries $\delta\mathbf C$ in the selected
+structure basis, not $\delta X$ as a full spin-product array. For state $s$
+and an original touched product $e$, it loads only
+\begin{equation}
+ (\delta x_s)_e=\sum_I W_{eI}\,\delta C_{Is}.
+\end{equation}
+The incidences $W_{eI}$ and source cover are already retained at the accepted
+point. This costs $O(\operatorname{nnz}W)$ additions and scalar products per
+state, with $O(P)$ temporary coefficients for $P$ touched products, instead
+of an $O(U_\alpha U_\beta)$ response array per state. The response columns
+are borrowed from their owning structure-space calculation; they are not
+copied into a second bundle. Both the integral-gradient derivative and
+the oriented residual-generator derivative consume these same columns.
+The optional Hamiltonian/overlap output projection is omitted when only
+the response adjoint is requested. This changes neither the full orbital
+derivative in Eq.~\eqref{eq:factor-tangent} nor the selected-space variational
+problem. In particular, a zero-dimensional horizontal CI tangent does not
+remove the normalization response or its gauge multiplier.
+
 Each term of Eq.~\eqref{eq:factor-tangent} is another factor source.
 Concatenating them adds their outer products exactly, without SVD truncation
 or a closure assumption. A source panel loads its base factors and applies

@@ -46,7 +46,7 @@ StructureResponseSweep StructureAction::source_response(
     const StructureAdjointState& state,
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
     const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
-    const mcscf::DirectCiSigmaAction& sigma) const {
+    const mcscf::DirectCiSigmaAction& sigma, bool collect_images) const {
   const int n = sigma.n_orbitals(), d = sigma.channel_kernel().rows();
   const int n_states = state.weights.size();
   if (n_states <= 0 || state.structure_coefficients.rows() != n_structures_ ||
@@ -54,8 +54,8 @@ StructureResponseSweep StructureAction::source_response(
       state.energies.size() != state.weights.size())
     throw std::invalid_argument("invalid selected-subspace adjoint state");
   StructureResponseSweep result{
-      {Eigen::MatrixXd::Zero(n_structures_,n_states),
-       Eigen::MatrixXd::Zero(n_structures_,n_states)},
+      {Eigen::MatrixXd::Zero(collect_images ? n_structures_ : 0,n_states),
+       Eigen::MatrixXd::Zero(collect_images ? n_structures_ : 0,n_states)},
       Eigen::MatrixXd::Zero(n,n),Eigen::MatrixXd::Zero(d,d),Eigen::MatrixXd::Zero(n,n)};
   for (int i = 0; i < n_states; ++i) {
     const double weight = state.weights[i], energy = state.energies[i];
@@ -70,6 +70,7 @@ StructureResponseSweep StructureAction::source_response(
     const auto y = factors(accepted,false), physical_y = factors(accepted,true);
     const auto q = factors(response,false), physical_q = factors(response,true);
     if (weight == 0.0) {
+      if (!collect_images) continue;
       const auto image = apply_source_columns(1,[&](int) { return response; },
           alpha,beta,sigma,false,mcscf::kFactorWorkspaceBytes);
       result.images.hamiltonian.col(i) = image.hamiltonian.col(0);
@@ -78,11 +79,13 @@ StructureResponseSweep StructureAction::source_response(
     }
     // H q is generated once: its raw factor images also supply D(H q,Y).
     // The second image needs only its VJP, never another structure projection.
-    auto response_image = project_source_adjoint(q,y,alpha,beta,sigma,nullptr);
+    auto response_image = project_source_adjoint(q,y,alpha,beta,sigma,nullptr,collect_images);
     auto accepted_image = project_source_adjoint(y,q,alpha,beta,sigma,nullptr,false);
     const auto& images = response_image.images;
-    result.images.hamiltonian.col(i) = images.hamiltonian.col(0);
-    result.images.overlap.col(i) = images.overlap.col(0);
+    if (collect_images) {
+      result.images.hamiltonian.col(i) = images.hamiltonian.col(0);
+      result.images.overlap.col(i) = images.overlap.col(0);
+    }
     result.images.tiles.expansions += images.tiles.expansions+accepted_image.images.tiles.expansions;
     result.images.tiles.structure_projections += images.tiles.structure_projections;
     result.images.tiles.source_tiles += images.tiles.source_tiles+accepted_image.images.tiles.source_tiles;

@@ -1482,7 +1482,7 @@ Eigen::MatrixXd StructureAction::source_generator_adjoint(
 
 mcscf::DirectCiIntegralAdjoint StructureAction::source_integral_direction(
     const StructureAdjointState& state, int index,
-    const Eigen::MatrixXd* orbital_direction, const Eigen::MatrixXd* raw_response) const {
+    const Eigen::MatrixXd* orbital_direction, const Eigen::MatrixXd* coefficient_response) const {
   const Eigen::VectorXd values = expand_support(state.structure_coefficients.col(index));
   const auto ket = sources_->orthogonal_source(spin_products_, values,
       direct_ci_->alpha_transform, direct_ci_->beta_transform());
@@ -1496,11 +1496,8 @@ mcscf::DirectCiIntegralAdjoint StructureAction::source_integral_direction(
     directions.push_back(mcscf::generator_factors(direct_ci_->sigma, physical, relative_direction));
   }
   Eigen::VectorXd response_values;
-  if (raw_response != nullptr) {
-    response_values.resize(spin_products_.size());
-    for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group)
-      response_values[group] = (*raw_response)(spin_products_[group] / n_unique_beta_,
-          spin_products_[group] % n_unique_beta_);
+  if (coefficient_response != nullptr) {
+    response_values = expand_support(coefficient_response->col(index));
     directions.push_back(sources_->orthogonal_source(spin_products_, response_values,
         direct_ci_->alpha_transform, direct_ci_->beta_transform(), true));
   }
@@ -1645,7 +1642,7 @@ StructureActiveIntegralAdjoint StructureAction::active_integral_adjoint(
 StructureActiveIntegralAdjoint
 StructureAction::active_integral_adjoint_direction(
     const StructureAdjointState& state,
-    const SelectedStateDeterminantMatrices* directional_selected_states,
+    const Eigen::MatrixXd* coefficient_response,
     const Eigen::MatrixXd* directional_state_multipliers,
     const std::vector<double>& overlap_direction,
     const std::vector<double>& one_electron_direction,
@@ -1656,7 +1653,7 @@ StructureAction::active_integral_adjoint_direction(
     throw std::logic_error(
         "active-integral adjoint direction requires orthogonal direct CI");
   }
-  const bool include_state_response = directional_selected_states != nullptr;
+  const bool include_state_response = coefficient_response != nullptr;
   const std::size_t n_states = state.weights.size();
   if (n_states == 0 || state.energies.size() != n_states ||
       state.structure_coefficients.rows() != n_structures_ ||
@@ -1665,15 +1662,14 @@ StructureAction::active_integral_adjoint_direction(
        state.residuals.size() != n_states)) ||
       include_state_response != (directional_state_multipliers != nullptr) ||
       (include_state_response &&
-       (directional_selected_states->states.size() !=
-            n_states ||
+       (coefficient_response->rows() != n_structures_ ||
+        coefficient_response->cols() != static_cast<Eigen::Index>(n_states) ||
+        !coefficient_response->allFinite() ||
         directional_state_multipliers->rows() !=
             static_cast<Eigen::Index>(n_states) ||
         directional_state_multipliers->cols() !=
             static_cast<Eigen::Index>(n_states) ||
-        !directional_state_multipliers->allFinite() ||
-        directional_selected_states->n_unique_alpha != n_unique_alpha_ ||
-        directional_selected_states->n_unique_beta != n_unique_beta_))) {
+        !directional_state_multipliers->allFinite()))) {
     throw std::invalid_argument(
         "selected-state adjoint-direction inputs have incompatible dimensions");
   }
@@ -1714,10 +1710,13 @@ StructureAction::active_integral_adjoint_direction(
     integral_direction.pair_kernel = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
   }
 
-  if (state.source_factors)
-    return source_adjoint_direction(state,directional_selected_states,directional_state_multipliers,
+  if (state.source_factors) {
+    const Eigen::MatrixXd empty;
+    const Eigen::MatrixXd& response = coefficient_response ? *coefficient_response : empty;
+    return source_adjoint_direction(state,response,directional_state_multipliers,
         direct_ci_->integrals,integral_direction,direct_ci_->alpha_transform,
         direct_ci_->beta_transform(),direct_ci_->sigma,include_integral_response,direct_ci_direction);
+  }
 
   ExteriorTransformDirection alpha_transform_direction;
   ExteriorTransformDirection beta_transform_direction;
@@ -1783,15 +1782,7 @@ StructureAction::active_integral_adjoint_direction(
     }
     Eigen::MatrixXd orthogonal_state_response;
     if (include_state_response) {
-      const auto& directional_state =
-          directional_selected_states->states[state_index];
-      if (directional_state.coefficient_matrix.rows() != n_unique_alpha_ ||
-          directional_state.coefficient_matrix.cols() != n_unique_beta_ ||
-          !directional_state.coefficient_matrix.allFinite()) {
-        throw std::invalid_argument(
-            "invalid directional selected-state adjoint input");
-      }
-      orthogonal_state_response = directional_state.coefficient_matrix;
+      orthogonal_state_response = expand_structure_block(coefficient_response->col(state_index));
       direct_ci_->alpha_transform.apply_left(&orthogonal_state_response);
       direct_ci_->beta_transform().apply_right(&orthogonal_state_response);
       directional_orthogonal_coefficients += orthogonal_state_response;
@@ -1846,7 +1837,7 @@ StructureAction::active_integral_adjoint_direction(
     if (prefer_factor_adjoint(direction_rank, rank)) {
       directional_integral_gradient = source_integral_direction(state, state_index,
           include_integral_response ? &integral_direction.orbital_transform : nullptr,
-          include_state_response ? &directional_selected_states->states[state_index].coefficient_matrix : nullptr);
+          coefficient_response);
     } else {
       directional_integral_gradient = direct_ci_->sigma.integral_adjoint(
           directional_orthogonal_coefficients, orthogonal_coefficients, spin_exchange_parity_);
@@ -1897,19 +1888,19 @@ StructureResponseSweep StructureAction::apply_response(
 
 StructureActiveIntegralAdjoint StructureAction::active_integral_response_adjoint(
     const StructureAdjointState& state,
-    const SelectedStateDeterminantMatrices& directional_selected_states,
+    const Eigen::Ref<const Eigen::MatrixXd>& coefficient_response,
     const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const {
-  if (directional_selected_states.states.size() != state.weights.size() ||
-      directional_selected_states.n_unique_alpha != n_unique_alpha_ ||
-      directional_selected_states.n_unique_beta != n_unique_beta_)
+  if (coefficient_response.rows() != n_structures_ ||
+      coefficient_response.cols() != static_cast<Eigen::Index>(state.weights.size()) ||
+      !coefficient_response.allFinite())
     throw std::invalid_argument("invalid selected-subspace response dimensions");
   if (state.source_factors) {
-    const Eigen::MatrixXd multipliers = state_multipliers;
-    return active_integral_adjoint_direction(state,&directional_selected_states,
-        &multipliers,{}, {}, {},nullptr,false);
+    return finish_response(state, source_response(state,coefficient_response,
+        direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,false),
+        state_multipliers);
   }
   return finish_response(state, contract_response(state, [&](int i) {
-    return directional_selected_states.states[i].coefficient_matrix;
+    return expand_structure_block(coefficient_response.col(i));
   }, false), state_multipliers);
 }
 

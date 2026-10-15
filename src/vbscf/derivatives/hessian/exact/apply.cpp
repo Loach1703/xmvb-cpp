@@ -727,29 +727,22 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       state_multipliers = gauge_coupling->gauge_adjoint_multipliers;
     }
 
-    std::optional<SelectedStateDeterminantMatrices>
-        directional_selected_states;
+    const Eigen::MatrixXd* coefficient_response = nullptr;
     if (directional_selected_state_response != nullptr) {
-      const auto selected_state_rebuild_start_time =
-          std::chrono::steady_clock::now();
-      directional_selected_states.emplace(
-          build_selected_state_determinant_matrices_from_selected_columns(
-              current_input_->structure_data,
-              directional_selected_state_response
-                  ->delta_selected_eigenvector_matrix,
-              accepted_point_context_->selected_state_indices,
-              accepted_point_context_->normalized_state_weights,
-              accepted_point_context_->same_spin_pair_cache));
-      apply_timing_totals_
-          .outer_response_selected_state_rebuild_wall_time_seconds +=
-          detail::exact_hvp_elapsed_seconds(selected_state_rebuild_start_time);
+      coefficient_response = &directional_selected_state_response
+                                  ->delta_selected_eigenvector_matrix;
     } else if (gauge_coupling != nullptr) {
+      coefficient_response = &gauge_coupling->gauge_coefficient_response;
+    }
+
+    std::optional<SelectedStateDeterminantMatrices> directional_selected_states;
+    if (coefficient_response != nullptr && !direct_active_gradient) {
       const auto selected_state_rebuild_start_time =
           std::chrono::steady_clock::now();
       directional_selected_states.emplace(
           build_selected_state_determinant_matrices_from_selected_columns(
               current_input_->structure_data,
-              gauge_coupling->gauge_coefficient_response,
+              *coefficient_response,
               accepted_point_context_->selected_state_indices,
               accepted_point_context_->normalized_state_weights,
               accepted_point_context_->same_spin_pair_cache));
@@ -806,10 +799,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       directional_active_space_gradient = make_active_gradient_direction(
           accepted_structure_action->active_integral_adjoint_direction(
               *accepted_point_context_->structure_adjoint_state,
-              directional_selected_states
-                  ? &directional_selected_states.value()
-                  : nullptr,
-              directional_selected_states ? &state_multipliers : nullptr,
+              coefficient_response,
+              coefficient_response ? &state_multipliers : nullptr,
               active_space_integral_direction.overlap,
               active_space_integral_direction.one_electron,
               active_space_integral_direction.packed_two_electron,
@@ -1083,19 +1074,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_structure_response_adjoint(
 
   const int n_active =
       current_input_->orbital_preparation_input.n_active_orbitals;
-  const auto selected_state_start = std::chrono::steady_clock::now();
-  const SelectedStateDeterminantMatrices directional_selected_states =
-      build_selected_state_determinant_matrices_from_selected_columns(
-          current_input_->structure_data,
-          coefficient_response,
-          accepted_point_context_->selected_state_indices,
-          accepted_point_context_->normalized_state_weights,
-          accepted_point_context_->same_spin_pair_cache);
-  apply_timing_totals_
-      .outer_response_selected_state_rebuild_wall_time_seconds +=
-      std::chrono::duration<double>(
-          std::chrono::steady_clock::now() - selected_state_start).count();
-
   const StructureAction* structure_action =
       outer_response_context()
           .selected_state_eigen_response_operator.structure_action;
@@ -1117,10 +1095,19 @@ Eigen::VectorXd ExactHvpOperator::State::apply_structure_response_adjoint(
     active_gradient = make_active_gradient_direction(
         structure_action->active_integral_response_adjoint(
             *accepted_point_context_->structure_adjoint_state,
-            directional_selected_states,
+            coefficient_response,
             state_multipliers),
         n_active);
   } else {
+    const auto selected_state_start = std::chrono::steady_clock::now();
+    const auto directional_selected_states =
+        build_selected_state_determinant_matrices_from_selected_columns(
+            current_input_->structure_data, coefficient_response,
+            accepted_point_context_->selected_state_indices,
+            accepted_point_context_->normalized_state_weights,
+            accepted_point_context_->same_spin_pair_cache);
+    apply_timing_totals_.outer_response_selected_state_rebuild_wall_time_seconds +=
+        detail::exact_hvp_elapsed_seconds(selected_state_start);
     active_gradient = make_zero_active_space_gradient_direction(n_active);
     add_selected_subspace_response_to_active_space_gradient(
         *current_input_,

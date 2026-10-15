@@ -47,11 +47,16 @@ def accepted(artifact):
                 **values(artifact / "accepted-state16.out"))
 
 
+def hvp(artifact):
+    return dict(run=artifact.name, kind="synthetic_production_hvp",
+                **values(artifact / "accepted-hvp16.out"))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=("audit", "capture", "accepted"))
+    parser.add_argument("kind", choices=("audit", "capture", "accepted", "hvp"))
     parser.add_argument("output", type=Path)
     parser.add_argument("artifacts", type=Path, nargs="+")
     args = parser.parse_args()
-    extract = dict(audit=audit, capture=capture, accepted=accepted)[args.kind]
+    extract = dict(audit=audit, capture=capture, accepted=accepted, hvp=hvp)[args.kind]
     save(args.output,[extract(artifact) for artifact in args.artifacts])

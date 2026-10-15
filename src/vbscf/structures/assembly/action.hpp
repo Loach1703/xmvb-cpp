@@ -10,7 +10,6 @@
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
-#include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/structures/assembly/connection.hpp"
 #include "vbscf/structures/expansion/types.hpp"
 
@@ -223,13 +222,13 @@ public:
    * `directional_state_multipliers` is the full multiplier @f$M@f$ in
    * @f$HZ-SZ\Lambda+SCM@f$. Equal-weight selected states therefore retain
    * their off-diagonal horizontal-gauge coupling.
-   * `directional_selected_states` expands coefficient responses in this
-   * action's selected structure map. Orbital representation directions,
+   * `coefficient_response` contains columns in this action's selected
+   * structure space. Orbital representation directions,
    * which need not remain on that support, are supplied separately.
    */
   StructureActiveIntegralAdjoint active_integral_adjoint_direction(
       const StructureAdjointState& state,
-      const SelectedStateDeterminantMatrices* directional_selected_states,
+      const Eigen::MatrixXd* coefficient_response,
       const Eigen::MatrixXd* directional_state_multipliers,
       const std::vector<double>& overlap_direction,
       const std::vector<double>& one_electron_direction,
@@ -240,7 +239,7 @@ public:
   /**
    * @brief Applies the selected-subspace coupling adjoint to active integrals.
    *
-   * `directional_selected_states` stores the coefficient block @f$Z@f$ and
+   * `coefficient_response` stores the structure coefficient block @f$Z@f$ and
    * `state_multipliers` stores the full selected-state multiplier @f$M@f$ in
    * the accepted-state ordering.  The latter must remain a matrix: within an
    * equal-weight state cluster its off-diagonal entries enforce the horizontal
@@ -249,7 +248,7 @@ public:
    */
   StructureActiveIntegralAdjoint active_integral_response_adjoint(
       const StructureAdjointState& state,
-      const SelectedStateDeterminantMatrices& directional_selected_states,
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficient_response,
       const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const;
 
   /** @brief Computes Hq, Mq and the response adjoint in one direct-CI sweep. */
@@ -407,7 +406,7 @@ private:
   /** @brief Contract orbital/structure tangents on bounded source panels. */
   mcscf::DirectCiIntegralAdjoint source_integral_direction(
       const StructureAdjointState& state, int index,
-      const Eigen::MatrixXd* orbital_direction, const Eigen::MatrixXd* raw_response) const;
+      const Eigen::MatrixXd* orbital_direction, const Eigen::MatrixXd* coefficient_response) const;
   /** @brief Bounded resident panels through expansion, sigma and projection. */
   StructureActionResult apply_orthogonal_tiled(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
@@ -450,7 +449,7 @@ private:
       StructureIntegralDirection* direction) const;
   /** @brief Complete source-factor gradient direction, including the moving pullback. */
   StructureActiveIntegralAdjoint source_adjoint_direction(const StructureAdjointState& state,
-      const SelectedStateDeterminantMatrices* response, const Eigen::MatrixXd* multipliers,
+      const Eigen::Ref<const Eigen::MatrixXd>& response, const Eigen::MatrixXd* multipliers,
       const OrthogonalActiveIntegrals& integrals, const OrthogonalActiveIntegrals& delta,
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma, bool include_integrals,
@@ -465,7 +464,7 @@ private:
   StructureResponseSweep source_response(const StructureAdjointState& state,
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
-      const mcscf::DirectCiSigmaAction& sigma) const;
+      const mcscf::DirectCiSigmaAction& sigma, bool collect_images = true) const;
   /** @brief Compares algebraic operation counts; independent of memory budgets. */
   bool prefer_source_contraction(const ExteriorOrbitalTransform& alpha_transform,
       const ExteriorOrbitalTransform& beta_transform,

@@ -533,13 +533,9 @@ void check_factor_structure_response(int parity, bool unequal = false) {
   const auto accepted = action.prepare_active_adjoint(c,{0.3,0.7},{-1.1,-0.7});
   require(accepted.source_factors && accepted.orthogonal_coefficients.empty() && accepted.residuals.empty(),
           "source accepted state retained a complete product array");
-  xmvb::vb::SelectedStateDeterminantMatrices raw;
-  raw.n_unique_alpha = fixture.alpha.size(); raw.n_unique_beta = fixture.beta.size();
-  raw.states.resize(2);
-  for (int i = 0; i < 2; ++i) raw.states[i].coefficient_matrix = action.expand_structure_block(q.col(i));
   const auto dense = explicit_product_state(fixture,cache,action,accepted);
   const auto reference = action.active_integral_adjoint_direction(dense,
-      &raw,&mu,{}, {}, {},nullptr,false);
+      &q,&mu,{}, {}, {},nullptr,false);
   // No accepted product arrays may be needed by this consumer.
   auto sparse = accepted;
   sparse.orthogonal_coefficients.clear(); sparse.residuals.clear();
@@ -575,9 +571,9 @@ void check_factor_structure_response(int parity, bool unequal = false) {
       (source_cache.connection->overlap-product_cache.connection->overlap).norm() < 2e-11 &&
       (source_cache.connection->squared_norm-product_cache.connection->squared_norm).norm() < 2e-11,
       "source connection diagnostic differs from the independent product calculation");
-  const auto source_hvp = action.active_integral_adjoint_direction(sparse,&raw,&mu,
+  const auto source_hvp = action.active_integral_adjoint_direction(sparse,&q,&mu,
       overlap,one,two,&source_cache,true);
-  const auto product_hvp = action.active_integral_adjoint_direction(dense,&raw,&mu,
+  const auto product_hvp = action.active_integral_adjoint_direction(dense,&q,&mu,
       overlap,one,two,&product_cache,true);
   require((source_hvp.overlap-product_hvp.overlap).norm() < 2e-11 &&
       (source_hvp.one_electron-product_hvp.one_electron).norm() < 2e-11 &&
@@ -651,10 +647,7 @@ void check_factor_accepted_gradient(bool sparse = false) {
         shifted_action.prepare_active_adjoint((1+response_scale*scale)*c, {1.0}, {energy}));
   };
   for (bool response : {false, true}) {
-    xmvb::vb::SelectedStateDeterminantMatrices dc;
-    dc.n_unique_alpha = fixture.alpha.size(); dc.n_unique_beta = fixture.beta.size();
-    dc.states.resize(1);
-    dc.states[0].coefficient_matrix = 0.21 * action.expand_structure_block(c);
+    const Eigen::MatrixXd dc = 0.21*c;
     const Eigen::MatrixXd multipliers = Eigen::MatrixXd::Zero(1,1);
     const auto analytic = action.active_integral_adjoint_direction(state,
         response ? &dc : nullptr, response ? &multipliers : nullptr,
@@ -697,9 +690,6 @@ void check_factor_state_average() {
   const auto dy_c = action.orthogonalize_structure_block(dc);
   const int nb = fixture.beta.size();
   const std::vector<double> energies{-1.1,-0.7};
-  xmvb::vb::SelectedStateDeterminantMatrices raw;
-  raw.n_unique_alpha = fixture.alpha.size(); raw.n_unique_beta = nb; raw.states.resize(2);
-  for (int i = 0; i < 2; ++i) raw.states[i].coefficient_matrix = action.expand_structure_block(dc.col(i));
   for (const std::vector<double>& weights : {std::vector<double>{0.5,0.5}, {0.3,0.7}}) {
     const auto state = action.prepare_active_adjoint(c, weights, energies);
     require(state.factor_integrals, "sparse multistate case did not select factor integral order");
@@ -726,7 +716,7 @@ void check_factor_state_average() {
         integrals, direction, state.one_electron_gradient, state.pair_kernel_gradient,
         state.generator_gradient, g1,g2,gg);
     const auto actual = action.active_integral_adjoint_direction(
-        state, &raw, &mu, overlap, one, two, nullptr, true);
+        state, &dc, &mu, overlap, one, two, nullptr, true);
     require((actual.overlap-expected.overlap).norm() < 2e-11 &&
         (actual.one_electron-expected.one_electron).norm() < 2e-11 &&
         (actual.pair_kernel-expected.pair_kernel).norm() < 2e-11,
@@ -1432,13 +1422,10 @@ void benchmark_structure_response(int n, int selected_count, bool compare_refere
         expansion.product_alpha,expansion.product_beta,q);
     check_images(images,reference_images);
     image_error = (images.hamiltonian-reference_images.hamiltonian).norm();
-    xmvb::vb::SelectedStateDeterminantMatrices raw;
-    raw.n_unique_alpha = fixture.alpha.size(); raw.n_unique_beta = fixture.beta.size();
-    raw.states.resize(1); raw.states[0].coefficient_matrix = action.expand_structure_block(q);
     const auto product_state = explicit_product_state(fixture,cache,action,accepted);
     const auto start = Clock::now();
     // Same-binary product sigma/adjoint consumer, without structure H/M images.
-    const auto reference = action.active_integral_response_adjoint(product_state,raw,mu);
+    const auto reference = action.active_integral_response_adjoint(product_state,q,mu);
     reference_seconds = std::chrono::duration<double>(Clock::now()-start).count();
     adjoint_error = std::max({(gradient.overlap-reference.overlap).norm(),
         (gradient.one_electron-reference.one_electron).norm(),

@@ -94,7 +94,7 @@ StructureActionResult StructureAction::source_integral_action(
 }
 
 StructureActiveIntegralAdjoint StructureAction::source_adjoint_direction(
-    const StructureAdjointState& state, const SelectedStateDeterminantMatrices* response,
+    const StructureAdjointState& state, const Eigen::Ref<const Eigen::MatrixXd>& response,
     const Eigen::MatrixXd* multipliers, const OrthogonalActiveIntegrals& integrals,
     const OrthogonalActiveIntegrals& delta, const ExteriorOrbitalTransform& alpha,
     const ExteriorOrbitalTransform& beta, const mcscf::DirectCiSigmaAction& sigma,
@@ -122,14 +122,8 @@ StructureActiveIntegralAdjoint StructureAction::source_adjoint_direction(
       physical_directions.push_back(mcscf::generator_factors(sigma,physical,generator));
     }
     Eigen::VectorXd response_values;
-    if (response) {
-      const auto& raw = response->states[i].coefficient_matrix;
-      if (raw.rows() != n_unique_alpha_ || raw.cols() != n_unique_beta_)
-        throw std::invalid_argument("invalid selected coefficient response");
-      response_values.resize(spin_products_.size());
-      for (int j = 0; j < response_values.size(); ++j)
-        response_values[j] = raw(spin_products_[j]/n_unique_beta_,spin_products_[j]%n_unique_beta_);
-      if (!response_values.allFinite()) throw std::invalid_argument("nonfinite coefficient response");
+    if (response.size() != 0) {
+      response_values = expand_support(response.col(i));
       if (!response_values.isZero(0.0)) {
         directions.push_back(sources_->orthogonal_source(spin_products_,response_values,alpha,beta));
         physical_directions.push_back(sources_->orthogonal_source(spin_products_,response_values,alpha,beta,true));
