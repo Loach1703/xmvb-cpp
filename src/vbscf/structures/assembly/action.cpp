@@ -704,6 +704,9 @@ StructureAction::StructureAction(
     auto support = std::make_unique<mcscf::ProductSupport>(n_active_orbitals,
         direct_ci_->alpha_transform.occupations(),
         direct_ci_->beta_transform().occupations(), touched);
+    if (profiling::phase_totals().enabled)
+      std::fprintf(stderr, "XMVB_SUPPORT,structures=%d,alpha=%d,beta=%d,seeds=%zu,full=%d\n",
+          n_structures_, n_unique_alpha_, n_unique_beta_, touched.size(), support->full());
     if (!support->full()) product_support_=std::move(support);
   }
 

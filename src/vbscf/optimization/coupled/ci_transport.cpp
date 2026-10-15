@@ -1,7 +1,9 @@
 #include "vbscf/optimization/coupled/ci_transport.hpp"
 
 #include <cmath>
+#include <chrono>
 #include "core/metric_solve.hpp"
+#include "core/timing.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
@@ -49,21 +51,50 @@ Eigen::VectorXd CiTransport::raw_direction(const Eigen::VectorXd& reduced) const
 
 Eigen::MatrixXd CiTransport::solve(const Eigen::MatrixXd& upper,
                                  const Eigen::MatrixXd& rhs) const {
+  // Opt-in diagnosis only: separate the selected metric solve from HVP work.
+  const bool timed = profiling::phase_totals().enabled;
+  using Clock = std::chrono::steady_clock;
+  const auto start = timed ? Clock::now() : Clock::time_point{};
+  double action_seconds = 0.0;
+  const auto report = [&](const char* mode, int actions, int iterations,
+                          int certifications, double residual) {
+    if (timed)
+      std::fprintf(stderr,
+          "XMVB_TRANSPORT_SOLVE,mode=%s,rows=%ld,rhs=%ld,actions=%d,iterations=%d,certifications=%d,relative_residual=%.9g,wall=%.9f,action_wall=%.9f\n",
+          mode, static_cast<long>(rhs.rows()), static_cast<long>(rhs.cols()),
+          actions, iterations, certifications, residual,
+          std::chrono::duration<double>(Clock::now() - start).count(), action_seconds);
+  };
   if (inverse_) {
     const ExteriorOrbitalTransform alpha(
         origin_.same_spin_pair_cache.alpha_reuse_table.unique_determinants, upper);
     const ExteriorOrbitalTransform beta(
         origin_.same_spin_pair_cache.beta_reuse_table.unique_determinants, upper);
-    return inverse_->apply_at_transform(rhs, alpha, beta);
+    Eigen::MatrixXd result = inverse_->apply_at_transform(rhs, alpha, beta);
+    report("factorized", 0, 0, 0, 0.0);
+    return result;
   }
   // Actual selected M, not the identity on a presumed closed carrier.
   Eigen::MatrixXd result(rhs.rows(), rhs.cols());
-  for (Eigen::Index s = 0; s < rhs.cols(); ++s)
+  int actions = 0, iterations = 0, certifications = 0;
+  double residual = 0.0;
+  for (Eigen::Index s = 0; s < rhs.cols(); ++s) {
+    core::MetricSolveStats stats;
     result.col(s) = core::solve_metric(rhs.col(s),
       [&](const Eigen::VectorXd& x) {
-        return Eigen::VectorXd(overlap_.apply(upper, upper, x).col(0));
+        const auto action_start = timed ? Clock::now() : Clock::time_point{};
+        Eigen::VectorXd image = overlap_.apply(upper, upper, x).col(0);
+        if (timed) action_seconds += std::chrono::duration<double>(Clock::now() - action_start).count();
+        return image;
       },
-      [&](const Eigen::VectorXd& x) { return Eigen::VectorXd(x.cwiseQuotient(diagonal_)); });
+      [&](const Eigen::VectorXd& x) { return Eigen::VectorXd(x.cwiseQuotient(diagonal_)); },
+      timed ? &stats : nullptr);
+    actions += stats.actions;
+    iterations += stats.iterations;
+    certifications += stats.certifications;
+    residual = std::max(residual, stats.relative_residual);
+  }
+  report("selected_cg", actions, iterations, certifications, residual);
   return result;
 }
 
