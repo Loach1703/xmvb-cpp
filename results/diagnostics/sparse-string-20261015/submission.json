@@ -1,0 +1,13 @@
+{
+  "cluster": "hanhai22",
+  "job_id": "1257163",
+  "cases": [12, 14, 16],
+  "cores_per_case": 1,
+  "geometry": "Linear H chain, 1.4 Angstrom spacing",
+  "basis": "STO-6G",
+  "structure": "One adjacent-pair singlet covalent VB structure",
+  "transform": "Sorted sparse alpha/beta string pairs, no coefficient screening; ordinary double arithmetic",
+  "validation": "H12 coefficient-by-coefficient independent exterior-minor reference",
+  "connectivity": "4096 uniform-with-replacement sampled rows; potential spin-preserving single/double excitation links, not evaluated nonzero Hamiltonian matrix elements",
+  "remote_directory": "/home/guqqgroup/xiatao/xmvb-runs/sparse-string-20261015"
+}
