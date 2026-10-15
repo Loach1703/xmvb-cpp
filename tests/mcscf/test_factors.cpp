@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "mcscf/ci/factors.hpp"
+#include "mcscf/ci/factors_internal.hpp"
 #include "mcscf/ci/strings.hpp"
 #include "core/openmp.hpp"
 
@@ -56,6 +57,15 @@ void check_case(int n, int ea, int eb) {
         spin,padded_a.topRows(count),padded_b.topRows(count));
     require(std::abs((density.array()*kappa.array()).sum()-(a.array()*image.array()).sum()) < 1e-12,
             "strided single-spin generator/adjoint pairing changed oriented indices");
+    for (int p = 0; p < n; ++p)
+      for (int q = 0; q <= p; ++q) {
+        Eigen::MatrixXd generator = Eigen::MatrixXd::Zero(n,n), channel(count,3);
+        generator(p,q) = generator(q,p) = 1.0;
+        sigma.scatter_spin(spin,b,p*(p+1)/2+q,1,channel);
+        sigma.apply_spin_generator(spin,b,generator,image);
+        require((channel-image).norm() < 1e-12,
+                "sorted channel range missed a diagonal or replacement link");
+      }
   }
   for (const int rank : {0, 1, 5}) {
     auto a = coefficients(alpha.size(), rank, 0.2);
@@ -98,7 +108,16 @@ void check_case(int n, int ea, int eb) {
     for (const auto bytes : {64ULL * 1024 * 1024,
         static_cast<unsigned long long>((13 * rows + 1 + reductions) * sizeof(double))}) {
       const auto actual = xmvb::mcscf::factor_generator_adjoint(sigma,bra,ket,bytes);
-      const auto relaxed = xmvb::mcscf::factor_residual_generator_adjoint(sigma,bra,ket,0.37,bytes);
+      auto traced = bra;
+      std::size_t loaded = 0;
+      traced.load = [&](int first, int width, Eigen::Ref<Eigen::MatrixXd> x, Eigen::Ref<Eigen::MatrixXd> y) {
+        loaded += width; bra.load(first,width,x,y);
+      };
+      const auto plan = xmvb::mcscf::detail::plan_factor_panels(sigma,traced,ket,bytes,
+          xmvb::mcscf::detail::FactorContraction::Residual);
+      const auto relaxed = xmvb::mcscf::factor_residual_generator_adjoint(sigma,traced,ket,0.37,bytes);
+      require(plan.workspace_bytes <= bytes && loaded == plan.source_columns,
+              "joint plan exceeded its budget or miscounted source regeneration");
       require((actual-generator_reference).norm() < 8e-12 * std::max(1.0,generator_reference.norm()),
               "factor generator adjoint lost an oriented one-body index");
       require((relaxed-residual_reference).norm() < 8e-12 * std::max(1.0,residual_reference.norm()),

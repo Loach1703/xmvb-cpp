@@ -221,3 +221,9 @@ residual-weighted contractions (Section8.3). Accepted-state transition densities
 already use the latter factor order when advantageous. Full accepted residuals,
 directional carriers and the remaining generator/HVP consumers still require
 migration; these bounds do not yet describe the complete SCF pipeline.
+
+Section8.4 derives the joint source/channel work plan. It counts source
+regeneration, matching-link visits, range lookups and repeated output traffic.
+Links are generated in packed-channel order, so a channel tile visits its
+exact link interval without a string-by-channel offset table. Scheduling never
+changes the selected space or an amplitude/accuracy threshold.

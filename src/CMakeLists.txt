@@ -37,6 +37,7 @@ set(XMVB_MCSCF_SOURCES
   mcscf/ci/spin_channels.cpp
   mcscf/ci/factors.cpp
   mcscf/ci/factor_generator.cpp
+  mcscf/ci/factor_plan.cpp
   mcscf/ci/planner.cpp
   mcscf/ci/strings.cpp
   mcscf/ci/spin.cpp)

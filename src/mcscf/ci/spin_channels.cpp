@@ -1,11 +1,34 @@
 #include "mcscf/ci/sigma.hpp"
 
+#include <algorithm>
 #include <stdexcept>
+#include <utility>
 
 #include "core/openmp.hpp"
 #include "core/pair_index.hpp"
 
 namespace xmvb::mcscf {
+namespace {
+
+/** @brief Half-open range in immutable sorted link/occupation metadata. */
+std::pair<int,int> channel_range(const std::vector<int>& indices, int first, int last) {
+  if (indices.empty()) return {0,0};
+  const auto begin = first <= indices.front() ? indices.begin() :
+      std::lower_bound(indices.begin(),indices.end(),first);
+  const auto end = last > indices.back() ? indices.end() : std::lower_bound(begin,indices.end(),last);
+  return {static_cast<int>(begin-indices.begin()),static_cast<int>(end-indices.begin())};
+}
+
+/** @brief Orbital interval whose packed diagonal channels belong to this tile. */
+std::pair<int,int> diagonal_range(int n, int first, int last) {
+  int begin = 0, end = 0;
+  while (begin < n && core::PairIndex::packed_pair_index(begin,begin) < first) ++begin;
+  end = begin;
+  while (end < n && core::PairIndex::packed_pair_index(end,end) < last) ++end;
+  return {begin,end};
+}
+
+} // namespace
 
 Eigen::MatrixXd DirectCiSigmaAction::spin_generator_adjoint(bool beta,
     const Eigen::Ref<const Eigen::MatrixXd>& left,
@@ -76,19 +99,24 @@ void DirectCiSigmaAction::scatter_spin(bool beta,
       result.cols() != factors.cols() * count)
     throw std::invalid_argument("invalid single-spin channel scatter");
   const int width = factors.cols();
+  const auto diagonal = diagonal_range(n_orbitals_,first,first+count);
   result.setZero();
   const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(), result.size());
 #pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
   for (int index = 0; index < rows * width; ++index) {
     const int target = index % rows, column = index / rows;
     const auto add = [&](int source, int pair, double sign) {
-      if (pair >= first && pair < first + count)
-        result(target, (pair - first) * width + column) += sign * factors(source, column);
+      result(target, (pair - first) * width + column) += sign * factors(source, column);
     };
-    for (int occupied : graph.occupied[target])
-      add(target, core::PairIndex::packed_pair_index(occupied, occupied), 1.0);
+    const auto& occupied = graph.occupied[target];
+    const auto occ = channel_range(occupied,diagonal.first,diagonal.second);
+    for (int o = occ.first; o < occ.second; ++o) {
+      const int orbital = graph.occupied[target][o];
+      add(target, core::PairIndex::packed_pair_index(orbital, orbital), 1.0);
+    }
     const auto& links = graph.singles[target];
-    for (std::size_t i = 0; i < links.size(); ++i)
+    const auto range = channel_range(links.pairs,first,first+count);
+    for (int i = range.first; i < range.second; ++i)
       add(links.sources[i], links.pairs[i], links.signs[i]);
   }
 }
@@ -103,18 +131,23 @@ void DirectCiSigmaAction::gather_spin(bool beta,
       first + count > hamiltonian_pair_kernel_.rows())
     throw std::invalid_argument("invalid single-spin channel gather");
   const int width = images.cols();
+  const auto diagonal = diagonal_range(n_orbitals_,first,first+count);
   const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(), channels.size());
 #pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
   for (int index = 0; index < rows * width; ++index) {
     const int target = index % rows, column = index / rows;
     const auto add = [&](int source, int pair, double sign) {
-      if (pair >= first && pair < first + count)
-        images(target, column) += sign * channels(source, (pair - first) * width + column);
+      images(target, column) += sign * channels(source, (pair - first) * width + column);
     };
-    for (int occupied : graph.occupied[target])
-      add(target, core::PairIndex::packed_pair_index(occupied, occupied), 1.0);
+    const auto& occupied = graph.occupied[target];
+    const auto occ = channel_range(occupied,diagonal.first,diagonal.second);
+    for (int o = occ.first; o < occ.second; ++o) {
+      const int orbital = graph.occupied[target][o];
+      add(target, core::PairIndex::packed_pair_index(orbital, orbital), 1.0);
+    }
     const auto& links = graph.singles[target];
-    for (std::size_t i = 0; i < links.size(); ++i)
+    const auto range = channel_range(links.pairs,first,first+count);
+    for (int i = range.first; i < range.second; ++i)
       add(links.sources[i], links.pairs[i], links.signs[i]);
   }
 }

@@ -620,11 +620,9 @@ The immutable metadata and the required returned $d\times d$ gradient are
 separate. Both source
 and channel widths can decrease to respect the budget, without changing
 the represented amplitudes or a derivative tolerance.
-If the complete bra factors fit together with one ket column, their storage
-is reserved first and the ket width is maximized within the remaining budget.
-This removes bra regeneration across ket panels without increasing the
-leading Gram/moment arithmetic or the memory budget. Otherwise both families
-are streamed by the same equations.
+Source and channel widths are chosen jointly by the repeated-work estimate
+in Section~\ref{sec:factor-schedule}. A complete bra is retained when that
+schedule makes it worthwhile; otherwise the same equations stream its panels.
 
 With complete channel panels, the leading dense arithmetic is
 \begin{equation}
@@ -794,6 +792,74 @@ without $\Ha$, the channel sweep and residual outputs are absent, giving
 $(U_\alpha+U_\beta)(s_\ell+2s_r)+s_\ell s_r$ plus the same loading
 and reduction terms. No per-worker spin/product array is allocated.
 
+\subsection{Joint source/channel scheduling}\label{sec:factor-schedule}
+
+For source widths $s_\ell,s_r$ and channel width $p$, define
+\begin{equation}
+ N_\ell=\left\lceil r_\ell/s_\ell\right\rceil,\qquad
+ N_r=\left\lceil r_r/s_r\right\rceil,\qquad
+ N_P=\left\lceil d/p\right\rceil,\qquad U=U_\alpha+U_\beta.
+\end{equation}
+The leading dense channel and moment arithmetic does not depend on these
+widths, but source regeneration, link traversal and output traffic do.
+In particular, the number of loaded bra source columns is
+\begin{equation}
+ C_\ell=\begin{cases}
+ r_\ell,&s_\ell=r_\ell,\\
+ N_r(N_P+b)r_\ell,&s_\ell<r_\ell,
+ \end{cases}\qquad
+ b=\begin{cases}1,&\text{integral adjoint},\\2,&\text{residual generator}.
+ \end{cases}
+\end{equation}
+Here $b$ counts the channel-independent moment sweeps. If generating a
+source column costs $\ell_\ell$ nominal scalar operations and element
+touches, source work is $C_\ell\ell_\ell$. Each provider declares this work
+from its sparse writes, diagonal scales and exterior shear multiply--adds;
+directional providers add the oriented generator work. This metadata affects
+only the evaluation schedule, never the amplitudes, ranks or tolerances.
+
+The single-replacement links are generated in ascending packed-channel
+order. For each larger orbital index, ascending lower indices with opposite
+occupation generate every link once. A channel tile then uses binary ranges
+in the existing link and occupation arrays. It does not scan all links and
+reject those outside the tile, nor allocate a string-by-channel offset table.
+Let $J=\sum_\sigma U_\sigma n_\sigma(n-n_\sigma+1)$ count the single-spin
+occupation/replacement links. Across all source columns, matching-link visits
+scale as $r_rv(N_P)J$, where
+\begin{equation}
+ v_I(N_P)=N_P+1,\qquad v_R(N_P)=2N_P+3.
+\end{equation}
+Without channel ranges these counts were respectively $N_P^2+N_P$ and
+$2N_P^2+3N_P$. Binary lookup comparisons still repeat with those latter
+counts and are included through an upper comparison estimate $B$ per
+complete single-spin row family. The complete-channel case needs no binary
+lookup penalty.
+
+The schedule also counts repeated output reads and writes in the moment
+GEMMs, and repeated channel zero fills:
+\begin{align}
+ W_{\rm out}&=2U r_r(d+b)N_\ell,\\
+ W_{0,I}&=U r_r d(N_P+1),&
+ W_{0,R}&=2U r_r dN_P.
+\end{align}
+Combining these terms gives the nominal variable-work estimate
+\begin{equation}
+ \widehat W=C_\ell\ell_\ell+
+   r_r\bigl[3v(N_P)J+s(N_P)B\bigr]+W_0+W_{\rm out},
+\end{equation}
+where $s_I=N_P^2+N_P$, $s_R=2N_P^2+3N_P$, and the factor three counts
+one matching-link visit plus its multiply and add. Terms invariant across
+the candidate schedules are omitted. The estimate combines scalar work and
+element traffic without fitted hardware weights; it is not a prediction of
+absolute wall time, which requires native measurement.
+
+The planner searches feasible source and channel widths under the same memory
+bound. For each ket/channel choice it takes the largest feasible bra panel;
+ties use fewer moment panels. Partial-channel residual sweeps currently use
+one ket column because the shared forward workspace and moment buffers must
+use the same channel width. Full-channel sweeps allow wider ket panels.
+This is a workspace scheduling limit, not a restriction on the selected VB space.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};
@@ -815,6 +881,8 @@ Common factor sweep and integral adjoint &
 \path{mcscf/ci/factors.cpp} \\
 Generator and residual-weighted factor adjoints &
 \path{mcscf/ci/factor_generator.cpp} \\
+Joint source/channel work plan &
+\path{mcscf/ci/factor_plan.cpp} \\
 Hamiltonian channel kernel, Eq.~\eqref{eq:K} &
 \path{mcscf/ci/sigma.cpp}\newline
 \texttt{build\_hamiltonian\_pair\_kernel()} \\

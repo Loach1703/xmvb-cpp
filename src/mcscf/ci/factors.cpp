@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <utility>
@@ -57,7 +58,7 @@ void add_channel_gram(const Eigen::Ref<const Eigen::MatrixXd>& ca,
 
 void validate_source(const DirectCiSigmaAction& sigma, const SpinFactorSource& source) {
   if (source.n_alpha != sigma.n_alpha_strings() || source.n_beta != sigma.n_beta_strings() ||
-      source.count < 0 || !source.load)
+      source.count < 0 || !source.load || source.load_work < 0 || !std::isfinite(source.load_work))
     throw std::invalid_argument("invalid direct-CI spin-factor source");
 }
 
@@ -111,7 +112,10 @@ SpinFactorSource sum_factors(std::vector<SpinFactorSource> sources) {
       throw std::invalid_argument("incompatible factor sum");
     result.count += source.count;
     result.workspace_rows = std::max(result.workspace_rows, source.workspace_rows);
+    result.load_work += source.count * std::max(source.load_work,
+        static_cast<long double>(source.n_alpha)+source.n_beta);
   }
+  if (result.count) result.load_work /= result.count;
   result.load = [sources = std::move(sources)](int first, int width,
       Eigen::Ref<Eigen::MatrixXd> a, Eigen::Ref<Eigen::MatrixXd> b) {
     int offset = 0;
@@ -145,7 +149,9 @@ SpinFactorSource generator_factors(const DirectCiSigmaAction& sigma,
           first += count; offset += count;
         }
       }, std::max(source.workspace_rows,
-          static_cast<std::size_t>(std::max(source.n_alpha, source.n_beta)))};
+          static_cast<std::size_t>(std::max(source.n_alpha, source.n_beta))),
+          std::max(source.load_work, static_cast<long double>(source.n_alpha)+source.n_beta) +
+          sigma.spin_link_count() + 0.5L * (source.n_alpha+source.n_beta)};
 }
 
 FactorActionWorkspace::FactorActionWorkspace(const SpinFactorSource& source, int channels,
@@ -254,44 +260,9 @@ DirectCiIntegralAdjoint factor_integral_adjoint(const DirectCiSigmaAction& sigma
   // it controls the leading channel-Gram work, without changing the functional.
   const auto& bra = left.count >= right.count ? left : right;
   const auto& ket = left.count >= right.count ? right : left;
-  const std::size_t rows = static_cast<std::size_t>(left.n_alpha) + left.n_beta;
-  const std::size_t capacity = workspace_bytes / sizeof(double);
-  const auto payload = [&](std::size_t l, std::size_t r, std::size_t p) {
-    const int channel_families = p < static_cast<std::size_t>(d) ? 3 : 2;
-    return static_cast<long double>(rows) * (l + 2 * r + channel_families * r * p) +
-        static_cast<long double>(l) * r * p +
-        std::max(static_cast<long double>(bra.workspace_rows) * l,
-                 static_cast<long double>(ket.workspace_rows) * r);
-  };
-  if (payload(1, 1, 1) > capacity)
-    throw std::length_error("factor adjoint workspace cannot hold one channel/source panel");
-  int p = d;
-  if (payload(1, 1, p) > capacity) {
-    int low = 1, high = p - 1;
-    while (low < high) {
-      const int middle = low + (high - low + 1) / 2;
-      if (payload(1, 1, middle) <= capacity) low = middle; else high = middle - 1;
-    }
-    p = low;
-  }
-  // When possible, retain the complete bra within the SAME slab budget.
-  // This leaves the leading Gram/moment arithmetic unchanged but removes bra
-  // regeneration across ket/channel panels. In particular a directional source
-  // must not redo its exterior maps and one-body generators on every ket tile.
-  const bool resident_bra = payload(bra.count, 1, p) <= capacity;
-  int low = 1, high = ket.count;
-  while (low < high) {
-    const int middle = low + (high - low + 1) / 2;
-    if (payload(resident_bra ? bra.count : middle, middle, p) <= capacity) low = middle;
-    else high = middle - 1;
-  }
-  const int nr = low;
-  low = nr; high = bra.count;
-  while (low < high) {
-    const int middle = low + (high - low + 1) / 2;
-    if (payload(middle, nr, p) <= capacity) low = middle; else high = middle - 1;
-  }
-  const int nl = low;
+  const auto plan = detail::plan_factor_panels(sigma,bra,ket,workspace_bytes,
+      detail::FactorContraction::Integral);
+  const int nl = plan.left, nr = plan.right, p = plan.channels;
   const bool timing = profiling::phase_totals().enabled;
   const auto tick = [&] { return timing ? Clock::now() : Clock::time_point{}; };
   const auto seconds = [](auto a, auto b) { return std::chrono::duration<double>(b-a).count(); };
@@ -381,8 +352,8 @@ DirectCiIntegralAdjoint factor_integral_adjoint(const DirectCiSigmaAction& sigma
     }
   }
   if (timing)
-    std::fprintf(stderr, "XMVB_FACTOR_ADJOINT,bra=%d,ket=%d,left_tile=%d,right_tile=%d,channel_tile=%d,workspace_bytes=%.0Lf,load=%.9f,scatter=%.9f,covectors=%.9f,gram=%.9f\n",
-        bra.count, ket.count, nl, nr, p, sizeof(double) * payload(nl, nr, p),
+    std::fprintf(stderr, "XMVB_FACTOR_ADJOINT,bra=%d,ket=%d,left_tile=%d,right_tile=%d,channel_tile=%d,workspace_bytes=%zu,source_loads=%.0Lf,load=%.9f,scatter=%.9f,covectors=%.9f,gram=%.9f\n",
+        bra.count, ket.count, nl, nr, p, plan.workspace_bytes,plan.source_columns,
         load_time, scatter_time, covector_time, gram_time);
   return sigma.pullback_channel_kernel(gradient);
 }

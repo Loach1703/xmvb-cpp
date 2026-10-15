@@ -171,6 +171,26 @@ DirectCiSigmaAction::DirectCiSigmaAction(
   hamiltonian_pair_kernel_ = build_hamiltonian_pair_kernel(integrals, n_electrons);
 }
 
+std::size_t DirectCiSigmaAction::spin_link_count() const noexcept {
+  const std::size_t a = alpha_->occupied.front().size(), b = beta_connections().occupied.front().size();
+  return static_cast<std::size_t>(n_alpha_) * a * (n_orbitals_-a+1) +
+      static_cast<std::size_t>(n_beta_) * b * (n_orbitals_-b+1);
+}
+
+long double DirectCiSigmaAction::channel_search_work() const noexcept {
+  const auto comparisons = [](std::size_t count) {
+    int levels = 0;
+    for (; count; count >>= 1) ++levels;
+    return 2*levels;
+  };
+  const auto count = [&](std::size_t rows, std::size_t occupied) {
+    return static_cast<long double>(rows) *
+        (comparisons(occupied)+comparisons(occupied*(n_orbitals_-occupied)));
+  };
+  return count(n_alpha_,alpha_->occupied.front().size()) +
+      count(n_beta_,beta_connections().occupied.front().size());
+}
+
 Eigen::MatrixXd DirectCiSigmaAction::diagonal(
     const Eigen::Ref<const Eigen::MatrixXd>& one_electron) const {
   if (one_electron.rows()!=n_orbitals_ || one_electron.cols()!=n_orbitals_ ||
@@ -264,13 +284,15 @@ DirectCiSigmaAction::build_spin_connections(
           removed);
     };
 
-    for (const int removed_from_target : target_occupied) {
-      for (const int inserted_into_source : target_virtual) {
-        const std::uint64_t source_mask =
-            (masks[target] ^
-             (std::uint64_t{1} << removed_from_target)) |
-            (std::uint64_t{1} << inserted_into_source);
-        add_source(source_mask);
+    // Increasing maximum/minimum orbital indices are packed-channel order.
+    // Opposite occupations generate every single replacement exactly once;
+    // no sorting copy or channel-by-string offset table is needed.
+    for (int high = 0; high < n_orbitals_; ++high) {
+      const auto& opposite = masks[target] & (std::uint64_t{1} << high)
+          ? target_virtual : target_occupied;
+      for (const int low : opposite) {
+        if (low >= high) break;
+        add_source(masks[target] ^ (std::uint64_t{1} << high) ^ (std::uint64_t{1} << low));
       }
     }
   }

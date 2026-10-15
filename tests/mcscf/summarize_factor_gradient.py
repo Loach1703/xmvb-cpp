@@ -83,11 +83,24 @@ def generators(artifacts, output):
             reference_path = artifact / f"{n}-factor-generator-reference.out"
             reference = values(reference_path) if reference_path.exists() else {}
             checked = int(reference.get("reference_checked",0))
+            check_path = artifact / f"{n}-direction-check.out"
+            directional = values(check_path) if check_path.exists() else {}
+            directional_checked = int(directional.get("directional_checked",0))
+            phase_path = artifact / f"{n}-direction-check.err"
+            plans = re.findall(r"XMVB_FACTOR_GENERATOR,hamiltonian=1,([^\n]+)",
+                               phase_path.read_text() if phase_path.exists() else "")
+            plan = dict(item.split("=",1) for item in plans[-1].split(",")) if plans else {}
             def number(key):
                 return float(reference[key]) if checked else None
             rows.append(dict(
                 run=artifact.name, orbitals=n, node=(artifact / "node.txt").read_text().strip(),
                 reference_checked=checked,
+                directional_checked=directional_checked,
+                directional_generator_error=float(directional["directional_generator_error"]) if directional_checked else None,
+                directional_residual_error=float(directional["directional_residual_error"]) if directional_checked else None,
+                left_tile=plan.get("left_tile"), right_tile=plan.get("right_tile"),
+                channel_tile=plan.get("channels"), workspace_bytes=plan.get("workspace_bytes"),
+                source_columns=plan.get("source_columns"), source_calls=plan.get("source_calls"),
                 generator_seconds=float(native["warm_generator_seconds"]),
                 residual_seconds=float(native["warm_residual_seconds"]),
                 rss_mib=float(native["native_max_rss_kib"])/1024,

@@ -21,7 +21,9 @@ public:
   FactorMoments(const SpinFactorSource& source, int width, int columns)
       : source_(source), width_(width), a_(source.n_alpha,width),
         b_(source.n_beta,width), moment_(width,columns) {
-    if (width_ == source_.count) source_.load(0,width_,a_,b_);
+    if (width_ == source_.count) {
+      source_.load(0,width_,a_,b_); loads_ = 1; columns_ = width_;
+    }
   }
 
   void add(const Eigen::Ref<const Eigen::MatrixXd>& alpha,
@@ -31,7 +33,9 @@ public:
     for (int first = 0; first < source_.count; first += width_) {
       const int count = std::min(width_,source_.count-first);
       auto a = a_.leftCols(count), b = b_.leftCols(count);
-      if (width_ != source_.count) source_.load(first,count,a,b);
+      if (width_ != source_.count) {
+        source_.load(first,count,a,b); ++loads_; columns_ += count;
+      }
       auto moment = moment_.topLeftCorner(count,alpha.cols());
       detail::transpose_product(b,beta,moment);
       if (scale != 1.0) moment *= scale;
@@ -42,10 +46,14 @@ public:
     }
   }
 
+  std::size_t loads() const noexcept { return loads_; }
+  std::size_t columns() const noexcept { return columns_; }
+
 private:
   const SpinFactorSource& source_;
   int width_;
   Eigen::MatrixXd a_, b_, moment_;
+  std::size_t loads_ = 0, columns_ = 0;
 };
 
 Eigen::MatrixXd generator_adjoint(const DirectCiSigmaAction& sigma,
@@ -63,44 +71,9 @@ Eigen::MatrixXd generator_adjoint(const DirectCiSigmaAction& sigma,
   const auto& bra = transpose ? right : left;
   const auto& ket = transpose ? left : right;
   const std::size_t rows = static_cast<std::size_t>(left.n_alpha) + left.n_beta;
-  const std::size_t capacity = workspace_bytes / sizeof(double);
-  const std::size_t reduction = static_cast<std::size_t>(
-      effective_openmp_thread_count()+1) * n * n;
-  const auto payload = [&](std::size_t l, std::size_t r, std::size_t p) {
-    const long double source = static_cast<long double>(rows) * (l + (hamiltonian ? 3 : 2)*r);
-    const long double moments = static_cast<long double>(l)*r*std::max<std::size_t>(1,p);
-    const long double loading = std::max(static_cast<long double>(bra.workspace_rows)*l,
-                                         static_cast<long double>(ket.workspace_rows)*r);
-    const long double sweep = hamiltonian ? static_cast<long double>(rows)*r*(3*p+6) : 0;
-    return source + moments + loading + sweep + reduction;
-  };
-  int p = hamiltonian ? d : 0;
-  if (payload(1,1,hamiltonian ? 1 : 0) > capacity)
-    throw std::length_error("factor generator workspace cannot hold one source/channel panel");
-  if (hamiltonian && payload(1,1,p) > capacity) {
-    int low = 1, high = d-1;
-    while (low < high) {
-      const int middle = low + (high-low+1)/2;
-      if (payload(1,1,middle) <= capacity) low = middle; else high = middle-1;
-    }
-    p = low;
-  }
-  const bool resident = payload(bra.count,1,p) <= capacity;
-  int low = 1, high = hamiltonian && p < d ? 1 : ket.count;
-  while (low < high) {
-    const int middle = low + (high-low+1)/2;
-    if (payload(resident ? bra.count : middle,middle,p) <= capacity) low = middle;
-    else high = middle-1;
-  }
-  const int nr = low;
-  low = nr; high = bra.count;
-  // H-left sources are not rank-sorted. A smaller bra is perfectly valid.
-  low = std::min(low,high);
-  while (low < high) {
-    const int middle = low + (high-low+1)/2;
-    if (payload(middle,nr,p) <= capacity) low = middle; else high = middle-1;
-  }
-  const int nl = low;
+  const auto plan = detail::plan_factor_panels(sigma,bra,ket,workspace_bytes,
+      hamiltonian ? detail::FactorContraction::Residual : detail::FactorContraction::Generator);
+  const int nl = plan.left, nr = plan.right, p = plan.channels;
   const bool timing = profiling::phase_totals().enabled;
   const auto start = timing ? Clock::now() : Clock::time_point{};
   FactorMoments moments(bra,nl,nr*std::max(1,p));
@@ -153,8 +126,8 @@ Eigen::MatrixXd generator_adjoint(const DirectCiSigmaAction& sigma,
     result += sigma.spin_generator_adjoint(true,out_b,bb);
   }
   if (timing)
-    std::fprintf(stderr,"XMVB_FACTOR_GENERATOR,hamiltonian=%d,bra=%d,ket=%d,left_tile=%d,right_tile=%d,channels=%d,workspace_bytes=%.0Lf,seconds=%.9f\n",
-        hamiltonian,bra.count,ket.count,nl,nr,p,sizeof(double)*payload(nl,nr,p),
+    std::fprintf(stderr,"XMVB_FACTOR_GENERATOR,hamiltonian=%d,bra=%d,ket=%d,left_tile=%d,right_tile=%d,channels=%d,workspace_bytes=%zu,planned_source_columns=%.0Lf,source_columns=%zu,source_calls=%zu,seconds=%.9f\n",
+        hamiltonian,bra.count,ket.count,nl,nr,p,plan.workspace_bytes,plan.source_columns,moments.columns(),moments.loads(),
         std::chrono::duration<double>(Clock::now()-start).count());
   if (transpose) return result.transpose();
   return result;

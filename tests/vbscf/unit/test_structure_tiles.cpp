@@ -1465,7 +1465,7 @@ void benchmark_factor_adjoint(int n, bool compare_reference, bool directional = 
 }
 
 /** @brief Generator/residual adjoints; full carriers are reference-process only. */
-void benchmark_factor_generators(int n, bool compare_reference) {
+void benchmark_factor_generators(int n, bool compare_reference, bool check_direction = false) {
   require(n == 12 || n == 14 || n == 16, "factor generator benchmark supports 12/14/16 orbitals");
   const auto fixture = make_fixture(n,n/2,n/2);
   Pairing adjacent;
@@ -1505,6 +1505,24 @@ void benchmark_factor_generators(int n, bool compare_reference) {
   require(getrusage(RUSAGE_SELF,&usage) == 0, "getrusage failed");
   const auto native_rss = usage.ru_maxrss;
   double sigma_seconds = 0, g_seconds = 0, r_seconds = 0, g_error = 0, r_error = 0;
+  double direction_seconds = 0, directional_g_error = 0, directional_r_error = 0;
+  if (check_direction) {
+    Eigen::MatrixXd kappa(n,n);
+    for (int j = 0; j < n; ++j)
+      for (int i = 0; i < n; ++i) kappa(i,j) = 0.02 * std::sin(0.13 * (i+1) * (j+3));
+    const auto tangent = xmvb::mcscf::generator_factors(sigma,ket,kappa);
+    const auto start = Clock::now();
+    const auto integral = xmvb::mcscf::factor_integral_adjoint(sigma,bra,tangent);
+    const double h = (integral.one_electron.array()*integrals.one_electron.array()).sum() +
+        (integral.pair_kernel.array()*integrals.pair_kernel.array()).sum();
+    // Number-operator trace gives <Y,G(kappa)Y> without a product carrier.
+    const double overlap = xmvb::mcscf::factor_generator_adjoint(sigma,bra,tangent).trace()/n;
+    directional_g_error = std::abs((g.array()*kappa.array()).sum()-overlap);
+    directional_r_error = std::abs((r.array()*kappa.array()).sum()-(h-0.37*overlap));
+    direction_seconds = std::chrono::duration<double>(Clock::now()-start).count();
+    require(directional_g_error < 2e-10 && directional_r_error < 2e-10,
+            "large factor generator violates its independent integral/number contraction");
+  }
   if (compare_reference) {
     Eigen::MatrixXd a(na,bra.count), b(nb,bra.count);
     bra.load(0,bra.count,a,b);
@@ -1535,6 +1553,10 @@ void benchmark_factor_generators(int n, bool compare_reference) {
             << "residual_total_reference_seconds=" << sigma_seconds+r_seconds << '\n'
             << "generator_error=" << g_error << '\n' << "residual_error=" << r_error << '\n'
             << "native_max_rss_kib=" << native_rss << '\n'
+            << "directional_checked=" << check_direction << '\n'
+            << "directional_generator_error=" << directional_g_error << '\n'
+            << "directional_residual_error=" << directional_r_error << '\n'
+            << "directional_reference_seconds=" << direction_seconds << '\n'
             << "reference_checked=" << compare_reference << '\n';
 }
 
@@ -1654,6 +1676,8 @@ int main(int argc, char** argv) {
       benchmark_factor_generators(std::stoi(argv[2]), false);
     } else if (argc == 3 && std::string(argv[1]) == "--factor-generator-reference") {
       benchmark_factor_generators(std::stoi(argv[2]), true);
+    } else if (argc == 2 && std::string(argv[1]) == "--factor-generator-check16") {
+      benchmark_factor_generators(16, false, true);
     } else if (argc == 3 && std::string(argv[1]) == "--paths12") {
       benchmark_selected12(std::stoi(argv[2]), false, true);
     } else if (argc == 3 && std::string(argv[1]) == "--gram12") {
@@ -1689,7 +1713,7 @@ int main(int argc, char** argv) {
           "--selected12 N|--selected12-parity N|--sources12 N|--paths12 N|--gram12 N|"
           "--source-size N|--source-size-parity N|--source-cover-size N|--source-cover-reference N|"
           "--factor-adjoint N|--factor-adjoint-reference N|--factor-direction N|--factor-direction-reference N|"
-          "--factor-generator N|--factor-generator-reference N]");
+          "--factor-generator N|--factor-generator-reference N|--factor-generator-check16]");
     }
     return 0;
   } catch (const std::exception& error) {

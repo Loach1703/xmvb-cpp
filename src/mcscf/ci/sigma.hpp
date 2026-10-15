@@ -84,6 +84,10 @@ public:
   int n_alpha_strings() const noexcept { return n_alpha_; }
   int n_beta_strings() const noexcept { return n_beta_; }
   int n_orbitals() const noexcept { return n_orbitals_; }
+  /** @brief Occupation plus single-replacement links in both complete spin spaces. */
+  std::size_t spin_link_count() const noexcept;
+  /** @brief Upper comparison work for the two sorted channel/occupation lookups. */
+  long double channel_search_work() const noexcept;
 
   /** @brief Pulls a K-channel cotangent back to symmetric h/(pq|rs) adjoints.
    * Shared by product and source-factor contractions; includes the absorbed

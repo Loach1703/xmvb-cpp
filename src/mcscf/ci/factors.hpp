@@ -19,6 +19,10 @@ struct SpinFactorSource {
   std::function<void(int, int, Eigen::Ref<Eigen::MatrixXd>, Eigen::Ref<Eigen::MatrixXd>)> load;
   /** Temporary doubles per source column during load; excludes output views. */
   std::size_t workspace_rows = 0;
+  /** Nominal scalar operations/element touches per column; scheduling only.
+   * Zero declares no work beyond filling the output rows. Never a tolerance.
+   */
+  long double load_work = 0;
 };
 
 /** @brief Exact concatenation of factor families; no rank truncation or carrier. */

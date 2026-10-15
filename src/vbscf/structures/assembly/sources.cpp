@@ -192,7 +192,9 @@ mcscf::SpinFactorSource SpinSources::orthogonal_source(const std::vector<int>& p
           offset += count;
         }
         alpha.apply_left_block(a); beta.apply_left_block(b);
-      }};
+      }, 0, 2.0L * (alpha.dimension()+beta.dimension()) +
+          2.0L * (alpha.shear_pair_count()+beta.shear_pair_count()) +
+          2.0L * groups.size()/std::max(1,rank) + 1 + (project ? alpha.dimension() : 0)};
 }
 
 } // namespace xmvb::vb

@@ -35,7 +35,7 @@ sha256sum "$source_dir/build/src/test_structure_tiles" > "$artifact/binary.sha25
 sha256sum "$source_dir/build/src/test_ci_factors" >> "$artifact/binary.sha256"
 sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_tiles.cpp,sources.cpp,sources.hpp,action.cpp} \
  "$source_dir/tests/vbscf/unit/test_structure_tiles.cpp" > "$artifact/sources.sha256"
-sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,factors_internal.hpp,factor_generator.cpp,sigma.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
+sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,factors_internal.hpp,factor_generator.cpp,factor_plan.cpp,sigma.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" \
  -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric)$' \
@@ -72,6 +72,14 @@ for count in 1 3 20 132; do
   "$source_dir/build/src/test_structure_tiles" --selected12 "$count" \
   > "$artifact/$count-selected12.out" 2> "$artifact/$count-selected12.err"
 done
+srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+ /usr/bin/time -v -o "$artifact/16-factor-generator.time" \
+ "$source_dir/build/src/test_structure_tiles" --factor-generator 16 \
+ > "$artifact/16-factor-generator.out" 2> "$artifact/16-factor-generator.err"
+srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+ env XMVB_PHASE_TIMING=1 /usr/bin/time -v -o "$artifact/16-direction-check.time" \
+ "$source_dir/build/src/test_structure_tiles" --factor-generator-check16 \
+ > "$artifact/16-direction-check.out" 2> "$artifact/16-direction-check.err"
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  env XMVB_PHASE_TIMING=1 "$source_dir/build/src/test_structure_tiles" --source-size 14 \
  > "$artifact/phases.out" 2> "$artifact/phases.err"
