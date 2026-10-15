@@ -271,8 +271,7 @@ void DirectCiSigmaAction::apply_tiled(
 
       Eigen::Map<const Eigen::MatrixXd> input(workspace.get(), n_halo,
           static_cast<Eigen::Index>(n_columns) * width);
-      // Scatter and alpha adjoint traverse channels of a target node. Store
-      // that channel vector contiguously, not one cache-line/page per entry.
+      // Keep each node's channel vector contiguous through scatter and GEMM.
       using ChannelMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
       Eigen::Map<ChannelMatrix> scattered(workspace.get() + panel_size, count * width, pairs);
       Eigen::Map<ChannelMatrix> transformed(workspace.get() + panel_size + channel_size,
@@ -310,13 +309,21 @@ void DirectCiSigmaAction::apply_tiled(
           // Evaluate E^T K E directly in the caller's output panel. The callback
           // owns panel lifetimes and schedules disjoint beta/RHS/alpha ranges.
           const DirectCiColumnAccumulator accumulate = [&](int source, int v,
-              int first, int last, double* destination) {
+              int first, int last, double* destination, const std::uint8_t* allowed) {
+            // Trim structural zeros once, before visiting any beta edge.
+            // A completely unsupported stripe has no adjoint work at all.
+            if (allowed) {
+              while (first < last && !allowed[halo[first]]) ++first;
+              while (first < last && !allowed[halo[last - 1]]) --last;
+              if (first == last) return;
+            }
             const int same = same_group[source];
-            for (int local = first; local < last; ++local) {
-              const int a = halo[local];
-              double sum = 0;
-              if (same >= 0) {
-                const int* index = target_index.data() + static_cast<std::size_t>(same) * n_halo;
+            if (same >= 0) {
+              const int* index = target_index.data() + static_cast<std::size_t>(same) * n_halo;
+              for (int local = first; local < last; ++local) {
+                const int a = halo[local];
+                if (allowed && !allowed[a]) continue;
+                double sum = 0;
                 if (index[local] >= 0) {
                   const int row = v * count + index[local];
                   for (const int p : alpha_->occupied[a])
@@ -331,13 +338,22 @@ void DirectCiSigmaAction::apply_tiled(
                   if (target >= 0)
                     sum += links.signs[link] * transformed(v * count + target, links.pairs[link]);
                 }
+                destination[a] += sum;
               }
-              for (int edge = offsets[source]; edge < offsets[source + 1]; ++edge) {
-                const auto& link = incoming[edge];
-                const int target = target_index[static_cast<std::size_t>(link.group) * n_halo + local];
-                if (target >= 0) sum += link.sign * transformed(v * count + target, link.pair);
+            }
+            // One beta edge fixes the channel, sign and target-row map for
+            // the entire alpha range. Do not rediscover them for every pixel.
+            for (int edge = offsets[source]; edge < offsets[source + 1]; ++edge) {
+              const auto& link = incoming[edge];
+              const int* index = target_index.data() + static_cast<std::size_t>(link.group) * n_halo;
+              const double* values = transformed.data() +
+                  static_cast<std::size_t>(v) * count * pairs + link.pair;
+              const double sign = link.sign;
+              for (int local = first; local < last; ++local) {
+                const int a = halo[local], target = index[local];
+                if (target >= 0 && (!allowed || allowed[a]))
+                  destination[a] += sign * values[static_cast<std::size_t>(target) * pairs];
               }
-              destination[a] += sum;
             }
           };
           const auto write_start = tick();

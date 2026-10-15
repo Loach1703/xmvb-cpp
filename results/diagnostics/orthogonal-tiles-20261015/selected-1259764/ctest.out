@@ -1,0 +1,656 @@
+Internal ctest changing into directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build
+UpdateCTestConfiguration  from :/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/DartConfiguration.tcl
+Parse Config file:/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/DartConfiguration.tcl
+UpdateCTestConfiguration  from :/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/DartConfiguration.tcl
+Parse Config file:/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/DartConfiguration.tcl
+Test project /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 15
+      Start 15: eigensolver_equivalence_f2
+
+15: Test command: /opt/cmake/3.30.5/bin/cmake "-DXMVB_EXECUTABLE=/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/xmvb-cpp.exe" "-DXMVB_INPUT=/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/testdata/vbscf/F2.xmi" "-P" "/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/tests/output/check_eigensolver_equivalence.cmake"
+15: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015
+15: Environment variables: 
+15:  OMP_NUM_THREADS=1
+15:  OPENBLAS_NUM_THREADS=1
+15:  GOTO_NUM_THREADS=1
+15:  MKL_NUM_THREADS=1
+15: Test timeout computed to be: 1500
+ 1/12 Test #15: eigensolver_equivalence_f2 .......   Passed    0.13 sec
+test 16
+      Start 16: eigensolver_equivalence_f2_oeo
+
+16: Test command: /opt/cmake/3.30.5/bin/cmake "-DXMVB_EXECUTABLE=/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/xmvb-cpp.exe" "-DXMVB_INPUT=/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/testdata/vbscf/F2_OEO.xmi" "-P" "/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/tests/output/check_eigensolver_equivalence.cmake"
+16: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015
+16: Environment variables: 
+16:  OMP_NUM_THREADS=1
+16:  OPENBLAS_NUM_THREADS=1
+16:  GOTO_NUM_THREADS=1
+16:  MKL_NUM_THREADS=1
+16: Test timeout computed to be: 1500
+ 2/12 Test #16: eigensolver_equivalence_f2_oeo ...   Passed    0.15 sec
+test 17
+      Start 17: ciah
+
+17: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/test_ciah
+17: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src
+17: Test timeout computed to be: 1500
+ 3/12 Test #17: ciah .............................   Passed    0.01 sec
+test 18
+      Start 18: ci_transport
+
+18: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/test_ci_transport
+18: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src
+18: Test timeout computed to be: 1500
+18: ci_transport max_error=4.68039495301e-08 nonclosure_residual=0.0140568225203
+ 4/12 Test #18: ci_transport .....................   Passed    0.01 sec
+test 19
+      Start 19: representation_overlap
+
+19: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/test_representation_overlap
+19: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src
+19: Test timeout computed to be: 1500
+19: Selected-space representation cross-Gram and derivatives: passed
+ 5/12 Test #19: representation_overlap ...........   Passed    0.01 sec
+test 21
+      Start 21: selected_ci_transport
+
+21: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/test_selected_ci_transport
+21: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src
+21: Test timeout computed to be: 1500
+21: Selected-space CI transport gradient and curvature: passed
+ 6/12 Test #21: selected_ci_transport ............   Passed    0.02 sec
+test 34
+      Start 34: orthogonal_direct_ci
+
+34: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/test_orthogonal_direct_ci
+34: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src
+34: Test timeout computed to be: 1500
+34: orthogonal direct-CI planner and exterior transform: passed
+ 7/12 Test #34: orthogonal_direct_ci .............   Passed    1.46 sec
+test 35
+      Start 35: structure_tiles
+
+35: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/test_structure_tiles
+35: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src
+35: Test timeout computed to be: 1500
+35: generated_contraction n=4 na=2 nb=2 absolute_error=1.4210854715202004e-14 outside_support_contribution=0.016905508240072451
+35: generated_contraction n=5 na=3 nb=2 absolute_error=1.1368683772161603e-13 outside_support_contribution=0.03993362434519282
+35: generated_contraction n=6 na=3 nb=3 absolute_error=2.7284841053187847e-12 outside_support_contribution=0.14702530830465263
+35: generated_contraction n=5 na=2 nb=1 absolute_error=2.4868995751603507e-14 outside_support_contribution=0.025819404842014351
+35: structure tiles: PASS
+ 8/12 Test #35: structure_tiles ..................   Passed    0.12 sec
+test 37
+      Start 37: coupled_structure
+
+37: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/test_coupled_structure
+37: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src
+37: Environment variables: 
+37:  OMP_NUM_THREADS=1
+37:  OPENBLAS_NUM_THREADS=1
+37: Test timeout computed to be: 1500
+ 9/12 Test #37: coupled_structure ................   Passed    0.01 sec
+test 38
+      Start 38: davidson
+
+38: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/test_davidson
+38: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src
+38: Environment variables: 
+38:  OMP_NUM_THREADS=1
+38:  OPENBLAS_NUM_THREADS=1
+38: Test timeout computed to be: 1500
+38: default Davidson budgets small_subspace=3 large_subspace=2091 PASS
+38: CI stationarity shift=0 iterations=2 gradient_error=2.11758e-18 stationarity=1.62934e-17 PASS
+38: CI stationarity shift=-2000 iterations=2 gradient_error=2.86602e-14 stationarity=4.54747e-13 PASS
+38: orthogonal n=80 roots=1 iterations=79 actions=79 subspace=80 seconds=0.00738171 eigenvalue_error=6.71772e-16 eigenvector_error=0 s_orthonormality_error=0 overlap_image_error=0 residual=4.36165e-15 PASS
+38: orthogonal n=80 roots=3 iterations=34 actions=34 subspace=78 seconds=0.00476126 eigenvalue_error=3.43475e-16 eigenvector_error=2.22045e-16 s_orthonormality_error=6.96875e-15 overlap_image_error=0 residual=1.05069e-08 PASS
+38: orthogonal n=80 roots=5 iterations=15 actions=15 subspace=80 seconds=0.00285941 eigenvalue_error=8.01442e-16 eigenvector_error=6.66134e-16 s_orthonormality_error=3.6562e-13 overlap_image_error=0 residual=1.18474e-14 PASS
+38: orthogonal n=80 roots=8 iterations=9 actions=9 subspace=80 seconds=0.00239719 eigenvalue_error=2.13468e-13 eigenvector_error=3.33067e-16 s_orthonormality_error=1.37034e-13 overlap_image_error=0 residual=8.13498e-13 PASS
+38: orthogonal n=120 roots=1 iterations=119 actions=119 subspace=120 seconds=0.0205853 eigenvalue_error=3.42933e-16 eigenvector_error=3.33067e-16 s_orthonormality_error=6.66134e-16 overlap_image_error=0 residual=4.80506e-15 PASS
+38: orthogonal n=120 roots=3 iterations=39 actions=39 subspace=120 seconds=0.0102116 eigenvalue_error=1.20607e-15 eigenvector_error=6.66134e-16 s_orthonormality_error=7.77156e-16 overlap_image_error=0 residual=5.90815e-15 PASS
+38: orthogonal n=120 roots=5 iterations=23 actions=23 subspace=120 seconds=0.00790112 eigenvalue_error=1.44329e-15 eigenvector_error=6.66134e-16 s_orthonormality_error=5.02584e-14 overlap_image_error=0 residual=1.3973e-14 PASS
+38: orthogonal n=120 roots=8 iterations=14 actions=14 subspace=120 seconds=0.00646143 eigenvalue_error=5.42448e-14 eigenvector_error=6.66134e-16 s_orthonormality_error=1.70224e-13 overlap_image_error=0 residual=1.01703e-12 PASS
+38: orthogonal n=200 roots=1 iterations=206 actions=206 subspace=128 seconds=0.0536714 eigenvalue_error=9.08887e-16 eigenvector_error=2.22045e-16 s_orthonormality_error=0 overlap_image_error=0 residual=1.2861e-08 PASS
+38: orthogonal n=200 roots=3 iterations=81 actions=81 subspace=127 seconds=0.0308862 eigenvalue_error=2.57346e-15 eigenvector_error=0 s_orthonormality_error=6.91674e-16 overlap_image_error=0 residual=7.49191e-09 PASS
+38: orthogonal n=200 roots=5 iterations=54 actions=54 subspace=125 seconds=0.0266634 eigenvalue_error=3.03447e-15 eigenvector_error=4.88498e-15 s_orthonormality_error=1.09945e-14 overlap_image_error=0 residual=7.44596e-09 PASS
+38: orthogonal n=200 roots=8 iterations=32 actions=32 subspace=192 seconds=0.0313427 eigenvalue_error=4.98941e-14 eigenvector_error=3.33067e-16 s_orthonormality_error=1.35736e-15 overlap_image_error=0 residual=1.09575e-08 PASS
+38: orthogonal n=400 roots=1 iterations=409 actions=409 subspace=128 seconds=0.149433 eigenvalue_error=1.68721e-15 eigenvector_error=0 s_orthonormality_error=4.44089e-16 overlap_image_error=0 residual=1.38308e-08 PASS
+38: orthogonal n=400 roots=3 iterations=157 actions=157 subspace=127 seconds=0.0861327 eigenvalue_error=2.268e-15 eigenvector_error=6.66134e-16 s_orthonormality_error=1.22125e-15 overlap_image_error=0 residual=1.16672e-08 PASS
+38: orthogonal n=400 roots=5 iterations=113 actions=113 subspace=125 seconds=0.0829347 eigenvalue_error=5.12286e-15 eigenvector_error=1.66533e-15 s_orthonormality_error=4.44089e-15 overlap_image_error=0 residual=1.58044e-08 PASS
+38: orthogonal n=400 roots=8 iterations=68 actions=68 subspace=192 seconds=0.104878 eigenvalue_error=1.88441e-14 eigenvector_error=5.55112e-16 s_orthonormality_error=1.88738e-15 overlap_image_error=0 residual=1.82312e-08 PASS
+38: orthogonal n=600 roots=1 iterations=616 actions=616 subspace=128 seconds=0.272699 eigenvalue_error=7.86927e-16 eigenvector_error=2.66454e-15 s_orthonormality_error=4.32987e-15 overlap_image_error=0 residual=1.52843e-08 PASS
+38: orthogonal n=600 roots=3 iterations=246 actions=246 subspace=127 seconds=0.209866 eigenvalue_error=1.45578e-15 eigenvector_error=8.88178e-16 s_orthonormality_error=3.55271e-15 overlap_image_error=0 residual=1.67636e-08 PASS
+38: orthogonal n=600 roots=5 iterations=175 actions=175 subspace=125 seconds=0.204678 eigenvalue_error=1.07687e-14 eigenvector_error=1.33227e-15 s_orthonormality_error=3.292e-15 overlap_image_error=0 residual=1.51778e-08 PASS
+38: orthogonal n=600 roots=8 iterations=104 actions=104 subspace=192 seconds=0.22517 eigenvalue_error=8.04093e-15 eigenvector_error=9.99201e-16 s_orthonormality_error=2.41156e-15 overlap_image_error=0 residual=1.2347e-08 PASS
+38: nonorthogonal n=160 roots=4 iterations=40 actions=40 subspace=128 seconds=0.0137807 eigenvalue_error=3.90963e-16 eigenvector_error=0 s_orthonormality_error=4.87322e-16 overlap_image_error=9.99201e-16 residual=1.49781e-09 PASS
+38: scaled nonorthogonal n=128 roots=1 iterations=101 actions=101 subspace=102 seconds=0.0133315 eigenvalue_error=1.6881e-16 eigenvector_error=0 s_orthonormality_error=2.22045e-16 overlap_image_error=1.38778e-16 residual=3.52823e-09 PASS
+38: recycled nonorthogonal n=160 roots=4 iterations=1 actions=1 residual=1.49781e-09 PASS
+38: nonorthogonal callback inverse calls=153 observations=40 iterations=40 residual=1.49781e-09 PASS
+38: invalid callback inverse PASS
+38: outer-accuracy Davidson iterations=219 eigenvalue_error=9.44126e-15 residual=8.85823e-08 PASS
+38: physical residual old=0.0001 certified=8.67112e-16 PASS
+38: bounded multiroot restart iterations=246 actions=246 subspace=127 eigenvalue_error=1.45578e-15 PASS
+38: ALL PASSED
+10/12 Test #38: davidson .........................   Passed    2.36 sec
+test 41
+      Start 41: neo
+
+41: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/test_neo
+41: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src
+41: Environment variables: 
+41:  OMP_NUM_THREADS=1
+41:  OPENBLAS_NUM_THREADS=1
+41: Test timeout computed to be: 1500
+11/12 Test #41: neo ..............................   Passed    0.02 sec
+test 65
+      Start 65: neo_f2
+
+65: Test command: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build/src/xmvb-cpp.exe "/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/testdata/vbscf/F2.xmi" "--optimizer-backend" "neo" "--eigensolver" "davidson" "--max-iterations" "30" "--gradient-tolerance" "1e-3" "--energy-tolerance" "1e-7"
+65: Working Directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015
+65: Environment variables: 
+65:  OMP_NUM_THREADS=4
+65:  OPENBLAS_NUM_THREADS=1
+65:  GOTO_NUM_THREADS=1
+65:  MKL_NUM_THREADS=1
+65: Test timeout computed to be: 1500
+65: 
+65: 
+65:     *************************************************************
+65:                                                                
+65:            M   M         MM MM         M   M         MMMM       
+65:             M M          M M M         M   M         M   M      
+65:              M           M M M          M M          MMMM       
+65:             M M          M   M          M M          M   M      
+65:            M   M         M   M           M           MMMM       
+65:                                                                
+65:     *************************************************************
+65:                                                                
+65:                     XMVB-CPP                                   
+65:                     Version: 0.1.0
+65:                                                                
+65:     Developed by: Tao Xia                                     
+65:     Software development assistance: OpenAI Codex             
+65: 
+65: 
+65:  Job started at 2026-10-15 20:28:58  with     8 processors.
+65: 
+65: Running Command: xmvb-cpp.exe /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/testdata/vbscf/F2.xmi
+65: 
+65: Work Directory at /home/guqqgroup/xiatao/work/xmvb-casscf-20261015 PID = 1968875
+65: 
+65: ---------------Input File---------------
+65: F2 VBSCF with 3 structures
+65: $CTRL
+65: VBSCF
+65: STR=FULL NAO=2 NAE=2 ISCF=7
+65: EIGENSOLVER=DAVIDSON
+65: ORBTYP=HAO FRGTYP=SAO
+65: INT=LIBCINT BASIS=CC-PVDZ
+65: $END
+65: $FRAG
+65: 1*6
+65: SPZDXXDYYDZZ 1
+65: SPZDXXDYYDZZ 2
+65: PXDXZ 1
+65: PXDXZ 2
+65: PYDYZ 1
+65: PYDYZ 2
+65: $END
+65: $ORB
+65: 1*10
+65: 1
+65: 2
+65: 1
+65: 2
+65: 3
+65: 4
+65: 5
+65: 6
+65: 1
+65: 2
+65: $END
+65: $GEO
+65: F 0.0 0.0 0.0
+65: F 0.0 0.0 1.4
+65: $END
+65: ---------------End of Input--------------
+65: 
+65:  ATOM      ATOMIC                      COORDINATES (BOHR)
+65:            CHARGE         X                   Y                   Z
+65:   F          9.0          0.00000000          0.00000000          0.00000000
+65:   F          9.0          0.00000000          0.00000000          2.64561638
+65: 
+65:      ATOMIC BASIS SET
+65:      ----------------
+65:  THE CONTRACTED PRIMITIVE FUNCTIONS HAVE BEEN UNNORMALIZED
+65:  THE CONTRACTED BASIS FUNCTIONS ARE NOW NORMALIZED TO UNITY
+65: 
+65:   SHELL TYPE  PRIMITIVE        EXPONENT          CONTRACTION COEFFICIENT(S)
+65: 
+65:  F 
+65: 
+65:       1   S       1         14710.0000000    0.686364576743
+65:       1   S       2          2207.0000000    1.274352324809
+65:       1   S       3           502.8000000    2.139125490256
+65:       1   S       4           142.6000000    3.130552004590
+65:       1   S       5            46.4700000    3.638228260070
+65:       1   S       6            16.7000000    2.641474397010
+65:       1   S       7             6.3560000    0.755356588039
+65:       1   S       8             1.3160000    0.013427004821
+65: 
+65:       2   S       9         14710.0000000   -0.157073724220
+65:       2   S      10          2207.0000000   -0.300171590285
+65:       2   S      11           502.8000000   -0.491513781413
+65:       2   S      12           142.6000000   -0.784990826674
+65:       2   S      13            46.4700000   -0.934755766750
+65:       2   S      14            16.7000000   -1.005481959125
+65:       2   S      15             6.3560000   -0.320466154247
+65:       2   S      16             1.3160000    0.492852428845
+65: 
+65:       3   S      17             0.3897000    0.351526359547
+65: 
+65:       4   P      18            22.6700000    3.164375273591
+65:       4   P      19             4.9770000    2.497712149673
+65:       4   P      20             1.3470000    1.051861295214
+65: 
+65:       5   P      21             0.3471000    0.379759244730
+65: 
+65:       6   D      22             1.6400000    6.201633829977
+65: 
+65: 
+65:  F 
+65: 
+65:       7   S      23         14710.0000000    0.686364576743
+65:       7   S      24          2207.0000000    1.274352324809
+65:       7   S      25           502.8000000    2.139125490256
+65:       7   S      26           142.6000000    3.130552004590
+65:       7   S      27            46.4700000    3.638228260070
+65:       7   S      28            16.7000000    2.641474397010
+65:       7   S      29             6.3560000    0.755356588039
+65:       7   S      30             1.3160000    0.013427004821
+65: 
+65:       8   S      31         14710.0000000   -0.157073724220
+65:       8   S      32          2207.0000000   -0.300171590285
+65:       8   S      33           502.8000000   -0.491513781413
+65:       8   S      34           142.6000000   -0.784990826674
+65:       8   S      35            46.4700000   -0.934755766750
+65:       8   S      36            16.7000000   -1.005481959125
+65:       8   S      37             6.3560000   -0.320466154247
+65:       8   S      38             1.3160000    0.492852428845
+65: 
+65:       9   S      39             0.3897000    0.351526359547
+65: 
+65:      10   P      40            22.6700000    3.164375273591
+65:      10   P      41             4.9770000    2.497712149673
+65:      10   P      42             1.3470000    1.051861295214
+65: 
+65:      11   P      43             0.3471000    0.379759244730
+65: 
+65:      12   D      44             1.6400000    6.201633829977
+65: 
+65:  TOTAL NUMBER OF BASIS SET SHELLS             =   12
+65:  NUMBER OF CARTESIAN GAUSSIAN BASIS FUNCTIONS =   30
+65:  NUMBER OF ELECTRONS                          =   18
+65:  CHARGE OF MOLECULE                           =    0
+65:  SPIN MULTIPLICITY                            =    1
+65:  TOTAL NUMBER OF ATOMS                        =    2
+65: 
+65: Number of   0th ion structures   is :          1  from          1 to          1
+65: Number of   0th ion determinants is :          2  from          1 to          2
+65: Number of   1th ion structures   is :          2  from          2 to          3
+65: Number of   1th ion determinants is :          2  from          3 to          4
+65: 
+65:  Number of structures:     3
+65: 
+65:  The following structures are used in calculation (First 10 structures if more than 10):
+65: 
+65:        1   ******    1:8    9-10   
+65:        2   ******    1:8    9 9    
+65:        3   ******    1:8   10 10   
+65: 
+65: 
+65:  Differentiable sparse-orbital coefficients : 60
+65: 
+65:  Number of equally averaged states          : 1
+65: 
+65:  VBSCF algorithm: NEO (matrix-free projected structure response).
+65: 
+65:  Maximum number of Iterations: 30
+65: 
+65:  Integral evaluation: precise integrals by Libcint.
+65:  2-e integral strategy: Symmetric AO-pair CSR.
+65:  Non-zero 2-e integrals: 28696
+65: 
+65: ---------------Initial Guess---------------
+65:      8     8     8     8     3     3     3     3     8     8
+65:   1.0007724083     1    0.0013781271     2   -0.0011080797     3    0.0008288225     6  
+65:  -0.0002633676     9   -0.0009833922    10   -0.0009833922    13   -0.0014606489    15  
+65:   1.0007724083    16    0.0013781271    17   -0.0011080797    18   -0.0008288225    21  
+65:   0.0002633676    24   -0.0009833922    25   -0.0009833922    28   -0.0014606489    30  
+65:   0.0108015152     1   -0.4902220778     2   -0.6103392437     3   -0.0071235657     6  
+65:  -0.0785054632     9    0.0143971850    10    0.0143971850    13    0.0010216269    15  
+65:   0.0108015152    16   -0.4902220778    17   -0.6103392437    18    0.0071235657    21  
+65:   0.0785054632    24    0.0143971850    25    0.0143971850    28    0.0010216269    30  
+65:   0.6905278099     4    0.4599831865     7    0.0093845337    12  
+65:   0.6905278099    19    0.4599831865    22   -0.0093845337    27  
+65:   0.6905278099     5    0.4599831865     8    0.0093845337    14  
+65:   0.6905278099    20    0.4599831865    23   -0.0093845337    29  
+65:   0.0498951747     1    0.1471304497     2   -0.1291945481     3   -0.4951678552     6  
+65:  -0.6500644257     9    0.0459585521    10    0.0459585521    13   -0.0001794357    15  
+65:   0.0498951747    16    0.1471304497    17   -0.1291945481    18    0.4951678552    21  
+65:   0.6500644257    24    0.0459585521    25    0.0459585521    28   -0.0001794357    30  
+65: ---------------End of Guess--------------
+65: Orbital preconditioner             : automatic (backend-selected)
+65: 
+65:                 ITER           ENERGY          DELTA_E      |G_PROJ|_INF
+65:                   0       -198.4883735545      0.0000000000    4.80165995e-01
+65:                   1       -198.7510701474     -0.2626965928    1.37584192e-02
+65:                   2       -198.7511558305     -0.0000856831    2.57458964e-05
+65:                   3       -198.7511558305     -0.0000000001    7.77834359e-07
+65: 
+65:                         VBSCF converged in     3 iterations
+65: 
+65:                   Total Energy:   -198.7511558305
+65: 
+65: 
+65:  Full structure Hamiltonian and overlap matrices are omitted in matrix-free Davidson mode.
+65: 
+65: 
+65:               ******  COEFFICIENTS OF STRUCTURES ******
+65: 
+65:        1      -0.80578749  ******    1:8    9-10   
+65:        2      -0.21326542  ******    1:8    9 9    
+65:        3      -0.21326539  ******    1:8   10 10   
+65: 
+65: 
+65:           ******  UNNORMALIZED DETERMINANT COEFFICIENTS  ******
+65: 
+65:                                      INA   A
+65:                                      INA   B
+65:        1      -0.80578749  ******    1-8 10
+65:                                      1-8 9
+65:        2      -0.80578749  ******    1-8 9
+65:                                      1-8 10
+65:        3      -0.21326542  ******    1-8 9
+65:                                      1-8 9
+65:        4      -0.21326539  ******    1-8 10
+65:                                      1-8 10
+65: 
+65: 
+65:              ******  WEIGHTS OF STRUCTURES ******
+65: 
+65:          Coulson-Chirgwin Weights
+65: 
+65:        1       0.77585654  ******    1:8    9-10   
+65:        2       0.11207174  ******    1:8    9 9    
+65:        3       0.11207172  ******    1:8   10 10   
+65: 
+65:          Renormalized Weights
+65: 
+65:        1       0.87711812  ******    1:8    9-10   
+65:        2       0.06144095  ******    1:8    9 9    
+65:        3       0.06144093  ******    1:8   10 10   
+65: 
+65:  Lowdin and inverse weights are omitted in matrix-free Davidson mode because they require global functions of the full overlap matrix.
+65: 
+65: 
+65:       ******  ORBITALS IN PRIMITIVE BASIS FUNCTIONS  ******
+65: 
+65: 
+65:                           1          2          3          4          5     
+65:     1   F    1  S       1.000863   0.000000  -0.001134   0.000000   0.000000
+65:     2   F    1  S       0.001628   0.000000  -0.514147   0.000000   0.000000
+65:     3   F    1  S      -0.001296   0.000000  -0.563865   0.000000   0.000000
+65:     4   F    1  PX      0.000000   0.000000   0.000000   0.000000   0.692016
+65:     5   F    1  PY      0.000000   0.000000   0.000000   0.000000   0.000000
+65:     6   F    1  PZ      0.000549   0.000000   0.063493   0.000000   0.000000
+65:     7   F    1  PX      0.000000   0.000000   0.000000   0.000000   0.458295
+65:     8   F    1  PY      0.000000   0.000000   0.000000   0.000000   0.000000
+65:     9   F    1  PZ     -0.000601   0.000000   0.046357   0.000000   0.000000
+65:    10   F    1  DXX    -0.000964   0.000000  -0.000044   0.000000   0.000000
+65:    11   F    1  DXY     0.000000   0.000000   0.000000   0.000000   0.000000
+65:    12   F    1  DXZ     0.000000   0.000000   0.000000   0.000000   0.007442
+65:    13   F    1  DYY    -0.000964   0.000000  -0.000044   0.000000   0.000000
+65:    14   F    1  DYZ     0.000000   0.000000   0.000000   0.000000   0.000000
+65:    15   F    1  DZZ    -0.001507   0.000000   0.000620   0.000000   0.000000
+65:    16   F    2  S       0.000000   1.000863   0.000000  -0.001133   0.000000
+65:    17   F    2  S       0.000000   0.001622   0.000000  -0.514148   0.000000
+65:    18   F    2  S       0.000000  -0.001302   0.000000  -0.563864   0.000000
+65:    19   F    2  PX      0.000000   0.000000   0.000000   0.000000   0.000000
+65:    20   F    2  PY      0.000000   0.000000   0.000000   0.000000   0.000000
+65:    21   F    2  PZ      0.000000  -0.000550   0.000000  -0.063493   0.000000
+65:    22   F    2  PX      0.000000   0.000000   0.000000   0.000000   0.000000
+65:    23   F    2  PY      0.000000   0.000000   0.000000   0.000000   0.000000
+65:    24   F    2  PZ      0.000000   0.000600   0.000000  -0.046357   0.000000
+65:    25   F    2  DXX     0.000000  -0.000964   0.000000  -0.000044   0.000000
+65:    26   F    2  DXY     0.000000   0.000000   0.000000   0.000000   0.000000
+65:    27   F    2  DXZ     0.000000   0.000000   0.000000   0.000000   0.000000
+65:    28   F    2  DYY     0.000000  -0.000964   0.000000  -0.000044   0.000000
+65:    29   F    2  DYZ     0.000000   0.000000   0.000000   0.000000   0.000000
+65:    30   F    2  DZZ     0.000000  -0.001507   0.000000   0.000620   0.000000
+65: 
+65: 
+65:                           6          7          8          9         10     
+65:     1   F    1  S       0.000000   0.000000   0.000000  -0.013416   0.000000
+65:     2   F    1  S       0.000000   0.000000   0.000000  -0.077614   0.000000
+65:     3   F    1  S       0.000000   0.000000   0.000000  -0.006115   0.000000
+65:     4   F    1  PX      0.000000   0.000000   0.000000   0.000000   0.000000
+65:     5   F    1  PY      0.000000   0.692016   0.000000   0.000000   0.000000
+65:     6   F    1  PZ      0.000000   0.000000   0.000000  -0.718309   0.000000
+65:     7   F    1  PX      0.000000   0.000000   0.000000   0.000000   0.000000
+65:     8   F    1  PY      0.000000   0.458295   0.000000   0.000000   0.000000
+65:     9   F    1  PZ      0.000000   0.000000   0.000000  -0.420376   0.000000
+65:    10   F    1  DXX     0.000000   0.000000   0.000000   0.010545   0.000000
+65:    11   F    1  DXY     0.000000   0.000000   0.000000   0.000000   0.000000
+65:    12   F    1  DXZ     0.000000   0.000000   0.000000   0.000000   0.000000
+65:    13   F    1  DYY     0.000000   0.000000   0.000000   0.010545   0.000000
+65:    14   F    1  DYZ     0.000000   0.007442   0.000000   0.000000   0.000000
+65:    15   F    1  DZZ     0.000000   0.000000   0.000000  -0.046996   0.000000
+65:    16   F    2  S       0.000000   0.000000   0.000000   0.000000  -0.013416
+65:    17   F    2  S       0.000000   0.000000   0.000000   0.000000  -0.077614
+65:    18   F    2  S       0.000000   0.000000   0.000000   0.000000  -0.006115
+65:    19   F    2  PX      0.692016   0.000000   0.000000   0.000000   0.000000
+65:    20   F    2  PY      0.000000   0.000000   0.692016   0.000000   0.000000
+65:    21   F    2  PZ      0.000000   0.000000   0.000000   0.000000   0.718309
+65:    22   F    2  PX      0.458295   0.000000   0.000000   0.000000   0.000000
+65:    23   F    2  PY      0.000000   0.000000   0.458295   0.000000   0.000000
+65:    24   F    2  PZ      0.000000   0.000000   0.000000   0.000000   0.420376
+65:    25   F    2  DXX     0.000000   0.000000   0.000000   0.000000   0.010545
+65:    26   F    2  DXY     0.000000   0.000000   0.000000   0.000000   0.000000
+65:    27   F    2  DXZ    -0.007442   0.000000   0.000000   0.000000   0.000000
+65:    28   F    2  DYY     0.000000   0.000000   0.000000   0.000000   0.010545
+65:    29   F    2  DYZ     0.000000   0.000000  -0.007442   0.000000   0.000000
+65:    30   F    2  DZZ     0.000000   0.000000   0.000000   0.000000  -0.046995
+65: 
+65: 
+65:       ******  COMPUTED NATURAL ORBITALS  ******
+65: 
+65: 
+65:                           1          2          3          4          5     
+65:                         2.000000   2.000000   2.000000   2.000000   2.000000
+65:     1   F    1  S      -0.190066   0.012608   0.980824   0.007233   0.026475
+65:     2   F    1  S       0.139605   0.030314   0.001588   0.043271   0.054164
+65:     3   F    1  S       0.153690   0.033207  -0.001277   0.047433   0.059320
+65:     4   F    1  PX      0.037623   0.065932   0.016109   0.370263  -0.366599
+65:     5   F    1  PY     -0.032679  -0.012597  -0.000573  -0.129622  -0.054663
+65:     6   F    1  PZ     -0.017383  -0.003734   0.000539  -0.005338  -0.006669
+65:     7   F    1  PX      0.024916   0.043664   0.010668   0.245211  -0.242784
+65:     8   F    1  PY     -0.021642  -0.008343  -0.000380  -0.085843  -0.036201
+65:     9   F    1  PZ     -0.012501  -0.002739  -0.000588  -0.003905  -0.004896
+65:    10   F    1  DXX     0.000196  -0.000009  -0.000945  -0.000003  -0.000021
+65:    11   F    1  DXY     0.000000   0.000000   0.000000  -0.000000  -0.000000
+65:    12   F    1  DXZ     0.000405   0.000709   0.000173   0.003982  -0.003942
+65:    13   F    1  DYY     0.000196  -0.000009  -0.000945  -0.000003  -0.000021
+65:    14   F    1  DYZ    -0.000351  -0.000135  -0.000006  -0.001394  -0.000588
+65:    15   F    1  DZZ     0.000118  -0.000055  -0.001477  -0.000063  -0.000105
+65:    16   F    2  S      -0.105101   0.987309  -0.032923  -0.056806   0.097802
+65:    17   F    2  S       0.458412   0.037610   0.093602   0.005046   0.083988
+65:    18   F    2  S       0.503066   0.038208   0.102755   0.005709   0.091809
+65:    19   F    2  PX     -0.058016  -0.002933  -0.018342   0.521941   0.187772
+65:    20   F    2  PY     -0.111248  -0.059530  -0.033127   0.089106   0.550649
+65:    21   F    2  PZ      0.056689   0.003905   0.011584   0.000666   0.010299
+65:    22   F    2  PX     -0.038422  -0.001943  -0.012147   0.345661   0.124354
+65:    23   F    2  PY     -0.073675  -0.039424  -0.021939   0.059012   0.364674
+65:    24   F    2  PZ      0.041284   0.003839   0.008425   0.000429   0.007617
+65:    25   F    2  DXX     0.000142  -0.000948   0.000040   0.000055  -0.000087
+65:    26   F    2  DXY    -0.000000   0.000000   0.000000  -0.000000  -0.000000
+65:    27   F    2  DXZ     0.000624   0.000032   0.000197  -0.005613  -0.002019
+65:    28   F    2  DYY     0.000142  -0.000948   0.000040   0.000055  -0.000087
+65:    29   F    2  DYZ     0.001196   0.000640   0.000356  -0.000958  -0.005922
+65:    30   F    2  DZZ    -0.000393  -0.001530  -0.000063   0.000079  -0.000248
+65: 
+65: 
+65:                           6          7          8          9         10     
+65:                         2.000000   2.000000   2.000000   1.878958   0.121042
+65:     1   F    1  S      -0.016501   0.049303   0.001806  -0.005081   0.031234
+65:     2   F    1  S      -0.084853   0.483878   0.015747  -0.009772   0.160695
+65:     3   F    1  S      -0.093008   0.530520   0.017265  -0.061277   0.109453
+65:     4   F    1  PX      0.258100   0.050237  -0.371457  -0.000000   0.000000
+65:     5   F    1  PY      0.579254   0.118518   0.337687   0.000000   0.000000
+65:     6   F    1  PZ      0.010466  -0.059719  -0.001943   0.467404   0.594886
+65:     7   F    1  PX      0.170930   0.033270  -0.246001  -0.000000  -0.000000
+65:     8   F    1  PY      0.383618   0.078490   0.223637   0.000000  -0.000000
+65:     9   F    1  PZ      0.007658  -0.043650  -0.001421   0.274615   0.346425
+65:    10   F    1  DXX     0.000008  -0.000005  -0.000000  -0.006746  -0.008916
+65:    11   F    1  DXY     0.000000   0.000000   0.000000   0.000000   0.000000
+65:    12   F    1  DXZ     0.002776   0.000540  -0.003995  -0.000000   0.000000
+65:    13   F    1  DYY     0.000008  -0.000005  -0.000000  -0.006746  -0.008916
+65:    14   F    1  DYZ     0.006229   0.001275   0.003632   0.000000   0.000000
+65:    15   F    1  DZZ     0.000127  -0.000656  -0.000022   0.030192   0.039544
+65:    16   F    2  S       0.012764  -0.041452   0.013285  -0.005081  -0.031234
+65:    17   F    2  S       0.071440  -0.185170   0.003901  -0.009773  -0.160695
+65:    18   F    2  S       0.078309  -0.202950   0.004238  -0.061277  -0.109453
+65:    19   F    2  PX     -0.085693  -0.078743   0.399620   0.000000   0.000000
+65:    20   F    2  PY      0.177407   0.008940  -0.353421   0.000000   0.000000
+65:    21   F    2  PZ      0.008813  -0.022836   0.000472  -0.467404   0.594886
+65:    22   F    2  PX     -0.056751  -0.052149   0.264653   0.000000   0.000000
+65:    23   F    2  PY      0.117490   0.005921  -0.234057   0.000000   0.000000
+65:    24   F    2  PZ      0.006447  -0.016714   0.000358  -0.274615   0.346425
+65:    25   F    2  DXX    -0.000006   0.000024  -0.000012  -0.006746   0.008916
+65:    26   F    2  DXY     0.000000   0.000000   0.000000  -0.000000  -0.000000
+65:    27   F    2  DXZ     0.000922   0.000847  -0.004298  -0.000000  -0.000000
+65:    28   F    2  DYY    -0.000006   0.000024  -0.000012  -0.006746   0.008916
+65:    29   F    2  DYZ    -0.001908  -0.000096   0.003801  -0.000000  -0.000000
+65:    30   F    2  DZZ    -0.000105   0.000285  -0.000025   0.030192  -0.039544
+65: 
+65: 
+65:                  ===============================================
+65:                          XMVB ATOMIC POPULATION ANALYSIS
+65:                  ===============================================
+65: 
+65:                      ******  POPULATION AND CHARGE  ******
+65: 
+65:        ATOM         MULL.POP.    CHARGE          LOW.POP.     CHARGE
+65:     1 F             9.000000   -0.000000         9.000000    0.000000
+65:     2 F             9.000000    0.000000         9.000000   -0.000000
+65: 
+65:               ******  ATOMIC SPIN POLARIZATION POPULATION ******
+65: 
+65:         ATOM          MULL.POP.                    LOW.POP.
+65: 
+65:       1    F           0.000000                     0.000000
+65:       2    F           0.000000                     0.000000
+65: 
+65:                             ******  BOND ORDER  ******
+65: 
+65:                   ATOM 1        ATOM 2           DIST     BOND ORDER
+65: 
+65:                    1  F          2  F            1.400        0.773
+65: 
+65:                      ******    VALENCE ANALYSIS    ******
+65: 
+65:                                 TOTAL       BONDED        FREE
+65:                ATOM            VALENCE     VALENCE     VALENCE
+65:              1 F                 1.000       0.773       0.227
+65:              2 F                 1.000       0.773       0.227
+65: 
+65:                      ****** DIPOLE MOMENT ANALYSIS ******
+65: 
+65:                 DX         DY         DZ        TOTAL
+65: 
+65:             0.000000    0.000000   -0.000000    0.000000
+65: 
+65: 
+65:                  ******    VIRIAL THEOREM ANALYSIS    ******
+65: 
+65:                       TOTAL ENERGY :     -198.751155830547
+65:                NUCLEAR REP. ENERGY :       30.616683692143
+65:                  ELECTRONIC ENERGY :     -229.367839522690
+65:                ONE-ELECTRON ENERGY :     -339.085349316249
+65:                TWO-ELECTRON ENERGY :      109.717509793560
+65:                     KINETIC ENERGY :      198.815297128750
+65:                NUC-ELE POT. ENERGY :     -537.900646444999
+65:                   POTENTIAL ENERGY :     -397.566452959297
+65:               VIRIAL THEOREM VALUE :        1.999677382479
+65: 
+65: 
+65:                  ===============================================
+65:                        XMVB-CPP RUN DIAGNOSTICS
+65:                  ===============================================
+65: Termination reason                 : neo_projected_gradient_tolerance
+65: Start time                         : 2026-10-15 20:28:58
+65: Finish time                        : 2026-10-15 20:28:58
+65: CPU threads                        : 8
+65: Structure eigensolver              : davidson
+65: Final Davidson iterations          : 2
+65: Final Davidson H/S block actions   : 2
+65: Final Davidson peak subspace       : 2
+65: Final Davidson max rel. residual   : 1.89498207e-09
+65: Final Davidson CI residual (Eh)    : 1.67575349e-08
+65: Gradient metric                    : projected |g|_inf
+65: Orbital coordinates                : unwhitened quotient
+65: Projected infinity norm            : reference coordinates for stopping/final report
+65: Convergence threshold              : 1e-07 for energy and 0.001 for gradient.
+65: Nuclear repulsion energy           : 30.616683692143
+65: Initial total energy               : -198.488373554525
+65: Final total energy                 : -198.751155830547
+65: Total energy change                : -2.62782276e-01
+65: Initial electronic energy          : -229.105057246668
+65: Final electronic energy            : -229.367839522690
+65: Initial reference energy           : -227.112451416005
+65: Final reference energy             : -226.989635339074
+65: Initial VB eigenvalue              : -1.992605830663
+65: Final VB eigenvalue                : -2.378204183616
+65: Average structure overlap          : 1.273360461191
+65: Final gradient |g|_inf             : 7.69852653e-07
+65: Final gradient |g|_2               : 2.53616111e-06
+65: Final projected |g|_inf            : 1.04956343e-06
+65: Final projected |g|_2              : 2.53616111e-06
+65: Final physical |g|_(G^-1)          : 2.46010081e-06
+65: 
+65: Timing Breakdown (Wall Time)
+65: ----------------------------
+65: AO integral provider wall time     : 0.016969 s
+65: AO integral input wall time        : 0.000411 s
+65: Orbital guess build wall time      : 0.003529 s
+65: Raw-structure selection wall       : 0.000003 s
+65: Structure expansion wall time      : 0.000008 s
+65: Input preparation wall time        : 0.024622 s
+65: SCF iteration wall time            : 0.036110 s
+65: End-to-end wall time               : 0.061301 s
+65: 
+65:         Wall time for the job: 0.061 seconds.
+12/12 Test #65: neo_f2 ...........................   Passed    0.07 sec
+
+The following tests passed:
+	eigensolver_equivalence_f2
+	eigensolver_equivalence_f2_oeo
+	ciah
+	ci_transport
+	representation_overlap
+	selected_ci_transport
+	orthogonal_direct_ci
+	structure_tiles
+	coupled_structure
+	davidson
+	neo
+	neo_f2
+
+100% tests passed, 0 tests failed out of 12
+
+Total Test time (real) =   4.39 sec

@@ -1,0 +1,1 @@
+/home/guqqgroup/xiatao/work/xmvb-casscf-20261015/240-bundle-1259764/xmvb-cpp.exe input.xmi --optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --neo-trace neo.tsv 

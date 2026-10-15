@@ -555,13 +555,76 @@ Evidence: `results/diagnostics/orthogonal-tiles-20261015/batch_comparison.csv`,
 `selected-1259723/`, `selected-1259728/`, `selected-1259729/`, and
 `tile-profile-1259725/`. Earlier candidate stages are identified in the CSV.
 
-### Planned end-to-end structure-space comparison
+### Edge-wise adjoint contraction
 
-After the selected-action implementation is validated, benchmark complete
-CAS(12,12) molecular optimizations on Hanhai22, not just fixed-point H/M
-actions. Use the nested structure spaces COV, ION(0,1), ION(0,2), and successive
+An incoming beta connection fixes its generator channel, sign, and target-row
+map for every alpha row in the requested output range. The beta part of the
+adjoint can therefore interchange its alpha-row and incoming-edge loops:
+
+$$
+y_{ab}\mathrel{+}=\sum_{e:\,b\leftarrow b_e}
+s_e Q_{(a,b_e),\lambda_e}.
+$$
+
+Processing one edge across a row range moves the channel/sign/map lookup out of
+the per-element loop. Both channel arrays remain row-major, matching scatter
+and GEMM. A column-major contracted array was tested, but did not improve the
+complete action consistently and increased observed RSS; it is not retained.
+No transpose, second copy, or representation-selection threshold is introduced.
+Numerical slab sizes and batch planning are unchanged.
+
+The output callback now forwards its exact support mask with the entire row
+range. It no longer splits the range into short support runs and invokes a
+type-erased callback for every run. Leading/trailing structural zeros are removed
+once before edge traversal, and an entirely unsupported row range returns without
+visiting any beta edge. These are exact support exclusions, not numerical screening.
+The alpha and beta adjoints both apply the same output mask, leaving input and
+intermediate closure unchanged. An
+independent test compares arbitrary masked output against projection of the
+complete sigma image, in addition to the selected-structure regression tests.
+This is an algebraic reassociation and a data-layout optimization, not a lower
+asymptotic bound on the full Hamiltonian contraction.
+
+Native H/M warm action results for this change (seconds / process peak MiB):
+
+| Structures | Previous, 8 cores | Edge-wise, 8 cores | Previous, 32 cores | Edge-wise, 32 cores |
+|---:|---:|---:|---:|---:|
+| 1 | 0.08652 / 64.44 | 0.08731 / 63.59 | 0.06652 / 62.98 | 0.07592 / 71.08 |
+| 3 | 0.09286 / 65.25 | 0.08778 / 65.66 | 0.08477 / 72.57 | 0.08173 / 73.08 |
+| 20 | 0.11420 / 68.23 | 0.10260 / 66.69 | 0.09388 / 75.95 | 0.08335 / 73.43 |
+| 132 | 0.11302 / 68.03 | 0.10011 / 67.69 | 0.11017 / 78.10 | 0.09061 / 69.93 |
+
+Previous jobs 1259729/1259728 and new jobs 1259764/1259765 use the same
+anode26/anode20 nodes and CPU sets respectively. These are individual native
+measurements, not averages. The 132-structure action improves by 11.4% at
+8 cores and 17.8% at 32 cores; the one-structure 32-core case regresses by
+14.1%, so this is not a universal speedup. The historical 132-structure
+32-core time of 0.06015 s is still faster; the current 0.09061 s is 1.51 times
+that value. The older run used a different CPU set on the same node.
+
+Phase job 1259766 on anode15 reduces warm adjoint/write time from the saved
+1259725 value of 57.36 ms to 34.97 ms. Prepare/read/compute are
+11.17/5.70/25.09 ms; batch count (32), source elements (10,642,550), and peak
+numerical/index payload (34,899,120 bytes) are unchanged. The alternative
+column-major and untrimmed edge-wise runs remain in `batch_comparison.csv`.
+The selected final candidate passes 12/12 regressions, including independent
+masked-output tests. Phase instrumentation is not a sampling-profiler result.
+
+### End-to-end structure-space comparison
+
+After selected-action validation, the first complete molecular test uses
+CAS(8,8) optimizations for the existing 240 input on Hanhai22, not just
+fixed-point H/M actions. Use the nested structure spaces COV, ION(0:1), ION(0:2), and successive
 ionic levels through FULL. Verify the generated spaces and their nesting;
 do not infer structure counts from the input labels alone.
+The parser treats `ION(0,2)` as exactly classes 0 and 2, not an inclusive range.
+The five 240 spaces are COV, ION(0:1), ION(0:2), ION(0:3), and FULL.
+Job array 1259783 uses a frozen binary from validation job 1259764,
+32 cores per case, original HAO/GUS, exact libcint/cc-pVDZ, ISCF=9,
+structure Davidson and the unchanged 1e-3 gradient / 1e-7 Eh energy criteria.
+The original input's ITMAX=2000 is preserved; these are convergence runs,
+not 30-step timing prefixes. `tests/mcscf/subspaces_240.sbatch` records the
+inputs, binary hash, affinity, traces and native GNU time results per case.
 
 Keep geometry, AO basis, initial orbital coefficients, spin, integral backend,
 optimizer, convergence criteria, thread count, and node type fixed. Retain
@@ -586,4 +649,30 @@ energy. The variational minimum cannot increase on enlarging a nested space,
 but a local optimizer can reach different stationary branches; record such cases
 rather than treating the observed final energies as guaranteed global minima.
 Unconverged or resource-limited tasks remain explicit results, not omitted rows.
-This is a pending benchmark plan, not a completed performance claim.
+
+All five jobs in array 1259783 converged, with identical original GUS contents
+and empty stderr. The generated structure counts agree with the nested ionic
+classes. Times below are native GNU time process wall seconds, including
+startup, integrals, SCF and final output, but excluding Slurm launch time.
+
+| Space | Structures | Outer steps | Orbital HVP | Final energy (Eh) | Wall (s) | Peak RSS (MiB) |
+|---|---:|---:|---:|---:|---:|---:|
+| COV | 14 | 3 | 20 | -343.239211501261 | 4.35 | 1530.64 |
+| ION(0:1) | 294 | 3 | 27 | -343.407736636065 | 5.55 | 1553.43 |
+| ION(0:2) | 1134 | 4 | 32 | -343.443415326851 | 7.37 | 1600.51 |
+| ION(0:3) | 1694 | 4 | 32 | -343.446256564845 | 9.29 | 1576.92 |
+| FULL | 1764 | 4 | 30 | -343.446302545201 | 5.27 | 1551.10 |
+
+The jobs ran concurrently on anode62 (COV), anode15 (the three truncated ionic
+spaces) and anode24 (FULL), with disjoint scheduler-allocated CPU sets. They are
+not a controlled same-node scaling study. FULL is faster than the last truncated
+space despite having more structures: the complete support avoids selected-path
+handling, and the optimizer also uses fewer HVPs; node differences and other
+phases prevent attributing the entire timing gap to either mechanism here.
+No old executable was rerun. The all-space final energies decrease in this
+particular experiment, but this does not prove globally optimal stationary points.
+
+Evidence: `240_subspaces.csv` and `240-spaces-1259783/` under the same diagnostics
+directory. `tests/mcscf/summarize_subspaces.py` extracts the table directly from
+output/trace/time files. The frozen executable SHA256 is
+`2ef41a08db437a8753b6f99b085dd9146ae03cdc5313cc6174ccd8fbade10305`.

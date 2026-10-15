@@ -315,19 +315,9 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
               double* to = target + (v * panel_width + betas[j] % extent) * target_stride;
               const int begin = alpha_rows.size() * chunk / chunks;
               const int end = alpha_rows.size() * (chunk + 1) / chunks;
-              if (!mask) {
-                accumulate(j, v, begin, end, to);
-                continue;
-              }
-              const auto* column_mask = mask +
-                  static_cast<std::size_t>(betas[j] % extent) * n_unique_alpha_;
-              int row = begin;
-              while (row < end) {
-                while (row < end && !column_mask[alpha_rows[row]]) ++row;
-                const int run = row;
-                while (row < end && column_mask[alpha_rows[row]]) ++row;
-                if (run < row) accumulate(j, v, run, row, to);
-              }
+              const auto* column_mask = mask ? mask +
+                  static_cast<std::size_t>(betas[j] % extent) * n_unique_alpha_ : nullptr;
+              accumulate(j, v, begin, end, to, column_mask);
             }
             first = last;
           }

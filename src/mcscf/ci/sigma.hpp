@@ -17,10 +17,12 @@ class ProductSupport;
 
 /** @brief Add one adjoint column range directly to a caller-owned spin column.
  * Arguments are local beta, RHS, first/last indices into alpha_rows, and a
- * destination indexed by the original alpha string. Disjoint ranges may run
- * concurrently; the callback must complete before the batch is released.
+ * destination indexed by the original alpha string, and an optional exact
+ * support mask in that same indexing. A null mask requests all rows.
+ * Disjoint ranges may run concurrently; the callback must complete before
+ * the batch is released.
  */
-using DirectCiColumnAccumulator = std::function<void(int, int, int, int, double*)>;
+using DirectCiColumnAccumulator = std::function<void(int, int, int, int, double*, const std::uint8_t*)>;
 
 /** @brief Integral adjoint of one orthonormal direct-CI bilinear form. */
 struct DirectCiIntegralAdjoint {

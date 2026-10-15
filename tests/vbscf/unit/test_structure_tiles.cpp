@@ -410,7 +410,7 @@ void check_sigma_columns(const Fixture& fixture, int width) {
         for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
           for (int vector = 0; vector < width; ++vector)
             accumulate(beta_local, vector, 0, static_cast<int>(alpha_rows.size()),
-                tiled.col(vector * n_beta + betas[beta_local]).data());
+                tiled.col(vector * n_beta + betas[beta_local]).data(), nullptr);
       };
   sigma.apply_tiled(width, read, add);
   const Eigen::MatrixXd ordinary = sigma.apply(carrier);
@@ -418,6 +418,22 @@ void check_sigma_columns(const Fixture& fixture, int width) {
               2e-11 * std::max(1.0, ordinary.norm()),
           "multi-column tiled direct-CI sigma differs from ordinary sigma");
   if (fixture.n == 5) {
+    // Only output is projected; omitted output rows still feed the channels.
+    std::vector<std::uint8_t> mask(carrier.rows());
+    for (int a = 0; a < carrier.rows(); ++a) mask[a] = a % 2 == 0;
+    tiled.setZero();
+    sigma.apply_tiled(width, read,
+        [&](const std::vector<int>& betas, const std::vector<int>& rows,
+            const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
+          for (int j = 0; j < static_cast<int>(betas.size()); ++j)
+            for (int v = 0; v < width; ++v)
+              accumulate(j, v, 0, rows.size(), tiled.col(v * n_beta + betas[j]).data(), mask.data());
+        });
+    Eigen::MatrixXd projected = ordinary;
+    for (int a = 0; a < carrier.rows(); ++a)
+      if (!mask[a]) projected.row(a).setZero();
+    require((tiled - projected).norm() <= 2e-11 * std::max(1.0, projected.norm()),
+            "output mask changed the unprojected sigma intermediates");
     bool read_failed = false, write_failed = false;
     try {
       sigma.apply_tiled(width,
@@ -662,7 +678,7 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
         for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
           for (int v = 0; v < width; ++v)
             accumulate(beta_local, v, 0, static_cast<int>(rows.size()),
-                actual.col(v * nb + betas[beta_local]).data());
+                actual.col(v * nb + betas[beta_local]).data(), nullptr);
       }, &support);
   auto expected = sigma.apply(carrier);
   require((actual - expected).norm() <= 2e-11 * std::max(1.0, expected.norm()),
