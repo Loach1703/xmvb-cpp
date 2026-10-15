@@ -18,10 +18,13 @@ void DirectCiSigmaAction::apply_tiled(
     int width,
     const std::function<void(const std::vector<int>&, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_columns,
     const std::function<void(const std::vector<int>&, const std::vector<int>&, const DirectCiColumnAccumulator&)>& add_columns,
-    const ProductSupport* support) const {
+    const ProductSupport* support, int exchange_parity) const {
   profiling::ScopedPhase phase(profiling::Phase::CiSigma);
   if (width <= 0 || !read_columns || !add_columns)
     throw std::invalid_argument("invalid tiled direct-CI callbacks or width");
+  if (exchange_parity < -1 || exchange_parity > 1 ||
+      (exchange_parity != 0 && distinct_beta_))
+    throw std::invalid_argument("exchange projection requires identical spin spaces");
 
   const auto& beta_graph = beta_connections();
   const int pairs = hamiltonian_pair_kernel_.rows();
@@ -35,7 +38,7 @@ void DirectCiSigmaAction::apply_tiled(
   const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(),
       static_cast<std::size_t>(row_limit) * width * pairs);
 
-  struct Group { int beta, begin, end, capacity; };
+  struct Group { int beta, begin, end, capacity, limit; };
   struct Incoming { int group, pair, sign; };
   std::vector<Group> groups;
   std::vector<int> active, group_index, halo, columns, distinct_alpha;
@@ -59,6 +62,9 @@ void DirectCiSigmaAction::apply_tiled(
   } else {
     for (int beta = 0; beta < n_beta_; ++beta) beta_targets.push_back(beta);
   }
+  if (exchange_parity < 0)
+    beta_targets.erase(std::remove(beta_targets.begin(), beta_targets.end(), 0),
+                       beta_targets.end());
   std::size_t next_beta = 0;
   std::optional<ProductSupport::Cursor> continuation;
   int full_alpha_offset = 0;
@@ -82,6 +88,7 @@ void DirectCiSigmaAction::apply_tiled(
   };
   double prepare_time = 0, read_time = 0, compute_time = 0, write_time = 0;
   std::size_t batches = 0, source_columns = 0, source_elements = 0, peak_payload = 0;
+  std::size_t targets = 0;
   Clock::time_point compute_start, prepare_start;
 #pragma omp parallel if(workers > 1) num_threads(workers)
   {
@@ -107,6 +114,9 @@ void DirectCiSigmaAction::apply_tiled(
           int reserved = 0;
           while (next_beta + groups.size() < beta_targets.size() && reserved < row_limit) {
             const int beta = beta_targets[next_beta + groups.size()];
+            // Reserve only possible exchange representatives, not the absent
+            // lower triangle. This reduces batches without increasing memory.
+            const int limit = exchange_parity ? beta + (exchange_parity > 0) : n_alpha_;
             std::size_t b = columns.size();
             b += column_index[beta] < 0;
             for (const int source : beta_graph.singles[beta].sources)
@@ -116,8 +126,8 @@ void DirectCiSigmaAction::apply_tiled(
                   static_cast<std::size_t>(rows) * maximum_neighbors);
               return payload(rows, h, b, groups.size() + 1);
             };
-            int slots = std::min(n_alpha_, row_limit - reserved);
-            if (!groups.empty() && (slots < n_alpha_ ||
+            int slots = std::min(limit, row_limit - reserved);
+            if (!groups.empty() && (slots < limit ||
                 bound(reserved + slots) > workspace_bytes)) break;
             // Split a single large alpha column without retaining its full
             // list. The same cursor resumes next batch; nothing is regenerated.
@@ -133,12 +143,12 @@ void DirectCiSigmaAction::apply_tiled(
             const auto include = [](int i, std::vector<int>& ids, std::vector<int>& index) {
               if (index[i] < 0) { index[i] = 0; ids.push_back(i); }
             };
-            groups.push_back({beta, reserved, reserved, slots});
+            groups.push_back({beta, reserved, reserved, slots, limit});
             reserved += slots;
             include(beta, columns, column_index);
             for (const int source : beta_graph.singles[beta].sources)
               include(source, columns, column_index);
-            if (slots < n_alpha_) break;
+            if (slots < limit) break;
           }
           active.resize(reserved);
           continued = false;
@@ -155,20 +165,23 @@ void DirectCiSigmaAction::apply_tiled(
                 support->column(group.beta, 1);
             int a, b;
             bool label;
-            while (group.end - group.begin < group.capacity && cursor.next(a, b, label))
+            while (group.end - group.begin < group.capacity && cursor.next(a, b, label)) {
+              if (exchange_parity && (a > b || (a == b && exchange_parity < 0))) continue;
               active[group.end++] = a;
-            if (group.capacity < n_alpha_) {
+            }
+            if (group.capacity < group.limit) {
               continued = group.end - group.begin == group.capacity;
               if (continued) continuation.emplace(std::move(cursor));
               else continuation.reset();
             }
           } else {
             const int first_alpha = g == 0 ? full_alpha_offset : 0;
-            for (int a = first_alpha; a < n_alpha_ && group.end - group.begin < group.capacity; ++a)
+            const int alpha_end = exchange_parity ? group.beta + (exchange_parity > 0) : n_alpha_;
+            for (int a = first_alpha; a < alpha_end && group.end - group.begin < group.capacity; ++a)
               active[group.end++] = a;
-            if (group.capacity < n_alpha_) {
+            if (group.capacity < group.limit) {
               full_alpha_offset = first_alpha + group.end - group.begin;
-              continued = full_alpha_offset < n_alpha_;
+              continued = full_alpha_offset < alpha_end;
               if (!continued) full_alpha_offset = 0;
             }
           }
@@ -234,6 +247,7 @@ void DirectCiSigmaAction::apply_tiled(
               const double batch_read_time = seconds(read_start, tick());
               read_time += batch_read_time;
               ++batches;
+              targets += count;
               source_columns += n_columns;
               source_elements += panel_size;
               peak_payload = std::max(peak_payload, required * sizeof(double) +
@@ -301,6 +315,14 @@ void DirectCiSigmaAction::apply_tiled(
       if (last > first)
         transformed.middleRows(first, last - first).noalias() =
             scattered.middleRows(first, last - first) * hamiltonian_pair_kernel_.transpose();
+      // E commutes with spin exchange. In a fixed-parity bilinear form,
+      // off-diagonal exchange orbits have two identical contributions.
+      if (exchange_parity)
+        for (int row = first; row < last; ++row) {
+          const int local = row % count;
+          if (active[local] != groups[group_index[local]].beta)
+            transformed.row(row) *= 2.0;
+        }
 #pragma omp barrier
 
 #pragma omp single
@@ -369,9 +391,9 @@ void DirectCiSigmaAction::apply_tiled(
   if (timing)
     std::fprintf(stderr,
         "XMVB_TILE,batches=%zu,source_columns=%zu,source_elements=%zu,peak_payload=%zu,"
-        "prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f\n",
+        "prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f,targets=%zu,exchange=%d\n",
         batches, source_columns, source_elements, peak_payload,
-        prepare_time, read_time, compute_time, write_time);
+        prepare_time, read_time, compute_time, write_time, targets, exchange_parity);
 }
 
 } // namespace xmvb::mcscf

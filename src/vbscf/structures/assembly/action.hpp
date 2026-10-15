@@ -379,6 +379,10 @@ private:
     double coefficient = 0.0;
   };
 
+  /** @brief Exact common transpose parity of all sparse structure columns. */
+  int detect_spin_exchange() const;
+  int spin_exchange_parity_ = 0;
+
   std::vector<int> spin_products_;
   std::vector<std::size_t> spin_term_offsets_;
   std::vector<StructureTerm> spin_terms_;

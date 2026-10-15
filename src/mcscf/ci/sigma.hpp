@@ -88,12 +88,18 @@ public:
    * are generated in its one-generator closure I. The adjoint returns the
    * full Hamiltonian image, including rows outside S; a selected-structure
    * caller projects those out in its exterior-transform adjoint.
+   * A nonzero exchange_parity (+1 or -1) instead contracts one representative
+   * of each alpha/beta exchange orbit with its exact multiplicity. This is
+   * valid ONLY when both the input and the final left projection have that
+   * transpose parity in identical spin-string spaces. The intermediate
+   * output is then a projected-action representative, NOT the full H image.
    */
   void apply_tiled(
       int block_width,
       const std::function<void(const std::vector<int>&, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_columns,
       const std::function<void(const std::vector<int>&, const std::vector<int>&, const DirectCiColumnAccumulator&)>& add_columns,
-      const ProductSupport* support = nullptr) const;
+      const ProductSupport* support = nullptr,
+      int exchange_parity = 0) const;
 
   /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
    * Uses occupation lists and the retained two-electron kernel, not sigma

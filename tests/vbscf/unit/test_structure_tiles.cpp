@@ -377,6 +377,30 @@ void check_complete_unequal_spin_case() {
       fixture, terms, product_alpha, product_beta, vectors));
 }
 
+void check_mixed_exchange_space() {
+  const Fixture fixture = make_fixture(4, 2, 2);
+  const auto [alpha, beta] = full_products(fixture);
+  const int n = fixture.alpha.size();
+  Terms terms(alpha.size());
+  // Equal spin dimensions do not imply a common exchange sector. Include
+  // even, odd, and nonsymmetric columns in one selected structure map.
+  for (int a = 0; a < n; ++a)
+    for (int b = 0; b < n; ++b) {
+      const double x = std::sin(0.17 * (a + 1) * (b + 2));
+      const double y = std::sin(0.17 * (b + 1) * (a + 2));
+      terms[a * n + b] = {{0, x + y}, {1, x - y}, {2, x}};
+    }
+  const auto cache = topology(fixture, alpha, beta);
+  const xmvb::vb::StructureAction action(
+      terms, 3, cache, fixture.overlap, fixture.one_electron,
+      fixture.two_electron, fixture.n, nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const auto vectors = test_vectors(3, 2);
+  const auto reference = reference_images(fixture, terms, alpha, beta, vectors);
+  check_images(action.apply(vectors), reference);
+  check_images(action.apply_streamed(vectors, 512), reference);
+}
+
 void check_sigma_columns(const Fixture& fixture, int width) {
   const auto integrals = xmvb::vb::orthogonalize_active_integrals(
       fixture.overlap, fixture.one_electron, fixture.two_electron, fixture.n);
@@ -418,6 +442,27 @@ void check_sigma_columns(const Fixture& fixture, int width) {
   require((tiled - ordinary).norm() <=
               2e-11 * std::max(1.0, ordinary.norm()),
           "multi-column tiled direct-CI sigma differs from ordinary sigma");
+  if (fixture.alpha == fixture.beta) {
+    const Eigen::MatrixXd unsymmetrized = carrier;
+    for (const int parity : {1, -1}) {
+      for (int v = 0; v < width; ++v) {
+        const Eigen::MatrixXd block = unsymmetrized.middleCols(v * n_beta, n_beta);
+        carrier.middleCols(v * n_beta, n_beta) = block + parity * block.transpose();
+      }
+      tiled.setZero();
+      sigma.apply_tiled(width, read, add, nullptr, parity);
+      // The quotient returns a representative, not the full product image.
+      // Only its projection to the same parity sector must equal H X.
+      for (int v = 0; v < width; ++v) {
+        const Eigen::MatrixXd block = tiled.middleCols(v * n_beta, n_beta);
+        tiled.middleCols(v * n_beta, n_beta) = 0.5 * (block + parity * block.transpose());
+      }
+      const Eigen::MatrixXd reference = sigma.apply(carrier);
+      require((tiled - reference).norm() <= 2e-11 * std::max(1.0, reference.norm()),
+              "exchange quotient changed the projected Hamiltonian action");
+    }
+    carrier = unsymmetrized;
+  }
   if (fixture.n == 5) {
     // Only output is projected; omitted output rows still feed the channels.
     std::vector<std::uint8_t> mask(carrier.rows());
@@ -1054,7 +1099,9 @@ int main(int argc, char** argv) {
       check_rumer_case(6);
       check_selected_unequal_spin_case();
       check_complete_unequal_spin_case();
+      check_mixed_exchange_space();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
+      check_sigma_columns(make_fixture(4, 2, 2), 3);
       check_sigma_columns(make_fixture(10, 5, 4), 2);
       check_prefix_words();
       check_supported_sigma(4, 2, 2, 2);

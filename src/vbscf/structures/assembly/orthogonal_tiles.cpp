@@ -80,6 +80,32 @@ private:
 
 }  // namespace
 
+int StructureAction::detect_spin_exchange() const {
+  int parity = 0;
+  for (std::size_t group = 0; group < spin_products_.size(); ++group) {
+    const auto begin = spin_term_offsets_[group], end = spin_term_offsets_[group + 1];
+    if (begin == end) continue;
+    const int product = spin_products_[group];
+    const int exchanged = (product % n_unique_beta_) * n_unique_alpha_ +
+                          product / n_unique_beta_;
+    const auto found = std::lower_bound(spin_products_.begin(), spin_products_.end(), exchanged);
+    if (found == spin_products_.end() || *found != exchanged) return 0;
+    const auto other = static_cast<std::size_t>(found - spin_products_.begin());
+    const auto paired = spin_term_offsets_[other];
+    if (end - begin != spin_term_offsets_[other + 1] - paired) return 0;
+    for (std::size_t offset = 0; offset < end - begin; ++offset) {
+      const auto& a = spin_terms_[begin + offset];
+      const auto& b = spin_terms_[paired + offset];
+      if (a.structure != b.structure) return 0;
+      const int sign = a.coefficient == b.coefficient ? 1 :
+                      a.coefficient == -b.coefficient ? -1 : 0;
+      if (!sign || (parity && parity != sign)) return 0;
+      parity = sign;
+    }
+  }
+  return parity;
+}
+
 StructureActionResult StructureAction::apply_orthogonal_tiled(
     const Eigen::Ref<const Eigen::MatrixXd>& vectors,
     const ExteriorOrbitalTransform& alpha_transform,
@@ -321,8 +347,12 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
             }
             first = last;
           }
-        }, support);
+        }, support, spin_exchange_parity_);
     output.finish();
+    // Exchange quotienting may never request some input columns. The overlap
+    // is still the complete Gram action, independent of the Hamiltonian sweep.
+    for (int panel = 0; panel < count; ++panel)
+      if (!overlap_consumed[panel]) input.get(panel);
     result.tiles.input_evictions += input.evictions;
     result.tiles.output_evictions += output.evictions;
     result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes, input.peak_bytes);

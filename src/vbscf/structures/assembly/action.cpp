@@ -696,6 +696,9 @@ StructureAction::StructureAction(
   }
 
   if (direct_ci_) {
+    if (direct_ci_->alpha_transform.occupations() ==
+        direct_ci_->beta_transform().occupations())
+      spin_exchange_parity_ = detect_spin_exchange();
     std::vector<int> touched;
     touched.reserve(spin_products_.size());
     for (std::size_t group=0; group<spin_products_.size(); ++group)
