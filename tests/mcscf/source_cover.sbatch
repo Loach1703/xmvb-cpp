@@ -27,21 +27,31 @@ lscpu > "$artifact/cpu.txt"
 module list > "$artifact/modules.txt" 2>&1
 env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|SLURM_CPUS_PER_TASK=)' > "$artifact/environment.txt"
 cmake -S "$source_dir" -B "$source_dir/build" > "$artifact/configure.log" 2>&1
-cmake --build "$source_dir/build" --target test_structure_tiles test_orthogonal_direct_ci \
+cmake --build "$source_dir/build" --target test_ci_factors test_structure_tiles test_orthogonal_direct_ci \
  test_coupled_structure test_product_frontier test_representation_overlap test_ci_transport \
  test_selected_ci_transport test_restricted_metric -j8 > "$artifact/build.log" 2>&1
 cp "$source_dir/build/CMakeCache.txt" "$artifact/"
 sha256sum "$source_dir/build/src/test_structure_tiles" > "$artifact/binary.sha256"
+sha256sum "$source_dir/build/src/test_ci_factors" >> "$artifact/binary.sha256"
 sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_tiles.cpp,sources.cpp,sources.hpp,action.cpp} \
  "$source_dir/tests/vbscf/unit/test_structure_tiles.cpp" > "$artifact/sources.sha256"
+sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,sigma.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" \
- -R '^(orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric)$' \
+ -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric)$' \
  --output-on-failure > "$artifact/ctest.out" 2>&1
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  bash -c 'grep Cpus_allowed_list /proc/self/status' > "$artifact/affinity.txt"
 for n in 12 14; do
  for mode in source-size source-cover-size source-cover-reference; do
+  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+   /usr/bin/time -v -o "$artifact/$n-$mode.time" \
+   "$source_dir/build/src/test_structure_tiles" --"$mode" "$n" \
+   > "$artifact/$n-$mode.out" 2> "$artifact/$n-$mode.err"
+ done
+done
+for n in 12 14; do
+ for mode in factor-adjoint factor-adjoint-reference; do
   srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
    /usr/bin/time -v -o "$artifact/$n-$mode.time" \
    "$source_dir/build/src/test_structure_tiles" --"$mode" "$n" \
@@ -57,3 +67,6 @@ done
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  env XMVB_PHASE_TIMING=1 "$source_dir/build/src/test_structure_tiles" --source-size 14 \
  > "$artifact/phases.out" 2> "$artifact/phases.err"
+srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+ env XMVB_PHASE_TIMING=1 "$source_dir/build/src/test_structure_tiles" --factor-adjoint 14 \
+ > "$artifact/adjoint-phases.out" 2> "$artifact/adjoint-phases.err"

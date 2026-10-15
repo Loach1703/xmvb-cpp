@@ -15,6 +15,7 @@
 
 #include "core/pair_index.hpp"
 #include "mcscf/ci/sigma.hpp"
+#include "mcscf/ci/factors.hpp"
 #include "mcscf/ci/product_support.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
@@ -463,7 +464,97 @@ void check_mixed_source_images() {
         (fixture.alpha.size() + fixture.beta.size())), expected);
     require((action.apply_overlap(vectors) - expected.overlap).norm() < 1e-12,
             "mixed-source metric differs from full CI");
+    std::vector<int> support;
+    Eigen::VectorXd support_values(products.size());
+    int group = 0;
+    for (const auto& [product, coefficients] : products) {
+      support.push_back(product); support_values[group] = 0;
+      for (const auto& term : coefficients)
+        support_values[group] += term.coefficient * vectors(term.structure_index, 0);
+      ++group;
+    }
+    const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+        fixture.overlap, fixture.one_electron, fixture.two_electron, fixture.n);
+    const xmvb::vb::ExteriorOrbitalTransform ta(fixture.alpha, integrals.orbital_transform);
+    const xmvb::vb::ExteriorOrbitalTransform tb(fixture.beta, integrals.orbital_transform);
+    const xmvb::mcscf::DirectCiSigmaAction sigma(fixture.alpha, fixture.beta, integrals);
+    const xmvb::vb::SpinSources plan(support, nb, nb, parity);
+    const auto full = plan.orthogonal_source(support, support_values, ta, tb, true);
+    xmvb::mcscf::FactorActionWorkspace workspace(full, sigma.channel_kernel().rows(), 65536, true);
+    Eigen::MatrixXd reconstructed = Eigen::MatrixXd::Zero(nb, nb);
+    workspace.apply(sigma, full, {}, [&](xmvb::mcscf::FactorImageBlock block) {
+      reconstructed.noalias() += block.alpha * block.beta.transpose();
+    });
+    require((reconstructed - action.orthogonalize_structure_block(vectors.col(0))).norm() < 1e-12,
+            "physical factor provider lost an exchange half or a mixed source");
   }
+}
+
+/** @brief Production accepted gradient keeps the nonstationary carrier term. */
+void check_factor_accepted_gradient() {
+  const auto fixture = make_fixture(8, 4, 4);
+  Pairing adjacent;
+  for (int i = 0; i < 8; i += 2) adjacent.emplace_back(i, i + 1);
+  const auto expansion = covalent_rumer_terms(8, fixture.alpha, fixture.beta, {adjacent});
+  const auto cache = topology(fixture, expansion.product_alpha, expansion.product_beta);
+  const xmvb::vb::StructureAction action(expansion.terms, 1, cache, fixture.overlap,
+      fixture.one_electron, fixture.two_electron, 8, nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  Eigen::MatrixXd c = Eigen::MatrixXd::Ones(1, 1);
+  const auto images = action.apply(c);
+  const double energy = images.hamiltonian(0,0) / images.overlap(0,0);
+  c /= std::sqrt(images.overlap(0,0));
+  const auto state = action.prepare_active_adjoint(c, {1.0}, {energy});
+  require(state.factor_integrals, "accepted gradient did not select the cheaper factor adjoint");
+  require(state.structure_coefficients.rows() == 1 && state.structure_coefficients.cols() == 1,
+          "accepted raw state was not retained in the selected structure space");
+  const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap, fixture.one_electron, fixture.two_electron, 8);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(
+      cache.alpha_reuse_table.unique_determinants,
+      cache.beta_reuse_table.unique_determinants, integrals);
+  const auto y = action.orthogonalize_structure_block(c);
+  const auto reference = sigma.integral_adjoint(y, y);
+  const Eigen::MatrixXd residual = sigma.apply(y) - energy * y;
+  const Eigen::MatrixXd generator = 2 * sigma.one_body_generator_adjoint(residual, y);
+  require(generator.norm() > 1e-7,
+          "accepted-gradient fixture does not probe a nonzero carrier residual");
+  const auto expected = xmvb::vb::backpropagate_orthogonal_active_integral_adjoint(
+      integrals, reference.one_electron, reference.pair_kernel, generator);
+  const auto actual = action.active_integral_adjoint(state);
+  require((actual.overlap-expected.overlap).norm() < 2e-11 &&
+      (actual.one_electron-expected.one_electron).norm() < 2e-11 &&
+      (actual.pair_kernel-expected.pair_kernel).norm() < 2e-11,
+      "factor accepted gradient differs from complete integral/generator pullback");
+  Eigen::MatrixXd ds(8,8), dh(8,8);
+  for (int j = 0; j < 8; ++j)
+    for (int i = 0; i <= j; ++i) {
+      ds(i,j) = ds(j,i) = 0.003 * std::cos(0.13 * (i + 1) * (j + 2));
+      dh(i,j) = dh(j,i) = 0.004 * std::sin(0.17 * (i + 2) * (j + 1));
+    }
+  std::vector<double> dg(fixture.two_electron.packed_active_two_electron_integrals.size());
+  for (int i = 0; i < static_cast<int>(dg.size()); ++i) dg[i] = 0.0003 * std::cos(0.11 * (i + 1));
+  const auto analytic = action.active_integral_adjoint_direction(state, nullptr, nullptr,
+      std::vector<double>(ds.data(), ds.data()+ds.size()),
+      std::vector<double>(dh.data(), dh.data()+dh.size()), dg, nullptr, true);
+  constexpr double step = 2e-5;
+  const auto shifted = [&](double scale) {
+    auto moved = fixture;
+    for (int i = 0; i < static_cast<int>(moved.overlap.size()); ++i) moved.overlap[i] += scale * ds.data()[i];
+    moved.one_electron += scale * dh;
+    for (int i = 0; i < static_cast<int>(dg.size()); ++i)
+      moved.two_electron.packed_active_two_electron_integrals[i] += scale * dg[i];
+    const xmvb::vb::StructureAction shifted_action(expansion.terms, 1, cache, moved.overlap,
+        moved.one_electron, moved.two_electron, 8, nullptr,
+        xmvb::vb::StructureActionMode::ActionOnly);
+    return shifted_action.active_integral_adjoint(
+        shifted_action.prepare_active_adjoint(c, {1.0}, {energy}));
+  };
+  const auto plus = shifted(step), minus = shifted(-step);
+  require(((plus.overlap-minus.overlap)/(2*step)-analytic.overlap).norm() < 2e-7 &&
+      ((plus.one_electron-minus.one_electron)/(2*step)-analytic.one_electron).norm() < 2e-7 &&
+      ((plus.pair_kernel-minus.pair_kernel)/(2*step)-analytic.pair_kernel).norm() < 2e-7,
+      "HVP directional pullback changed after retaining structure rather than raw coefficients");
 }
 
 void check_complete_unequal_spin_case() {
@@ -1221,6 +1312,69 @@ void benchmark_source_cover(int n, bool compare_reference) {
               << "overlap_reference_error=" << (warm.overlap-reference.overlap).norm() << '\n';
 }
 
+/** @brief Physical covalent-state integral adjoint with bounded spin factors. */
+void benchmark_factor_adjoint(int n, bool compare_reference) {
+  require(n == 12 || n == 14, "factor adjoint benchmark supports 12/14 orbitals");
+  const auto fixture = make_fixture(n, n / 2, n / 2);
+  Pairing adjacent;
+  for (int i = 0; i < n; i += 2) adjacent.emplace_back(i, i + 1);
+  const auto expansion = covalent_rumer_terms(n, fixture.alpha, fixture.beta, {adjacent});
+  const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap, fixture.one_electron, fixture.two_electron, n);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(fixture.alpha, fixture.beta, integrals);
+  const xmvb::vb::ExteriorOrbitalTransform ta(fixture.alpha, integrals.orbital_transform);
+  const xmvb::vb::ExteriorOrbitalTransform tb(fixture.beta, integrals.orbital_transform);
+  std::map<int, int> index;
+  for (int a = 0; a < static_cast<int>(fixture.alpha.size()); ++a)
+    index.emplace(occupation_mask(fixture.alpha[a]), a);
+  const int na = fixture.alpha.size(), nb = fixture.beta.size(), parity = (n / 2) % 2 ? -1 : 1;
+  std::vector<int> products;
+  Eigen::VectorXd coefficients(expansion.terms.size());
+  for (int group = 0; group < static_cast<int>(expansion.terms.size()); ++group) {
+    products.push_back(index.at(occupation_mask(expansion.product_alpha[group])) * nb +
+        index.at(occupation_mask(expansion.product_beta[group])));
+    coefficients[group] = expansion.terms[group][0].coefficient;
+  }
+  const xmvb::vb::SpinSources representatives(products, na, nb, parity);
+  const auto bra = representatives.orthogonal_source(products, coefficients, ta, tb, true);
+  const auto ket = representatives.orthogonal_source(products, coefficients, ta, tb);
+  const auto begin = Clock::now();
+  const auto cold = xmvb::mcscf::factor_integral_adjoint(sigma, bra, ket);
+  const auto first = Clock::now();
+  const auto warm = xmvb::mcscf::factor_integral_adjoint(sigma, bra, ket);
+  const auto finished = Clock::now();
+  require((cold.one_electron-warm.one_electron).norm() < 1e-12 &&
+      (cold.pair_kernel-warm.pair_kernel).norm() < 1e-12, "factor adjoint is not repeatable");
+  rusage usage{};
+  require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
+  const long native_rss = usage.ru_maxrss;
+  xmvb::mcscf::DirectCiIntegralAdjoint reference;
+  double reference_seconds = 0;
+  if (compare_reference) {
+    Eigen::MatrixXd a(na, bra.count), b(nb, bra.count);
+    bra.load(0, bra.count, a, b);
+    const Eigen::MatrixXd carrier = a * b.transpose();
+    const auto start = Clock::now();
+    reference = sigma.integral_adjoint(carrier, carrier, parity);
+    reference_seconds = std::chrono::duration<double>(Clock::now()-start).count();
+    require((warm.one_electron-reference.one_electron).norm() < 2e-10 &&
+        (warm.pair_kernel-reference.pair_kernel).norm() < 2e-10,
+        "covalent factor adjoint differs from complete-carrier reference");
+  }
+  std::cout << std::setprecision(17)
+            << "orbitals=" << n << '\n' << "structures=1\n"
+            << "alpha_strings=" << na << '\n' << "beta_strings=" << nb << '\n'
+            << "bra_sources=" << bra.count << '\n' << "ket_sources=" << ket.count << '\n'
+            << "cold_adjoint_seconds=" << std::chrono::duration<double>(first-begin).count() << '\n'
+            << "warm_adjoint_seconds=" << std::chrono::duration<double>(finished-first).count() << '\n'
+            << "reference_seconds=" << reference_seconds << '\n'
+            << "native_max_rss_kib=" << native_rss << '\n'
+            << "reference_checked=" << compare_reference << '\n';
+  if (compare_reference)
+    std::cout << "one_electron_error=" << (warm.one_electron-reference.one_electron).norm() << '\n'
+              << "pair_kernel_error=" << (warm.pair_kernel-reference.pair_kernel).norm() << '\n';
+}
+
 void benchmark12(bool compare_reference) {
   const auto start = Clock::now();
   const Fixture fixture = make_fixture(12, 6, 6);
@@ -1325,6 +1479,10 @@ int main(int argc, char** argv) {
       benchmark_source_cover(std::stoi(argv[2]), false);
     } else if (argc == 3 && std::string(argv[1]) == "--source-cover-reference") {
       benchmark_source_cover(std::stoi(argv[2]), true);
+    } else if (argc == 3 && std::string(argv[1]) == "--factor-adjoint") {
+      benchmark_factor_adjoint(std::stoi(argv[2]), false);
+    } else if (argc == 3 && std::string(argv[1]) == "--factor-adjoint-reference") {
+      benchmark_factor_adjoint(std::stoi(argv[2]), true);
     } else if (argc == 3 && std::string(argv[1]) == "--paths12") {
       benchmark_selected12(std::stoi(argv[2]), false, true);
     } else if (argc == 3 && std::string(argv[1]) == "--gram12") {
@@ -1336,6 +1494,7 @@ int main(int argc, char** argv) {
       check_ionic_sources();
       check_source_cover();
       check_mixed_source_images();
+      check_factor_accepted_gradient();
       check_complete_unequal_spin_case();
       check_mixed_exchange_space();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
@@ -1355,7 +1514,8 @@ int main(int argc, char** argv) {
       throw std::invalid_argument(
           "usage: test_structure_tiles [--benchmark12|--benchmark12-no-reference|"
           "--selected12 N|--selected12-parity N|--sources12 N|--paths12 N|--gram12 N|"
-          "--source-size N|--source-size-parity N|--source-cover-size N|--source-cover-reference N]");
+          "--source-size N|--source-size-parity N|--source-cover-size N|--source-cover-reference N|"
+          "--factor-adjoint N|--factor-adjoint-reference N]");
     }
     return 0;
   } catch (const std::exception& error) {

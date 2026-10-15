@@ -1,0 +1,11 @@
+orbitals=14
+structures=1
+alpha_strings=3432
+beta_strings=3432
+bra_sources=128
+ket_sources=64
+cold_adjoint_seconds=3.312257454
+warm_adjoint_seconds=3.3594924129999999
+reference_seconds=0
+native_max_rss_kib=79684
+reference_checked=0

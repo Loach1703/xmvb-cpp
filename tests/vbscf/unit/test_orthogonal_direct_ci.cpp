@@ -70,7 +70,7 @@ void check_joint_structure_response(const xmvb::vb::StructureAction& action,
     states.states[i].normalized_state_weight = states.normalized_state_weights[i];
     states.states[i].coefficient_matrix = action.expand_structure_block(raw.col(i));
   }
-  const auto accepted = action.prepare_active_adjoint(states, {-1.3, -0.9});
+  const auto accepted = action.prepare_active_adjoint(raw, states.normalized_state_weights, {-1.3, -0.9});
   const Eigen::MatrixXd multipliers =
       (Eigen::Matrix2d() << 0.13, -0.04, 0.08, -0.21).finished();
   for (bool zero : {false, true}) {
@@ -2082,7 +2082,7 @@ void benchmark_structure_response() {
     states.states[0].normalized_state_weight = 1.0;
     const Eigen::Vector3d c(0.3,-0.2,0.7), q(0.4,0.6,-0.3);
     states.states[0].coefficient_matrix = action.expand_structure_block(c);
-    const auto accepted = action.prepare_active_adjoint(states, {-1.3});
+    const auto accepted = action.prepare_active_adjoint(c, {1.0}, {-1.3});
     const auto evaluate = [&](bool joint) {
       xmvb::vb::StructureActionResult images;
       xmvb::vb::StructureResponseSweep sweep;
@@ -2174,6 +2174,8 @@ void check_exchange_adjoint(bool benchmark = false) {
       require(error < 3e-11, "exchange quotient changed the full sigma or integral adjoint");
       require((quotient.sigma - action.apply(left)).norm() < 3e-10,
           "reconstructed exchange sigma differs from independent full sigma");
+      require((quotient.sigma - action.apply(left, parity)).norm() < 3e-10,
+          "standalone exchange sigma differs from fused sigma");
       const auto accepted = action.apply_with_adjoint(left, left, parity);
       const Eigen::MatrixXd copy = left;
       const auto independent = action.integral_adjoint(left, copy);
@@ -2182,6 +2184,12 @@ void check_exchange_adjoint(bool benchmark = false) {
           "shared accepted-point scatter changed integral adjoint");
       if (!benchmark) continue;
       for (int sector : {0, parity}) {
+        const auto sigma_start = Clock::now();
+        const auto sigma = action.apply(left, sector);
+        const double sigma_wall = std::chrono::duration<double>(Clock::now() - sigma_start).count();
+        std::cout << n << ',' << width << ',' << parity << ','
+                  << (sector == 0 ? "full_sigma" : "quotient_sigma") << ',' << sigma_wall << ','
+                  << sigma.squaredNorm() << ',' << error << '\n';
         for (bool same : {false, true}) {
           const auto start = Clock::now();
           const auto result = same ? action.apply_with_adjoint(left, left, sector)

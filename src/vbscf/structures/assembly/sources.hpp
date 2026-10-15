@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "mcscf/ci/factors.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
 namespace xmvb::vb {
@@ -27,6 +28,24 @@ struct SpinSources {
 
   SpinSources(const std::vector<int>& products, int na, int nb, int parity = 0);
 
+  /** @brief Load raw source factors from original-support coefficients.
+   * Both output views are overwritten. Parity weights belong to this plan;
+   * callers apply their orbital transforms after loading the raw factors.
+   */
+  void load(const std::vector<int>& products,
+      const Eigen::Ref<const Eigen::VectorXd>& coefficients, int first, int width,
+      Eigen::Ref<Eigen::MatrixXd> alpha, Eigen::Ref<Eigen::MatrixXd> beta) const;
+
+  /** @brief Borrow a transformed factor provider over original support values.
+   * physical=true reconstructs the full amplitude from a certified common
+   * exchange-parity representative. Metadata, values and transforms must
+   * outlive the provider; only its requested source panel is materialized.
+   */
+  mcscf::SpinFactorSource orthogonal_source(const std::vector<int>& products,
+      const Eigen::Ref<const Eigen::VectorXd>& coefficients,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      bool physical = false) const;
+
   std::size_t dynamic_bytes() const noexcept {
     std::size_t bytes = (columns.capacity() + alpha_rows.capacity() + alpha_offsets.capacity() +
         offsets.capacity() + groups.capacity()) * sizeof(int) +
@@ -38,6 +57,9 @@ struct SpinSources {
     }
     return bytes;
   }
+
+private:
+  int parity_ = 0;
 };
 
 } // namespace xmvb::vb

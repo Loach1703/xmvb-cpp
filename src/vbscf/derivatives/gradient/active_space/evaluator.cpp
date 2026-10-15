@@ -769,20 +769,14 @@ void accumulate_active_space_gradient(
   const auto stage_start_time = std::chrono::steady_clock::now();
   const auto& same_spin_pair_cache = forward_context.same_spin_pair_cache;
 
-  const SelectedStateDeterminantMatrices selected_state_matrices =
-      build_selected_state_determinant_matrices_from_selected_columns(
-          input.structure_data,
-          forward_context.selected_state_eigenvectors,
-          selected_state_indices,
-          normalized_weights,
-          same_spin_pair_cache);
   const std::vector<double>& selected_state_energies =
       forward_context.selected_state_energies;
   if (forward_context.structure_action &&
       forward_context.structure_action->supports_integral_direction()) {
     forward_context.structure_adjoint_state =
         forward_context.structure_action->prepare_active_adjoint(
-            selected_state_matrices,
+            forward_context.selected_state_eigenvectors,
+            normalized_weights,
             selected_state_energies);
     write_direct_ci_active_gradient(
         forward_context.structure_action->active_integral_adjoint(
@@ -794,6 +788,13 @@ void accumulate_active_space_gradient(
             std::chrono::steady_clock::now() - stage_start_time).count();
     return;
   }
+  const SelectedStateDeterminantMatrices selected_state_matrices =
+      build_selected_state_determinant_matrices_from_selected_columns(
+          input.structure_data,
+          forward_context.selected_state_eigenvectors,
+          selected_state_indices,
+          normalized_weights,
+          same_spin_pair_cache);
   if (!same_spin_pair_cache.has_pair_providers()) {
     throw std::runtime_error(
         "active-space gradient requires pair providers or direct-CI action");

@@ -35,6 +35,7 @@ set(XMVB_MCSCF_SOURCES
   mcscf/ci/sigma.cpp
   mcscf/ci/sigma_tiles.cpp
   mcscf/ci/spin_channels.cpp
+  mcscf/ci/factors.cpp
   mcscf/ci/planner.cpp
   mcscf/ci/strings.cpp
   mcscf/ci/spin.cpp)
@@ -189,9 +190,13 @@ unset(_xmvb_common_file)
 unset(_xmvb_vb_includes)
 
 if (XMVB_BUILD_DEV_TARGETS)
+  add_executable(test_ci_factors ${CMAKE_SOURCE_DIR}/tests/mcscf/test_factors.cpp)
+  target_link_libraries(test_ci_factors PRIVATE xmvb_mcscf)
   add_executable(test_casci ${CMAKE_SOURCE_DIR}/tests/mcscf/test_casci.cpp)
   target_link_libraries(test_casci PRIVATE xmvb_casscf)
   if (BUILD_TESTING)
+    add_test(NAME ci_factors COMMAND test_ci_factors)
+    set_tests_properties(ci_factors PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
     add_test(NAME casci COMMAND test_casci)
     set_tests_properties(casci PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
   endif()

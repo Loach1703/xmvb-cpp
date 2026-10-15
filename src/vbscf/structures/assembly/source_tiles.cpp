@@ -1,40 +1,17 @@
 #include "vbscf/structures/assembly/action.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <chrono>
-#include <stdexcept>
 
 #include "core/openmp.hpp"
 #include "core/timing.hpp"
+#include "mcscf/ci/factors.hpp"
 #include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma.hpp"
 #include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
 namespace xmvb::vb {
-namespace {
-
-/** @brief Mix channels without coupling or replicating the source columns. */
-void mix_channels(const Eigen::Ref<const Eigen::MatrixXd>& channels, const Eigen::MatrixXd& kernel,
-    int p, int q, int width, Eigen::Ref<Eigen::MatrixXd> image) {
-  const int rows = channels.rows() * width;
-  const int np = image.cols() / width, nq = channels.cols() / width;
-  Eigen::Map<const Eigen::MatrixXd> input(channels.data(), rows, nq);
-  Eigen::Map<Eigen::MatrixXd> output(image.data(), rows, np);
-  const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(),
-      static_cast<std::size_t>(rows) * np * nq);
-#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
-  for (int part = 0; part < workers; ++part) {
-    const int first = rows * part / workers, last = rows * (part + 1) / workers;
-    if (last > first)
-      output.middleRows(first, last - first).noalias() +=
-          input.middleRows(first, last - first) * kernel.block(p, q, np, nq).transpose();
-  }
-}
-
-} // namespace
-
 bool StructureAction::prefer_source_contraction(const ExteriorOrbitalTransform& alpha,
     const ExteriorOrbitalTransform& beta, const mcscf::DirectCiSigmaAction& sigma) const {
   const long double r = sources_->nodes.size();
@@ -80,38 +57,15 @@ StructureActionResult StructureAction::apply_source_tiles(
   const auto seconds = [](auto first, auto last) { return std::chrono::duration<double>(last-first).count(); };
   double scatter_time = 0, mix_time = 0, gather_time = 0, pullback_time = 0, sample_time = 0;
   const auto& sources = *sources_;
-  const auto& kernel = sigma.channel_kernel();
   const auto& alpha_projection = sources.alpha_projection;
   const auto& beta_projection = sources.beta_projection;
-  const int pairs = kernel.rows();
-  const std::size_t spin_rows = static_cast<std::size_t>(n_unique_alpha_) + n_unique_beta_;
-  // At most three channel pairs plus six source/image pairs coexist. Tile
-  // source columns first, then channels if even one full channel family is too big.
-  const std::size_t unit_bytes = spin_rows * sizeof(double);
-  if (workspace_bytes / unit_bytes < (overlap_only ? 2U : 9U))
-    throw std::length_error("source workspace cannot hold one single-spin channel tile");
-  const int columns_per_source = overlap_only ? 2 : 3 * pairs + 6;
-  const int source_tile = static_cast<int>(std::max<std::size_t>(1,
-      std::min<std::size_t>(sources.nodes.size(), workspace_bytes / unit_bytes / columns_per_source)));
-  const int channel_tile = overlap_only ? 0 : static_cast<int>(std::min<std::size_t>(pairs,
-      (workspace_bytes / unit_bytes / source_tile - 6) / 3));
+  const mcscf::SpinFactorSource shape{n_unique_alpha_, n_unique_beta_,
+      static_cast<int>(sources.nodes.size()), {}};
+  mcscf::FactorActionWorkspace workspace(shape, sigma.channel_kernel().rows(), workspace_bytes, overlap_only);
+  int source_tile = 0, channel_tile = 0;
   StructureActionResult result{
       Eigen::MatrixXd::Zero(n_structures_, vectors.cols()),
       Eigen::MatrixXd::Zero(n_structures_, vectors.cols())};
-  // One shared allocation per slab. Active full-row views also handle final
-  // partial source/channel tiles without resizing or refaulting large buffers.
-  Eigen::MatrixXd a_buffer(n_unique_alpha_, source_tile), b_buffer(n_unique_beta_, source_tile);
-  const int image_columns = overlap_only ? 0 : source_tile;
-  Eigen::MatrixXd ha_buffer(n_unique_alpha_, image_columns), hb_buffer(n_unique_beta_, image_columns);
-  Eigen::MatrixXd ap_buffer(n_unique_alpha_, source_tile * channel_tile);
-  Eigen::MatrixXd bp_buffer(n_unique_beta_, source_tile * channel_tile);
-  Eigen::MatrixXd va_buffer(n_unique_alpha_, source_tile * channel_tile);
-  Eigen::MatrixXd vb_buffer(n_unique_beta_, source_tile * channel_tile);
-  Eigen::MatrixXd aq_buffer, bq_buffer;
-  if (!overlap_only && channel_tile < pairs) {
-    aq_buffer.resize(n_unique_alpha_, source_tile * channel_tile);
-    bq_buffer.resize(n_unique_beta_, source_tile * channel_tile);
-  }
   for (int vector = 0; vector < vectors.cols(); ++vector) {
     Eigen::VectorXd coefficients = Eigen::VectorXd::Zero(spin_products_.size());
     Eigen::VectorXd h_products = coefficients, m_products = coefficients;
@@ -121,95 +75,45 @@ StructureActionResult StructureAction::apply_source_tiles(
       for (std::size_t t = spin_term_offsets_[group]; t < spin_term_offsets_[group + 1]; ++t)
         coefficients[group] += spin_terms_[t].coefficient * vectors(spin_terms_[t].structure, vector);
 
-    for (int first = 0; first < static_cast<int>(sources.nodes.size()); first += source_tile) {
-      const int width = std::min<int>(source_tile, sources.nodes.size() - first);
-      ++result.tiles.source_tiles;
-      result.tiles.source_columns += width;
-      result.tiles.source_workspace_bound = std::max(result.tiles.source_workspace_bound,
-          unit_bytes * width * (overlap_only ? 2 : 3 * channel_tile + 6));
-      auto a = a_buffer.leftCols(width), b = b_buffer.leftCols(width);
-      auto ha = ha_buffer.leftCols(overlap_only ? 0 : width);
-      auto hb = hb_buffer.leftCols(overlap_only ? 0 : width);
-      a.setZero(); b.setZero(); ha.setZero(); hb.setZero();
-      for (int j = 0; j < width; ++j) {
-        const int index = first + j;
-        const auto& source = sources.nodes[index];
-        if (source.beta) b(source.string, j) = 1.0;
-        else a(source.string, j) = 1.0;
-        for (int entry = sources.offsets[index]; entry < sources.offsets[index + 1]; ++entry) {
-          const int group = sources.groups[entry];
-          const int row = spin_products_[group] / n_unique_beta_;
-          const int column = spin_products_[group] % n_unique_beta_;
-          const double value = coefficients[group] * (spin_exchange_parity_ && row != column ? 2 : 1);
-          if (source.beta) a(row, j) = value;
-          else b(column, j) = value;
-        }
-      }
-      alpha.apply_left_block(a);
-      beta.apply_left_block(b);
-      if (!overlap_only) {
-        for (int p = 0; p < pairs; p += channel_tile) {
-          const int np = std::min(channel_tile, pairs - p);
-          auto ap = ap_buffer.leftCols(np * width), bp = bp_buffer.leftCols(np * width);
-          auto va = va_buffer.leftCols(np * width), vb = vb_buffer.leftCols(np * width);
-          const auto scatter_start = tick();
-          sigma.scatter_spin(false, a, p, np, ap);
-          sigma.scatter_spin(true, b, p, np, bp);
-          scatter_time += seconds(scatter_start, tick());
-          va.setZero(); vb.setZero();
-          for (int q = 0; q < pairs; q += channel_tile) {
-            ++result.tiles.channel_blocks;
-            const int nq = std::min(channel_tile, pairs - q);
-            if (q == p) {
-              const auto start = tick();
-              mix_channels(ap, kernel, p, q, width, va);
-              mix_channels(bp, kernel, p, q, width, vb);
-              mix_time += seconds(start, tick());
-            } else {
-              const auto start = tick();
-              auto aq = aq_buffer.leftCols(nq * width), bq = bq_buffer.leftCols(nq * width);
-              sigma.scatter_spin(false, a, q, nq, aq);
-              sigma.scatter_spin(true, b, q, nq, bq);
-              const auto mixed = tick();
-              scatter_time += seconds(start, mixed);
-              mix_channels(aq, kernel, p, q, width, va);
-              mix_channels(bq, kernel, p, q, width, vb);
-              mix_time += seconds(mixed, tick());
-            }
-          }
-          const auto gathered = tick();
-          sigma.gather_spin(false, va, p, np, ha);
-          sigma.gather_spin(true, vb, p, np, hb);
-          const auto pulling = tick();
-          gather_time += seconds(gathered, pulling);
-          // Commuting spin sectors give the factor two, since K is symmetric.
-          // Sample only original products after the two single-spin adjoints.
-          alpha.apply_adjoint_left_block(ap, alpha_projection);
-          beta.apply_adjoint_left_block(vb, beta_projection);
-          const auto sampled = tick();
-          pullback_time += seconds(pulling, sampled);
-#pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
-          for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group) {
-            const int i = spin_products_[group] / n_unique_beta_;
-            const int j = spin_products_[group] % n_unique_beta_;
-            h_products[group] += 2 * ap.row(i).dot(vb.row(j));
-          }
-          sample_time += seconds(sampled, tick());
-        }
-        alpha.apply_adjoint_left_block(ha, alpha_projection);
-        beta.apply_adjoint_left_block(hb, beta_projection);
-      }
-      alpha.apply_adjoint_left_block(a, alpha_projection);
-      beta.apply_adjoint_left_block(b, beta_projection);
+    const auto source = sources.orthogonal_source(spin_products_, coefficients, alpha, beta);
+    const auto cross = [&](mcscf::FactorCrossBlock block) {
+      const auto pulling = tick();
+      alpha.apply_adjoint_left_block(block.alpha, alpha_projection);
+      beta.apply_adjoint_left_block(block.beta, beta_projection);
+      const auto sampled = tick();
+      pullback_time += seconds(pulling, sampled);
 #pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
       for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group) {
         const int i = spin_products_[group] / n_unique_beta_;
         const int j = spin_products_[group] % n_unique_beta_;
-        m_products[group] += a.row(i).dot(b.row(j));
-        if (!overlap_only)
-          h_products[group] += ha.row(i).dot(b.row(j)) + a.row(i).dot(hb.row(j));
+        h_products[group] += 2 * block.alpha.row(i).dot(block.beta.row(j));
       }
-    }
+      sample_time += seconds(sampled, tick());
+    };
+    const auto finish = [&](mcscf::FactorImageBlock block) {
+      if (!overlap_only) {
+        alpha.apply_adjoint_left_block(block.same_alpha, alpha_projection);
+        beta.apply_adjoint_left_block(block.same_beta, beta_projection);
+      }
+      alpha.apply_adjoint_left_block(block.alpha, alpha_projection);
+      beta.apply_adjoint_left_block(block.beta, beta_projection);
+#pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
+      for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group) {
+        const int i = spin_products_[group] / n_unique_beta_;
+        const int j = spin_products_[group] % n_unique_beta_;
+        m_products[group] += block.alpha.row(i).dot(block.beta.row(j));
+        if (!overlap_only)
+          h_products[group] += block.same_alpha.row(i).dot(block.beta.row(j)) +
+              block.alpha.row(i).dot(block.same_beta.row(j));
+      }
+    };
+    const auto work = workspace.apply(sigma, source, cross, finish);
+    source_tile = work.source_tile; channel_tile = work.channel_tile;
+    result.tiles.source_tiles += work.panels;
+    result.tiles.source_columns += work.sources;
+    result.tiles.channel_blocks += work.channel_blocks;
+    result.tiles.source_workspace_bound = std::max(result.tiles.source_workspace_bound, work.workspace_bound);
+    scatter_time += work.scatter_seconds; mix_time += work.mix_seconds; gather_time += work.gather_seconds;
     ++result.tiles.structure_projections;
 #pragma omp parallel for schedule(static) if(n_structures_ > 32)
     for (int structure = 0; structure < n_structures_; ++structure) {

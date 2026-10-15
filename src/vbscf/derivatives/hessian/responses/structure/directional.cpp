@@ -161,7 +161,8 @@ build_selected_structure_direction(
   if (!accepted_point.structure_adjoint_state.has_value()) {
     accepted_point.structure_adjoint_state =
         structure_action->prepare_active_adjoint(
-            accepted_point.selected_state_matrices,
+            accepted_point.selected_state_eigenvectors,
+            accepted_point.normalized_state_weights,
             accepted_point.selected_state_energies);
   }
   StructureIntegralDirection direct_ci_direction;

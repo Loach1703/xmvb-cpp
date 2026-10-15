@@ -10,9 +10,10 @@ or memory-based admission to a different physical representation is allowed.
 - Fixed-point H/M actions have two exact contraction orders: generated product
   tiles and two-sided source factors. Neither needs a dense transformed product
   array. The arithmetic planner chooses their order, not the physical space.
-- `prepare_active_adjoint()` in `assembly/action.cpp` still retains raw and
-  orthogonal coefficient matrices plus residuals, each on the full product
-  carrier, for every selected state.
+- `prepare_active_adjoint()` now retains raw coefficients in structure space,
+  not as a product matrix. Its integral adjoint can stream spin factors using
+  the exact factor/product arithmetic planner. Orthogonal coefficient matrices
+  and residuals remain on the full product carrier for every selected state.
 - `apply_integral_direction()` allocates stacked product arrays for the base
   coefficients, sigma, coefficient direction and overlap direction.
 - `active_integral_adjoint_direction()` and `contract_response()` still consume
@@ -41,9 +42,9 @@ Target ownership, without a new generic SCF class hierarchy:
 | Consumers | H/M sampling, integral/factor adjoints, differentiated contractions | separately reimplemented spin kernels |
 | Optimizer | structure-space Davidson and existing orbital coordinates | carrier representation decisions or duplicate CI response |
 
-The concrete next numerical module is `mcscf/ci/factors`, not another parallel
-implementation of the existing source loop. Move the current tested channel
-sweep there, then add reverse/tangent consumers to that same graph. A source
+The shared numerical module is `mcscf/ci/factors`, not another parallel
+implementation of the source loop. The forward sweep and integral adjoint are
+implemented there; factor adjoints and tangent consumers remain next. A source
 provider generates panels from sparse coefficients; it must not first build
 full `U * r` factors when a broad support makes those product-sized.
 
@@ -56,14 +57,20 @@ full `U * r` factors when a broad support makes those product-sized.
    Structure incidences now store the support-group index directly, removing
    repeated binary searches in source/product/overlap back-projection without
    adding an index array or enlarging each incidence.
-3. [ ] Extract one shared spin-factor channel sweep from H/M into `mcscf/ci`.
-   Forward sampling and reverse integral/factor adjoints consume the same channel
-   panels. Do not duplicate scatter/GEMM/gather implementations in VB consumers.
+3. [x] Extract one shared spin-factor channel sweep from H/M into `mcscf/ci`.
+   Reuse bounded backing allocations across right-hand sides. Add exact streamed
+   integral adjoints, transferring self-adjoint generators onto the smaller ket
+   source family to avoid repeated bra scatter. Both consumers reuse the common
+   spin kernels and Hamiltonian-kernel pullback; factor VJP remains in item 4.
 4. [ ] Introduce sparse selected-state support coefficients at their producer.
    Replace dense accepted raw/orthogonal/residual carriers by a shared support
    plan, numerical source factors and streamed images. Migrate accepted integral
    gradients and transition one-body adjoints together, including unequal spins
    and state-average cross-state gauge multipliers.
+   Partial: accepted raw state caches now hold structure coefficients. The
+   direct-CI gradient entry no longer builds an unused raw selected-state bundle.
+   Integral gradients choose the exact factor or product contraction by work;
+   their nonstationary full-carrier generator term is retained, not discarded.
    Route exact structure diagonals through an appropriate contraction consumer,
    without probing every global basis vector or adding quadratic structure work.
 5. [ ] Differentiate that same factor graph for orbital HVP and CI responses.

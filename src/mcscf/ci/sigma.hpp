@@ -64,6 +64,15 @@ public:
    * Includes the absorbed one-electron Hamiltonian. Borrowed immutable data.
    */
   const Eigen::MatrixXd& channel_kernel() const noexcept { return hamiltonian_pair_kernel_; }
+  int n_alpha_strings() const noexcept { return n_alpha_; }
+  int n_beta_strings() const noexcept { return n_beta_; }
+
+  /** @brief Pulls a K-channel cotangent back to symmetric h/(pq|rs) adjoints.
+   * Shared by product and source-factor contractions; includes the absorbed
+   * one-electron and normal-ordering terms, with full Frobenius conventions.
+   */
+  DirectCiIntegralAdjoint pullback_channel_kernel(
+      const Eigen::Ref<const Eigen::MatrixXd>& channel_adjoint) const;
 
   DirectCiSigmaAction(
       const std::vector<std::vector<int>>& alpha_determinants,
@@ -83,10 +92,11 @@ public:
    * @brief Applies the Hamiltonian to packed determinant-product blocks.
    *
    * The input shape is `(n_alpha, block_width * n_beta)`; beta columns for one
-   * block vector are contiguous.
+   * block vector are contiguous. A nonzero exchange_parity requires certified
+   * common transpose parity in identical spin spaces and returns a full image.
    */
   Eigen::MatrixXd apply(
-      const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients, int exchange_parity = 0) const;
 
   /** @brief Stream the exact Hamiltonian action through beta-column callbacks.
    *
@@ -218,11 +228,14 @@ private:
       Eigen::Ref<Eigen::MatrixXd> intermediate) const;
   const SpinConnections& beta_connections() const noexcept;
 
-  /** @brief Shared adjoint sweep; non-null sigma additionally receives H * left. */
-  DirectCiIntegralAdjoint contract_adjoint(
+  /** @brief Shared channel sweep for sigma, integral adjoints, or both.
+   * Non-null sigma receives H * left. A sigma-only request neither constructs
+   * a kernel gradient nor scatters/copies the unused right-hand channels.
+   */
+  DirectCiIntegralAdjoint contract_channels(
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       const Eigen::Ref<const Eigen::MatrixXd>& right,
-      Eigen::MatrixXd* sigma, int exchange_parity) const;
+      Eigen::MatrixXd* sigma, int exchange_parity, bool collect_integrals) const;
 
   /** @brief Cooperative sigma contraction inside the current OpenMP team.
    * Each output beta column has one owner. All workers must call this method.

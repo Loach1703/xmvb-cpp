@@ -41,7 +41,8 @@ projection. The resulting equations preserve the selected variational space
 without a closure assumption or intermediate amplitude truncation. Source
 and channel tiling bound the numerical workspace. Optional spin-exchange
 reduction and causal pruning of the exterior adjoint are derived separately.
-The scope is the Hamiltonian/overlap action at a fixed orbital point.
+The scope is the Hamiltonian/overlap action and its active-integral adjoint
+at a fixed orbital point.
 \end{abstract}
 
 \section{The selected VB space}
@@ -530,6 +531,113 @@ or that selecting one structure universally yields rank one. There is no
 claim of eliminating the exponential growth of the complete one-spin
 spaces.
 
+\section{Integral adjoints without a product carrier}\label{sec:factor-adjoint}
+
+Let the bra and ket amplitudes have exact factorizations
+\begin{equation}
+ Y_\ell=L_\ell F_\ell\Tr,\qquad Y_r=L_r F_r\Tr,
+ \qquad \mathscr E=\ip{Y_\ell}{\Ha Y_r}.
+\end{equation}
+Their source counts $r_\ell$ and $r_r$ need not be equal. At fixed factors,
+the derivative with respect to the Hamiltonian channel kernel is
+\begin{equation}\label{eq:kernel-adjoint}
+ \frac{\partial\mathscr E}{\partial K_{PQ}}=
+ \ip{\Ea_PY_\ell}{\Ea_QY_r}=G_{PQ}.
+\end{equation}
+This uses the self-adjoint symmetric generators, but does not assume that
+the bra and ket, their source counts, or their spin spaces coincide.
+
+First contract the unacted ket factors into the bra amplitude:
+\begin{equation}\label{eq:weighted-bra}
+ W_\alpha=Y_\ell F_r=L_\ell(F_\ell\Tr F_r),\qquad
+ W_\beta=Y_\ell\Tr L_r=F_\ell(L_\ell\Tr L_r).
+\end{equation}
+For each channel $P$, form the two channel covectors
+\begin{align}\label{eq:channel-covectors}
+ C_{\alpha P}&=E_{\alpha P}W_\alpha
+            +L_\ell\bigl(F_\ell\Tr(E_{\beta P}F_r)\bigr),\\
+ C_{\beta P}&=E_{\beta P}W_\beta
+            +F_\ell\bigl(L_\ell\Tr(E_{\alpha P}L_r)\bigr).
+\end{align}
+Their dimensions are $U_\alpha\times r_r$ and $U_\beta\times r_r$.
+Self-adjointness moves the crossed generator from the bra to the ket;
+for example, $(E_{\beta P}F_\ell)\Tr F_r
+=F_\ell\Tr(E_{\beta P}F_r)$. Thus no channel scatter on the bra
+source family is required, even when it contains many panels.
+The full kernel derivative is then
+\begin{equation}\label{eq:factor-kernel-adjoint}
+ \boxed{\quad G_{PQ}=
+ \ip{C_{\alpha P}}{E_{\alpha Q}L_r}
+ +\ip{C_{\beta P}}{E_{\beta Q}F_r}.\quad}
+\end{equation}
+To verify this identity, expand $\Ea_QY_r$ as
+$(E_{\alpha Q}L_r)F_r\Tr+L_r(E_{\beta Q}F_r)\Tr$ and move each
+unacted ket factor to the bra side of the Frobenius product. The resulting
+bra contractions are precisely Eq.~\eqref{eq:channel-covectors}. This is
+the reverse contraction of the same one-body channel graph used for sigma;
+no product-space one-body response or higher-order density tensor is formed.
+
+Only $\operatorname{sym}G=(G+G\Tr)/2$ contributes to symmetric integral
+variations. Using the packed diagonal selector $d_P$ and the effective
+one-electron matrix $f$ defined above, Eq.~\eqref{eq:K} gives
+\begin{equation}
+ \delta\mathscr E=
+ \tfrac12\ip{\operatorname{sym}G}{\delta V}
+ +\sum_P\frac{[(\operatorname{sym}G)d]_P}{N}\,\delta f_P,
+ \qquad
+ \delta f_{ps}=\delta h_{ps}-\tfrac12\sum_q\delta(pq|qs).
+\end{equation}
+Unpacking the symmetric pair entries with half weight on each off-diagonal
+matrix element gives the full-matrix Frobenius gradients for $h$ and $V$.
+The product and factor algorithms share this final kernel pullback in code;
+they differ only in the contraction order that generates $G$.
+
+\subsection{A bounded reverse sweep}
+
+For each ket source panel, stream the bra factors to accumulate
+$W_\alpha,W_\beta$ once. For each $P$-channel panel, scatter the ket
+and these weighted factors, then stream the bra base factors to accumulate
+the crossed contributions to $C_{\sigma P}$. Only after the complete bra has been
+consumed, stream the ket $Q$ channels and add their Gram matrices to $G$.
+Putting the $Q$ contraction inside the bra source loop would repeat the
+leading channel GEMM unnecessarily; that order is not used.
+
+Let $s_\ell,s_r$ be the bra and ket panel widths and $p$ the channel width.
+The required numerical workspace, measured in doubles, is bounded by
+\begin{equation}
+ (U_\alpha+U_\beta)
+ \bigl[s_\ell+2s_r+(2+\mathbf 1_{p<d})s_rp\bigr]
+ +s_\ell s_rp.
+\end{equation}
+It includes loaded bra/ket base factors, weighted bra factors, ket channel
+panels, channel covectors, and one reusable source moment matrix.
+When $p=d$, the ket $P$ panel also supplies all $Q$ channels; otherwise
+a separate $Q$ panel is required. The immutable source metadata
+and the required returned $d\times d$ gradient are separate. Both source
+and channel widths can decrease to respect the budget, without changing
+the represented amplitudes or a derivative tolerance.
+
+With complete channel panels, the leading dense arithmetic is
+\begin{equation}
+ O\left((U_\alpha+U_\beta)
+    [r_r d^2+r_\ell r_r d]\right),
+\end{equation}
+instead of product-carrier Gram work of order $U_\alpha U_\beta d^2$.
+The source-pair term is essential and is not assumed linear in rank.
+Self-adjointness permits exchanging the bra and ket before contraction,
+placing the smaller source family on the ket side. One-spin link
+traversals and panel regeneration also contribute; a smaller channel
+panel can repeat these traversals. No universal speedup is inferred from
+the leading dense terms alone.
+
+For an exchange-parity reduction, a representative cannot replace both
+amplitudes without projection. A physical bra with parity $\eta$ may,
+however, contract an unprojected ket representative $Z$ when
+$Y_r=P_\eta Z$ and the integral derivative commutes with exchange:
+$\ip{Y_\ell}{\delta\Ha Z}=\ip{Y_\ell}{\delta\Ha Y_r}$.
+The caller must establish this identity; the common factor kernel does
+not infer a parity projection from equal spin dimensions.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};
@@ -544,9 +652,11 @@ Mathematical operation & Implementation \\
 \midrule
 Original support and minimum source cover &
 \path{vbscf/structures/assembly/sources.cpp} \\
-Source panels, spin scatter/mix/gather, samples and $\Wa^*$ &
+VB source generation, sampling and $\Wa^*$ &
 \path{vbscf/structures/assembly/source_tiles.cpp}\newline
 \texttt{apply\_source\_tiles()} \\
+Common factor sweep and integral adjoint &
+\path{mcscf/ci/factors.cpp} \\
 Hamiltonian channel kernel, Eq.~\eqref{eq:K} &
 \path{mcscf/ci/sigma.cpp}\newline
 \texttt{build\_hamiltonian\_pair\_kernel()} \\
@@ -561,20 +671,18 @@ Independent complete-carrier comparisons &
 \end{tabular}
 \end{center}
 
-The current change covers fixed-point structure Hamiltonian and overlap
-actions. Integral adjoints, orbital gradients, and Hessian--vector products
-have their own existing consumers; the source-factor cost bound is not yet
-a claim about those complete derivative pipelines. Extending the equations
-to those consumers requires differentiating the exterior maps, factors,
-and Hamiltonian consistently, not simply reusing a fixed-point formula.
+Fixed-point structure Hamiltonian/overlap actions use the common factor
+sweep. Accepted-state integral gradients choose between the exact factor and
+product contractions by their arithmetic costs. Raw state coefficients are
+retained in structure space. The orthogonal state, its full carrier residual,
+and directional-response consumers still require migration, including the
+exterior-map and factor derivatives. A selected-space eigenvector need not be
+stationary on the full carrier: its residual contribution to the
+exterior-transform gradient is retained.
 
 \paragraph{Main result.}
-Arbitrary selected VB structures can use the orthogonal spin-string
-Slater--Condon action while Davidson remains in the selected structure
-space. The exact restriction in Eq.~\eqref{eq:restriction} requires no
-selected-space closure. Equations~\eqref{eq:Hfactor}--\eqref{eq:final}
-make that restriction computable through two-sided spin factors rather
-than a complete transformed product array. No intermediate projection,
-coefficient cutoff, or approximate rank compression enters the derivation.
+Equations~\eqref{eq:Hfactor}--\eqref{eq:final} give the exact
+selected-space restriction through spin factors and Slater--Condon actions,
+without a closure assumption or a complete transformed product array.
 
 \end{document}

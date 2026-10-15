@@ -356,7 +356,8 @@ StructureTangentOperator::apply_coupling_coordinate_block(
   if (adjoint) {
     if (!accepted_point_->structure_adjoint_state)
       accepted_point_->structure_adjoint_state = action_->prepare_active_adjoint(
-          accepted_point_->selected_state_matrices,
+          accepted_point_->selected_state_eigenvectors,
+          accepted_point_->normalized_state_weights,
           accepted_point_->selected_state_energies);
     sweep = action_->apply_response(*accepted_point_->structure_adjoint_state, raw);
     images = std::move(sweep.images);

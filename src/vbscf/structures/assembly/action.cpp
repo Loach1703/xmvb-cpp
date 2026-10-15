@@ -17,6 +17,7 @@
 #include "mcscf/ci/planner.hpp"
 #include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma.hpp"
+#include "mcscf/ci/factors.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -1149,7 +1150,7 @@ double StructureAction::complete_space_residual_norm(
   const double norm = carrier.stableNorm();
   if (!(norm > 0.0))
     throw std::runtime_error("complete-space Ritz state has zero physical norm");
-  const Eigen::MatrixXd residual = direct_ci_->sigma.apply(carrier) - energy * carrier;
+  const Eigen::MatrixXd residual = direct_ci_->sigma.apply(carrier, spin_exchange_parity_) - energy * carrier;
   return residual.stableNorm() / norm;
 }
 
@@ -1320,7 +1321,7 @@ StructureActionResult StructureAction::apply_integral_direction(
       integral_direction.orbital_transform * inverse_orbital_transform;
 
   const int block_width =
-      static_cast<int>(state.source_coefficients.size());
+      static_cast<int>(state.structure_coefficients.cols());
   if (block_width <= 0 ||
       state.orthogonal_coefficients.size() !=
           static_cast<std::size_t>(block_width) ||
@@ -1360,7 +1361,7 @@ StructureActionResult StructureAction::apply_integral_direction(
 
   delta_spin_overlaps += delta_spin_vectors;
   Eigen::MatrixXd delta_spin_hamiltonians =
-      direct_ci_->sigma.apply(delta_spin_vectors);
+      direct_ci_->sigma.apply(delta_spin_vectors, spin_exchange_parity_);
   // Diagnostics are shared per action, bounded independently of thread count.
   const bool capture_connection = direct_ci_direction != nullptr &&
       direct_ci_direction->capture_connection &&
@@ -1382,7 +1383,7 @@ StructureActionResult StructureAction::apply_integral_direction(
     }
   }
   {
-    Eigen::MatrixXd integral_image = sigma_direction.apply(spin_vectors);
+    Eigen::MatrixXd integral_image = sigma_direction.apply(spin_vectors, spin_exchange_parity_);
     delta_spin_hamiltonians += integral_image;
     if (capture_connection) integral = std::move(integral_image);
   }
@@ -1441,16 +1442,17 @@ bool StructureAction::supports_integral_direction() const noexcept {
 }
 
 StructureAdjointState StructureAction::prepare_active_adjoint(
-    const SelectedStateDeterminantMatrices& selected_states,
+    const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+    const std::vector<double>& state_weights,
     const std::vector<double>& state_energies) const {
   if (!direct_ci_) {
     throw std::logic_error(
         "active-integral adjoint requires orthogonal direct CI");
   }
-  if (selected_states.states.empty() ||
-      selected_states.states.size() != state_energies.size() ||
-      selected_states.n_unique_alpha != n_unique_alpha_ ||
-      selected_states.n_unique_beta != n_unique_beta_) {
+  const int n_states = structure_coefficients.cols();
+  if (structure_coefficients.rows() != n_structures_ || n_states <= 0 ||
+      !structure_coefficients.allFinite() || state_weights.size() != state_energies.size() ||
+      state_weights.size() != static_cast<std::size_t>(n_states)) {
     throw std::invalid_argument(
         "selected-state adjoint inputs have incompatible dimensions");
   }
@@ -1459,11 +1461,22 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
       static_cast<int>(direct_ci_->integrals.one_electron.rows());
   const int n_pairs = packed_active_pair_count(n_orbitals);
   StructureAdjointState result;
-  result.source_coefficients.reserve(selected_states.states.size());
-  result.orthogonal_coefficients.reserve(selected_states.states.size());
-  result.residuals.reserve(selected_states.states.size());
-  result.weights.reserve(selected_states.states.size());
+  result.structure_coefficients = structure_coefficients;
+  result.orthogonal_coefficients.reserve(n_states);
+  result.residuals.reserve(n_states);
+  result.weights = state_weights;
   result.energies = state_energies;
+  // Compare the arithmetic of this consumer, independently of the H/M order.
+  // Source-pair moments are quadratic in rank and must not be omitted here.
+  const long double rank = sources_->nodes.size();
+  const long double bra_rank = rank * (spin_exchange_parity_ ? 2 : 1);
+  const long double rows = static_cast<long double>(n_unique_alpha_) + n_unique_beta_;
+  const long double product_rows = spin_exchange_parity_ == 0
+      ? static_cast<long double>(n_unique_alpha_) * n_unique_beta_
+      : static_cast<long double>(n_unique_alpha_) * (n_unique_alpha_ + spin_exchange_parity_) / 2;
+  const long double factor_work = 2 * rows * rank * n_pairs * n_pairs +
+      4 * rows * bra_rank * rank * (n_pairs + 1);
+  result.factor_integrals = rank > 0 && factor_work < 2 * product_rows * n_pairs * n_pairs;
   result.one_electron_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);
   result.pair_kernel_gradient = Eigen::MatrixXd::Zero(
@@ -1471,30 +1484,39 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
   result.generator_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);
 
-  for (std::size_t state = 0; state < selected_states.states.size(); ++state) {
-    const auto& selected_state = selected_states.states[state];
-    const double state_weight = selected_state.normalized_state_weight;
-    if (selected_state.coefficient_matrix.rows() != n_unique_alpha_ ||
-        selected_state.coefficient_matrix.cols() != n_unique_beta_ ||
-        !selected_state.coefficient_matrix.allFinite() ||
-        !std::isfinite(state_weight) || state_weight < 0.0 ||
+  for (int state = 0; state < n_states; ++state) {
+    const double state_weight = state_weights[state];
+    if (!std::isfinite(state_weight) || state_weight < 0.0 ||
         !std::isfinite(state_energies[state])) {
       throw std::invalid_argument("invalid selected-state adjoint input");
     }
-    result.weights.push_back(state_weight);
-    result.source_coefficients.push_back(
-        selected_state.coefficient_matrix);
     if (state_weight == 0.0) {
       result.orthogonal_coefficients.emplace_back();
       result.residuals.emplace_back();
       continue;
     }
-    Eigen::MatrixXd orthogonal_coefficients =
-        result.source_coefficients.back();
+    Eigen::MatrixXd orthogonal_coefficients = expand_structure_block(structure_coefficients.col(state));
+    Eigen::VectorXd support_values;
+    if (result.factor_integrals) {
+      support_values.resize(spin_products_.size());
+      for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group)
+        support_values[group] = orthogonal_coefficients(
+            spin_products_[group] / n_unique_beta_, spin_products_[group] % n_unique_beta_);
+    }
     direct_ci_->alpha_transform.apply_left(&orthogonal_coefficients);
     direct_ci_->beta_transform().apply_right(&orthogonal_coefficients);
-    auto contracted = direct_ci_->sigma.apply_with_adjoint(
-        orthogonal_coefficients, orthogonal_coefficients, spin_exchange_parity_);
+    mcscf::DirectCiResponse contracted;
+    if (result.factor_integrals) {
+      const auto bra = sources_->orthogonal_source(spin_products_, support_values,
+          direct_ci_->alpha_transform, direct_ci_->beta_transform(), true);
+      const auto ket = sources_->orthogonal_source(spin_products_, support_values,
+          direct_ci_->alpha_transform, direct_ci_->beta_transform());
+      contracted.integrals = mcscf::factor_integral_adjoint(direct_ci_->sigma, bra, ket);
+      contracted.sigma = direct_ci_->sigma.apply(orthogonal_coefficients, spin_exchange_parity_);
+    } else {
+      contracted = direct_ci_->sigma.apply_with_adjoint(
+          orthogonal_coefficients, orthogonal_coefficients, spin_exchange_parity_);
+    }
     result.orthogonal_coefficients.push_back(
         std::move(orthogonal_coefficients));
     result.residuals.push_back(
@@ -1558,7 +1580,8 @@ StructureAction::active_integral_adjoint_direction(
   const bool include_state_response = directional_selected_states != nullptr;
   const std::size_t n_states = state.weights.size();
   if (n_states == 0 || state.energies.size() != n_states ||
-      state.source_coefficients.size() != n_states ||
+      state.structure_coefficients.rows() != n_structures_ ||
+      state.structure_coefficients.cols() != static_cast<Eigen::Index>(n_states) ||
       state.orthogonal_coefficients.size() != n_states ||
       state.residuals.size() != n_states ||
       include_state_response != (directional_state_multipliers != nullptr) ||
@@ -1646,9 +1669,7 @@ StructureAction::active_integral_adjoint_direction(
     const auto& orthogonal_coefficients =
         state.orthogonal_coefficients[state_index];
     const auto& residual = state.residuals[state_index];
-    if (state.source_coefficients[state_index].rows() != n_unique_alpha_ ||
-        state.source_coefficients[state_index].cols() != n_unique_beta_ ||
-        orthogonal_coefficients.rows() != n_unique_alpha_ ||
+    if (orthogonal_coefficients.rows() != n_unique_alpha_ ||
         orthogonal_coefficients.cols() != n_unique_beta_ ||
         residual.rows() != n_unique_alpha_ ||
         residual.cols() != n_unique_beta_) {
@@ -1665,7 +1686,7 @@ StructureAction::active_integral_adjoint_direction(
                 n_unique_beta_);
       } else {
         Eigen::MatrixXd transformed_source =
-            state.source_coefficients[state_index];
+            expand_structure_block(state.structure_coefficients.col(state_index));
         direct_ci_->alpha_transform.apply_directional_left(
             alpha_transform_direction,
             &transformed_source,
@@ -1699,16 +1720,16 @@ StructureAction::active_integral_adjoint_direction(
           n_unique_beta_);
     } else {
       directional_sigma = direct_ci_->sigma.apply(
-          directional_orthogonal_coefficients);
+          directional_orthogonal_coefficients, spin_exchange_parity_);
     }
     if (include_integral_response && direct_ci_direction == nullptr) {
       directional_sigma.noalias() +=
-          sigma_direction->apply(orthogonal_coefficients);
+          sigma_direction->apply(orthogonal_coefficients, spin_exchange_parity_);
     }
     if (include_state_response && include_integral_response &&
         direct_ci_direction != nullptr) {
       directional_sigma.noalias() +=
-          direct_ci_->sigma.apply(orthogonal_state_response);
+          direct_ci_->sigma.apply(orthogonal_state_response, spin_exchange_parity_);
     }
     Eigen::MatrixXd directional_residual =
         directional_sigma -
@@ -1799,7 +1820,8 @@ StructureResponseSweep StructureAction::contract_response(
   }
   const std::size_t n_states = state.weights.size();
   if (n_states == 0 || state.energies.size() != n_states ||
-      state.source_coefficients.size() != n_states ||
+      state.structure_coefficients.rows() != n_structures_ ||
+      state.structure_coefficients.cols() != static_cast<Eigen::Index>(n_states) ||
       state.orthogonal_coefficients.size() != n_states ||
       state.residuals.size() != n_states) {
     throw std::invalid_argument(

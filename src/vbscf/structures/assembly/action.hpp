@@ -67,7 +67,10 @@ struct StructureResponseSweep {
 
 /** @brief Direction-independent selected-state data for direct-CI adjoints. */
 struct StructureAdjointState {
-  std::vector<Eigen::MatrixXd> source_coefficients;
+  /** Accepted coefficients in the originating selected structure space. */
+  Eigen::MatrixXd structure_coefficients;
+  /** Whether integral adjoints use bounded spin-factor rather than product order. */
+  bool factor_integrals = false;
   std::vector<Eigen::MatrixXd> orthogonal_coefficients;
   std::vector<Eigen::MatrixXd> residuals;
   std::vector<double> weights;
@@ -195,7 +198,8 @@ public:
 
   /** @brief Precomputes direction-independent selected-state adjoint data. */
   StructureAdjointState prepare_active_adjoint(
-      const SelectedStateDeterminantMatrices& selected_states,
+      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+      const std::vector<double>& state_weights,
       const std::vector<double>& state_energies) const;
 
   /** @brief Pulls a prepared direct-CI adjoint back to active integrals. */

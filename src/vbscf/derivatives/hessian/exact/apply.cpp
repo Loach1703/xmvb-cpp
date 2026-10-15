@@ -791,7 +791,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       if (!accepted_point_context_->structure_adjoint_state.has_value()) {
         accepted_point_context_->structure_adjoint_state =
             accepted_structure_action->prepare_active_adjoint(
-                accepted_point_context_->selected_state_matrices,
+                accepted_point_context_->selected_state_eigenvectors,
+                accepted_point_context_->normalized_state_weights,
                 accepted_point_context_->selected_state_energies);
       }
       const StructureIntegralDirection* direct_ci_direction = nullptr;
@@ -1109,7 +1110,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_structure_response_adjoint(
     if (!accepted_point_context_->structure_adjoint_state.has_value()) {
       accepted_point_context_->structure_adjoint_state =
           structure_action->prepare_active_adjoint(
-              accepted_point_context_->selected_state_matrices,
+              accepted_point_context_->selected_state_eigenvectors,
+              accepted_point_context_->normalized_state_weights,
               accepted_point_context_->selected_state_energies);
     }
     active_gradient = make_active_gradient_direction(

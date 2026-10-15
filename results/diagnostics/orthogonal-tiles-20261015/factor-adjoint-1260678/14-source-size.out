@@ -1,0 +1,15 @@
+orbitals=14
+alpha_strings=3432
+beta_strings=3432
+products=128
+prepare_seconds=0.0051522
+construct_seconds=0.068599376000000004
+cold_apply_seconds=0.272211117
+warm_apply_seconds=0.25950063099999998
+reference_seconds=6.3e-07
+source_tiles=22
+source_columns=64
+channel_blocks=22
+source_workspace_bound=52880256
+rayleigh_energy=-5.7651827186932545
+max_rss_kib=53748

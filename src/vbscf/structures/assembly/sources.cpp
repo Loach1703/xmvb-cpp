@@ -83,7 +83,7 @@ struct SupportMatching {
 } // namespace
 
 SpinSources::SpinSources(const std::vector<int>& products, int na, int nb, int parity)
-    : alpha_offsets(na + 1, 0), beta_groups(nb) {
+    : alpha_offsets(na + 1, 0), beta_groups(nb), parity_(parity) {
   std::vector<std::vector<int>> edges(na);
   const auto representative = [=](int a, int b) {
     return !parity || a < b || (a == b && parity > 0);
@@ -149,6 +149,50 @@ SpinSources::SpinSources(const std::vector<int>& products, int na, int nb, int p
     if (representative(a, b))
       groups[next[row_source[a] >= 0 ? row_source[a] : column_source[b]]++] = group;
   }
+}
+
+void SpinSources::load(const std::vector<int>& products,
+    const Eigen::Ref<const Eigen::VectorXd>& coefficients, int first, int width,
+    Eigen::Ref<Eigen::MatrixXd> alpha, Eigen::Ref<Eigen::MatrixXd> beta) const {
+  alpha.setZero(); beta.setZero();
+  const int nb = beta.rows();
+  for (int j = 0; j < width; ++j) {
+    const int index = first + j;
+    const auto& source = nodes[index];
+    if (source.beta) beta(source.string, j) = 1.0;
+    else alpha(source.string, j) = 1.0;
+    for (int entry = offsets[index]; entry < offsets[index + 1]; ++entry) {
+      const int group = groups[entry];
+      const int row = products[group] / nb, column = products[group] % nb;
+      const double value = coefficients[group] * (parity_ && row != column ? 2 : 1);
+      if (source.beta) alpha(row, j) = value;
+      else beta(column, j) = value;
+    }
+  }
+}
+
+mcscf::SpinFactorSource SpinSources::orthogonal_source(const std::vector<int>& products,
+    const Eigen::Ref<const Eigen::VectorXd>& coefficients,
+    const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+    bool physical) const {
+  const bool project = physical && parity_ != 0;
+  const int rank = nodes.size();
+  return {alpha.dimension(), beta.dimension(), rank * (project ? 2 : 1),
+      [this, &products, coefficients, &alpha, &beta, project, rank](int first, int width,
+          Eigen::Ref<Eigen::MatrixXd> a, Eigen::Ref<Eigen::MatrixXd> b) {
+        int offset = 0;
+        while (offset < width) {
+          const int local = (first + offset) % rank;
+          const int count = std::min(width - offset, rank - local);
+          auto aa = a.middleCols(offset, count), bb = b.middleCols(offset, count);
+          const bool exchanged = project && first + offset >= rank;
+          if (exchanged) load(products, coefficients, local, count, bb, aa);
+          else load(products, coefficients, local, count, aa, bb);
+          if (project) aa *= exchanged ? 0.5 * parity_ : 0.5;
+          offset += count;
+        }
+        alpha.apply_left_block(a); beta.apply_left_block(b);
+      }};
 }
 
 } // namespace xmvb::vb

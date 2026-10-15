@@ -574,17 +574,7 @@ void check_connection(const StructureFixture& fixture) {
     if (!stationary) coefficients += 0.4 * fixture.eigenvectors.col(1);
     coefficients /= std::sqrt(coefficients.dot(fixture.overlap * coefficients));
     const double energy = coefficients.dot(fixture.hamiltonian * coefficients);
-    xmvb::vb::SelectedStateDeterminantMatrices selected;
-    selected.n_structures = 4;
-    selected.n_unique_alpha = selected.n_unique_beta = 2;
-    selected.normalized_state_weights = {1.0};
-    selected.states.resize(1);
-    selected.states[0].normalized_state_weight = 1.0;
-    selected.states[0].coefficient_matrix.resize(2, 2);
-    for (int a = 0; a < 2; ++a)
-      for (int b = 0; b < 2; ++b)
-        selected.states[0].coefficient_matrix(a,b) = coefficients[2*a+b];
-    const auto state = fixture.action.prepare_active_adjoint(selected, {energy});
+    const auto state = fixture.action.prepare_active_adjoint(coefficients, {1.0}, {energy});
     xmvb::vb::StructureIntegralDirection captured, plain;
     captured.capture_connection = true;
     const auto images = fixture.action.apply_integral_direction(state, overlap, one, two, &captured);

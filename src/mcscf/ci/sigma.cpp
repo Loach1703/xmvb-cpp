@@ -402,161 +402,11 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
 }
 
 Eigen::MatrixXd DirectCiSigmaAction::apply(
-    const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const {
-  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiSigma);
-  if (coefficients.rows() != n_alpha_ || coefficients.cols() <= 0 ||
-      coefficients.cols() % n_beta_ != 0) {
-    throw std::invalid_argument(
-        "direct-CI coefficient block has incompatible dimensions");
-  }
-  const int block_width = static_cast<int>(coefficients.cols()) / n_beta_;
-  const SpinConnections& beta_graph = beta_connections();
-  const int n_pairs = static_cast<int>(hamiltonian_pair_kernel_.rows());
-  Eigen::MatrixXd sigma = Eigen::MatrixXd::Zero(
-      n_alpha_, coefficients.cols());
-  // Bound all thread-local scatter, transformed-scatter, and reduction
-  // buffers by one explicit workspace budget.  A wider alpha tile increases
-  // GEMM efficiency without changing the mathematical action.
-  constexpr std::size_t kWorkspaceBytes = 64ULL * 1024ULL * 1024ULL;
-  const std::size_t worker_row_bytes = static_cast<std::size_t>(block_width) *
-      (static_cast<std::size_t>(n_beta_) + 2ULL * n_pairs) * sizeof(double);
-  if (worker_row_bytes > kWorkspaceBytes)
-    throw std::length_error("one direct-CI sigma row exceeds workspace budget");
-  const int n_threads = static_cast<int>(std::min<std::size_t>(
-      std::max(1, std::min(effective_openmp_thread_count(), n_beta_)),
-      kWorkspaceBytes / worker_row_bytes));
-  const std::size_t bytes_per_alpha =
-      static_cast<std::size_t>(n_threads) * block_width *
-      (static_cast<std::size_t>(n_beta_) + 2ULL * n_pairs) * sizeof(double);
-  const int alpha_tile = std::min(
-      n_alpha_,
-      std::max(
-          1,
-          std::min(
-              kSigmaAlphaTile,
-              static_cast<int>(kWorkspaceBytes /
-                  std::max<std::size_t>(bytes_per_alpha, 1)))));
-  const int maximum_columns = alpha_tile * block_width;
-  std::vector<Eigen::MatrixXd> partial_sigma(n_threads);
-
-#pragma omp parallel if(n_threads > 1) num_threads(n_threads)
-  {
-    int thread = 0;
-    int team_size = 1;
-#ifdef _OPENMP
-    thread = omp_get_thread_num();
-    team_size = omp_get_num_threads();
-#endif
-    // Strings are the contiguous axis, matching coefficient columns. Both
-    // scatter/gather and BLAS now consume contiguous string segments.
-    Eigen::MatrixXd intermediate(maximum_columns, n_pairs);
-    Eigen::MatrixXd transformed(maximum_columns, n_pairs);
-    Eigen::MatrixXd& beta_reduction = partial_sigma[thread];
-    beta_reduction.resize(maximum_columns, n_beta_);
-
-    for (int alpha_begin = 0;
-         alpha_begin < n_alpha_;
-         alpha_begin += alpha_tile) {
-      const int alpha_count = std::min(alpha_tile, n_alpha_ - alpha_begin);
-      const int active_columns = alpha_count * block_width;
-      beta_reduction.topRows(active_columns).setZero();
-
-#pragma omp for schedule(static)
-      for (int beta_target = 0; beta_target < n_beta_; ++beta_target) {
-        auto active_intermediate = intermediate.topRows(active_columns);
-        scatter_one_body_intermediate(
-            coefficients,
-            alpha_begin,
-            alpha_count,
-            beta_target,
-            active_intermediate);
-
-        auto active_transformed = transformed.topRows(active_columns);
-        active_transformed.noalias() =
-            active_intermediate * hamiltonian_pair_kernel_.transpose();
-
-        // Alpha links write one beta column owned by this loop iteration, so
-        // no synchronization is required.
-        for (int local_alpha = 0;
-             local_alpha < alpha_count;
-             ++local_alpha) {
-          const int alpha_target = alpha_begin + local_alpha;
-          const auto gather_alpha_link = [&] (
-              int alpha_source, int pair, double sign) {
-            for (int block = 0; block < block_width; ++block) {
-              sigma(alpha_source, block * n_beta_ + beta_target) +=
-                  sign * active_transformed(
-                      block * alpha_count + local_alpha, pair);
-            }
-          };
-          for (const int occupied : alpha_->occupied[alpha_target]) {
-            gather_alpha_link(
-                alpha_target,
-                xmvb::core::PairIndex::packed_pair_index(occupied, occupied),
-                1.0);
-          }
-        const DensityConnections& alpha_singles =
-              alpha_->singles[alpha_target];
-          for (std::size_t link = 0; link < alpha_singles.size(); ++link) {
-            gather_alpha_link(
-                alpha_singles.sources[link],
-                alpha_singles.pairs[link],
-                alpha_singles.signs[link]);
-          }
-        }
-
-        // Contributions scattered through beta links can collide between
-        // beta targets.  Accumulate them in one bounded buffer per thread.
-        const auto gather_beta_link = [&] (
-            int beta_source, int pair, double sign) {
-          const double* source = active_transformed.col(pair).data();
-          double* target = beta_reduction.col(beta_source).data();
-#pragma omp simd
-          for (int column = 0; column < active_columns; ++column) {
-            target[column] += sign * source[column];
-          }
-        };
-        for (const int occupied : beta_graph.occupied[beta_target]) {
-          gather_beta_link(
-              beta_target,
-              xmvb::core::PairIndex::packed_pair_index(occupied, occupied),
-              1.0);
-        }
-        const DensityConnections& beta_singles =
-            beta_graph.singles[beta_target];
-        for (std::size_t link = 0; link < beta_singles.size(); ++link) {
-          gather_beta_link(
-              beta_singles.sources[link],
-              beta_singles.pairs[link],
-              beta_singles.signs[link]);
-        }
-      }
-
-#pragma omp for schedule(static)
-      for (int beta = 0; beta < n_beta_; ++beta) {
-        // Reuse the first worker's tile as the sum. Each beta column has one
-        // owner, and workers are visited in the original reduction order.
-        // Contiguous AXPY loops replace scalar cross-worker strided loads.
-        double* sum = partial_sigma[0].col(beta).data();
-        for (int source_thread = 1; source_thread < team_size; ++source_thread) {
-          const double* source = partial_sigma[source_thread].col(beta).data();
-#pragma omp simd
-          for (int row = 0; row < active_columns; ++row) {
-            sum[row] += source[row];
-          }
-        }
-        for (int block = 0; block < block_width; ++block) {
-          double* target = sigma.col(block * n_beta_ + beta).data() + alpha_begin;
-          const double* source = sum + block * alpha_count;
-#pragma omp simd
-          for (int local_alpha = 0; local_alpha < alpha_count; ++local_alpha) {
-            target[local_alpha] += source[local_alpha];
-          }
-        }
-      }
-    }
-  }
-  return sigma;
+    const Eigen::Ref<const Eigen::MatrixXd>& coefficients, int exchange_parity) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiSigma);
+  Eigen::MatrixXd result;
+  contract_channels(coefficients, coefficients, &result, exchange_parity, false);
+  return result;
 }
 
 Eigen::MatrixXd DirectCiSigmaAction::apply_one_body_generator(
@@ -633,7 +483,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::integral_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     const Eigen::Ref<const Eigen::MatrixXd>& right, int exchange_parity) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiIntegralAdjoint);
-  return contract_adjoint(left, right, nullptr, exchange_parity);
+  return contract_channels(left, right, nullptr, exchange_parity, true);
 }
 
 DirectCiResponse DirectCiSigmaAction::apply_with_adjoint(
@@ -641,7 +491,7 @@ DirectCiResponse DirectCiSigmaAction::apply_with_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& state, int exchange_parity) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiResponse);
   DirectCiResponse result;
-  result.integrals = contract_adjoint(response, state, &result.sigma, exchange_parity);
+  result.integrals = contract_channels(response, state, &result.sigma, exchange_parity, true);
   return result;
 }
 
@@ -716,18 +566,18 @@ void DirectCiSigmaAction::apply_sigma_tile(
   }
 }
 
-DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
+DirectCiIntegralAdjoint DirectCiSigmaAction::contract_channels(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     const Eigen::Ref<const Eigen::MatrixXd>& right,
-    Eigen::MatrixXd* sigma, int exchange_parity) const {
+    Eigen::MatrixXd* sigma, int exchange_parity, bool collect_integrals) const {
   if (exchange_parity < -1 || exchange_parity > 1 ||
       (exchange_parity != 0 && distinct_beta_)) {
     throw std::invalid_argument("direct-CI adjoint exchange sector requires identical spin lists");
   }
   if (left.rows() != n_alpha_ || right.rows() != n_alpha_ ||
       left.cols() <= 0 || left.cols() != right.cols() ||
-      left.cols() % n_beta_ != 0 || !left.allFinite() ||
-      !right.allFinite()) {
+      left.cols() % n_beta_ != 0 ||
+      (collect_integrals && (!left.allFinite() || !right.allFinite()))) {
     throw std::invalid_argument(
         "direct-CI adjoint coefficient blocks have incompatible dimensions");
   }
@@ -769,7 +619,8 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
   const int column_parts = n_threads / row_parts;
   Eigen::MatrixXd left_intermediate(maximum_rows, n_pairs);
   Eigen::MatrixXd right_intermediate(maximum_rows, n_pairs);
-  Eigen::MatrixXd effective_kernel_adjoint = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
+  Eigen::MatrixXd effective_kernel_adjoint = Eigen::MatrixXd::Zero(
+      collect_integrals ? n_pairs : 0, collect_integrals ? n_pairs : 0);
   if (sigma != nullptr) sigma->setZero(n_alpha_, left.cols());
 
 #pragma omp parallel if(n_threads > 1) num_threads(n_threads)
@@ -793,9 +644,11 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
             auto active_right = right_intermediate.middleRows(layout.offset(beta), rows);
             scatter_one_body_intermediate(
                 left_block, alpha_begin, count, beta_begin + beta, active_left);
-            if (same_input) active_right = active_left;
-            else scatter_one_body_intermediate(
-                right_block, alpha_begin, count, beta_begin + beta, active_right);
+            if (collect_integrals) {
+              if (same_input) active_right = active_left;
+              else scatter_one_body_intermediate(
+                  right_block, alpha_begin, count, beta_begin + beta, active_right);
+            }
             if (exchange_parity != 0) {
               // Q^T D Q weights one operand only; omitted rows are never scattered.
               active_left *= 2.0;
@@ -809,24 +662,26 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
           }
           // The scatter barrier publishes every shared row before GEMM; the
           // following barrier prevents overwriting the tile during contraction.
+          if (collect_integrals) {
 #pragma omp for schedule(static)
-          for (int partition = 0; partition < n_threads; ++partition) {
-            const int row_partition = partition / column_parts;
-            const int column_partition = partition % column_parts;
-            const int row_first = static_cast<int>(
-                static_cast<std::int64_t>(n_pairs) * row_partition / row_parts);
-            const int row_end = static_cast<int>(
-                static_cast<std::int64_t>(n_pairs) * (row_partition + 1) / row_parts);
-            const int first = static_cast<int>(
-                static_cast<std::int64_t>(n_pairs) * column_partition / column_parts);
-            const int end = static_cast<int>(
-                static_cast<std::int64_t>(n_pairs) * (column_partition + 1) / column_parts);
-            if (first == end || row_first == row_end) continue;
-            effective_kernel_adjoint.block(
-                row_first, first, row_end - row_first, end - first).noalias() +=
-                left_intermediate.topRows(used_rows)
-                    .middleCols(row_first, row_end - row_first).transpose() *
-                right_intermediate.topRows(used_rows).middleCols(first, end - first);
+            for (int partition = 0; partition < n_threads; ++partition) {
+              const int row_partition = partition / column_parts;
+              const int column_partition = partition % column_parts;
+              const int row_first = static_cast<int>(
+                  static_cast<std::int64_t>(n_pairs) * row_partition / row_parts);
+              const int row_end = static_cast<int>(
+                  static_cast<std::int64_t>(n_pairs) * (row_partition + 1) / row_parts);
+              const int first = static_cast<int>(
+                  static_cast<std::int64_t>(n_pairs) * column_partition / column_parts);
+              const int end = static_cast<int>(
+                  static_cast<std::int64_t>(n_pairs) * (column_partition + 1) / column_parts);
+              if (first == end || row_first == row_end) continue;
+              effective_kernel_adjoint.block(
+                  row_first, first, row_end - row_first, end - first).noalias() +=
+                  left_intermediate.topRows(used_rows)
+                      .middleCols(row_first, row_end - row_first).transpose() *
+                  right_intermediate.topRows(used_rows).middleCols(first, end - first);
+            }
           }
           if (sigma != nullptr) {
             // The adjoint has consumed the right tile. Reuse its storage for
@@ -856,6 +711,15 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_adjoint(
     }
   }
 
+  if (!collect_integrals) return {};
+  return pullback_channel_kernel(effective_kernel_adjoint);
+}
+
+DirectCiIntegralAdjoint DirectCiSigmaAction::pullback_channel_kernel(
+    const Eigen::Ref<const Eigen::MatrixXd>& effective_kernel_adjoint) const {
+  const int n_pairs = pair_kernel_.rows();
+  if (effective_kernel_adjoint.rows() != n_pairs || effective_kernel_adjoint.cols() != n_pairs)
+    throw std::invalid_argument("invalid Hamiltonian channel adjoint dimensions");
   Eigen::VectorXd absorbed_one_adjoint = Eigen::VectorXd::Zero(n_pairs);
   for (int orbital = 0; orbital < n_orbitals_; ++orbital) {
     const int diagonal_pair =
