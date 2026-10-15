@@ -83,7 +83,16 @@ void benchmark_accepted_state16(bool check_hvp = false) {
     const auto image = hessian.apply_orbital_coupling(p);
     hvp_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now()-hvp_start).count();
     hvp_norm = image.orbital_hessian.norm();
-    require(hessian.diagnostics().outer_response_selected_state_rebuild_wall_time_seconds == 0,
+    const auto stages = hessian.diagnostics();
+    std::cout << std::setprecision(17)
+              << "hvp_integral_direction_seconds=" << stages.outer_response_active_space_integrals_wall_time_seconds
+              << "\nhvp_selected_direction_seconds=" << stages.outer_response_structure_matrices_wall_time_seconds
+              << "\nhvp_eigen_response_seconds=" << stages.outer_response_eigensystem_wall_time_seconds
+              << "\nhvp_active_backward_seconds=" << stages.outer_response_active_gradient_wall_time_seconds
+              << "\nhvp_response_pullback_seconds=" << stages.outer_response_orbital_pullback_wall_time_seconds
+              << "\nhvp_raw_response_rebuild_seconds=" << stages.outer_response_selected_state_rebuild_wall_time_seconds
+              << '\n' << std::flush;
+    require(stages.outer_response_selected_state_rebuild_wall_time_seconds == 0,
             "production direct-CI HVP rebuilt a raw product response bundle");
     require(image.orbital_hessian.allFinite() && image.scaled_structure_forcing.allFinite(),
             "production source HVP has a nonfinite orbital or structure image");

@@ -118,7 +118,8 @@ full `U * r` factors when a broad support makes those product-sized.
    their directional terms. Arbitrary selected spaces may not be treated as
    invariant. Do not add relaxed CI response to a coupled action a second time.
    Partial: `generator_factors` represents both oriented orbital-generator
-   terms, and `sum_factors` includes selected-structure coefficient responses.
+   terms. `SpinSources::tangent_source` merges coefficient changes into their
+   non-anchor spin factors, so combined directions use at most2r rather than3r.
    HVP integral adjoints consume this exact source sum; its temporary loading
    panel is included in the numerical workspace budget. Source-state orbital
    H/M directions and complete gradient/HVP pullbacks are now factor-based,
@@ -145,13 +146,18 @@ full `U * r` factors when a broad support makes those product-sized.
    accepted product arrays or raw response rebuild. This is a constructed
    16-AO Hamiltonian, not a converged molecular SCF benchmark. Its HVP still
    costs153.49 s; stage attribution and contraction reduction remain necessary.
-   Next exact simplification: each minimum-cover source has one constant
-   coordinate anchor, so its coefficient tangent belongs only to the opposite
-   factor. Merge that tangent into the corresponding orbital-generator factor
-   family instead of concatenating a third family. The combined tangent then
-   needs at most twice the accepted source count, not three times; physical
-   parity reconstruction must be applied to both consistently. Derive, test
-   and measure this change before claiming a runtime gain.
+   Jobs1261360/1261367 passed mixed row/column anchor reconstruction, unequal
+   spins, both exchange parities, generator-only/coefficient-only/combined
+   tangents, cross-panel boundaries, factor/product derivatives and9 complete
+   SCF regressions. Production probe1261368 retains1.73e-9 HVP difference error
+   and155.94 MiB RSS, but costs154.54 s versus saved153.49 s: the exact2r
+   simplification is not an end-to-end speedup. Its55.01 s selected direction
+   and99.53 s backward phase identify where further work is needed.
+   Next investigate equivalent parity placements in the symmetric integral
+   adjoint: a physical directional bra may force regeneration whereas an
+   accepted physical bra can remain resident. Also derive direct accepted
+   adjoint reuse for the known within-state normalization response; do not
+   detect that response by a numerical amplitude threshold.
 6. [ ] Remove obsolete full-product production consumers after migration.
    Explicit full-carrier arrays remain only as independent small-system test
    oracles; broad-support production uses generated product tiles, not a dense

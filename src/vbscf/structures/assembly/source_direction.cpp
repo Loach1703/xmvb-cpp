@@ -115,27 +115,15 @@ StructureActiveIntegralAdjoint StructureAction::source_adjoint_direction(
     const Eigen::VectorXd values = expand_support(state.structure_coefficients.col(i));
     const auto y = sources_->orthogonal_source(spin_products_,values,alpha,beta);
     const auto physical = sources_->orthogonal_source(spin_products_,values,alpha,beta,true);
-    std::vector<mcscf::SpinFactorSource> directions, physical_directions;
-    std::vector<mcscf::SpinFactorSource> response_directions, physical_responses;
-    if (moving) {
-      directions.push_back(mcscf::generator_factors(sigma,y,generator));
-      physical_directions.push_back(mcscf::generator_factors(sigma,physical,generator));
-    }
     Eigen::VectorXd response_values;
-    if (response.size() != 0) {
-      response_values = expand_support(response.col(i));
-      if (!response_values.isZero(0.0)) {
-        directions.push_back(sources_->orthogonal_source(spin_products_,response_values,alpha,beta));
-        physical_directions.push_back(sources_->orthogonal_source(spin_products_,response_values,alpha,beta,true));
-        if (reuse) {
-          response_directions.push_back(directions.back());
-          physical_responses.push_back(physical_directions.back());
-        }
-      }
-    }
-    if (!directions.empty()) {
-      const auto dy = mcscf::sum_factors(std::move(directions));
-      const auto physical_dy = mcscf::sum_factors(std::move(physical_directions));
+    if (response.size() != 0) response_values = expand_support(response.col(i));
+    const bool responding = response_values.size() && !response_values.isZero(0.0);
+    const auto* q_values = responding ? &response_values : nullptr;
+    if (moving || responding) {
+      const auto dy = sources_->tangent_source(spin_products_,values,q_values,
+          alpha,beta,sigma,moving ? &generator : nullptr);
+      const auto physical_dy = sources_->tangent_source(spin_products_,values,q_values,
+          alpha,beta,sigma,moving ? &generator : nullptr,true);
       const auto adjoint = mcscf::factor_integral_adjoint(sigma,physical_dy,y);
       one.noalias() += 2*weight*adjoint.one_electron;
       pair.noalias() += 2*weight*adjoint.pair_kernel;
@@ -146,9 +134,9 @@ StructureActiveIntegralAdjoint StructureAction::source_adjoint_direction(
             sigma,physical,dy,state.energies[i]);
       }
     }
-    if (!response_directions.empty()) {
-      const auto q = mcscf::sum_factors(std::move(response_directions));
-      const auto physical_q = mcscf::sum_factors(std::move(physical_responses));
+    if (reuse && responding) {
+      const auto q = sources_->orthogonal_source(spin_products_,response_values,alpha,beta);
+      const auto physical_q = sources_->orthogonal_source(spin_products_,response_values,alpha,beta,true);
       gradient.noalias() += 2*weight*mcscf::factor_residual_generator_adjoint(sigma,physical_q,y,state.energies[i]);
       gradient.noalias() += 2*weight*mcscf::factor_residual_generator_adjoint(sigma,physical,q,state.energies[i]);
     }

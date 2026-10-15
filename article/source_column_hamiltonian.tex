@@ -693,10 +693,30 @@ derivative in Eq.~\eqref{eq:factor-tangent} nor the selected-space variational
 problem. In particular, a zero-dimensional horizontal CI tangent does not
 remove the normalization response or its gauge multiplier.
 
-Each term of Eq.~\eqref{eq:factor-tangent} is another factor source.
-Concatenating them adds their outer products exactly, without SVD truncation
-or a closure assumption. A source panel loads its base factors and applies
+For each coordinate-anchored source $j$, write $Y_j=\ell_j f_j\Tr$.
+Its selected-coefficient derivative changes only the unanchored raw factor.
+For a $\beta$-anchored source $\delta f_j=0$; for an $\alpha$-anchored
+source $\delta\ell_j=0$. The symbols $\delta\ell_j$ and $\delta f_j$ here
+denote coefficient changes at fixed orbital map. Combining these changes
+with the orbital derivative gives
+\begin{align}
+ a_j&=\mathcal G_\alpha(\kappa)\ell_j+\delta\ell_j,&
+ b_j&=\mathcal G_\beta(\kappa)f_j+\delta f_j,\\
+ \delta Y&=\sum_{j=1}^{r}\left(a_j f_j\Tr+\ell_j b_j\Tr\right).
+ \label{eq:merged-factor-tangent}
+\end{align}
+Thus at most $2r$ factors are required, rather than the $3r$ produced by
+concatenating two orbital families and a separate coefficient-response
+family. No cross term $\delta\ell_j\delta f_j\Tr$ enters a first derivative.
+This is an exact source identity, not a numerical rank truncation. For a
+physical exchange-parity projection, apply the same linear projection to
+both sides of Eq.~\eqref{eq:merged-factor-tangent}, including exchanged
+anchors and their signs. A coefficient-only tangent needs only $r$ factors.
+
+A source panel loads its base factors and applies
 the oriented Slater--Condon generator to the required spin factor only.
+The same temporary is then overwritten by the coefficient derivative of
+that factor, transformed and accumulated. No second factor panel is needed.
 Unlike a Hamiltonian channel, $\kappa$ need not be symmetric: replacing it by
 its symmetric part would give the wrong orbital derivative. The one-factor
 temporary uses at most $\max(U_\alpha,U_\beta)s$ doubles for panel width $s$;

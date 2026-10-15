@@ -1486,23 +1486,20 @@ mcscf::DirectCiIntegralAdjoint StructureAction::source_integral_direction(
   const Eigen::VectorXd values = expand_support(state.structure_coefficients.col(index));
   const auto ket = sources_->orthogonal_source(spin_products_, values,
       direct_ci_->alpha_transform, direct_ci_->beta_transform());
-  const auto physical = sources_->orthogonal_source(spin_products_, values,
-      direct_ci_->alpha_transform, direct_ci_->beta_transform(), true);
-  std::vector<mcscf::SpinFactorSource> directions;
   Eigen::MatrixXd relative_direction;
   if (orbital_direction != nullptr) {
     relative_direction = direct_ci_->integrals.orbital_transform.transpose()
         .template triangularView<Eigen::Lower>().solve(orbital_direction->transpose()).transpose();
-    directions.push_back(mcscf::generator_factors(direct_ci_->sigma, physical, relative_direction));
   }
   Eigen::VectorXd response_values;
   if (coefficient_response != nullptr) {
     response_values = expand_support(coefficient_response->col(index));
-    directions.push_back(sources_->orthogonal_source(spin_products_, response_values,
-        direct_ci_->alpha_transform, direct_ci_->beta_transform(), true));
   }
   return mcscf::factor_integral_adjoint(
-      direct_ci_->sigma, mcscf::sum_factors(std::move(directions)), ket);
+      direct_ci_->sigma, sources_->tangent_source(spin_products_,values,
+          coefficient_response ? &response_values : nullptr,
+          direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,
+          orbital_direction ? &relative_direction : nullptr,true), ket);
 }
 
 StructureAdjointState StructureAction::prepare_active_adjoint(
@@ -1832,7 +1829,7 @@ StructureAction::active_integral_adjoint_direction(
     const int rank = sources_->nodes.size();
     const int physical_rank = rank * (spin_exchange_parity_ ? 2 : 1);
     const int direction_rank = physical_rank *
-        (2 * static_cast<int>(include_integral_response) + static_cast<int>(include_state_response));
+        (include_integral_response ? 2 : static_cast<int>(include_state_response));
     xmvb::mcscf::DirectCiIntegralAdjoint directional_integral_gradient;
     if (prefer_factor_adjoint(direction_rank, rank)) {
       directional_integral_gradient = source_integral_direction(state, state_index,

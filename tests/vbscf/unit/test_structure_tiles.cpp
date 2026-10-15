@@ -431,6 +431,80 @@ void check_source_cover() {
   }
 }
 
+/** @brief The exact merged tangent matches independent full-carrier generators. */
+void check_source_tangents() {
+  for (const bool unequal : {false,true}) {
+    const auto fixture = unequal ? make_fixture(5,2,1) : make_fixture(4,2,2);
+    const int na = fixture.alpha.size(), nb = fixture.beta.size();
+    const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+        fixture.overlap,fixture.one_electron,fixture.two_electron,fixture.n);
+    const xmvb::vb::ExteriorOrbitalTransform ta(fixture.alpha,integrals.orbital_transform);
+    const xmvb::vb::ExteriorOrbitalTransform tb(fixture.beta,integrals.orbital_transform);
+    const xmvb::mcscf::DirectCiSigmaAction sigma(fixture.alpha,fixture.beta,integrals);
+    Eigen::MatrixXd generator(fixture.n,fixture.n);
+    for (int j = 0; j < generator.cols(); ++j)
+      for (int i = 0; i < generator.rows(); ++i)
+        generator(i,j) = 0.03*std::sin(0.7*(i+1)*(j+2));
+    for (const int parity : {0,1,-1}) {
+      if (unequal && parity) continue;
+      std::map<int,std::pair<double,double>> entries;
+      const auto add = [&](int a,int b) {
+        const double c = 0.3+0.02*(a+1)*(b+2), q = std::sin(0.41*(a+2)*(b+1));
+        entries[a*nb+b] = {c,q};
+        if (parity && a != b) entries[b*nb+a] = {parity*c,parity*q};
+      };
+      if (parity) {
+        for (int b = 2; b < nb; ++b) add(0,b);
+        for (int a = 1; a < na-1; ++a) add(a,nb-1);
+        if (parity > 0) add(1,1);
+      } else {
+        for (int b = 1; b < nb; ++b) add(0,b);
+        for (int a = 1; a < na; ++a) add(a,0);
+      }
+      std::vector<int> products;
+      Eigen::VectorXd c(entries.size()),q(entries.size());
+      int offset = 0;
+      for (const auto& [edge,values] : entries) {
+        products.push_back(edge); c[offset] = values.first; q[offset++] = values.second;
+      }
+      const xmvb::vb::SpinSources plan(products,na,nb,parity);
+      require(std::any_of(plan.nodes.begin(),plan.nodes.end(),[](auto node) { return node.beta; }) &&
+              std::any_of(plan.nodes.begin(),plan.nodes.end(),[](auto node) { return !node.beta; }),
+              "tangent test did not exercise both coordinate-anchor orientations");
+      const auto reconstruct = [&](const xmvb::mcscf::SpinFactorSource& source,int width) {
+        Eigen::MatrixXd value = Eigen::MatrixXd::Zero(na,nb);
+        for (int first = 0; first < source.count; first += width) {
+          const int count = std::min(width,source.count-first);
+          Eigen::MatrixXd a(na,count),b(nb,count);
+          source.load(first,count,a,b);
+          value.noalias() += a*b.transpose();
+        }
+        return value;
+      };
+      for (const bool physical : {false,true}) {
+        const auto base = plan.orthogonal_source(products,c,ta,tb,physical);
+        const auto response = plan.orthogonal_source(products,q,ta,tb,physical);
+        const Eigen::MatrixXd orbital = sigma.apply_one_body_generator(reconstruct(base,3),generator);
+        const Eigen::MatrixXd coefficient = reconstruct(response,3);
+        for (const int mode : {0,1,2}) {
+          const auto tangent = plan.tangent_source(products,c,mode == 0 ? nullptr : &q,
+              ta,tb,sigma,mode == 1 ? nullptr : &generator,physical);
+          const Eigen::MatrixXd expected = mode == 0 ? orbital : mode == 1 ? coefficient :
+              Eigen::MatrixXd(orbital+coefficient);
+          require(tangent.count == (mode == 1 ? base.count : 2*base.count),
+                  "merged source tangent retained a third factor family");
+          require(tangent.workspace_rows <= static_cast<std::size_t>(std::max(na,nb)),
+                  "merged source tangent needs more than one spin scratch panel");
+          for (const int width : {1,3,7,tangent.count})
+            require((reconstruct(tangent,width)-expected).norm() <
+                    3e-12*std::max(1.0,expected.norm()),
+                    "merged tangent changed an oriented generator, coefficient response or parity sign");
+        }
+      }
+    }
+  }
+}
+
 /** @brief Row, mixed row/column and parity-representative factors match full CI. */
 void check_mixed_source_images() {
   for (const int parity : {0, 1, -1}) {
@@ -1987,6 +2061,7 @@ int main(int argc, char** argv) {
       check_selected_unequal_spin_case();
       check_ionic_sources();
       check_source_cover();
+      check_source_tangents();
       check_mixed_source_images();
       for (int parity : {0,1,-1}) check_factor_structure_response(parity);
       check_factor_structure_response(0,true);

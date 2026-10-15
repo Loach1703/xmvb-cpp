@@ -46,6 +46,19 @@ struct SpinSources {
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
       bool physical = false) const;
 
+  /** @brief Exact orbital/coefficient tangent with at most two factor families.
+   * The coefficient tangent changes only the non-anchor factor and is merged
+   * into its orbital derivative. A coefficient-only direction uses one family.
+   * All borrowed inputs must outlive the provider. Loading needs only one
+   * single-spin scratch panel, never a product array or all-source factors.
+   */
+  mcscf::SpinFactorSource tangent_source(const std::vector<int>& products,
+      const Eigen::Ref<const Eigen::VectorXd>& coefficients,
+      const Eigen::VectorXd* coefficient_direction,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, const Eigen::MatrixXd* generator,
+      bool physical = false) const;
+
   std::size_t dynamic_bytes() const noexcept {
     std::size_t bytes = (columns.capacity() + alpha_rows.capacity() + alpha_offsets.capacity() +
         offsets.capacity() + groups.capacity()) * sizeof(int) +

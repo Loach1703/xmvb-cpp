@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 
 namespace xmvb::vb {
 namespace {
@@ -195,6 +196,64 @@ mcscf::SpinFactorSource SpinSources::orthogonal_source(const std::vector<int>& p
       }, 0, 2.0L * (alpha.dimension()+beta.dimension()) +
           2.0L * (alpha.shear_pair_count()+beta.shear_pair_count()) +
           2.0L * groups.size()/std::max(1,rank) + 1 + (project ? alpha.dimension() : 0)};
+}
+
+mcscf::SpinFactorSource SpinSources::tangent_source(const std::vector<int>& products,
+    const Eigen::Ref<const Eigen::VectorXd>& coefficients,
+    const Eigen::VectorXd* coefficient_direction,
+    const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+    const mcscf::DirectCiSigmaAction& sigma, const Eigen::MatrixXd* generator,
+    bool physical) const {
+  if (!generator) {
+    if (!coefficient_direction) throw std::invalid_argument("a source tangent needs a direction");
+    return orthogonal_source(products,*coefficient_direction,alpha,beta,physical);
+  }
+  const auto base = orthogonal_source(products,coefficients,alpha,beta,physical);
+  if (!coefficient_direction) return mcscf::generator_factors(sigma,base,*generator);
+  const bool project = physical && parity_ != 0;
+  const int rank = nodes.size();
+  return {base.n_alpha,base.n_beta,2*base.count,
+      [this,&products,coefficient_direction,&alpha,&beta,&sigma,generator,base,project,rank](
+          int first, int width, Eigen::Ref<Eigen::MatrixXd> a, Eigen::Ref<Eigen::MatrixXd> b) {
+        int offset = 0;
+        while (offset < width) {
+          const bool beta_side = first >= base.count;
+          const int local = beta_side ? first-base.count : first;
+          const int count = std::min(width-offset,base.count-local);
+          auto aa = a.middleCols(offset,count), bb = b.middleCols(offset,count);
+          base.load(local,count,aa,bb);
+          Eigen::MatrixXd image(beta_side ? base.n_beta : base.n_alpha,count);
+          sigma.apply_spin_generator(beta_side,beta_side ? bb : aa,*generator,image);
+          if (beta_side) bb = image; else aa = image;
+
+          // One coordinate anchor is constant. Only its opposite factor can
+          // carry dC. Reuse the generator scratch for that exact derivative.
+          image.setZero();
+          bool varying = false;
+          for (int j = 0; j < count; ++j) {
+            const int node = (local+j)%rank;
+            const bool exchanged = project && local+j >= rank;
+            const bool anchor_beta = nodes[node].beta != exchanged;
+            if (beta_side == anchor_beta) continue;
+            varying = true;
+            for (int entry = offsets[node]; entry < offsets[node+1]; ++entry) {
+              const int group = groups[entry];
+              const int row = products[group]/base.n_beta, column = products[group]%base.n_beta;
+              double value = (*coefficient_direction)[group]*(parity_ && row != column ? 2 : 1);
+              if (!beta_side && project) value *= exchanged ? 0.5*parity_ : 0.5;
+              const int index = beta_side ? (exchanged ? row : column) : (exchanged ? column : row);
+              image(index,j) = value;
+            }
+          }
+          if (varying) {
+            if (beta_side) { beta.apply_left_block(image); bb += image; }
+            else { alpha.apply_left_block(image); aa += image; }
+          }
+          first += count;
+          offset += count;
+        }
+      },std::max(base.workspace_rows,static_cast<std::size_t>(std::max(base.n_alpha,base.n_beta))),
+      1.5L*base.load_work+sigma.spin_link_count()+base.n_alpha+base.n_beta};
 }
 
 } // namespace xmvb::vb

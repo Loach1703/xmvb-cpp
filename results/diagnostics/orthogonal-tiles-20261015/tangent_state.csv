@@ -1,0 +1,4 @@
+run,orbitals,structures,node,accepted_seconds,direction_checked,direction_seconds,hvp_seconds,combined_seconds,rss_mib,lagrangian_fd_error,accepted_product_doubles,direction_product_doubles,cached_generator_doubles,direction_source_columns,direction_workspace_bound,reference_checked,gradient_error,image_error,hvp_error,reference_direction_seconds,reference_hvp_seconds
+source-cover-1261360,12,1,anode26,0.093524048,1,0.244336013,0.058157461,0.302493474,55.33984375,6.493356579425485e-11,0,0,144,128,33136224,1,6.3621623727794895e-15,4.336808689942018e-19,9.295845134955819e-18,0.202543892,0.090617343
+source-cover-1261360,14,2,anode26,1.670148298,1,3.123774821,1.148131933,4.271906754,77.07421875,3.914381416659368e-11,0,0,196,384,55691424,1,7.52652081749219e-15,3.9091465258659384e-19,2.027204381126155e-17,3.745073994,2.87512795
+source-cover-1261360,16,1,anode26,22.879134723,0,,,,149.9140625,3.125580024833374e-11,0,0,0,0,,0,,,,,

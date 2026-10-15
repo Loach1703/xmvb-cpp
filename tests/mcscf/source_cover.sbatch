@@ -47,10 +47,31 @@ srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2
 [[ ${1:-} == --tests-only ]] && exit 0
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  bash -c 'grep Cpus_allowed_list /proc/self/status' > "$artifact/affinity.txt"
-if [[ ${1:-} == --accepted-state16 || ${1:-} == --accepted-hvp16 ]]; then
+if [[ ${1:-} == --accepted-state16 || ${1:-} == --accepted-hvp16 || ${1:-} == --profile-hvp16 ]]; then
  cmake --build "$source_dir/build" --target test_keyframe -j8 > "$artifact/accepted-build.log" 2>&1
  sha256sum "$source_dir/build/src/test_keyframe" >> "$artifact/binary.sha256"
  sha256sum "$source_dir/tests/vbscf/unit/test_keyframe.cpp" >> "$artifact/sources.sha256"
+ if [[ $1 == --profile-hvp16 ]]; then
+  # One bounded current-code capture. Profiled wall/RSS is not native timing.
+  profiler=/opt/intel/oneapi/vtune/latest/bin64/vtune
+  "$profiler" -version > "$artifact/profilers.txt" 2>&1
+  set +e
+  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+   perf stat -e cycles:u,instructions:u -- true > "$artifact/perf-probe.out" 2> "$artifact/perf-probe.err"
+  printf '%s\n' "$?" > "$artifact/perf-probe.exit"
+  set -e
+  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+   env XMVB_PHASE_TIMING=1 "$profiler" -collect hotspots -knob sampling-mode=sw \
+   -result-dir "$artifact/hvp.vtune" -- \
+   "$source_dir/build/src/test_keyframe" --accepted-hvp16 \
+   > "$artifact/profile.out" 2> "$artifact/profile.err"
+  for report in summary hotspots callstacks; do
+   srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+    "$profiler" -report "$report" -r "$artifact/hvp.vtune" \
+    > "$artifact/profile-$report.txt" 2> "$artifact/profile-$report.err"
+  done
+  exit 0
+ fi
  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
   /usr/bin/time -v -o "$artifact/${1#--}.time" \
   "$source_dir/build/src/test_keyframe" "$1" \
