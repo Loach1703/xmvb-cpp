@@ -291,6 +291,19 @@ void check_images(const xmvb::vb::StructureActionResult& actual,
 
 void check_rumer_case(int n) {
   const Fixture fixture = make_fixture(n, n / 2, n / 2);
+  {
+    const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+        fixture.overlap, fixture.one_electron, fixture.two_electron, n);
+    const xmvb::vb::ExteriorOrbitalTransform transform(fixture.alpha, integrals.orbital_transform);
+    const std::vector<int> rows{0, transform.dimension() / 3, transform.dimension() - 1};
+    auto selected = test_vectors(transform.dimension(), 3), full = selected;
+    transform.apply_adjoint_left(&full);
+    const auto plan = transform.projection(rows);
+    transform.apply_adjoint_left(&selected, plan);
+    for (int row : rows)
+      require((selected.row(row) - full.row(row)).norm() < 1e-13,
+          "causal exterior projection lost a required input path");
+  }
   const auto pairings = rumer_pairings(0, n);
   const CovalentExpansion expansion = covalent_rumer_terms(
       n, fixture.alpha, fixture.beta, pairings);
@@ -319,6 +332,12 @@ void check_rumer_case(int n) {
   check_images(actual, reference_images(
       fixture, expansion.terms, expansion.product_alpha,
       expansion.product_beta, vectors));
+  check_images(action.apply_sources(vectors), actual);
+  // Force simultaneous source and channel streaming, including final partial
+  // channel blocks. This is an independent order, not the grid's panel budget.
+  const std::size_t source_budget = 12 * sizeof(double) *
+      (fixture.alpha.size() + fixture.beta.size());
+  check_images(action.apply_sources(vectors, source_budget), actual);
   require((actual.overlap.array() * vectors.array()).colwise().sum().minCoeff()
               > 0.0,
           "Rumer structure metric is not positive on test vectors");
@@ -353,6 +372,28 @@ void check_selected_unequal_spin_case() {
       fixture, terms, product_alpha, product_beta, vectors));
   check_images(action.apply_streamed(vectors, 512), reference_images(
       fixture, terms, product_alpha, product_beta, vectors));
+  check_images(action.apply_sources(vectors), action.apply(vectors));
+  check_images(action.apply_sources(vectors,
+      12 * sizeof(double) * (fixture.alpha.size() + fixture.beta.size())), action.apply(vectors));
+}
+
+/** @brief The source quotient keeps even-parity diagonals and both output halves. */
+void check_ionic_sources() {
+  const auto fixture = make_fixture(4, 2, 2);
+  const auto pairings = rumer_pairings(0, 4);
+  auto expansion = covalent_rumer_terms(4, fixture.alpha, fixture.beta, {pairings.front()});
+  expansion.product_alpha.push_back({2, 3});
+  expansion.product_beta.push_back({2, 3});
+  expansion.terms.push_back({{1, 0.7}});
+  const auto cache = topology(fixture, expansion.product_alpha, expansion.product_beta);
+  const xmvb::vb::StructureAction action(expansion.terms, 2, cache,
+      fixture.overlap, fixture.one_electron, fixture.two_electron, 4, nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const auto vectors = test_vectors(2, 3);
+  const auto reference = reference_images(fixture, expansion.terms,
+      expansion.product_alpha, expansion.product_beta, vectors);
+  check_images(action.apply_sources(vectors), reference);
+  check_images(action.apply(vectors), reference);
 }
 
 void check_complete_unequal_spin_case() {
@@ -828,13 +869,15 @@ void check_covalent_subset(int selected_count, bool add_ionic) {
       expansion.product_alpha, expansion.product_beta, vectors);
   check_images(action.apply(vectors), expected);
   check_images(action.apply_streamed(vectors, 512), expected);
+  check_images(action.apply_sources(vectors), expected);
   require((action.apply_overlap(vectors) - expected.overlap).norm() <=
               2e-11 * std::max(1.0, expected.overlap.norm()),
           "selected covalent overlap action differs from reference");
 }
 
 void benchmark_selected12(int selected_count, bool compare_reference,
-                          bool paths_only = false, bool gram_only = false) {
+                          bool paths_only = false, bool gram_only = false,
+                          bool sources_only = false) {
   require(selected_count == 1 || selected_count == 3 ||
           selected_count == 20 || selected_count == 132,
           "selected12 count must be 1, 3, 20, or 132");
@@ -958,9 +1001,9 @@ void benchmark_selected12(int selected_count, bool compare_reference,
     return;
   }
   const auto start = Clock::now();
-  const auto actual = action.apply(vectors);
+  const auto actual = sources_only ? action.apply_sources(vectors) : action.apply(vectors);
   const auto cold = Clock::now();
-  const auto warm = action.apply(vectors);
+  const auto warm = sources_only ? action.apply_sources(vectors) : action.apply(vectors);
   const auto warmed = Clock::now();
   check_images(warm, actual);
   xmvb::vb::StructureActionResult reference;
@@ -968,6 +1011,9 @@ void benchmark_selected12(int selected_count, bool compare_reference,
     reference = reference_images(fixture, expansion.terms,
         expansion.product_alpha, expansion.product_beta, vectors);
     check_images(actual, reference);
+    require((action.apply_overlap(vectors) - reference.overlap).norm() <
+        2e-11 * std::max(1.0, reference.overlap.norm()),
+        "source-planned metric-only action differs from full reference");
   }
   const double denominator = vectors.col(0).dot(actual.overlap.col(0));
   require(denominator > 0.0, "selected12 Rayleigh denominator is nonpositive");
@@ -986,6 +1032,10 @@ void benchmark_selected12(int selected_count, bool compare_reference,
             << "output_evictions=" << warm.tiles.output_evictions << '\n'
             << "input_resident_bytes=" << warm.tiles.input_resident_bytes << '\n'
             << "output_resident_bytes=" << warm.tiles.output_resident_bytes << '\n'
+            << "source_tiles=" << warm.tiles.source_tiles << '\n'
+            << "source_columns=" << warm.tiles.source_columns << '\n'
+            << "channel_blocks=" << warm.tiles.channel_blocks << '\n'
+            << "source_workspace_bound=" << warm.tiles.source_workspace_bound << '\n'
             << "max_rss_kib=" << usage.ru_maxrss << '\n'
             << "rayleigh_energy=" << energy << '\n'
             << "reference_checked=" << static_cast<int>(compare_reference) << '\n';
@@ -994,6 +1044,57 @@ void benchmark_selected12(int selected_count, bool compare_reference,
               << (actual.hamiltonian - reference.hamiltonian).norm() << '\n'
               << "overlap_reference_error="
               << (actual.overlap - reference.overlap).norm() << '\n';
+}
+
+/** @brief A target-size single covalent structure, with optional full-carrier oracle. */
+void benchmark_source_size(int n, bool compare_reference) {
+  require(n == 12 || n == 14, "source-size benchmark supports 12 or 14 orbitals");
+  const auto begin = Clock::now();
+  const auto fixture = make_fixture(n, n / 2, n / 2);
+  Pairing adjacent;
+  for (int i = 0; i < n; i += 2) adjacent.emplace_back(i, i + 1);
+  const auto expansion = covalent_rumer_terms(n, fixture.alpha, fixture.beta, {adjacent});
+  const auto cache = topology(fixture, expansion.product_alpha, expansion.product_beta);
+  const auto built = Clock::now();
+  const xmvb::vb::StructureAction action(expansion.terms, 1, cache,
+      fixture.overlap, fixture.one_electron, fixture.two_electron, n, nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const auto constructed = Clock::now();
+  const Eigen::MatrixXd vectors = Eigen::MatrixXd::Ones(1, 1);
+  const auto cold = action.apply(vectors);
+  const auto applied = Clock::now();
+  const auto warm = action.apply(vectors);
+  const auto finished = Clock::now();
+  check_images(cold, warm);
+  xmvb::vb::StructureActionResult reference;
+  if (compare_reference) {
+    reference = reference_images(fixture, expansion.terms,
+        expansion.product_alpha, expansion.product_beta, vectors);
+    check_images(warm, reference);
+  }
+  const auto checked = Clock::now();
+  rusage usage{};
+  require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
+  const auto seconds = [](auto a, auto b) { return std::chrono::duration<double>(b-a).count(); };
+  std::cout << std::setprecision(17)
+            << "orbitals=" << n << '\n'
+            << "alpha_strings=" << fixture.alpha.size() << '\n'
+            << "beta_strings=" << fixture.beta.size() << '\n'
+            << "products=" << expansion.terms.size() << '\n'
+            << "prepare_seconds=" << seconds(begin, built) << '\n'
+            << "construct_seconds=" << seconds(built, constructed) << '\n'
+            << "cold_apply_seconds=" << seconds(constructed, applied) << '\n'
+            << "warm_apply_seconds=" << seconds(applied, finished) << '\n'
+            << "reference_seconds=" << seconds(finished, checked) << '\n'
+            << "source_tiles=" << warm.tiles.source_tiles << '\n'
+            << "source_columns=" << warm.tiles.source_columns << '\n'
+            << "channel_blocks=" << warm.tiles.channel_blocks << '\n'
+            << "source_workspace_bound=" << warm.tiles.source_workspace_bound << '\n'
+            << "rayleigh_energy=" << warm.hamiltonian(0,0) / warm.overlap(0,0) << '\n'
+            << "max_rss_kib=" << usage.ru_maxrss << '\n';
+  if (compare_reference)
+    std::cout << "hamiltonian_reference_error=" << (warm.hamiltonian-reference.hamiltonian).norm() << '\n'
+              << "overlap_reference_error=" << (warm.overlap-reference.overlap).norm() << '\n';
 }
 
 void benchmark12(bool compare_reference) {
@@ -1090,6 +1191,12 @@ int main(int argc, char** argv) {
       benchmark_selected12(std::stoi(argv[2]), false);
     } else if (argc == 3 && std::string(argv[1]) == "--selected12-parity") {
       benchmark_selected12(std::stoi(argv[2]), true);
+    } else if (argc == 3 && std::string(argv[1]) == "--sources12") {
+      benchmark_selected12(std::stoi(argv[2]), true, false, false, true);
+    } else if (argc == 3 && std::string(argv[1]) == "--source-size") {
+      benchmark_source_size(std::stoi(argv[2]), false);
+    } else if (argc == 3 && std::string(argv[1]) == "--source-size-parity") {
+      benchmark_source_size(std::stoi(argv[2]), true);
     } else if (argc == 3 && std::string(argv[1]) == "--paths12") {
       benchmark_selected12(std::stoi(argv[2]), false, true);
     } else if (argc == 3 && std::string(argv[1]) == "--gram12") {
@@ -1098,6 +1205,7 @@ int main(int argc, char** argv) {
       check_rumer_case(4);
       check_rumer_case(6);
       check_selected_unequal_spin_case();
+      check_ionic_sources();
       check_complete_unequal_spin_case();
       check_mixed_exchange_space();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
@@ -1116,7 +1224,8 @@ int main(int argc, char** argv) {
     } else {
       throw std::invalid_argument(
           "usage: test_structure_tiles [--benchmark12|--benchmark12-no-reference|"
-          "--selected12 N|--selected12-parity N|--paths12 N|--gram12 N]");
+          "--selected12 N|--selected12-parity N|--sources12 N|--paths12 N|--gram12 N|"
+          "--source-size N|--source-size-parity N]");
     }
     return 0;
   } catch (const std::exception& error) {

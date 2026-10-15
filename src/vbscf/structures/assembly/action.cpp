@@ -8,6 +8,7 @@
 
 #include "core/openmp.hpp"
 #include "core/timing.hpp"
+#include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/determinants/pairs/accepted_action.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
@@ -699,6 +700,7 @@ StructureAction::StructureAction(
     if (direct_ci_->alpha_transform.occupations() ==
         direct_ci_->beta_transform().occupations())
       spin_exchange_parity_ = detect_spin_exchange();
+    sources_ = std::make_unique<SpinSources>(spin_products_, n_unique_alpha_, n_unique_beta_, spin_exchange_parity_);
     std::vector<int> touched;
     touched.reserve(spin_products_.size());
     for (std::size_t group=0; group<spin_products_.size(); ++group)
@@ -711,6 +713,8 @@ StructureAction::StructureAction(
       std::fprintf(stderr, "XMVB_SUPPORT,structures=%d,alpha=%d,beta=%d,seeds=%zu,full=%d\n",
           n_structures_, n_unique_alpha_, n_unique_beta_, touched.size(), support->full());
     if (!support->full()) product_support_=std::move(support);
+    source_contraction_ = prefer_source_contraction(direct_ci_->alpha_transform,
+        direct_ci_->beta_transform(), direct_ci_->sigma);
   }
 
   if (mode == StructureActionMode::ActionOnly) return;
@@ -1175,6 +1179,14 @@ Eigen::MatrixXd StructureAction::apply_overlap(
   if (!direct_ci_) return apply(vectors).overlap;
   return apply_orthogonal_tiled(vectors, direct_ci_->alpha_transform,
       direct_ci_->beta_transform(), direct_ci_->sigma, true).overlap;
+}
+
+StructureActionResult StructureAction::apply_sources(
+    const Eigen::Ref<const Eigen::MatrixXd>& vectors, std::size_t workspace_bytes) const {
+  if (!direct_ci_ || vectors.rows() != n_structures_ || vectors.cols() <= 0)
+    throw std::invalid_argument("source contraction needs an orthogonal-CI structure action");
+  return apply_source_tiles(vectors, direct_ci_->alpha_transform,
+      direct_ci_->beta_transform(), direct_ci_->sigma, false, workspace_bytes);
 }
 
 StructureActionResult StructureAction::apply(
@@ -1936,6 +1948,7 @@ StructureActionStorage StructureAction::storage() const noexcept {
       spin_terms_.size() * sizeof(StructureTerm) +
       structure_term_offsets_.size() * sizeof(std::size_t) +
       structure_term_indices_.size() * sizeof(std::size_t);
+  if (sources_) result.expansion_bytes += sources_->dynamic_bytes();
   result.diagonal_bytes =
       static_cast<std::size_t>(
           preconditioner_diagonal_.hamiltonian.size() +

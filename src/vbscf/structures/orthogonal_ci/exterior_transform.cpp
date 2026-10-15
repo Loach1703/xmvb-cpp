@@ -206,6 +206,12 @@ void ExteriorOrbitalTransform::apply_left(
   transform_left(*coefficients, false, false);
 }
 
+void ExteriorOrbitalTransform::apply_left_block(Eigen::Ref<Eigen::MatrixXd> coefficients) const {
+  if (coefficients.rows() != dimension())
+    throw std::invalid_argument("left exterior block dimension mismatch");
+  transform_left(coefficients, false, false);
+}
+
 void ExteriorOrbitalTransform::apply_right(
     Eigen::MatrixXd* coefficients) const {
   if (coefficients == nullptr) {
@@ -230,6 +236,56 @@ void ExteriorOrbitalTransform::apply_adjoint_left(
   }
   validate_left(*coefficients);
   transform_left(*coefficients, true, false);
+}
+
+ExteriorProjection ExteriorOrbitalTransform::projection(const std::vector<int>& rows) const {
+  std::vector<unsigned char> needed(dimension(), 0);
+  for (int row : rows) {
+    if (row < 0 || row >= dimension()) throw std::invalid_argument("exterior projection row is outside the spin space");
+    needed[row] = 1;
+  }
+  ExteriorProjection result;
+  result.shear_pairs.resize(shears_.size());
+  // The adjoint executes shears in reverse. Walk their dependency graph in
+  // forward order, starting from the requested final rows. Pairs in one
+  // elementary shear are disjoint, so this sweep needs no transitive iteration.
+  for (std::size_t i = 0; i < shears_.size(); ++i) {
+    const auto& pairs = shears_[i].pairs;
+    for (int j = 0; j < static_cast<int>(pairs.size()); ++j)
+      if (needed[pairs[j].source]) {
+        result.shear_pairs[i].push_back(j);
+        needed[pairs[j].target] = 1;
+      }
+  }
+  return result;
+}
+
+void ExteriorOrbitalTransform::apply_adjoint_left(
+    Eigen::MatrixXd* coefficients, const ExteriorProjection& projection) const {
+  if (!coefficients)
+    throw std::invalid_argument("invalid exterior projection plan");
+  apply_adjoint_left_block(*coefficients, projection);
+}
+
+void ExteriorOrbitalTransform::apply_adjoint_left_block(
+    Eigen::Ref<Eigen::MatrixXd> coefficients, const ExteriorProjection& projection) const {
+  if (coefficients.rows() != dimension() || projection.shear_pairs.size() != shears_.size())
+    throw std::invalid_argument("invalid exterior projection block");
+  profiling::ScopedPhase phase(profiling::Phase::CiTransformLeft);
+  const int workers = bounded_openmp_thread_count(
+      coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients.size()), coefficients.cols());
+#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
+  for (Eigen::Index column = 0; column < coefficients.cols(); ++column) {
+    auto values = coefficients.col(column);
+    for (int i = static_cast<int>(shears_.size()) - 1; i >= 0; --i) {
+      const auto& shear = shears_[i];
+      for (int j : projection.shear_pairs[i]) {
+        const auto& pair = shear.pairs[j];
+        values[pair.source] += shear.coefficient * pair.sign * values[pair.target];
+      }
+    }
+    values.array() *= determinant_scales_.array();
+  }
 }
 
 void ExteriorOrbitalTransform::apply_supported_left(
@@ -391,7 +447,7 @@ void ExteriorOrbitalTransform::apply_inverse_adjoint_right_block(
 }
 
 void ExteriorOrbitalTransform::transform_left(
-    Eigen::MatrixXd& coefficients, bool adjoint, bool inverse) const {
+    Eigen::Ref<Eigen::MatrixXd> coefficients, bool adjoint, bool inverse) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiTransformLeft);
   const bool reverse = adjoint != inverse;
   const int n_shears = static_cast<int>(shears_.size());

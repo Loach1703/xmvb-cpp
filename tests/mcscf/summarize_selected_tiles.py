@@ -13,8 +13,13 @@ def fields(path):
 
 def summarize(root):
     for count in (1, 3, 20, 132):
-        native = fields(root / f"{count}.out")
-        reference = fields(root / f"{count}-parity.out")
+        native_path = root / f"{count}.out"
+        reference_path = root / f"{count}-parity.out"
+        if not native_path.exists():
+            native_path = root / f"{count}-selected12.out"
+            reference_path = root / f"{count}-selected12-parity.out"
+        native = fields(native_path)
+        reference = fields(reference_path)
         yield {
             "run": root.name,
             "node": (root / "node.txt").read_text().strip(),
@@ -26,6 +31,9 @@ def summarize(root):
             "parity_process_warm_seconds": float(reference["warm_apply_seconds"]),
             "hamiltonian_error": float(reference["hamiltonian_reference_error"]),
             "overlap_error": float(reference["overlap_reference_error"]),
+            "source_columns": int(native.get("source_columns", 0)),
+            "source_tiles": int(native.get("source_tiles", 0)),
+            "source_workspace_bound": int(native.get("source_workspace_bound", 0)),
         }
 
 

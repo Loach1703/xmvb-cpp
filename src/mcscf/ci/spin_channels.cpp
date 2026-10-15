@@ -1,0 +1,63 @@
+#include "mcscf/ci/sigma.hpp"
+
+#include <stdexcept>
+
+#include "core/openmp.hpp"
+#include "core/pair_index.hpp"
+
+namespace xmvb::mcscf {
+
+void DirectCiSigmaAction::scatter_spin(bool beta,
+    const Eigen::Ref<const Eigen::MatrixXd>& factors, int first, int count,
+    Eigen::Ref<Eigen::MatrixXd> result) const {
+  const auto& graph = beta ? beta_connections() : *alpha_;
+  const int rows = beta ? n_beta_ : n_alpha_;
+  if (factors.rows() != rows || factors.cols() <= 0 || first < 0 || count <= 0 ||
+      first + count > hamiltonian_pair_kernel_.rows() || result.rows() != rows ||
+      result.cols() != factors.cols() * count)
+    throw std::invalid_argument("invalid single-spin channel scatter");
+  const int width = factors.cols();
+  result.setZero();
+  const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(), result.size());
+#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
+  for (int index = 0; index < rows * width; ++index) {
+    const int target = index % rows, column = index / rows;
+    const auto add = [&](int source, int pair, double sign) {
+      if (pair >= first && pair < first + count)
+        result(target, (pair - first) * width + column) += sign * factors(source, column);
+    };
+    for (int occupied : graph.occupied[target])
+      add(target, core::PairIndex::packed_pair_index(occupied, occupied), 1.0);
+    const auto& links = graph.singles[target];
+    for (std::size_t i = 0; i < links.size(); ++i)
+      add(links.sources[i], links.pairs[i], links.signs[i]);
+  }
+}
+
+void DirectCiSigmaAction::gather_spin(bool beta,
+    const Eigen::Ref<const Eigen::MatrixXd>& channels, int first, int count,
+    Eigen::Ref<Eigen::MatrixXd> images) const {
+  const auto& graph = beta ? beta_connections() : *alpha_;
+  const int rows = beta ? n_beta_ : n_alpha_;
+  if (images.rows() != rows || images.cols() <= 0 || channels.rows() != rows ||
+      channels.cols() != images.cols() * count || first < 0 || count <= 0 ||
+      first + count > hamiltonian_pair_kernel_.rows())
+    throw std::invalid_argument("invalid single-spin channel gather");
+  const int width = images.cols();
+  const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(), channels.size());
+#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
+  for (int index = 0; index < rows * width; ++index) {
+    const int target = index % rows, column = index / rows;
+    const auto add = [&](int source, int pair, double sign) {
+      if (pair >= first && pair < first + count)
+        images(target, column) += sign * channels(source, (pair - first) * width + column);
+    };
+    for (int occupied : graph.occupied[target])
+      add(target, core::PairIndex::packed_pair_index(occupied, occupied), 1.0);
+    const auto& links = graph.singles[target];
+    for (std::size_t i = 0; i < links.size(); ++i)
+      add(links.sources[i], links.pairs[i], links.signs[i]);
+  }
+}
+
+} // namespace xmvb::mcscf

@@ -48,6 +48,23 @@ struct DirectCiGeneratorRequest {
  */
 class DirectCiSigmaAction {
 public:
+  /** @brief E_(spin,P) applied to single-spin source columns.
+   * Output column P*width+j contains one channel image of source j.
+   * No alpha-by-beta product is constructed.
+   */
+  void scatter_spin(bool beta,
+      const Eigen::Ref<const Eigen::MatrixXd>& factors, int first, int count,
+      Eigen::Ref<Eigen::MatrixXd> channels) const;
+
+  /** @brief Accumulates sum_P E_(spin,P)^T channels[P] into single-spin images. */
+  void gather_spin(bool beta, const Eigen::Ref<const Eigen::MatrixXd>& channels,
+      int first, int count, Eigen::Ref<Eigen::MatrixXd> images) const;
+
+  /** @brief Symmetric K in H = (E_alpha+E_beta)^T K (E_alpha+E_beta).
+   * Includes the absorbed one-electron Hamiltonian. Borrowed immutable data.
+   */
+  const Eigen::MatrixXd& channel_kernel() const noexcept { return hamiltonian_pair_kernel_; }
+
   DirectCiSigmaAction(
       const std::vector<std::vector<int>>& alpha_determinants,
       const std::vector<std::vector<int>>& beta_determinants,

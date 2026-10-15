@@ -24,6 +24,7 @@ struct ExteriorTransformDirection;
 class StructureMetricInverse;
 class RestrictedMetricInverse;
 struct UpperPair;
+struct SpinSources;
 
 /** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
 enum class StructureActionMode { Davidson, ActionOnly };
@@ -34,6 +35,8 @@ struct StructureTileWork {
   std::size_t input_panels = 0, hamiltonian_projections = 0, overlap_projections = 0;
   std::size_t input_evictions = 0, output_evictions = 0;
   std::size_t input_resident_bytes = 0, output_resident_bytes = 0;
+  std::size_t source_tiles = 0, source_columns = 0, channel_blocks = 0;
+  std::size_t source_workspace_bound = 0;
 };
 
 /** @brief Structure H/S images, each of shape `(n_structures, block_width)`.
@@ -161,6 +164,14 @@ public:
   StructureActionResult apply_streamed(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
       std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
+
+  /** @brief Exact H/M through original source-column factors and channel tiles.
+   * Arbitrary selected structures need no closure. This explicit contraction
+   * order also permits independent comparisons against the product-tile order.
+   */
+  StructureActionResult apply_sources(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
 
   /**
    * @brief Applies the exact first derivative of a complete-space direct-CI action.
@@ -365,6 +376,16 @@ private:
       const mcscf::DirectCiSigmaAction& sigma,
       bool overlap_only = false,
       std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
+  StructureActionResult apply_source_tiles(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const ExteriorOrbitalTransform& alpha_transform,
+      const ExteriorOrbitalTransform& beta_transform,
+      const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
+      std::size_t workspace_bytes) const;
+  /** @brief Compares algebraic operation counts; independent of memory budgets. */
+  bool prefer_source_contraction(const ExteriorOrbitalTransform& alpha_transform,
+      const ExteriorOrbitalTransform& beta_transform,
+      const mcscf::DirectCiSigmaAction& sigma) const;
   StructureResponseSweep contract_response(
       const StructureAdjointState& state,
       const std::function<Eigen::MatrixXd(int)>& coefficients,
@@ -382,6 +403,8 @@ private:
   /** @brief Exact common transpose parity of all sparse structure columns. */
   int detect_spin_exchange() const;
   int spin_exchange_parity_ = 0;
+  bool source_contraction_ = false;
+  std::unique_ptr<const SpinSources> sources_;
 
   std::vector<int> spin_products_;
   std::vector<std::size_t> spin_term_offsets_;

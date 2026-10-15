@@ -113,6 +113,9 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
     const mcscf::DirectCiSigmaAction& sigma,
     bool overlap_only,
     std::size_t workspace_bytes) const {
+  if (source_contraction_)
+    return apply_source_tiles(vectors, alpha_transform, beta_transform, sigma,
+        overlap_only, 64ULL * 1024ULL * 1024ULL);
   StructureActionResult result{
       Eigen::MatrixXd::Zero(n_structures_, vectors.cols()),
       Eigen::MatrixXd::Zero(n_structures_, vectors.cols())};

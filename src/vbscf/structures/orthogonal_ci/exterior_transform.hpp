@@ -16,6 +16,13 @@ struct ExteriorTransformDirection {
   std::vector<double> shear_coefficients;
 };
 
+/** @brief Causal shear edges needed for selected rows of one exterior adjoint.
+ * The plan belongs to the transform that constructed it; it stores no matrix.
+ */
+struct ExteriorProjection {
+  std::vector<std::vector<int>> shear_pairs;
+};
+
 /**
  * @brief Exterior-power action of an upper-triangular orbital transform.
  *
@@ -31,12 +38,21 @@ public:
 
   /** @brief Applies the exterior transform to matrix rows in place. */
   void apply_left(Eigen::MatrixXd* coefficients) const;
+  /** @brief Left transform of a full-row view into a shared workspace. */
+  void apply_left_block(Eigen::Ref<Eigen::MatrixXd> coefficients) const;
   /** @brief Applies the exterior transform to matrix columns in place. */
   void apply_right(Eigen::MatrixXd* coefficients) const;
   /** @brief Applies the exterior transform to a mutable matrix block in place. */
   void apply_right_block(Eigen::Ref<Eigen::MatrixXd> coefficients) const;
   /** @brief Applies the transpose exterior transform to matrix rows. */
   void apply_adjoint_left(Eigen::MatrixXd* coefficients) const;
+  /** @brief Backward dependency closure of requested output rows. */
+  ExteriorProjection projection(const std::vector<int>& rows) const;
+  /** @brief Exact requested adjoint rows; other output rows are unspecified. */
+  void apply_adjoint_left(Eigen::MatrixXd* coefficients, const ExteriorProjection& projection) const;
+  /** @brief Selected adjoint rows in a full-row shared workspace view. */
+  void apply_adjoint_left_block(Eigen::Ref<Eigen::MatrixXd> coefficients,
+      const ExteriorProjection& projection) const;
   /** @brief Left transform within exact selected support, with ordered beta columns.
    * For the adjoint this discards only paths that cannot return to a selected
    * input under the remaining upper-triangular beta adjoint.
@@ -124,7 +140,7 @@ private:
   void validate_right(const Eigen::MatrixXd& coefficients) const;
   void validate_inverse() const;
   /** @brief Ordered shears on disjoint columns; no per-worker carrier copy. */
-  void transform_left(Eigen::MatrixXd& coefficients, bool adjoint, bool inverse) const;
+  void transform_left(Eigen::Ref<Eigen::MatrixXd> coefficients, bool adjoint, bool inverse) const;
   /** @brief Primal and tangent ordered products on independent columns. */
   void transform_directional_left(const ExteriorTransformDirection& direction,
       Eigen::MatrixXd* coefficients, Eigen::MatrixXd* tangent, bool adjoint) const;

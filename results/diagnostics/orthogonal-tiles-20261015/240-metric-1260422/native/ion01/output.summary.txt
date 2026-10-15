@@ -1,0 +1,7 @@
+cd9c6a807fb5fe0f9f687d3e48765b20d813a362444411642d74f8ed6cbe9f4c  results/diagnostics/orthogonal-tiles-20261015/240-metric-1260422/native/ion01/output.out
+ Number of structures:   294
+                        VBSCF converged in     3 iterations
+Initial total energy               : -343.035697191509
+Final total energy                 : -343.407736636066
+SCF iteration wall time            : 8.760583 s
+End-to-end wall time               : 11.124199 s

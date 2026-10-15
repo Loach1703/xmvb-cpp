@@ -4,33 +4,12 @@
 #include <stdexcept>
 
 #include "core/openmp.hpp"
+#include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
 
 namespace xmvb::vb {
 namespace {
-
-/** @brief Exact column factorization X = sum_J X[:,J] E_J^T.
- * Only original touched beta strings are included. No rank truncation or
- * transformed product support is needed, even for a nonclosed VB space.
- */
-struct Sources {
-  std::vector<int> columns;
-  std::vector<int> alpha_offsets;
-  std::vector<std::vector<int>> beta_groups;
-
-  Sources(const std::vector<int>& products, int na, int nb)
-      : alpha_offsets(na + 1, 0), beta_groups(nb) {
-    for (int group = 0; group < static_cast<int>(products.size()); ++group) {
-      const int a = products[group] / nb, b = products[group] % nb;
-      ++alpha_offsets[a + 1];
-      beta_groups[b].push_back(group);
-    }
-    for (int a = 0; a < na; ++a) alpha_offsets[a + 1] += alpha_offsets[a];
-    for (int b = 0; b < nb; ++b)
-      if (!beta_groups[b].empty()) columns.push_back(b);
-  }
-};
 
 /** @brief A bounded single-spin factor and, when requested, its tangent. */
 struct Factor {
@@ -75,7 +54,7 @@ Eigen::MatrixXd StructureAction::cross_overlap(
       lb.dimension() != n_unique_beta_ || rb.dimension() != n_unique_beta_ ||
       (directional && !(dla && dlb && dra && drb)))
     throw std::invalid_argument("invalid selected cross overlap");
-  const Sources sources(spin_products_, n_unique_alpha_, n_unique_beta_);
+  const auto& sources = *sources_;
   const int extent = panel_width(workspace_bytes, n_unique_alpha_, n_unique_beta_,
       sources.columns.size(), directional ? 8 : 4);
   Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_structures_, vectors.cols());
@@ -133,7 +112,7 @@ UpperPair StructureAction::cross_overlap_adjoint(
   if (left.size() != n_structures_ || right.size() != n_structures_ ||
       directional != (delta_right != nullptr))
     throw std::invalid_argument("invalid cross overlap adjoint");
-  const Sources sources(spin_products_, n_unique_alpha_, n_unique_beta_);
+  const auto& sources = *sources_;
   const int extent = panel_width(workspace_bytes, n_unique_alpha_, n_unique_beta_,
       sources.columns.size(), directional ? 16 : 8);
   ExteriorTransformDirection dla, dlb, dra, drb;

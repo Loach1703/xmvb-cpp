@@ -34,6 +34,7 @@ include(vbscf/sources.cmake)
 set(XMVB_MCSCF_SOURCES
   mcscf/ci/sigma.cpp
   mcscf/ci/sigma_tiles.cpp
+  mcscf/ci/spin_channels.cpp
   mcscf/ci/planner.cpp
   mcscf/ci/strings.cpp
   mcscf/ci/spin.cpp)
