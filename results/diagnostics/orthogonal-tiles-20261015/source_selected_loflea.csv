@@ -1,0 +1,5 @@
+run,structures,eigensolver,active_orbitals,status,termination_reason,iterations,orbital_hvp,initial_energy_Eh,energy_Eh,scf_seconds,total_seconds,rss_mib
+source-state-1261175,1,davidson,12,failed,CIAH metric action is not symmetric,24,274,-384.3802278112,-396.139660977277,199.889604,203.862845,2547.6015625
+source-state-1261175,1,dense,12,not_started,,,,,,,,
+source-state-1261175,3,davidson,12,not_started,,,,,,,,
+source-state-1261175,3,dense,12,not_started,,,,,,,,

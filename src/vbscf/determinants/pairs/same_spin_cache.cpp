@@ -710,7 +710,7 @@ std::size_t estimate_same_spin_pair_cache_bytes(
         std::max(max_electron_count, static_cast<int>(determinant.size()));
   }
   const std::size_t n_packed_active_pairs =
-      packed_active_pair_count(n_orbitals);
+      n_orbitals == 0 ? 0 : packed_active_pair_count(n_orbitals);
   const std::size_t max_occupied_pair_count =
       static_cast<std::size_t>(max_electron_count) *
       static_cast<std::size_t>(std::max(0, max_electron_count - 1)) / 2;
@@ -867,7 +867,7 @@ SameSpinPairCacheContext build_orthogonal_spin_topology(
     int n_orbitals) {
   if (alpha_det.size() != beta_det.size())
     throw std::invalid_argument("alpha_det and beta_det must have the same size");
-  if (n_orbitals < 1 || n_orbitals > 63)
+  if (n_orbitals < 0 || n_orbitals > 63)
     throw std::invalid_argument("invalid orthogonal spin orbital count");
 
   SameSpinPairCacheContext context;

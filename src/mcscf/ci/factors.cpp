@@ -155,20 +155,22 @@ SpinFactorSource generator_factors(const DirectCiSigmaAction& sigma,
 }
 
 FactorActionWorkspace::FactorActionWorkspace(const SpinFactorSource& source, int channels,
-    std::size_t workspace_bytes, bool overlap_only)
+    std::size_t workspace_bytes, bool overlap_only, int reserved_channel_panels)
     : n_alpha_(source.n_alpha), n_beta_(source.n_beta), channels_(channels),
-      load_rows_(source.workspace_rows), overlap_only_(overlap_only) {
-  if (n_alpha_ <= 0 || n_beta_ <= 0 || source.count < 0 || channels <= 0)
+      load_rows_(source.workspace_rows), overlap_only_(overlap_only),
+      reserved_channel_panels_(reserved_channel_panels) {
+  if (n_alpha_ <= 0 || n_beta_ <= 0 || source.count < 0 || channels <= 0 || reserved_channel_panels < 0)
     throw std::invalid_argument("invalid factor workspace dimensions");
   const std::size_t unit_bytes = (static_cast<std::size_t>(n_alpha_) + n_beta_) * sizeof(double);
   const std::size_t load_bytes = source.workspace_rows * sizeof(double);
-  if (workspace_bytes < unit_bytes * (overlap_only ? 2U : 9U) + load_bytes)
+  if (workspace_bytes < unit_bytes * ((overlap_only ? 2U : 9U)+reserved_channel_panels) + load_bytes)
     throw std::length_error("source workspace cannot hold one single-spin channel tile");
-  const int columns_per_source = overlap_only ? 2 : 3 * channels + 6;
+  const int columns_per_source = overlap_only ? 2+reserved_channel_panels :
+      (3+reserved_channel_panels)*channels+6;
   source_tile_ = static_cast<int>(std::max<std::size_t>(1,
       std::min<std::size_t>(source.count, workspace_bytes / (unit_bytes * columns_per_source + load_bytes))));
   channel_tile_ = overlap_only ? 0 : static_cast<int>(std::min<std::size_t>(channels,
-      ((workspace_bytes / source_tile_ - load_bytes) / unit_bytes - 6) / 3));
+      ((workspace_bytes / source_tile_ - load_bytes) / unit_bytes - 6) / (3+reserved_channel_panels)));
   alpha_.resize(n_alpha_, source_tile_); beta_.resize(n_beta_, source_tile_);
   ha_.resize(n_alpha_, overlap_only ? 0 : source_tile_);
   hb_.resize(n_beta_, overlap_only ? 0 : source_tile_);
@@ -201,7 +203,8 @@ FactorActionWork FactorActionWorkspace::apply(const DirectCiSigmaAction& sigma,
     ++work.panels; work.sources += width;
     work.workspace_bound = std::max(work.workspace_bound, sizeof(double) *
         ((static_cast<std::size_t>(n_alpha_) + n_beta_) * width *
-        (overlap_only_ ? 2 : 3 * channel_tile_ + 6) + source.workspace_rows * width));
+        (overlap_only_ ? 2+reserved_channel_panels_ :
+         (3+reserved_channel_panels_) * channel_tile_ + 6) + source.workspace_rows * width));
     auto a = alpha_.leftCols(width), b = beta_.leftCols(width);
     auto ha = ha_.leftCols(overlap_only_ ? 0 : width);
     auto hb = hb_.leftCols(overlap_only_ ? 0 : width);

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <chrono>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -37,7 +38,14 @@ void check_projected_symmetry(
       static_cast<double>(action.rows()) * std::max(1.0, action.norm()) +
       roundoff + relative_action_error * basis_norm * images_norm;
   if (!std::isfinite(skew.norm()) || skew.norm() > tolerance) {
-    throw std::runtime_error(name);
+    std::ostringstream message;
+    message.precision(17);
+    message << name << ": skew=" << skew.norm()
+            << ", tolerance=" << tolerance << ", dot_roundoff=" << roundoff
+            << ", action_norm=" << action.norm()
+            << ", basis_norm=" << basis_norm << ", images_norm=" << images_norm
+            << ", dimension=" << dimension << ", subspace=" << action.rows();
+    throw std::runtime_error(message.str());
   }
 }
 

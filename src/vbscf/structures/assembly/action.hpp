@@ -18,12 +18,15 @@ namespace xmvb::mcscf {
 class DirectCiSigmaAction;
 class ProductSupport;
 struct DirectCiIntegralAdjoint;
+struct SpinFactorSource;
+class FactorActionWorkspace;
 }
 
 namespace xmvb::vb {
 
 class ExteriorOrbitalTransform;
 struct ExteriorTransformDirection;
+struct OrthogonalActiveIntegrals;
 
 class StructureMetricInverse;
 class RestrictedMetricInverse;
@@ -75,6 +78,8 @@ struct StructureAdjointState {
   Eigen::MatrixXd structure_coefficients;
   /** Whether integral adjoints use bounded spin-factor rather than product order. */
   bool factor_integrals = false;
+  /** Exact source representation; accepted orthogonal/residual arrays are absent. */
+  bool source_factors = false;
   std::vector<Eigen::MatrixXd> orthogonal_coefficients;
   std::vector<Eigen::MatrixXd> residuals;
   std::vector<double> weights;
@@ -90,6 +95,8 @@ struct StructureAdjointState {
 struct StructureIntegralDirection {
   Eigen::MatrixXd coefficient_direction;
   Eigen::MatrixXd sigma_direction;
+  /** Weighted generator-gradient direction accumulated before source images are released. */
+  Eigen::MatrixXd generator_direction;
   /** Full-trace diagnostic request; never changes the physical action. */
   bool capture_connection = false;
   std::optional<StructureConnectionDirection> connection;
@@ -381,6 +388,12 @@ public:
   StructureActionStorage storage() const noexcept;
 
 private:
+  using FactorImageConsumer = std::function<void(const Eigen::Ref<const Eigen::MatrixXd>&,
+      const Eigen::Ref<const Eigen::MatrixXd>&, double)>;
+  struct SourceImageAdjoint {
+    StructureActionResult images;
+    Eigen::MatrixXd generator;
+  };
   /** @brief Expand one structure vector only on original touched products. */
   Eigen::VectorXd expand_support(
       const Eigen::Ref<const Eigen::VectorXd>& coefficients) const;
@@ -415,6 +428,37 @@ private:
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
       std::size_t workspace_bytes) const;
+  /** @brief Project one factor image; an optional generator acts on its output. */
+  StructureActionResult project_factor_source(const mcscf::SpinFactorSource& source,
+      mcscf::FactorActionWorkspace& workspace,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
+      const Eigen::MatrixXd* output_generator = nullptr,
+      const FactorImageConsumer& image_consumer = {}, bool project_output = true) const;
+  /** @brief Shared H-image projection and generator VJP; right panels may replay the sweep. */
+  SourceImageAdjoint project_source_adjoint(const mcscf::SpinFactorSource& source,
+      const mcscf::SpinFactorSource& right,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, const Eigen::MatrixXd* output_generator,
+      bool project_output = true) const;
+  /** @brief Direction H/M images without accepted or directional product arrays. */
+  StructureActionResult source_integral_action(const StructureAdjointState& state,
+      const Eigen::MatrixXd& generator,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma,
+      const mcscf::DirectCiSigmaAction& delta_sigma,
+      StructureIntegralDirection* direction) const;
+  /** @brief Complete source-factor gradient direction, including the moving pullback. */
+  StructureActiveIntegralAdjoint source_adjoint_direction(const StructureAdjointState& state,
+      const SelectedStateDeterminantMatrices* response, const Eigen::MatrixXd* multipliers,
+      const OrthogonalActiveIntegrals& integrals, const OrthogonalActiveIntegrals& delta,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, bool include_integrals,
+      const StructureIntegralDirection* cached_direction) const;
+  /** @brief Weight-symmetrized gauge shared by response and orbital directions. */
+  void add_response_gauge(const StructureAdjointState& state,
+      const Eigen::Ref<const Eigen::MatrixXd>& multipliers,
+      Eigen::Ref<Eigen::MatrixXd> generator) const;
   /** @brief Includes both residual-generator contractions and the H/M images. */
   bool prefer_factor_response(const mcscf::DirectCiSigmaAction& sigma) const;
   /** @brief Coupled coefficient response directly from structure-space columns. */

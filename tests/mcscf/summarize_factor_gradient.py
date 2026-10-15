@@ -144,6 +144,41 @@ def responses(artifacts, output):
     save(output, rows)
 
 
+def states(artifacts, output):
+    rows = []
+    for artifact in artifacts:
+        for path in sorted(artifact.glob("*-source-state.out")):
+            native = values(path)
+            n = int(native["orbitals"])
+            reference_path = artifact / f"{n}-source-state-reference.out"
+            reference = values(reference_path) if reference_path.exists() else {}
+            checked = int(reference["reference_checked"]) if reference else 0
+            direction = int(native["direction_checked"])
+            def measured(key):
+                return float(reference[key]) if checked else None
+            rows.append(dict(
+                run=artifact.name, orbitals=n, structures=int(native["structures"]),
+                node=(artifact / "node.txt").read_text().strip(),
+                accepted_seconds=float(native["accepted_seconds"]),
+                direction_checked=direction,
+                direction_seconds=float(native["direction_seconds"]) if direction else None,
+                hvp_seconds=float(native["hvp_seconds"]) if direction else None,
+                combined_seconds=float(native["direction_seconds"])+float(native["hvp_seconds"]) if direction else None,
+                rss_mib=float(native["native_max_rss_kib"])/1024,
+                lagrangian_fd_error=float(native["lagrangian_fd_error"]),
+                accepted_product_doubles=int(native["accepted_product_doubles"]),
+                direction_product_doubles=int(native["direction_product_doubles"]),
+                cached_generator_doubles=native.get("cached_generator_doubles"),
+                direction_source_columns=native.get("direction_source_columns"),
+                direction_workspace_bound=native["direction_workspace_bound"] if direction else None,
+                reference_checked=checked,
+                gradient_error=measured("gradient_error"), image_error=measured("image_error"),
+                hvp_error=measured("hvp_error"),
+                reference_direction_seconds=measured("reference_direction_seconds"),
+                reference_hvp_seconds=measured("reference_hvp_seconds")))
+    save(output, rows)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="kind", required=True)
@@ -156,6 +191,9 @@ def main():
     response = sub.add_parser("responses")
     response.add_argument("output", type=Path)
     response.add_argument("artifacts", type=Path, nargs="+")
+    state = sub.add_parser("states")
+    state.add_argument("output", type=Path)
+    state.add_argument("artifacts", type=Path, nargs="+")
     chain = sub.add_parser("scf")
     chain.add_argument("artifact", type=Path)
     chain.add_argument("baseline", type=Path)
@@ -167,6 +205,8 @@ def main():
         generators(args.artifacts, args.output)
     elif args.kind == "responses":
         responses(args.artifacts, args.output)
+    elif args.kind == "states":
+        states(args.artifacts, args.output)
     else:
         scf(args.artifact, args.baseline, args.output)
 

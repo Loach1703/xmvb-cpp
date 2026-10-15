@@ -5,6 +5,12 @@ Hamiltonian channel kernel, and implementation correspondence, is in
 [the TeX note](source_column_hamiltonian.tex)
 ([compiled PDF](source_column_hamiltonian.pdf)).
 
+Production entry points complete only the computational fixed-spin string
+tables and remap the original input incidences. They do not add VB structures
+or independent CI coefficients. This allows the same exterior maps to be used
+for an arbitrary selected space without assuming its closure. No numerical
+same-spin pair table or complete product amplitude is created by this step.
+
 ## Exact expansion
 
 Let $W$ map a selected VB coefficient vector $c$ to the original nonorthogonal
@@ -218,17 +224,26 @@ are stored; discarded panels are consumed immediately.
 The TeX note extends these equations to streamed integral adjoints and their
 directional factor sources (Sections8.1-8.2), plus oriented generator and
 residual-weighted contractions (Section8.3). Accepted-state transition densities
-already use the latter factor order when advantageous. Full accepted residuals,
-directional carriers and the remaining generator/HVP consumers still require
-migration; these bounds do not yet describe the complete SCF pipeline.
+already use the latter factor order when advantageous. Source-order accepted
+states and their orbital H/M and gradient/HVP directions now omit complete
+product arrays. Broad product-order states, the selected-state producer and
+metric consumers still require migration; these bounds do not yet describe
+the complete SCF pipeline.
 
 Section8.4 derives the coefficient-response consumer. It keeps both
 residual-generator terms and the separate state-average gauge term, using
 original-support response values rather than a complete response carrier.
 Its arithmetic-order comparison includes all adjoints and the H/M image sweep.
-The accepted arrays and orbital-direction consumers still require migration.
+The broad product-order accepted and orbital-direction consumers still require migration.
 
-Section8.5 derives the joint source/channel work plan. It counts source
+Section8.5 derives the source accepted-state and orbital-direction chain.
+The H-image consumer accumulates right-factor moments before projection,
+and retains only the small generator-gradient direction for its HVP consumer.
+Hamiltonian images are not regenerated solely for that later contraction.
+The image and adjoint workspaces share one budget; repeated RHS tiles do not
+repeat the structure projection.
+
+Section8.6 derives the joint source/channel work plan. It counts source
 regeneration, matching-link visits, range lookups and repeated output traffic.
 Links are generated in packed-channel order, so a channel tile visits its
 exact link interval without a string-by-channel offset table. Scheduling never

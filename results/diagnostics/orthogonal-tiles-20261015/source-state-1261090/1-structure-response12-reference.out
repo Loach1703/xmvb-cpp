@@ -1,0 +1,14 @@
+case=CAS(12,12)_structure_response
+structures=1
+orbitals=12
+prepare_seconds=0.104238465
+cold_response_seconds=0.163138334
+warm_response_seconds=0.15638601199999999
+source_columns=32
+source_workspace_bound=63866880
+checksum=27.210526347211182
+native_max_rss_kib=54700
+reference_checked=1
+reference_adjoint_only_seconds=0.21093152600000001
+image_error=4.4408920985006262e-16
+adjoint_error=1.4887316454971704e-15

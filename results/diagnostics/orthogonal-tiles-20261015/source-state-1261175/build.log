@@ -1,0 +1,25 @@
+[ 75%] Built target xmvb_mcscf
+[100%] Built target test_ci_factors
+[  7%] Built target xmvb_mcscf
+[ 97%] Built target xmvb_vbscf
+[100%] Built target test_structure_tiles
+[  7%] Built target xmvb_mcscf
+[ 97%] Built target xmvb_vbscf
+[100%] Built target test_orthogonal_direct_ci
+[  7%] Built target xmvb_mcscf
+[ 97%] Built target xmvb_vbscf
+[100%] Built target test_coupled_structure
+[100%] Built target xmvb_mcscf
+[100%] Built target test_product_frontier
+[  7%] Built target xmvb_mcscf
+[ 97%] Built target xmvb_vbscf
+[100%] Built target test_representation_overlap
+[  7%] Built target xmvb_mcscf
+[100%] Built target xmvb_vbscf
+[100%] Built target test_ci_transport
+[  7%] Built target xmvb_mcscf
+[100%] Built target xmvb_vbscf
+[100%] Built target test_selected_ci_transport
+[  7%] Built target xmvb_mcscf
+[100%] Built target xmvb_vbscf
+[100%] Built target test_restricted_metric

@@ -1,0 +1,12 @@
+[  2%] Built target xmvb_assets
+[  6%] Built target xmvb_mcscf
+[  6%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/optimization/neo/ciah.cpp.o
+[  8%] Linking CXX static library libxmvb-vbscf.a
+[ 81%] Built target xmvb_vbscf
+[ 83%] Built target xmvb_libcint
+[ 87%] Built target xmvb_input_deck
+[ 89%] Built target xmvb_guess
+[ 91%] Built target xmvb_input
+[ 97%] Built target xmvb_output
+[ 97%] Linking CXX executable xmvb-cpp.exe
+[100%] Built target xmvb

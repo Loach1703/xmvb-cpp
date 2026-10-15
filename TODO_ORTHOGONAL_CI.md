@@ -7,24 +7,37 @@ or memory-based admission to a different physical representation is allowed.
 
 ## Current audit
 
+- All three active-space forward entries now complete the computational
+  one-spin topology before constructing `StructureAction`. Previously only
+  synthetic selected-space tests called that constructor; real incomplete
+  string lists could therefore miss the new path. Original input expansion
+  maps and the selected VB variational space remain unchanged. The completion
+  stores one-spin metadata, not all spin pairs or product amplitudes.
 - Fixed-point H/M actions have two exact contraction orders: generated product
   tiles and two-sided source factors. Neither needs a dense transformed product
   array. The arithmetic planner chooses their order, not the physical space.
 - `prepare_active_adjoint()` now retains raw coefficients in structure space,
   not as a product matrix. Its integral adjoint can stream spin factors using
-  the exact factor/product arithmetic planner. Orthogonal coefficient matrices
-  and residuals remain on the full product carrier for every selected state.
+  the exact factor/product arithmetic planner. Source-order accepted states
+  now omit orthogonal/residual product arrays and use factor derivatives.
+  Broad product-order states still retain those arrays.
   Transition one-body densities now have an exact streamed factor order,
   chosen by their own moment/link work rather than the Hamiltonian-channel cost.
-- `apply_integral_direction()` allocates stacked product arrays for the base
+- Product-order `apply_integral_direction()` allocates stacked product arrays for the base
   coefficients, sigma, coefficient direction and overlap direction.
-- `active_integral_adjoint_direction()` and `contract_response()` still consume
+- Product-order `active_integral_adjoint_direction()` and `contract_response()` still consume
   those dense carriers for the residual/generator terms. The former now uses
   exact directional source factors for its integral adjoint when their work is
   smaller. Tiling only the Davidson H/M action is therefore not a
   bounded-memory VBSCF implementation.
 - `SelectedStateDeterminantCoefficients::coefficient_matrix` is itself dense;
   changing only its downstream consumers cannot remove this allocation.
+  In particular, `finalize_active_space_second_order_context()` still builds
+  accepted raw product states merely because pair providers exist, even for a
+  direct-CI action. Its direct-CI consumers should instead use the support
+  coefficients. Update the response-work estimate in `backends/neo.cpp` to
+  use topology/state dimensions, not the presence of those numerical arrays;
+  deleting the array alone would silently change response admission.
 - Without a supplied Davidson diagonal, `StructureAction` still evaluates a
   double loop over the expansion terms of each structure through spin-pair
   matrix elements. This must not survive as an accidental cofactor bottleneck
@@ -35,6 +48,16 @@ or memory-based admission to a different physical representation is allowed.
   Audit and migrate this consumer as well; H/M tiling alone does not bound it.
 
 ## Ordered milestones
+
+Production correctness gate: the new real CAS(12,12) one-structure LOFLEA
+SCF (job1261175) reaches24 accepted steps but fails the unchanged CIAH orbital
+metric symmetry check. Its other selected cases were not started. Diagnose
+the chart/physical-metric action at the saved failing point before claiming
+large-active-space end-to-end qualification; do not weaken the certificate.
+Job1261192 passed the old failure iteration on a different trajectory and was
+cancelled, not certified; its final raw-orbital exporter was not reached.
+Capture the exact native failing point before selecting a repair. This is
+separate from the qualified source/product derivative kernel comparisons.
 
 Target ownership, without a new generic SCF class hierarchy:
 
@@ -77,8 +100,9 @@ full `U * r` factors when a broad support makes those product-sized.
    their nonstationary full-carrier generator term is retained, not discarded.
    `factor_generator_adjoint` now supplies oriented transition densities to this
    producer. `factor_residual_generator_adjoint` computes residual-weighted
-   panels without a residual carrier, reusing the shared channel sweep; remaining
-   residual consumers must migrate before deleting accepted residual storage.
+   panels without a residual carrier, reusing the shared channel sweep. Source
+   states now remove accepted orthogonal/residual storage; broad product-order
+   states still need tile-consumer migration before deleting their storage.
    Route exact structure diagonals through an appropriate contraction consumer,
    without probing every global basis vector or adding quadratic structure work.
 5. [ ] Differentiate that same factor graph for orbital HVP and CI responses.
@@ -88,17 +112,28 @@ full `U * r` factors when a broad support makes those product-sized.
    Partial: `generator_factors` represents both oriented orbital-generator
    terms, and `sum_factors` includes selected-structure coefficient responses.
    HVP integral adjoints consume this exact source sum; its temporary loading
-   panel is included in the numerical workspace budget. Full carrier residual
-   and generator-gradient derivatives still need migration.
+   panel is included in the numerical workspace budget. Source-state orbital
+   H/M directions and complete gradient/HVP pullbacks are now factor-based,
+   including left/right representation changes, delta-H and gauge terms.
+   The H-image sweep also collects the small generator-gradient direction;
+   subsequent HVP contraction reuses it instead of repeating Hamiltonian work.
+   Broad product-order directional consumers still need migration.
    The coupled structure-coefficient response now has a bounded factor order:
    expand its original support once, reuse the common H/M source sweep, and
-   contract the integral derivative plus both residual-generator terms. This
+   collect both generator terms from the shared Hq/HY images without a residual
+   Hamiltonian replay; only Hq is projected to structures. This
    consumer needs no accepted or response product array; broad-support cases
    retain the exact product order when its total adjoint/image work is lower.
 6. [ ] Remove obsolete full-product production consumers after migration.
    Explicit full-carrier arrays remain only as independent small-system test
    oracles; broad-support production uses generated product tiles, not a dense
    full-product allocation.
+   Next priority: give the existing product-tile sigma/adjoint graph generated
+   coefficient readers, so broad-support accepted gradients and orbital
+   directions stream too. Share the H-image consumer, retain oriented generator
+   terms and their support halo, and do not instantiate another full carrier.
+   Also move structure-response expansion at its remaining selected-state
+   producer; optimizing only downstream readers does not remove that array.
 7. [ ] Validate the complete SCF chain on 240 COV/ION/FULL and selected CAS(12,12)
    spaces, then larger covalent cases. Report convergence, energy, HVP count,
    total wall time and native peak RSS, not only a fixed-point kernel speedup.

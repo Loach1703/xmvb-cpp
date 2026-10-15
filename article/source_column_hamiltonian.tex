@@ -834,17 +834,19 @@ adjoint and both residual-generator contractions is
  O\bigl((U_\alpha+U_\beta)
         [r_r d^2+r_\ell r_r d]\bigr).
 \end{equation}
-Constants include two residual sweeps for each generator contraction;
-the structure-image projection adds another factor sweep. Those costs
-must be included when choosing the contraction order. With equal
+The two Hamiltonian images also supply their generator adjoints by the
+shared image consumer in Section~\ref{sec:source-state}. Only $\Ha Q_i$
+is projected to structure H/M images; $\Ha Y_i$ is consumed by its adjoint
+without an unused structure projection. With equal
 representative source counts $r_r=r$ and physical bra count $r_\ell=l$,
 the leading multiply--add count used for this consumer is
 \begin{equation}
- W_{\rm source}=12(U_\alpha+U_\beta)rd^2
+ W_{\rm source}=6(U_\alpha+U_\beta)rd^2
             +(U_\alpha+U_\beta)lr(12d+20).
 \end{equation}
-The coefficients count one integral adjoint, two residual-generator
-adjoints and one H/M image sweep. The fused product sigma/Gram has leading
+The coefficients count one integral adjoint and two shared H-image/generator
+adjoint sweeps. The energy shifts use the transpose identity for the ordinary
+generator adjoint. The fused product sigma/Gram has leading
 work $4N_{\rm product}d^2$, with $N_{\rm product}$ reduced only by a
 certified exchange parity. Comparing these leading operation counts
 does not fit timings or change numerical thresholds. Link work,
@@ -852,6 +854,89 @@ source transforms, sampling and finite tile effects still affect wall time.
 A product order
 can still be cheaper for broad support; this is an exact arithmetic-order
 choice, not a change of variational space or a memory admission criterion.
+
+\subsection{Accepted states and orbital directions without product arrays}\label{sec:source-state}
+
+Let $F=\Ta\Wa$, $Y=F\vv C$ and
+$\kappa=\delta R R^{-1}$. Holding the structure coefficients fixed,
+\begin{align}\label{eq:source-direction-images}
+ \delta(H\vv C)&=F^*\bigl[\delta\Ha Y+
+               \Ha\mathcal G(\kappa)Y+
+               \mathcal G(\kappa)^*\Ha Y\bigr],\\
+ \delta(M\vv C)&=F^*\bigl[\mathcal G(\kappa)+
+                               \mathcal G(\kappa)^*\bigr]Y.
+\end{align}
+The left-generator term differentiates the projection, not the physical
+selected structure map. It may not be omitted even if the selected
+coefficients solve their generalized eigenproblem.
+
+Each Hamiltonian image is a sum of outer products from Eq.~\eqref{eq:Hfactor}.
+For any such term $AB\Tr$,
+\begin{equation}
+ \mathcal G(\kappa)^*(AB\Tr)=
+   [\mathcal G_\alpha(\kappa\Tr)A]B\Tr
+   +A[\mathcal G_\beta(\kappa\Tr)B]\Tr.
+\end{equation}
+Apply the oriented spin generators to the factor panels, perform the same
+causal exterior adjoints, and sample only $\Omega$. Two additional shared
+spin-factor channel slabs suffice, including both base and same-spin
+images. They are reserved inside the original numerical budget, never
+allocated independently per worker.
+
+For a general orbital/structure tangent $\delta Y$, the accepted generator
+adjoint $\Gamma=2\mathcal D((\Ha-E)Y,Y)$ has direction
+\begin{equation}\label{eq:source-generator-direction}
+ \delta\Gamma=2\mathcal D((\Ha-E)\delta Y,Y)
+             +2\mathcal D((\Ha-E)Y,\delta Y)
+             +2\mathcal D(\delta\Ha Y,Y),
+\end{equation}
+before adding the separate normalization/orthogonality multipliers.
+Here $E$ is held fixed; its required directional multiplier terms follow
+the same state-average gauge convention as Section~\ref{sec:factor-response}.
+The third term uses the residual-panel kernel with Hamiltonian $\delta\Ha$
+and shift zero. The integral direction remains $2\mathcal J(\delta Y,Y)$.
+Consequently the accepted adjoints and their complete directions require
+only structure coefficients, source providers, small orbital tensors and
+bounded numerical panels, not accepted amplitudes or residual product arrays.
+The differentiated Cholesky/integral pullback is still applied afterwards;
+Eq.~\eqref{eq:source-generator-direction} does not replace that chain rule.
+
+Computing Eq.~\eqref{eq:source-generator-direction} after releasing the
+directional H/M images would repeat their Hamiltonian work. Instead consume
+each outer-product image $X=\sum_j A_jB_j\Tr$ before its exterior projection.
+For right factors $Y_r=L_rF_r\Tr$, accumulate
+\begin{equation}
+ Z_\alpha\mathrel{+}=A(B\Tr F_r),\qquad
+ Z_\beta\mathrel{+}=B(A\Tr L_r).
+\end{equation}
+After all source/channel tiles, these are $XF_r$ and $X\Tr L_r$;
+Eq.~\eqref{eq:generator-factor} then returns $\mathcal D(X,Y_r)$.
+For a certified exchange representative, accumulate its physical image
+$P_\eta X=\tfrac12(X+\eta X\Tr)$ by adding the exchanged factors with
+weight $\eta/2$. No product-space symmetrization is formed.
+
+Let $D=\mathcal D(Y,\delta Y)$. Since
+$\mathcal D(\delta Y,Y)=D\Tr$, the orbital-direction cache is only
+\begin{equation}
+ \delta\Gamma=2\bigl[
+     \mathcal D(\Ha\delta Y,Y)+\mathcal D(\delta\Ha Y,Y)
+    +\mathcal D(\Ha Y,\delta Y)-E(D+D\Tr)\bigr].
+\end{equation}
+The three Hamiltonian images are already generated for
+Eq.~\eqref{eq:source-direction-images}. Their generator adjoints are
+collected in that sweep; the subsequent HVP pullback reuses this small
+$n\times n$ covector, not a sigma or residual product array. With state
+averaging, the cache is the weighted sum and coefficient-response/gauge
+terms are added separately. The integral-adjoint direction remains required.
+
+One numerical budget is split between the H-image workspace and the right
+factor/moment workspace. Right factors are tiled if necessary; the H source
+can then replay, but its structure projection occurs only on the first pass.
+When all right factors fit, the three images visit $4r$ representative source
+columns: $2r$ for $\Ha\delta Y$, $r$ for $\delta\Ha Y$, and $r$ for
+$\Ha Y$. The unfused residual-panel route plus the images visits $12r$.
+This removes repeated channel mixing, not the source-pair moment arithmetic
+or the outer optimizer's HVP calls.
 
 \subsection{Joint source/channel scheduling}\label{sec:factor-schedule}
 
@@ -942,6 +1027,10 @@ Common factor sweep and integral adjoint &
 \path{mcscf/ci/factors.cpp} \\
 Selected-structure response and its adjoints &
 \path{vbscf/structures/assembly/source_response.cpp} \\
+Source-state orbital directions and HVP pullback &
+\path{vbscf/structures/assembly/source_direction.cpp} \\
+Shared H-image projection and generator adjoint &
+\path{vbscf/structures/assembly/source_image.cpp} \\
 Generator and residual-weighted factor adjoints &
 \path{mcscf/ci/factor_generator.cpp} \\
 Joint source/channel work plan &
@@ -960,11 +1049,19 @@ Independent complete-carrier comparisons &
 \end{tabular}
 \end{center}
 
+The active-space forward entries complete the computational fixed-spin
+string tables before constructing the action. Original input incidences are
+remapped into those tables; neither the selected VB structures nor their
+independent coefficients are enlarged. This completion supplies the exterior
+maps and Slater--Condon links without allocating numerical pair tables or
+product amplitudes. It must occur in the production entries, not only in
+selected-space test fixtures.
+
 Fixed-point structure Hamiltonian/overlap actions use the common factor
 sweep. Accepted-state integral gradients choose between the exact factor and
 product contractions by their arithmetic costs. Raw state coefficients are
-retained in structure space. The orthogonal state, its full carrier residual,
-and generator-response consumers still require migration. Directional
+retained in structure space. Broad product-order states and their
+generator-response consumers still require migration. Directional
 integral adjoints use Eq.~\eqref{eq:factor-adjoint-tangent} when the factor
 order has less estimated arithmetic. A selected-space eigenvector need not be
 stationary on the full carrier: its residual contribution to the
@@ -972,11 +1069,12 @@ exterior-transform gradient is retained.
 Accepted-state transition densities use Eq.~\eqref{eq:generator-factor}
 when advantageous. The residual-panel kernel of
 Eq.~\eqref{eq:residual-panels} is available and independently tested;
-accepted-state residual storage is not yet removed from the remaining consumers.
+source-order accepted states now omit accepted orthogonal and residual arrays.
 The coupled coefficient-response consumer in
 Section~\ref{sec:factor-response} uses neither accepted nor response product
-arrays when its factor contraction order is cheaper. Orbital-direction
-consumers and the accepted-state producer still require migration.
+arrays when its factor contraction order is cheaper. Section~\ref{sec:source-state}
+extends that ownership to source-state orbital directions and HVPs. Broad
+product-order consumers and the selected-state/metric producers still require migration.
 
 \paragraph{Main result.}
 Equations~\eqref{eq:Hfactor}--\eqref{eq:final} give the exact

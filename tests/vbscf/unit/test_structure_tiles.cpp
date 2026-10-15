@@ -490,6 +490,25 @@ void check_mixed_source_images() {
   }
 }
 
+/** @brief Independent small-system oracle; never called by production. */
+xmvb::vb::StructureAdjointState explicit_product_state(const Fixture& fixture,
+    const xmvb::vb::SameSpinPairCacheContext& cache,
+    const xmvb::vb::StructureAction& action, xmvb::vb::StructureAdjointState state) {
+  const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap,fixture.one_electron,fixture.two_electron,fixture.n);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(cache.alpha_reuse_table.unique_determinants,
+      cache.beta_reuse_table.unique_determinants,integrals);
+  const auto y = action.orthogonalize_structure_block(state.structure_coefficients);
+  state.source_factors = false; state.orthogonal_coefficients.clear(); state.residuals.clear();
+  const int nb = fixture.beta.size();
+  for (int i = 0; i < state.structure_coefficients.cols(); ++i) {
+    state.orthogonal_coefficients.emplace_back(y.middleCols(i*nb,nb));
+    state.residuals.push_back(sigma.apply(state.orthogonal_coefficients.back())-
+        state.energies[i]*state.orthogonal_coefficients.back());
+  }
+  return state;
+}
+
 /** @brief Sparse coupled responses retain both full-carrier residual terms. */
 void check_factor_structure_response(int parity, bool unequal = false) {
   const auto fixture = unequal ? make_fixture(5,2,1) : make_fixture(6,3,3);
@@ -512,11 +531,14 @@ void check_factor_structure_response(int parity, bool unequal = false) {
   const Eigen::MatrixXd q = (Eigen::Matrix2d() << 0.02,-0.03,0.04,0.01).finished();
   const Eigen::MatrixXd mu = (Eigen::Matrix2d() << 0.01,0.02,-0.03,0.005).finished();
   const auto accepted = action.prepare_active_adjoint(c,{0.3,0.7},{-1.1,-0.7});
+  require(accepted.source_factors && accepted.orthogonal_coefficients.empty() && accepted.residuals.empty(),
+          "source accepted state retained a complete product array");
   xmvb::vb::SelectedStateDeterminantMatrices raw;
   raw.n_unique_alpha = fixture.alpha.size(); raw.n_unique_beta = fixture.beta.size();
   raw.states.resize(2);
   for (int i = 0; i < 2; ++i) raw.states[i].coefficient_matrix = action.expand_structure_block(q.col(i));
-  const auto reference = action.active_integral_adjoint_direction(accepted,
+  const auto dense = explicit_product_state(fixture,cache,action,accepted);
+  const auto reference = action.active_integral_adjoint_direction(dense,
       &raw,&mu,{}, {}, {},nullptr,false);
   // No accepted product arrays may be needed by this consumer.
   auto sparse = accepted;
@@ -536,6 +558,31 @@ void check_factor_structure_response(int parity, bool unequal = false) {
   require(zero.images.hamiltonian.isZero(0) && zero.images.overlap.isZero(0) &&
       zero.generator.isZero(0) && zero.one_electron.isZero(0) && zero.pair_kernel.isZero(0),
       "exactly zero structure response performed a nonzero contraction");
+  const Eigen::MatrixXd ds = 0.001*Eigen::MatrixXd::Ones(fixture.n,fixture.n);
+  const Eigen::MatrixXd dh = -0.002*Eigen::MatrixXd::Identity(fixture.n,fixture.n);
+  const std::vector<double> overlap(ds.data(),ds.data()+ds.size()), one(dh.data(),dh.data()+dh.size());
+  const std::vector<double> two(fixture.two_electron.packed_active_two_electron_integrals.size(),0.0001);
+  xmvb::vb::StructureIntegralDirection source_cache, product_cache;
+  source_cache.capture_connection = product_cache.capture_connection = true;
+  const auto source_images = action.apply_integral_direction(sparse,overlap,one,two,&source_cache);
+  check_images(source_images,action.apply_integral_direction(dense,overlap,one,two,&product_cache));
+  require(source_images.tiles.source_workspace_bound <= xmvb::mcscf::kFactorWorkspaceBytes,
+          "source image/VJP exceeded the single shared numerical workspace");
+  require(source_cache.coefficient_direction.size() == 0 && source_cache.sigma_direction.size() == 0 &&
+      source_cache.connection.has_value(),"source direction retained a full product cache");
+  require((source_cache.connection->representation_forcing-product_cache.connection->representation_forcing).norm() < 2e-11 &&
+      (source_cache.connection->integral_forcing-product_cache.connection->integral_forcing).norm() < 2e-11 &&
+      (source_cache.connection->overlap-product_cache.connection->overlap).norm() < 2e-11 &&
+      (source_cache.connection->squared_norm-product_cache.connection->squared_norm).norm() < 2e-11,
+      "source connection diagnostic differs from the independent product calculation");
+  const auto source_hvp = action.active_integral_adjoint_direction(sparse,&raw,&mu,
+      overlap,one,two,&source_cache,true);
+  const auto product_hvp = action.active_integral_adjoint_direction(dense,&raw,&mu,
+      overlap,one,two,&product_cache,true);
+  require((source_hvp.overlap-product_hvp.overlap).norm() < 2e-11 &&
+      (source_hvp.one_electron-product_hvp.one_electron).norm() < 2e-11 &&
+      (source_hvp.pair_kernel-product_hvp.pair_kernel).norm() < 2e-11,
+      "source HVP lost a left/right representation, delta-H or gauge term");
 }
 
 /** @brief Production accepted gradient keeps the nonstationary carrier term. */
@@ -1388,9 +1435,10 @@ void benchmark_structure_response(int n, int selected_count, bool compare_refere
     xmvb::vb::SelectedStateDeterminantMatrices raw;
     raw.n_unique_alpha = fixture.alpha.size(); raw.n_unique_beta = fixture.beta.size();
     raw.states.resize(1); raw.states[0].coefficient_matrix = action.expand_structure_block(q);
+    const auto product_state = explicit_product_state(fixture,cache,action,accepted);
     const auto start = Clock::now();
     // Same-binary product sigma/adjoint consumer, without structure H/M images.
-    const auto reference = action.active_integral_response_adjoint(accepted,raw,mu);
+    const auto reference = action.active_integral_response_adjoint(product_state,raw,mu);
     reference_seconds = std::chrono::duration<double>(Clock::now()-start).count();
     adjoint_error = std::max({(gradient.overlap-reference.overlap).norm(),
         (gradient.one_electron-reference.one_electron).norm(),
@@ -1415,6 +1463,122 @@ void benchmark_structure_response(int n, int selected_count, bool compare_refere
             << "reference_adjoint_only_seconds=" << reference_seconds << '\n'
             << "image_error=" << image_error << '\n'
             << "adjoint_error=" << adjoint_error << '\n';
+}
+
+/** @brief Accepted gradient and complete orbital direction, with separate oracles. */
+void benchmark_source_state(int n, bool reference, bool accepted_only = false) {
+  require(n == 12 || n == 14 || (n == 16 && accepted_only),"unsupported source-state benchmark");
+  const auto fixture = make_fixture(n,n/2,n/2);
+  const int count = n == 14 ? 2 : 1;
+  const auto pairings = rumer_pairings(0,n);
+  const auto expansion = covalent_rumer_terms(n,fixture.alpha,fixture.beta,
+      std::vector<Pairing>(pairings.begin(),pairings.begin()+count));
+  const auto cache = topology(fixture,expansion.product_alpha,expansion.product_beta);
+  const xmvb::vb::StructureAction action(expansion.terms,count,cache,fixture.overlap,
+      fixture.one_electron,fixture.two_electron,n,nullptr,xmvb::vb::StructureActionMode::ActionOnly);
+  const Eigen::MatrixXd c = test_vectors(count,1)/std::sqrt(count);
+  constexpr double energy = -5.3;
+  const auto start = Clock::now();
+  const auto state = action.prepare_active_adjoint(c,{1.0},{energy});
+  const auto gradient = action.active_integral_adjoint(state);
+  const auto prepared = Clock::now();
+  std::size_t accepted_product_doubles = 0;
+  for (const auto& block : state.orthogonal_coefficients) accepted_product_doubles += block.size();
+  for (const auto& block : state.residuals) accepted_product_doubles += block.size();
+  require(state.source_factors && state.orthogonal_coefficients.empty() && state.residuals.empty(),
+          "source accepted benchmark retained a full product state");
+  Eigen::MatrixXd ds(n,n), dh(n,n);
+  for (int j = 0; j < n; ++j)
+    for (int i = 0; i <= j; ++i) {
+      ds(i,j) = ds(j,i) = 0.0004*std::cos(0.13*(i+2)*(j+1));
+      dh(i,j) = dh(j,i) = 0.0007*std::sin(0.17*(i+1)*(j+3));
+    }
+  const int pairs = xmvb::vb::packed_active_pair_count(n);
+  std::vector<double> dg(fixture.two_electron.packed_active_two_electron_integrals.size());
+  for (int i = 0; i < static_cast<int>(dg.size()); ++i) dg[i] = 0.00001*std::cos(0.19*(i+1));
+  Eigen::MatrixXd dg_full(pairs,pairs);
+  for (int j = 0; j < pairs; ++j)
+    for (int i = 0; i < pairs; ++i)
+      dg_full(i,j) = dg[xmvb::core::PairIndex::packed_pair_of_pairs_index(i,j)];
+  const std::vector<double> overlap(ds.data(),ds.data()+ds.size()), one(dh.data(),dh.data()+dh.size());
+  xmvb::vb::StructureIntegralDirection direction;
+  xmvb::vb::StructureActionResult images;
+  xmvb::vb::StructureActiveIntegralAdjoint hvp;
+  double image_seconds = 0, hvp_seconds = 0;
+  if (!accepted_only) {
+    const auto a = Clock::now();
+    images = action.apply_integral_direction(state,overlap,one,dg,&direction);
+    const auto b = Clock::now();
+    hvp = action.active_integral_adjoint_direction(state,nullptr,nullptr,overlap,one,dg,&direction,true);
+    const auto end = Clock::now();
+    image_seconds = std::chrono::duration<double>(b-a).count();
+    hvp_seconds = std::chrono::duration<double>(end-b).count();
+    require(direction.coefficient_direction.size() == 0 && direction.sigma_direction.size() == 0,
+            "source orbital direction retained a product cache");
+  }
+  constexpr double step = 2e-5;
+  const auto lagrangian = [&](double scale) {
+    auto moved = fixture;
+    for (int i = 0; i < static_cast<int>(moved.overlap.size()); ++i) moved.overlap[i] += scale*ds.data()[i];
+    moved.one_electron += scale*dh;
+    for (int i = 0; i < static_cast<int>(dg.size()); ++i)
+      moved.two_electron.packed_active_two_electron_integrals[i] += scale*dg[i];
+    const xmvb::vb::StructureAction shifted(expansion.terms,count,cache,moved.overlap,
+        moved.one_electron,moved.two_electron,n,nullptr,xmvb::vb::StructureActionMode::ActionOnly);
+    const auto value = shifted.apply(c);
+    return c.col(0).dot(value.hamiltonian.col(0)-energy*value.overlap.col(0));
+  };
+  const double slope = (gradient.overlap.array()*ds.array()).sum()+
+      (gradient.one_electron.array()*dh.array()).sum()+
+      (gradient.pair_kernel.array()*dg_full.array()).sum();
+  const double fd_error = std::abs(slope-(lagrangian(step)-lagrangian(-step))/(2*step));
+  require(fd_error < 2e-7,"source accepted gradient violates the Lagrangian directional derivative");
+  rusage usage{};
+  require(getrusage(RUSAGE_SELF,&usage) == 0,"getrusage failed");
+  const auto native_rss = usage.ru_maxrss;
+  double gradient_error = 0, image_error = 0, hvp_error = 0;
+  double reference_image_seconds = 0, reference_hvp_seconds = 0;
+  if (reference) {
+    auto dense = explicit_product_state(fixture,cache,action,state);
+    const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+        fixture.overlap,fixture.one_electron,fixture.two_electron,n);
+    const xmvb::mcscf::DirectCiSigmaAction sigma(cache.alpha_reuse_table.unique_determinants,
+        cache.beta_reuse_table.unique_determinants,integrals);
+    const auto integral = sigma.integral_adjoint(dense.orthogonal_coefficients[0],dense.orthogonal_coefficients[0]);
+    dense.one_electron_gradient = integral.one_electron; dense.pair_kernel_gradient = integral.pair_kernel;
+    dense.generator_gradient = 2*sigma.one_body_generator_adjoint(dense.residuals[0],dense.orthogonal_coefficients[0]);
+    const auto expected = action.active_integral_adjoint(dense);
+    gradient_error = std::max({(gradient.overlap-expected.overlap).norm(),
+        (gradient.one_electron-expected.one_electron).norm(),(gradient.pair_kernel-expected.pair_kernel).norm()});
+    xmvb::vb::StructureIntegralDirection dense_direction;
+    const auto a = Clock::now();
+    const auto reference_images = action.apply_integral_direction(dense,overlap,one,dg,&dense_direction);
+    const auto b = Clock::now();
+    const auto expected_hvp = action.active_integral_adjoint_direction(dense,nullptr,nullptr,
+        overlap,one,dg,&dense_direction,true);
+    const auto end = Clock::now();
+    reference_image_seconds = std::chrono::duration<double>(b-a).count();
+    reference_hvp_seconds = std::chrono::duration<double>(end-b).count();
+    image_error = std::max((images.hamiltonian-reference_images.hamiltonian).norm(),
+        (images.overlap-reference_images.overlap).norm());
+    hvp_error = std::max({(hvp.overlap-expected_hvp.overlap).norm(),
+        (hvp.one_electron-expected_hvp.one_electron).norm(),(hvp.pair_kernel-expected_hvp.pair_kernel).norm()});
+    require(std::max({gradient_error,image_error,hvp_error}) < 3e-10,
+            "source accepted/orbital chain differs from the independent product oracle");
+  }
+  std::cout << std::setprecision(17) << "orbitals=" << n << "\nstructures=" << count << '\n'
+            << "accepted_seconds=" << std::chrono::duration<double>(prepared-start).count() << '\n'
+            << "direction_checked=" << !accepted_only << "\ndirection_seconds=" << image_seconds << '\n'
+            << "hvp_seconds=" << hvp_seconds << "\nlagrangian_fd_error=" << fd_error << '\n'
+            << "accepted_product_doubles=" << accepted_product_doubles << "\ndirection_product_doubles="
+            << direction.coefficient_direction.size()+direction.sigma_direction.size() << '\n'
+            << "direction_workspace_bound=" << images.tiles.source_workspace_bound << '\n'
+            << "direction_source_columns=" << images.tiles.source_columns << '\n'
+            << "cached_generator_doubles=" << direction.generator_direction.size() << '\n'
+            << "native_max_rss_kib=" << native_rss << "\nreference_checked=" << reference << '\n'
+            << "gradient_error=" << gradient_error << "\nimage_error=" << image_error << "\nhvp_error=" << hvp_error << '\n'
+            << "reference_direction_seconds=" << reference_image_seconds << '\n'
+            << "reference_hvp_seconds=" << reference_hvp_seconds << '\n';
 }
 
 /** @brief A target-size single covalent structure, with optional full-carrier oracle. */
@@ -1792,6 +1956,12 @@ int main(int argc, char** argv) {
       benchmark_structure_response(14,std::stoi(argv[2]),false);
     } else if (argc == 3 && std::string(argv[1]) == "--structure-response14-reference") {
       benchmark_structure_response(14,std::stoi(argv[2]),true);
+    } else if (argc == 3 && std::string(argv[1]) == "--source-state") {
+      benchmark_source_state(std::stoi(argv[2]),false);
+    } else if (argc == 3 && std::string(argv[1]) == "--source-state-reference") {
+      benchmark_source_state(std::stoi(argv[2]),true);
+    } else if (argc == 2 && std::string(argv[1]) == "--source-accepted16") {
+      benchmark_source_state(16,false,true);
     } else if (argc == 3 && std::string(argv[1]) == "--source-size") {
       benchmark_source_size(std::stoi(argv[2]), false);
     } else if (argc == 3 && std::string(argv[1]) == "--source-size-parity") {
@@ -1819,6 +1989,12 @@ int main(int argc, char** argv) {
     } else if (argc == 3 && std::string(argv[1]) == "--gram12") {
       benchmark_selected12(std::stoi(argv[2]), false, false, true);
     } else if (argc == 1) {
+      const auto vacuum = xmvb::vb::build_orthogonal_spin_topology(
+          Strings{{}}, Strings{{}}, 0);
+      require(vacuum.n_unique_alpha == 1 && vacuum.n_unique_beta == 1 &&
+                  vacuum.alpha_reuse_table.determinant_to_unique_id[0] == 0 &&
+                  vacuum.beta_reuse_table.determinant_to_unique_id[0] == 0,
+              "zero-active-space topology must retain the unique vacuum");
       check_rumer_case(4);
       check_rumer_case(6);
       check_selected_unequal_spin_case();
@@ -1851,6 +2027,7 @@ int main(int argc, char** argv) {
           "--selected12 N|--selected12-parity N|--sources12 N|--paths12 N|--gram12 N|"
           "--structure-response12 N|--structure-response12-reference N|"
           "--structure-response14 N|--structure-response14-reference N|"
+          "--source-state N|--source-state-reference N|--source-accepted16|"
           "--source-size N|--source-size-parity N|--source-cover-size N|--source-cover-reference N|"
           "--factor-adjoint N|--factor-adjoint-reference N|--factor-direction N|--factor-direction-reference N|"
           "--factor-generator N|--factor-generator-reference N|--factor-generator-check16]");

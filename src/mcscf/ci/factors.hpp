@@ -71,7 +71,12 @@ struct FactorActionWork {
 class FactorActionWorkspace {
 public:
   FactorActionWorkspace(const SpinFactorSource& source, int channels,
-      std::size_t workspace_bytes, bool overlap_only = false);
+      std::size_t workspace_bytes, bool overlap_only = false,
+      int reserved_channel_panels = 0);
+
+  /** @brief Shared consumer slab dimensions; reservations count inside the budget. */
+  int source_tile() const noexcept { return source_tile_; }
+  int channel_tile() const noexcept { return channel_tile_; }
 
   FactorActionWork apply(const DirectCiSigmaAction& sigma, const SpinFactorSource& source,
       const std::function<void(FactorCrossBlock)>& cross,
@@ -81,6 +86,7 @@ private:
   int n_alpha_, n_beta_, channels_, source_tile_, channel_tile_;
   std::size_t load_rows_;
   bool overlap_only_;
+  int reserved_channel_panels_;
   Eigen::MatrixXd alpha_, beta_, ha_, hb_;
   Eigen::MatrixXd ap_, bp_, va_, vb_, aq_, bq_;
 };

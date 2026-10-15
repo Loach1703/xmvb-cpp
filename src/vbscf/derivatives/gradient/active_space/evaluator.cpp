@@ -459,7 +459,7 @@ ActiveSpaceGradientForwardContext build_active_space_gradient_forward_context(
           active_space_one_electron_builder,
           active_space_two_electron_builder);
 
-  context.same_spin_pair_cache = build_same_spin_pair_topology(
+  context.same_spin_pair_cache = build_orthogonal_spin_topology(
       input.structure_data.alpha_det,
       input.structure_data.beta_det,
       input.orbital_preparation_input.n_active_orbitals);
@@ -487,7 +487,7 @@ ActiveSpaceGradientForwardContext build_active_space_gradient_forward_context(
   ActiveSpaceGradientForwardContext context;
   context.timed_active_space_context = std::move(timed_active_space_context);
 
-  context.same_spin_pair_cache = build_same_spin_pair_topology(
+  context.same_spin_pair_cache = build_orthogonal_spin_topology(
       input.structure_data.alpha_det,
       input.structure_data.beta_det,
       input.orbital_preparation_input.n_active_orbitals);
@@ -567,6 +567,17 @@ finalize_active_space_second_order_context(
       images.hamiltonian.col(state) = forward_context->hamiltonian_eigenvectors.col(root);
       images.overlap.col(state) = forward_context->overlap_eigenvectors.col(root);
     }
+  } else if (!forward_context->structure_matrices.hamiltonian_matrix.empty()) {
+    // Dense CI has no Davidson Ritz images. Supply the same accepted-state
+    // contract from its resident matrices, only for the selected roots.
+    const int n = context->n_structures;
+    const Eigen::Map<const Eigen::MatrixXd> hamiltonian(
+        forward_context->structure_matrices.hamiltonian_matrix.data(), n, n);
+    const Eigen::Map<const Eigen::MatrixXd> overlap(
+        forward_context->structure_matrices.overlap_matrix.data(), n, n);
+    auto& images = context->selected_state_structure_images.emplace();
+    images.hamiltonian.noalias() = hamiltonian * context->selected_state_eigenvectors;
+    images.overlap.noalias() = overlap * context->selected_state_eigenvectors;
   }
   const int n_roots =
       static_cast<int>(forward_context->eigen_result.eigenvalues.size());
@@ -1058,7 +1069,7 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       active_space_two_electron_builder_);
   const auto& prepared =
       context.timed_active_space_context.prepared_active_space;
-  context.same_spin_pair_cache = build_same_spin_pair_topology(
+  context.same_spin_pair_cache = build_orthogonal_spin_topology(
       input.structure_data.alpha_det,
       input.structure_data.beta_det,
       input.orbital_preparation_input.n_active_orbitals);
