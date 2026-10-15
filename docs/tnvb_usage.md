@@ -3,13 +3,19 @@
 ## Scope
 
 The `tnvb` branch supplies a separate `xmvb_tnvb` library. Production uses
-explicit singlet VB structures, SU(2) Block2, fixed bond dimensions, DIRECT
+singlet VB structures, SU(2) Block2, fixed bond dimensions, DIRECT
 total-state construction and FULL 3-RDM. HAO and OEO use the same electronic
 adapter. Selected structures remain a selected space, not a complete CAS.
 The default ordinary determinant path and its second-order caches remain
 available; a TNVB evaluation creates neither determinants nor an
 `AcceptedPointContext`. ISCF=5 retains the existing raw-coordinate L-BFGS,
 line search, history and stopping criteria.
+TNVB also supports the existing ISCF=8 nonredundant orbital-block L-BFGS.
+It uses the same first-order electronic adapter and does not require an
+`AcceptedPointContext`, a determinant HVP, or a new input keyword. Its original
+stopping metric is the projected reduced-gradient infinity norm, unlike the
+raw-coordinate L2 norm used by ISCF=5. Neither optimizer's numerical stopping
+thresholds or algorithm is changed by enabling TNVB.
 
 Only these new input keywords are registered:
 
@@ -22,8 +28,14 @@ Only these new input keywords are registered:
 For ENERGY, use `VBSCF ISCF=5 ITMAX=0 TNVB TNBOND=128`. No total MPS or
 1/2/3-RDM is constructed. For optimization, use
 `VBSCF ISCF=5 ITMAX=200 TNVB TNBOND=128 TNSUMBOND=256`.
+Replace `ISCF=5` with `ISCF=8` to use orbital-block L-BFGS. The existing CLI
+override `--optimizer-backend block_lbfgs` has the same effect. In ENERGY
+(`ITMAX=0`), either setting evaluates the fixed orbitals without optimization.
 These are additions to the existing `$CTRL`; geometry, orbital guess and
-explicit `$STR` are still needed. Final command-line `--max-iterations`
+VB structures are still needed. Structures can be supplied explicitly through
+`$STR` or generated using the existing supported `STR=...` structure classes,
+including `STR=COV`. Both sources feed the same TNVB MPS construction without
+determinant expansion. Final command-line `--max-iterations`
 overrides `ITMAX`. Omitted `ITMAX` retains the project default 2000; specify
 zero explicitly for ENERGY. TNVB defaults to dense H/S solving. An explicit
 unsupported eigensolver or optimizer request is a capability error.
@@ -125,7 +137,11 @@ consume memory.
 
 Finite `fit_dE>1e-7 Eh` emits a warning and continues. It is not a user-configured
 convergence limit. Nonfinite data, invalid structure metric, worker failure,
-eigenpair norm/residual failure and RDM identity error above `1e-8` are errors.
+eigenpair norm/residual failure and RDM check residuals above `1e-7` are errors.
+Finite RDM check residuals above `1e-8` and at most `1e-7` emit a warning and
+continue. Both limits are fixed in the C++/worker production path; inherited
+`XMVB_BLOCK2_RDM_CHECK_TOL` cannot override them. This changes numerical
+consistency handling, not orbital convergence parameters or RDM algorithms.
 At finite bond dimensions, the gradient does not differentiate all truncation
 operations. Check bond convergence before interpreting an approximate optimum.
 ENERGY output reports no orbital convergence or gradient norms. Optimization
@@ -133,6 +149,11 @@ retains H/S, all existing structure weights, orbital and density analyses.
 The CLI regression also checks Molden export in ENERGY and gradient modes,
 all 24 orbitals of the benzene fixture, natural-orbital and population sections
 after a full-gradient evaluation, and their absence in ENERGY output.
+ISCF=8 integration checks and their explicitly bounded C14 scope are recorded
+separately in `tnvb_iscf8_integration.md`; the original ISCF=5 acceptance archive
+is preserved. The block optimizer's current Armijo trials evaluate full
+gradients, including FULL 3-RDM, even for rejected trials. Joining this optimizer
+does not by itself reduce the cost of a gradient evaluation.
 
 ## Reproducible acceptance tools
 
@@ -175,7 +196,10 @@ gradient gates. The user-confirmed C14 profile uses energy <=1e-6 Eh,
 gradient <=1e-7, and coefficient/weight errors <=1e-4. Its finite-D H/S
 differences are reported separately, including whether they satisfy benzene's
 stricter matrix limits. Nonfinite matrices remain errors for both profiles;
-RDM identity <=1e-8 and eigenpair/metric checks are never disabled. C14 final
+The historical numerical acceptance profile retains RDM identity <=1e-8;
+production now warns above 1e-8 and stops above 1e-7. Warning-band continuation
+alone does not establish that stricter acceptance criterion. Eigenpair/metric
+checks are never disabled. C14 final
 optimization additionally requires both backends to converge under the
 original optimizer criteria, fit <=1e-7 and exported-energy consistency.
 

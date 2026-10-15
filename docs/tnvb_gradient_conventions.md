@@ -133,4 +133,7 @@ optimization. Validate active and inactive orbital directions over several
 finite-difference step sizes. Compare normalized H/S and phase-aligned
 coefficients/weights with the determinant backend. HAO/OEO and exact/RI are
 separate required configurations. Nonfinite data, invalid structure metrics,
-worker failures, or RDM identity errors above 1e-8 remain fatal.
+worker failures, or RDM check residuals above 1e-7 remain fatal. Finite residuals
+above 1e-8 and at most 1e-7 produce a warning and continue in production; this
+does not change the RDM algorithm or optimizer convergence criteria. Historical
+numerical acceptance reports retain their original 1e-8 identity criterion.

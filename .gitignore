@@ -2,6 +2,7 @@
 build/
 build-*/
 cmake-build-*/
+/install-tnvb/
 .cache/
 .codex
 .codex/
@@ -110,3 +111,4 @@ docs/*
 !docs/tnvb_gradient_conventions.md
 !docs/tnvb_acceptance_report.md
 !docs/tnvb_usage.md
+!docs/tnvb_iscf8_integration.md

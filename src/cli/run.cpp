@@ -81,11 +81,12 @@ int run(Options command_line) {
 #else
     const auto& orbitals=load_result.input.orbital_preparation_input;
     if (options.max_iterations < 0 || load_result.state_average_count != 1 ||
-        options.backend != xmvb::vb::VbScfOptimizerBackend::Lbfgs ||
+        (options.backend != xmvb::vb::VbScfOptimizerBackend::Lbfgs &&
+         options.backend != xmvb::vb::VbScfOptimizerBackend::BlockLbfgs) ||
         options.structure_eigensolver != xmvb::vb::StructureEigensolver::Dense ||
         (orbitals.orbital_type != xmvb::vb::kOrbitalTypeHao &&
          orbitals.orbital_type != xmvb::vb::kOrbitalTypeOeo)) {
-      throw std::invalid_argument("TNVB supports ISCF=5, one singlet state, HAO/OEO and dense H/S");
+      throw std::invalid_argument("TNVB supports ISCF=5/8, one singlet state, HAO/OEO and dense H/S");
     }
     if (options.max_iterations > 0 && load_result.input.tnvb.total_bond <
         load_result.input.tnvb.structure_bond) {

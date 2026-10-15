@@ -110,10 +110,12 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
     throw std::invalid_argument("max_iterations must be positive");
   }
   if (input.tnvb.enabled &&
-      (!electronic_backend_ || options_.backend != VbScfOptimizerBackend::Lbfgs ||
+      (!electronic_backend_ ||
+       (options_.backend != VbScfOptimizerBackend::Lbfgs &&
+        options_.backend != VbScfOptimizerBackend::BlockLbfgs) ||
        options_.structure_eigensolver != StructureEigensolver::Dense ||
        input.tnvb.total_bond < input.tnvb.structure_bond)) {
-    throw std::invalid_argument("TNVB optimization requires its electronic backend, ISCF=5, dense H/S and TNSUMBOND >= TNBOND");
+    throw std::invalid_argument("TNVB optimization requires its electronic backend, ISCF=5/8, dense H/S and TNSUMBOND >= TNBOND");
   }
   if (options_.gradient_tolerance <= 0.0 ||
       options_.energy_tolerance <= 0.0 ||

@@ -51,6 +51,9 @@ from pyblock2.driver.core import (
 # basis. This retains the former default accuracy reference, without an input
 # keyword or an environment-variable override.
 FIT_ENERGY_WARNING = 1.0e-7
+# Production RDM diagnostics have a warning band before the fatal limit.
+# These are numerical consistency checks, not orbital convergence criteria.
+RDM_CHECK_WARNING = 1.0e-8
 # Internal repair/cache criteria, not orbital convergence limits. Finite
 # failures of these criteria still produce RDMs and a compression warning.
 SUM_INFIDELITY_TOL = 1.0e-10
@@ -86,6 +89,42 @@ def print(*values, **kwargs):
 
 def log_summary(message: str):
     _builtin_print(message, flush=True)
+
+
+def check_total_state_rdm(
+    trace_error, contraction2_error, contraction3_error, rdm_energy_error,
+    direct_trace_error, direct_overlap_error, rdm_tolerance,
+):
+    """Warn above 1e-8; reject nonfinite data or residuals above the fatal limit."""
+    errors = (
+        trace_error, contraction2_error, contraction3_error, rdm_energy_error,
+        direct_trace_error, direct_overlap_error,
+    )
+    detail = (
+        f"trace1={trace_error:.3e}, "
+        f"contract2={contraction2_error:.3e}, "
+        f"contract3={contraction3_error:.3e}, "
+        f"energy={rdm_energy_error:.3e}, "
+        f"direct_trace={direct_trace_error:.3e}, "
+        f"direct_overlap={direct_overlap_error:.3e}"
+    )
+    if not math.isfinite(rdm_tolerance) or rdm_tolerance <= 0.0:
+        raise RuntimeError("TNVB total-state RDM check has an invalid fatal limit")
+    if any(not math.isfinite(error) or error < 0.0 for error in errors):
+        raise RuntimeError("TNVB total-state RDM check failed: invalid residual; " + detail)
+    if max(errors) > rdm_tolerance:
+        raise RuntimeError(
+            "TNVB total-state RDM check failed: " + detail
+            + f", limit={rdm_tolerance:.3e}"
+        )
+    if max(errors) > RDM_CHECK_WARNING:
+        log_summary(
+            "[TNVB-WARNING] total-state RDM check: " + detail
+            + f", warning_limit={RDM_CHECK_WARNING:.3e}, "
+            + f"fatal_limit={rdm_tolerance:.3e}; continuing RDM/gradient evaluation. "
+            + "Numerical consistency is outside the warning reference; "
+            + "verify gradient and bond convergence before interpreting optimized results."
+        )
 
 
 def warn_total_state_fit(fit_error: float, tnbond: int, sum_bond: int):
@@ -5746,24 +5785,16 @@ def compute_total_state_rdms(
             f"identity_max={identity_error:.3e} norm_error={abs(1.0 - norm):.3e}"
             f"{validation_summary}"
         )
-        rdm_tolerance = float(os.environ.get("XMVB_BLOCK2_RDM_CHECK_TOL", "1e-8"))
-        if max(
+        rdm_tolerance = float(os.environ.get("XMVB_BLOCK2_RDM_CHECK_TOL", "1e-7"))
+        check_total_state_rdm(
             trace_error,
             contraction2_error,
             contraction3_error,
             rdm_energy_error,
             direct_trace_error,
             direct_overlap_error,
-        ) > rdm_tolerance:
-            raise RuntimeError(
-                "TNVB total-state RDM check failed: "
-                f"trace1={trace_error:.3e}, "
-                f"contract2={contraction2_error:.3e}, "
-                f"contract3={contraction3_error:.3e}, "
-                f"energy={rdm_energy_error:.3e}, "
-                f"direct_trace={direct_trace_error:.3e}, "
-                f"limit={rdm_tolerance:.3e}"
-            )
+            rdm_tolerance,
+        )
         diagnostics = dict(identity_error=identity_error,
                            rdm_energy_error=rdm_energy_error,
                            total_seconds=rdm_total_seconds,

@@ -59,6 +59,8 @@ void write_result(std::ostream& out,const xmvb::vb::VbScfOptimizerResult& r) {
   out << "{\"converged\":" << (r.converged?"true":"false")
       << ",\"termination\":\"" << r.termination_reason << "\",\"iterations\":" << r.n_iterations
       << ",\"energy\":" << r.final_total_energy << ",\"gradient_l2\":" << r.final_gradient_l2_norm
+      << ",\"projected_gradient_inf\":" << r.final_projected_gradient_inf_norm
+      << ",\"projected_gradient_l2\":" << r.final_projected_gradient_l2_norm
       << ",\"wall_seconds\":" << r.total_wall_time_seconds << ",\"coefficients\":";
   write_array(out,state.c.data(),state.c.size());
   out << ",\"weights_column_major\":"; write_array(out,state.weights.data(),state.weights.size());
@@ -156,7 +158,13 @@ int main(int argc,char** argv) {
     reference_input.tnvb.enabled=false;
     reference_input.structure_data=expanded;
     xmvb::vb::VbScfOptimizerOptions options;
-    options.backend=xmvb::vb::VbScfOptimizerBackend::Lbfgs;
+    if (loaded.scf_optimizer==xmvb::vb::InputScfOptimizer::Lbfgs) {
+      options.backend=xmvb::vb::VbScfOptimizerBackend::Lbfgs;
+    } else if (loaded.scf_optimizer==xmvb::vb::InputScfOptimizer::BlockLbfgs) {
+      options.backend=xmvb::vb::VbScfOptimizerBackend::BlockLbfgs;
+    } else {
+      throw std::invalid_argument("TNVB optimization acceptance requires explicit input ISCF=5 or ISCF=8");
+    }
     options.structure_eigensolver=xmvb::vb::StructureEigensolver::Dense;
     options.max_iterations=iterations;
     options.verbose=false;
@@ -165,7 +173,9 @@ int main(int argc,char** argv) {
     const auto callback=[](const char* name) {
       return [name](const xmvb::vb::VbScfAcceptedIterationSnapshot& s) {
         std::cout << std::setprecision(17) << "[OPT-" << name << "] i=" << s.accepted_iteration_index
-          << " E=" << s.total_energy << " gradient_l2=" << s.sparse_orbital_energy_gradient_l2_norm << std::endl;
+          << " E=" << s.total_energy << " gradient_l2=" << s.sparse_orbital_energy_gradient_l2_norm;
+        if (s.has_projected_gradient) std::cout << " projected_gradient_inf=" << s.projected_gradient_inf_norm;
+        std::cout << std::endl;
       };
     };
     options.accepted_iteration_callback=callback("REFERENCE");
@@ -206,8 +216,15 @@ int main(int argc,char** argv) {
     report << std::setprecision(17) << "{\n\"passed\":" << (passed?"true":"false")
         << ",\n\"integrals\":\"" << mode << "\",\n\"max_iterations\":" << iterations
         << ",\n\"convergence_profile\":\"original\""
+        << ",\n\"optimizer\":\"" << xmvb::vb::vbscf_optimizer_backend_name(options.backend) << "\""
         << ",\n\"energy_tolerance\":" << options.energy_tolerance
-        << ",\n\"gradient_l2_tolerance\":" << options.gradient_tolerance
+        << ",\n\"gradient_tolerance\":" << options.gradient_tolerance
+        << ",\n\"gradient_metric\":\"" << (options.backend==xmvb::vb::VbScfOptimizerBackend::Lbfgs
+            ? "raw_l2" : "projected_inf") << "\"";
+    if (options.backend==xmvb::vb::VbScfOptimizerBackend::Lbfgs) {
+      report << ",\n\"gradient_l2_tolerance\":" << options.gradient_tolerance;
+    }
+    report
         << ",\n\"final_energy_error_limit\":" << energy_limit
         << ",\n\"final_energy_error\":" << de << ",\n\"final_coefficient_error\":" << dc
         << ",\n\"final_weight_error\":" << dw << ",\n\"parent_peak_rss_kib\":" << self.ru_maxrss

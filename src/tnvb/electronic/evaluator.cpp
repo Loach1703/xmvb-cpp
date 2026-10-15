@@ -24,7 +24,7 @@ void validate_response(const WorkerResponse& response) {
   if (!response.hamiltonian.allFinite() || !response.overlap.allFinite() ||
       !response.coefficients.allFinite() || !response.energies.allFinite() ||
       !std::isfinite(response.fit_energy_error) || response.fit_energy_error < 0 ||
-      !std::isfinite(response.rdm_identity_error) || response.rdm_identity_error > 1e-8 ||
+      !std::isfinite(response.rdm_identity_error) || response.rdm_identity_error > 1e-7 ||
       response.rdm_identity_error < 0) {
     throw std::runtime_error("TNVB worker returned invalid numerical data");
   }

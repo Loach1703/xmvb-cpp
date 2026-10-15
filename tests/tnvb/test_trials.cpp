@@ -8,6 +8,7 @@
 #include "input/loading/loader.hpp"
 #include "tnvb/electronic/evaluator.hpp"
 #include "vbscf/optimization/objective/function.hpp"
+#include "vbscf/optimization/driver/optimizer.hpp"
 
 namespace {
 void require(bool value,const char* message) {
@@ -91,7 +92,35 @@ int main(int argc,char** argv) {
     verify_accepted();
     objective.commit(std::move(value));
     require(objective.call_count()==2 && objective.input().orbital_preparation_input.orbital_value_table!=accepted_orbitals,"explicit trial commit failed");
+    // A successful CLI exit at an iteration cap is not proof of a usable
+    // optimizer: require an actual accepted block-LBFGS orbital step here.
+    auto block_input=xmvb::vb::load_vbscf_input_with_timings(argv[1]);
+    xmvb::vb::VbScfOptimizerOptions block_options;
+    block_options.backend=xmvb::vb::VbScfOptimizerBackend::BlockLbfgs;
+    block_options.structure_eigensolver=xmvb::vb::StructureEigensolver::Dense;
+    block_options.max_iterations=1;
+    block_options.verbose=false;
+    block_options.retain_accepted_iteration_trace=true;
+    const auto block=xmvb::vb::VbScfOptimizer{block_options,backend}.optimize(
+        std::move(block_input.input),block_input.nuclear_repulsion_energy);
+    require(block.n_iterations==1 && block.total_energy_history.size()==2,
+        "TNVB block-LBFGS did not accept an orbital step");
+    require(block.total_energy_history.back()<block.total_energy_history.front(),
+        "TNVB block-LBFGS orbital step did not decrease energy");
+    require(block.termination_reason=="max_iterations" || block.converged,
+        "TNVB block-LBFGS stopped with an optimizer failure");
+    require(block.accepted_iteration_trace.size()==2 &&
+        block.accepted_iteration_trace.back().has_projected_gradient &&
+        std::isfinite(block.final_projected_gradient_inf_norm),
+        "TNVB block-LBFGS did not report its projected gradient");
+    require(block.optimized_input.structure_data.alpha_det.empty() &&
+        !block.optimized_input.complete_active_space && block.scf_result.n_structures==5,
+        "TNVB block-LBFGS changed selected VB structures to determinants/CAS");
+    require(block.scf_result.tnvb_diagnostics.has_value() &&
+        block.scf_result.tnvb_diagnostics->fit_energy_error<1e-7,
+        "TNVB block-LBFGS lost full-gradient tensor diagnostics");
     std::cout << "TNVB pair-phase, worker-failure and trial/accepted-state isolation passed\n";
+    std::cout << "TNVB ISCF=8 accepted orbital step and selected-space invariants passed\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n'; return 1;

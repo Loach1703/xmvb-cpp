@@ -598,12 +598,11 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
   result.standard_two_electron_mode = load_result.standard_two_electron_mode;
   result.tnvb = input_deck_metadata.tnvb;
   if (result.tnvb.enabled) {
-    if (!input_deck.has_explicit_raw_structures ||
-        resolved_spin_multiplicity != 1 ||
+    if (resolved_spin_multiplicity != 1 ||
         input_deck_metadata.wavefunction_type != kWavefunctionTypeStructure ||
         input_deck_metadata.vb_function_type != kVbFunctionTypeDeterminant) {
       throw std::invalid_argument(
-          "TNVB requires explicit singlet VB structures with WFNTYP=STR, VBFTYP=DET");
+          "TNVB requires singlet VB structures with WFNTYP=STR, VBFTYP=DET");
     }
     if (result.tnvb.structure_bond <= 0) {
       throw std::invalid_argument("TNVB requires TNBOND to be specified");

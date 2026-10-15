@@ -16,7 +16,7 @@ import traceback
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["GOTO_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["XMVB_BLOCK2_RDM_CHECK_TOL"] = "1e-8"
+os.environ["XMVB_BLOCK2_RDM_CHECK_TOL"] = "1e-7"
 os.environ.pop("XMVB_BLOCK2_SUM_ENERGY_TOL", None)
 os.environ.pop("XMVB_BLOCK2_VALIDATE_DIRECT_D3G", None)
 

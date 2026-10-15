@@ -18,9 +18,10 @@ def main():
     with tempfile.TemporaryDirectory(prefix="cpp-tnvb-cli-") as directory:
         path = Path(directory) / "input.xmi"
 
-        def run(configuration, iterations, options=(), forbidden=True, molden=False):
+        def run(configuration, iterations, options=(), forbidden=True, molden=False, iscf=5):
             text = original.replace("tnvb\ntnbond=128\ntnsumbond=256\n", configuration + "\n")
             text = text.replace("itmax=0", f"itmax={iterations}")
+            text = text.replace("iscf=5", f"iscf={iscf}")
             if not molden:
                 text = re.sub(r"(?mi)^molden\s*$", "", text)
             artifact = path.with_suffix(".molden")
@@ -64,6 +65,7 @@ def main():
                 ("TNVB TNBOND=128 TNSUMBOND=64", ("--max-iterations", "1"), "requires explicit TNSUMBOND"),
                 ("TNVB TNBOND=128", ("--eigensolver", "davidson"), "dense H/S"),
                 ("TNVB TNBOND=128", ("--optimizer-backend", "neo"), "ISCF=5"),
+                ("TNVB TNBOND=128", ("--optimizer-backend", "nonredundant_truncated_newton"), "ISCF=5"),
                 ("TNVB TNBOND=128", ("--max-iterations", "-1"), "ISCF=5")]:
             status, output = run(configuration, 0, options)
             assert status != 0 and "XMVB-CPP error:" in output and message in output, output
@@ -81,7 +83,21 @@ def main():
         for label in ("COMPUTED NATURAL ORBITALS", "XMVB ATOMIC POPULATION ANALYSIS",
                       "POPULATION AND CHARGE", "MULL.POP.", "LOW.POP."):
             assert label in output, label
-    print("TNVB CLI ENERGY, override, capability, fit-warning and analysis/export tests passed")
+        # Input ISCF=8 and its CLI override use the existing block optimizer.
+        # ENERGY still must not build a total MPS or call any RDM.
+        status, output = run("TNVB TNBOND=128", 0, iscf=8)
+        assert status == 0 and "energy_only" in output, output
+        assert "[TNVB-RDM]" not in output and "[TNVB-SUM]" not in output, output
+        for iscf, options in [(8, ()), (5, ("--optimizer-backend", "block_lbfgs"))]:
+            status, output = run("TNVB TNBOND=128 TNSUMBOND=256", 1, options,
+                                 forbidden=False, molden=True, iscf=iscf)
+            assert status in (0, 2) and "XMVB-CPP error:" not in output, output
+            for label in ("block-LBFGS (nonredundant orbital-block inverse)",
+                          "projected |g|_inf", "Final projected |g|_inf",
+                          "COMPUTED NATURAL ORBITALS", "XMVB ATOMIC POPULATION ANALYSIS"):
+                assert label in output, label
+            assert "block_lbfgs_line_search_failed" not in output, output
+    print("TNVB CLI ISCF=5/8, ENERGY, override, capability, fit-warning and analysis/export tests passed")
     return 0
 
 

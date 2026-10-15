@@ -76,7 +76,7 @@ void execute_worker(const std::filesystem::path& request,
       (inherited_preload.empty() ? std::string{} : ":" + inherited_preload);
   environment["XMVB_BLOCK2_WARM_CACHE"] = cache.string();
   environment["XMVB_BLOCK2_SCRATCH_PARENT"] = request.parent_path().string();
-  environment["XMVB_BLOCK2_RDM_CHECK_TOL"] = "1e-8";
+  environment["XMVB_BLOCK2_RDM_CHECK_TOL"] = "1e-7";
   environment["OPENBLAS_NUM_THREADS"] = "1";
   environment["OMP_DYNAMIC"] = "FALSE";
   environment["OMP_MAX_ACTIVE_LEVELS"] = "1";

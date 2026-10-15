@@ -25,6 +25,8 @@ install(TARGETS xmvb_tnvb ARCHIVE DESTINATION lib)
 install(FILES worker/evaluate.py worker/pair_core.py DESTINATION libexec/xmvb-cpp/tnvb)
 
 if (BUILD_TESTING)
+  add_test(NAME tnvb_rdm_policy COMMAND "${XMVB_TNVB_PYTHON}"
+    "${CMAKE_SOURCE_DIR}/tests/tnvb/test_rdm_policy.py")
   add_test(NAME tnvb_acceptance_summary COMMAND "${XMVB_TNVB_PYTHON}"
     "${CMAKE_SOURCE_DIR}/tests/tnvb/test_acceptance_summary.py")
   add_test(NAME tnvb_cli COMMAND "${XMVB_TNVB_PYTHON}"
