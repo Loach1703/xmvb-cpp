@@ -43,11 +43,12 @@ sha256sum "$source_dir/src/core/"{eigen_response.cpp,eigen_response.hpp} \
  "$source_dir/src/vbscf/derivatives/hessian/coupled/"{coupling.cpp,coupling.hpp} \
  "$source_dir/src/vbscf/derivatives/hessian/exact/"{operator.cpp,operator.hpp,state_internal.hpp} \
  "$source_dir/tests/vbscf/unit/test_keyframe.cpp" >> "$artifact/sources.sha256"
-sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,factors_internal.hpp,factor_generator.cpp,factor_plan.cpp,sigma.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
+sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,factors_internal.hpp,factor_generator.cpp,factor_plan.cpp,sigma.cpp,sigma_tiles.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" \
  -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric|eigen_response|keyframe)$' \
  --output-on-failure > "$artifact/ctest.out" 2>&1
+cp "$source_dir/build/Testing/Temporary/LastTest.log" "$artifact/test-details.log"
 [[ ${1:-} == --tests-only ]] && exit 0
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  bash -c 'grep Cpus_allowed_list /proc/self/status' > "$artifact/affinity.txt"
@@ -80,6 +81,15 @@ if [[ ${1:-} == --accepted-state16 || ${1:-} == --accepted-hvp16 || ${1:-} == --
   /usr/bin/time -v -o "$artifact/${1#--}.time" \
   "$source_dir/build/src/test_keyframe" "$1" \
   > "$artifact/${1#--}.out" 2> "$artifact/${1#--}.err"
+ exit 0
+fi
+if [[ ${1:-} == --tile-adjoint12 ]]; then
+ for mode in tile-adjoint12 tile-adjoint12-reference; do
+  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+   /usr/bin/time -v -o "$artifact/$mode.time" \
+   "$source_dir/build/src/test_structure_tiles" --"$mode" \
+   > "$artifact/$mode.out" 2> "$artifact/$mode.err"
+ done
  exit 0
 fi
 if [[ ${1:-} == --production || ${1:-} == --selected-scf ]]; then

@@ -1,0 +1,2 @@
+run,kind,orbitals,alpha_strings,beta_strings,generated_targets,full_targets,batches,peak_payload_bytes,generated_elements,prepare_seconds,read_seconds,compute_seconds,consume_seconds,native_seconds,native_rss_mib,oracle_dense_seconds,oracle_process_rss_mib,sigma_error,one_electron_error,pair_kernel_error
+source-cover-1261518,generated_support_sigma_adjoint,12,924,924,608751,853776,32,34899120,10642550,0.011226685,0.083101968,0.144445626,0.274992215,0.51755711,42.78125,0.233600005,87.171875,6.605826996519681e-14,2.688352863666641e-16,1.5477123361810899e-15

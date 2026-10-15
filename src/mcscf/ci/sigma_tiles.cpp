@@ -16,11 +16,24 @@ namespace xmvb::mcscf {
 
 void DirectCiSigmaAction::apply_tiled(
     int width,
-    const std::function<void(const std::vector<int>&, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_columns,
-    const std::function<void(const std::vector<int>&, const std::vector<int>&, const DirectCiColumnAccumulator&)>& add_columns,
+    const DirectCiTileReader& read_columns, const DirectCiTileWriter& add_columns,
     const ProductSupport* support, int exchange_parity) const {
   profiling::ScopedPhase phase(profiling::Phase::CiSigma);
-  if (width <= 0 || !read_columns || !add_columns)
+  contract_tiled(width,read_columns,add_columns,{},false,support,exchange_parity);
+}
+
+DirectCiIntegralAdjoint DirectCiSigmaAction::apply_tiled_with_adjoint(
+    int width, const DirectCiTileReader& response, const DirectCiTileWriter& add_columns,
+    const DirectCiTileReader& state, const ProductSupport* support, int exchange_parity) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiResponse);
+  return contract_tiled(width,response,add_columns,state,true,support,exchange_parity);
+}
+
+DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
+    int width, const DirectCiTileReader& read_columns, const DirectCiTileWriter& add_columns,
+    const DirectCiTileReader& state, bool collect_integrals,
+    const ProductSupport* support, int exchange_parity) const {
+  if (width <= 0 || !read_columns || (!add_columns && !collect_integrals))
     throw std::invalid_argument("invalid tiled direct-CI callbacks or width");
   if (exchange_parity < -1 || exchange_parity > 1 ||
       (exchange_parity != 0 && distinct_beta_))
@@ -28,6 +41,8 @@ void DirectCiSigmaAction::apply_tiled(
 
   const auto& beta_graph = beta_connections();
   const int pairs = hamiltonian_pair_kernel_.rows();
+  Eigen::MatrixXd kernel_adjoint = Eigen::MatrixXd::Zero(
+      collect_integrals ? pairs : 0,collect_integrals ? pairs : 0);
   constexpr std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL;
   // Reserve half the slab target for the two channel matrices. The exact
   // halo/CSR payload check below can shorten a batch further. No fixed
@@ -39,7 +54,7 @@ void DirectCiSigmaAction::apply_tiled(
       static_cast<std::size_t>(row_limit) * width * pairs);
 
   struct Group { int beta, begin, end, capacity, limit; };
-  struct Incoming { int group, pair, sign; };
+  struct Incoming { int group, pair; double sign; };
   std::vector<Group> groups;
   std::vector<int> active, group_index, halo, columns, distinct_alpha;
   std::vector<int> halo_index(n_alpha_, -1), column_index(n_beta_, -1);
@@ -293,31 +308,69 @@ void DirectCiSigmaAction::apply_tiled(
 
       const int first = count * width * thread / team;
       const int last = count * width * (thread + 1) / team;
-      for (int row = first; row < last; ++row) {
-        scattered.row(row).setZero();
+      const auto scatter = [&](int row, Eigen::Ref<ChannelMatrix> target) {
+        target.row(row).setZero();
         const int local = row % count, v = row / count;
         const int a = active[local], beta = groups[group_index[local]].beta;
         const int column = column_index[beta] * width + v;
         const double value = input(halo_index[a], column);
         for (const int p : alpha_->occupied[a])
-          scattered(row, core::PairIndex::packed_pair_index(p, p)) += value;
+          target(row, core::PairIndex::packed_pair_index(p, p)) += value;
         for (const int p : beta_graph.occupied[beta])
-          scattered(row, core::PairIndex::packed_pair_index(p, p)) += value;
+          target(row, core::PairIndex::packed_pair_index(p, p)) += value;
         const auto& alpha_links = alpha_->singles[a];
         for (int link = 0; link < static_cast<int>(alpha_links.size()); ++link)
-          scattered(row, alpha_links.pairs[link]) += alpha_links.signs[link] *
+          target(row, alpha_links.pairs[link]) += alpha_links.signs[link] *
               input(halo_index[alpha_links.sources[link]], column);
         const auto& beta_links = beta_graph.singles[beta];
         for (int link = 0; link < static_cast<int>(beta_links.size()); ++link)
-          scattered(row, beta_links.pairs[link]) += beta_links.signs[link] *
+          target(row, beta_links.pairs[link]) += beta_links.signs[link] *
               input(halo_index[a], column_index[beta_links.sources[link]] * width + v);
+      };
+      for (int row = first; row < last; ++row) scatter(row,scattered);
+      if (collect_integrals) {
+        if (state) {
+          // The response scatter is now complete. Refill the same input halo
+          // for the state and use the future K*D slab for its channel image.
+#pragma omp barrier
+#pragma omp single
+          {
+            try {
+              const auto begin = tick();
+              Eigen::Map<Eigen::MatrixXd> values(workspace.get(),n_halo,n_columns*width);
+              state(columns,halo,values);
+              const double elapsed=seconds(begin,tick());
+              read_time += elapsed;
+              compute_time -= elapsed;
+              source_columns += n_columns;
+              source_elements += panel_size;
+            } catch (...) { failure = std::current_exception(); }
+          }
+          if (failure) break;
+          for (int row = first; row < last; ++row) scatter(row,transformed);
+        } else if (last > first) {
+          transformed.middleRows(first,last-first) = scattered.middleRows(first,last-first);
+        }
+        if (exchange_parity)
+          for (int row = first; row < last; ++row)
+            if (active[row % count] != groups[group_index[row % count]].beta)
+              transformed.row(row) *= 2.0;
+#pragma omp barrier
+        // Each cotangent row has one owner; no pair-square thread replicas.
+#pragma omp for schedule(static)
+        for (int part = 0; part < team; ++part) {
+          const int begin = pairs*part/team, end = pairs*(part+1)/team;
+          if (end > begin)
+            kernel_adjoint.middleRows(begin,end-begin).noalias() +=
+                scattered.middleCols(begin,end-begin).transpose()*transformed;
+        }
       }
-      if (last > first)
+      if (add_columns && last > first)
         transformed.middleRows(first, last - first).noalias() =
             scattered.middleRows(first, last - first) * hamiltonian_pair_kernel_.transpose();
       // E commutes with spin exchange. In a fixed-parity bilinear form,
       // off-diagonal exchange orbits have two identical contributions.
-      if (exchange_parity)
+      if (add_columns && exchange_parity)
         for (int row = first; row < last; ++row) {
           const int local = row % count;
           if (active[local] != groups[group_index[local]].beta)
@@ -380,7 +433,7 @@ void DirectCiSigmaAction::apply_tiled(
           };
           const auto write_start = tick();
           compute_time += seconds(compute_start, write_start);
-          add_columns(columns, halo, accumulate);
+          if (add_columns) add_columns(columns, halo, accumulate);
           write_time += seconds(write_start, tick());
         } catch (...) { failure = std::current_exception(); }
       }
@@ -394,6 +447,7 @@ void DirectCiSigmaAction::apply_tiled(
         "prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f,targets=%zu,exchange=%d\n",
         batches, source_columns, source_elements, peak_payload,
         prepare_time, read_time, compute_time, write_time, targets, exchange_parity);
+  return collect_integrals ? pullback_channel_kernel(kernel_adjoint) : DirectCiIntegralAdjoint{};
 }
 
 } // namespace xmvb::mcscf

@@ -24,6 +24,12 @@ class ProductSupport;
  */
 using DirectCiColumnAccumulator = std::function<void(int, int, int, int, double*, const std::uint8_t*)>;
 
+/** @brief Generated coefficient slab and immediately consumed sigma-column callbacks. */
+using DirectCiTileReader = std::function<void(const std::vector<int>&,
+    const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>;
+using DirectCiTileWriter = std::function<void(const std::vector<int>&,
+    const std::vector<int>&, const DirectCiColumnAccumulator&)>;
+
 /** @brief Integral adjoint of one orthonormal direct-CI bilinear form. */
 struct DirectCiIntegralAdjoint {
   Eigen::MatrixXd one_electron;
@@ -145,10 +151,25 @@ public:
    */
   void apply_tiled(
       int block_width,
-      const std::function<void(const std::vector<int>&, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_columns,
-      const std::function<void(const std::vector<int>&, const std::vector<int>&, const DirectCiColumnAccumulator&)>& add_columns,
+      const DirectCiTileReader& read_columns,
+      const DirectCiTileWriter& add_columns,
       const ProductSupport* support = nullptr,
       int exchange_parity = 0) const;
+
+  /** @brief Stream H*response and the integral adjoint of <response,H*state>.
+   * Uses the same generated channel sweep and bounded numerical slabs as
+   * apply_tiled(). An empty state reader means state=response and reuses its
+   * scatter. A distinct reader reuses the input and transformed-channel slabs,
+   * not another carrier or per-thread channel array. The optional writer has
+   * the same projected-image convention as apply_tiled(); it may be empty for
+   * an adjoint-only request. Support must contain both inputs; a nonzero
+   * exchange parity certifies that both have that same parity.
+   */
+  DirectCiIntegralAdjoint apply_tiled_with_adjoint(
+      int block_width, const DirectCiTileReader& response,
+      const DirectCiTileWriter& add_columns,
+      const DirectCiTileReader& state = {},
+      const ProductSupport* support = nullptr, int exchange_parity = 0) const;
 
   /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
    * Uses occupation lists and the retained two-electron kernel, not sigma
@@ -258,6 +279,12 @@ private:
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       const Eigen::Ref<const Eigen::MatrixXd>& right,
       Eigen::MatrixXd* sigma, int exchange_parity, bool collect_integrals) const;
+
+  /** @brief Generated channel graph shared by tiled sigma and its integral VJP. */
+  DirectCiIntegralAdjoint contract_tiled(
+      int block_width, const DirectCiTileReader& response,
+      const DirectCiTileWriter& add_columns, const DirectCiTileReader& state,
+      bool collect_integrals, const ProductSupport* support, int exchange_parity) const;
 
   /** @brief Cooperative sigma contraction inside the current OpenMP team.
    * Each output beta column has one owner. All workers must call this method.

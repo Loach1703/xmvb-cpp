@@ -939,11 +939,38 @@ void check_sigma_columns(const Fixture& fixture, int width) {
             accumulate(beta_local, vector, 0, static_cast<int>(alpha_rows.size()),
                 tiled.col(vector * n_beta + betas[beta_local]).data(), nullptr);
       };
+  const auto check_adjoint = [&](const xmvb::mcscf::DirectCiIntegralAdjoint& value,
+                                 const xmvb::mcscf::DirectCiIntegralAdjoint& reference) {
+    require((value.one_electron-reference.one_electron).norm() <
+                3e-11*std::max(1.0,reference.one_electron.norm()) &&
+            (value.pair_kernel-reference.pair_kernel).norm() <
+                3e-11*std::max(1.0,reference.pair_kernel.norm()),
+            "generated sigma/adjoint channel sweep differs from the full oracle");
+  };
   sigma.apply_tiled(width, read, add);
   const Eigen::MatrixXd ordinary = sigma.apply(carrier);
   require((tiled - ordinary).norm() <=
               2e-11 * std::max(1.0, ordinary.norm()),
           "multi-column tiled direct-CI sigma differs from ordinary sigma");
+  tiled.setZero();
+  check_adjoint(sigma.apply_tiled_with_adjoint(width,read,add),
+                sigma.integral_adjoint(carrier,carrier));
+  require((tiled-ordinary).norm() < 2e-11*std::max(1.0,ordinary.norm()),
+          "collecting the generated integral adjoint changed sigma");
+  Eigen::MatrixXd right=carrier.array().cos().matrix();
+  const xmvb::mcscf::DirectCiTileReader read_right = [&](const std::vector<int>& betas,
+      const std::vector<int>& rows,Eigen::Ref<Eigen::MatrixXd> values) {
+    for (int j=0;j<static_cast<int>(betas.size());++j)
+      for (int v=0;v<width;++v)
+        for (int a=0;a<static_cast<int>(rows.size());++a)
+          values(a,j*width+v)=right(rows[a],v*n_beta+betas[j]);
+  };
+  tiled.setZero();
+  const auto cross=sigma.integral_adjoint(carrier,right);
+  check_adjoint(sigma.apply_tiled_with_adjoint(width,read,add,read_right),cross);
+  require((tiled-ordinary).norm() < 2e-11*std::max(1.0,ordinary.norm()),
+          "state-channel slab reuse corrupted the response sigma");
+  check_adjoint(sigma.apply_tiled_with_adjoint(width,read,{},read_right),cross);
   if (fixture.alpha == fixture.beta) {
     const Eigen::MatrixXd unsymmetrized = carrier;
     for (const int parity : {1, -1}) {
@@ -962,6 +989,20 @@ void check_sigma_columns(const Fixture& fixture, int width) {
       const Eigen::MatrixXd reference = sigma.apply(carrier);
       require((tiled - reference).norm() <= 2e-11 * std::max(1.0, reference.norm()),
               "exchange quotient changed the projected Hamiltonian action");
+      right=0.4*carrier;
+      check_adjoint(sigma.apply_tiled_with_adjoint(width,read,{},read_right,nullptr,parity),
+                    sigma.integral_adjoint(carrier,right,parity));
+      check_adjoint(sigma.apply_tiled_with_adjoint(width,read,{},{},nullptr,parity),
+                    sigma.integral_adjoint(carrier,carrier,parity));
+      tiled.setZero();
+      check_adjoint(sigma.apply_tiled_with_adjoint(width,read,add,{},nullptr,parity),
+                    sigma.integral_adjoint(carrier,carrier,parity));
+      for (int v=0;v<width;++v) {
+        const Eigen::MatrixXd block=tiled.middleCols(v*n_beta,n_beta);
+        tiled.middleCols(v*n_beta,n_beta)=0.5*(block+parity*block.transpose());
+      }
+      require((tiled-reference).norm() < 2e-11*std::max(1.0,reference.norm()),
+              "fused exchange-quotient sigma/adjoint changed the projected image");
     }
     carrier = unsymmetrized;
   }
@@ -983,6 +1024,7 @@ void check_sigma_columns(const Fixture& fixture, int width) {
     require((tiled - projected).norm() <= 2e-11 * std::max(1.0, projected.norm()),
             "output mask changed the unprojected sigma intermediates");
     bool read_failed = false, write_failed = false;
+    bool adjoint_read_failed = false;
     try {
       sigma.apply_tiled(width,
           [](const std::vector<int>&, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>) {
@@ -1000,7 +1042,15 @@ void check_sigma_columns(const Fixture& fixture, int width) {
     } catch (const std::runtime_error& error) {
       write_failed = std::string(error.what()) == "writer failure";
     }
-    require(read_failed && write_failed,
+    try {
+      sigma.apply_tiled_with_adjoint(width,read,{},
+          [](const std::vector<int>&,const std::vector<int>&,Eigen::Ref<Eigen::MatrixXd>) {
+            throw std::runtime_error("state reader failure");
+          });
+    } catch (const std::runtime_error& error) {
+      adjoint_read_failed=std::string(error.what())=="state reader failure";
+    }
+    require(read_failed && write_failed && adjoint_read_failed,
             "tile callback exceptions did not propagate out of the OpenMP team");
   }
 }
@@ -1212,7 +1262,7 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
           carrier(a, v * nb + b) = std::sin(0.17 * (a + 1) * (b + v + 2));
     }
   Eigen::MatrixXd actual = Eigen::MatrixXd::Zero(na, width * nb);
-  sigma.apply_tiled(width,
+  const xmvb::mcscf::DirectCiTileReader read =
       [&](const std::vector<int>& betas, const std::vector<int>& rows,
           Eigen::Ref<Eigen::MatrixXd> values) {
         for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
@@ -1220,17 +1270,32 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
             for (int i = 0; i < static_cast<int>(rows.size()); ++i)
               values(i, beta_local * width + v) =
                   carrier(rows[i], v * nb + betas[beta_local]);
-      },
+      };
+  const xmvb::mcscf::DirectCiTileWriter add =
       [&](const std::vector<int>& betas, const std::vector<int>& rows,
           const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
         for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
           for (int v = 0; v < width; ++v)
             accumulate(beta_local, v, 0, static_cast<int>(rows.size()),
                 actual.col(v * nb + betas[beta_local]).data(), nullptr);
-      }, &support);
+      };
+  sigma.apply_tiled(width,read,add,&support);
   auto expected = sigma.apply(carrier);
   require((actual - expected).norm() <= 2e-11 * std::max(1.0, expected.norm()),
           "generated closure sigma differs from full sigma, including outside-S outputs");
+  actual.setZero();
+  const auto fused=sigma.apply_tiled_with_adjoint(width,read,add,{},&support);
+  const auto integral=sigma.integral_adjoint(carrier,carrier);
+  std::cout << "supported_adjoint n=" << n << " na=" << n_alpha << " nb=" << n_beta_electrons
+            << " sigma_error=" << (actual-expected).norm()
+            << " one_error=" << (fused.one_electron-integral.one_electron).norm()
+            << " pair_error=" << (fused.pair_kernel-integral.pair_kernel).norm() << '\n';
+  require((actual-expected).norm() < 2e-11*std::max(1.0,expected.norm()) &&
+          (fused.one_electron-integral.one_electron).norm() <
+              3e-11*std::max(1.0,integral.one_electron.norm()) &&
+          (fused.pair_kernel-integral.pair_kernel).norm() <
+              3e-11*std::max(1.0,integral.pair_kernel.norm()),
+          "support-aware sigma/adjoint dropped intermediate or outside-support contributions");
   Eigen::MatrixXd generator = Eigen::MatrixXd::Ones(n, n);
   const auto one_body = sigma.apply_one_body_generator(carrier, generator);
   double outside_input = 0.0;
@@ -1238,6 +1303,59 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
     for (int b = 0; b < nb; ++b)
       if (!support.contains(a, b)) outside_input += one_body(a, b) * one_body(a, b);
   require(outside_input > 1e-10, "fixture does not exercise intermediate-only support");
+
+  // Cholesky's relative direction is upper triangular: its exterior action
+  // stays in the downset S, although S is not a selected VB structure space.
+  generator.setZero();
+  for (int q=0;q<n;++q)
+    for (int p=0;p<=q;++p) generator(p,q)=0.03*std::sin(0.21*(p+1)*(q+2));
+  const auto tangent=sigma.apply_one_body_generator(carrier,generator);
+  const Eigen::MatrixXd residual=expected-0.37*carrier;
+  const Eigen::MatrixXd dr=sigma.apply(tangent)-0.37*tangent;
+  Eigen::MatrixXd projected=residual,projected_dr=dr;
+  double tangent_outside=0;
+  for (int b=0;b<nb;++b)
+    for (int a=0;a<na;++a)
+      if (!support.contains(a,b))
+        for (int v=0;v<width;++v) {
+          tangent_outside+=std::abs(tangent(a,v*nb+b));
+          projected(a,v*nb+b)=0;
+          projected_dr(a,v*nb+b)=0;
+        }
+  require(tangent_outside<1e-13,"upper Cholesky generator left its exact downset");
+  const auto full_generator=sigma.one_body_generator_adjoint(residual,carrier);
+  const auto restricted_generator=sigma.one_body_generator_adjoint(projected,carrier);
+  const Eigen::MatrixXd full_direction=sigma.one_body_generator_adjoint(dr,carrier)+
+      sigma.one_body_generator_adjoint(residual,tangent);
+  const Eigen::MatrixXd restricted_direction=sigma.one_body_generator_adjoint(projected_dr,carrier)+
+      sigma.one_body_generator_adjoint(projected,tangent);
+  for (int q=0;q<n;++q)
+    for (int p=0;p<=q;++p) {
+      require(std::abs(full_generator(p,q)-restricted_generator(p,q))<3e-11 &&
+              std::abs(full_direction(p,q)-restricted_direction(p,q))<3e-11,
+              "downset projection changed the upper generator VJP or its derivative");
+    }
+  const auto full_pullback=xmvb::vb::backpropagate_orthogonal_active_integral_adjoint(
+      integrals,integral.one_electron,integral.pair_kernel,full_generator);
+  const auto restricted_pullback=xmvb::vb::backpropagate_orthogonal_active_integral_adjoint(
+      integrals,integral.one_electron,integral.pair_kernel,restricted_generator);
+  require((full_pullback.overlap-restricted_pullback.overlap).norm()<3e-11,
+          "downset projection changed the physical active-overlap pullback");
+  xmvb::vb::OrthogonalActiveIntegrals delta;
+  delta.orbital_transform=generator*integrals.orbital_transform;
+  delta.one_electron=Eigen::MatrixXd::Zero(n,n);
+  delta.pair_kernel=Eigen::MatrixXd::Zero(integrals.pair_kernel.rows(),integrals.pair_kernel.cols());
+  const auto dj=sigma.integral_adjoint(tangent,carrier);
+  const auto full_hvp=xmvb::vb::backpropagate_orthogonal_active_integral_adjoint_direction(
+      integrals,delta,integral.one_electron,integral.pair_kernel,full_generator,
+      2*dj.one_electron,2*dj.pair_kernel,full_direction);
+  const auto restricted_hvp=xmvb::vb::backpropagate_orthogonal_active_integral_adjoint_direction(
+      integrals,delta,integral.one_electron,integral.pair_kernel,restricted_generator,
+      2*dj.one_electron,2*dj.pair_kernel,restricted_direction);
+  require((full_hvp.overlap-restricted_hvp.overlap).norm()<3e-11,
+          "downset projection changed the differentiated physical overlap pullback");
+  std::cout<<"downset_pullback n="<<n<<" upper_tangent_outside="<<tangent_outside
+           <<" discarded_generator_norm="<<(full_generator-restricted_generator).norm()<<'\n';
 
   // Independently contract the ordered E_pq E_rs Hamiltonian using only
   // generated I paths. Dense generator images are small-test oracles, not
@@ -1806,6 +1924,70 @@ void benchmark_source_cover(int n, bool compare_reference) {
               << "overlap_reference_error=" << (warm.overlap-reference.overlap).norm() << '\n';
 }
 
+/** @brief Generated-support sigma/VJP probe; the native process has no product array. */
+void benchmark_tile_adjoint(bool oracle) {
+  constexpr int n=12;
+  const auto fixture=make_fixture(n,n/2,n/2);
+  const auto integrals=xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap,fixture.one_electron,fixture.two_electron,n);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(fixture.alpha,fixture.beta,integrals);
+  std::vector<std::uint64_t> alpha,beta;
+  for (const auto& string:fixture.alpha) alpha.push_back(occupation_mask(string));
+  for (const auto& string:fixture.beta) beta.push_back(occupation_mask(string));
+  const xmvb::mcscf::ProductSupport support(n,alpha,beta);
+  const int na=alpha.size(),nb=beta.size();
+  const double scale=1.0/std::sqrt(static_cast<double>(na)*nb);
+  const auto coefficient=[&](int a,int b) {
+    return support.contains(a,b) ? scale*std::sin(0.013*(a+1)*(b+2)) : 0.0;
+  };
+  const auto read=[&](const std::vector<int>& betas,const std::vector<int>& rows,
+      Eigen::Ref<Eigen::MatrixXd> values) {
+    for (int j=0;j<static_cast<int>(betas.size());++j)
+      for (int a=0;a<static_cast<int>(rows.size());++a)
+        values(a,j)=coefficient(rows[a],betas[j]);
+  };
+  Eigen::VectorXd column(na);
+  double energy=0;
+  const auto begin=Clock::now();
+  const auto gradient=sigma.apply_tiled_with_adjoint(1,read,
+      [&](const std::vector<int>& betas,const std::vector<int>& rows,
+          const xmvb::mcscf::DirectCiColumnAccumulator& add) {
+        for (int j=0;j<static_cast<int>(betas.size());++j) {
+          column.setZero();
+          add(j,0,0,rows.size(),column.data(),nullptr);
+          for (const int a:rows) energy+=column[a]*coefficient(a,betas[j]);
+        }
+      },{},&support);
+  const double elapsed=std::chrono::duration<double>(Clock::now()-begin).count();
+  const double adjoint_energy=(gradient.one_electron.array()*integrals.one_electron.array()).sum()+
+      (gradient.pair_kernel.array()*integrals.pair_kernel.array()).sum();
+  require(std::abs(energy-adjoint_energy)<3e-11*std::max(1.0,std::abs(energy)),
+          "streamed energy differs from the contracted integral cotangent");
+  double sigma_error=0,one_error=0,pair_error=0,reference_seconds=0;
+  if (oracle) {
+    Eigen::MatrixXd carrier(na,nb);
+    for (int b=0;b<nb;++b)
+      for (int a=0;a<na;++a) carrier(a,b)=coefficient(a,b);
+    const auto start=Clock::now();
+    const auto reference=sigma.apply_with_adjoint(carrier,carrier);
+    reference_seconds=std::chrono::duration<double>(Clock::now()-start).count();
+    sigma_error=std::abs(energy-(carrier.array()*reference.sigma.array()).sum());
+    one_error=(gradient.one_electron-reference.integrals.one_electron).norm();
+    pair_error=(gradient.pair_kernel-reference.integrals.pair_kernel).norm();
+    require(std::max({sigma_error,one_error,pair_error})<3e-11,
+            "generated-support sigma/VJP differs from the complete-carrier oracle");
+  }
+  rusage usage{};
+  require(getrusage(RUSAGE_SELF,&usage)==0,"getrusage failed");
+  std::cout<<std::setprecision(17)<<"orbitals="<<n<<'\n'
+      <<"alpha_strings="<<na<<'\n'<<"beta_strings="<<nb<<'\n'
+      <<"sigma_adjoint_seconds="<<elapsed<<'\n'<<"bilinear_energy="<<energy<<'\n'
+      <<"energy_adjoint_error="<<std::abs(energy-adjoint_energy)<<'\n'
+      <<"reference_checked="<<oracle<<'\n'<<"reference_seconds="<<reference_seconds<<'\n'
+      <<"sigma_error="<<sigma_error<<'\n'<<"one_electron_error="<<one_error<<'\n'
+      <<"pair_kernel_error="<<pair_error<<'\n'<<"max_rss_kib="<<usage.ru_maxrss<<'\n';
+}
+
 /** @brief Physical covalent-state integral adjoint with bounded spin factors. */
 void benchmark_factor_adjoint(int n, bool compare_reference, bool directional = false) {
   require(n == 12 || n == 14, "factor adjoint benchmark supports 12/14 orbitals");
@@ -2108,6 +2290,9 @@ int main(int argc, char** argv) {
       benchmark_selected12(std::stoi(argv[2]), false, true);
     } else if (argc == 3 && std::string(argv[1]) == "--gram12") {
       benchmark_selected12(std::stoi(argv[2]), false, false, true);
+    } else if (argc==2 && (std::string(argv[1])=="--tile-adjoint12" ||
+                           std::string(argv[1])=="--tile-adjoint12-reference")) {
+      benchmark_tile_adjoint(std::string(argv[1])=="--tile-adjoint12-reference");
     } else if (argc == 1) {
       const auto vacuum = xmvb::vb::build_orthogonal_spin_topology(
           Strings{{}}, Strings{{}}, 0);

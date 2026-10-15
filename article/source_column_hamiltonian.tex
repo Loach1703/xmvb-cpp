@@ -321,6 +321,96 @@ or an exactly equivalent representation of all required intermediates.
 Arbitrary \emph{selected VB structure spaces} need not be complete.
 The two statements are different.
 
+\subsection{Generated channel sweep and its adjoint}
+
+Let $S$ contain the exact support of the transformed selected input and
+$I=\bigcup_P\operatorname{supp}(\Ea_P S)$ its one-generator closure.
+For a response $L$ and state $Y$, define the channel panels
+\begin{equation}
+ D^L_{zP}=(\Ea_P L)_z,\qquad D^Y_{zP}=(\Ea_P Y)_z,
+ \qquad z\in I.
+\end{equation}
+The same generated paths supply the Hamiltonian image and its integral
+cotangent:
+\begin{equation}
+ \sigma_L=\Ea^* (D^L K\Tr),\qquad
+ G_K=(D^L)\Tr D^Y.
+ \label{eq:tiled-channel-vjp}
+\end{equation}
+Here $\Ea^*$ is the signed occupation/replacement gather adjoint to the
+channel scatter. The Hamiltonian image is not truncated back to $S$ before
+any further consumer; its exterior-transform and structure adjoints perform
+the exact final projection. The supplied support must contain both inputs.
+For $L=Y$ the state scatter is the response scatter and is reused directly.
+For distinct inputs, read the state into the consumed input halo and place
+$D^Y$ in the slab that subsequently holds $D^L K\Tr$. After accumulating
+$G_K$, that slab is reused for sigma. Thus a second input requires no extra
+product array, channel slab, or worker-local tensor.
+
+For two inputs with the same certified spin-exchange parity, the channel
+sum may use one representative per exchange orbit. Its multiplicity is
+two off the exchange diagonal and one on the diagonal; apply this weight
+to only one Gram operand. This gives the full integral cotangent, while
+the emitted sigma remains a projected-action representative until its
+known parity projection is applied. Uncertified or unequal spin spaces
+use the complete generated channel support, without an exchange quotient.
+
+With $m=|I|$ generated channel targets and $b$ right-hand sides, the dense
+channel-kernel and Gram contractions cost $O(mbd^2)$ each, in addition to
+the sparse scatters, readers and final projections. The complete-carrier
+order instead uses $m=U_\alpha U_\beta$. This optimization avoids absent
+targets and repeated scatter; it does not lower the power of the orbital
+count in the exact channel kernel. The returned integral cotangent needs
+$O(d^2)$ storage, separately from the fixed shared numerical slab budget.
+No higher-order density tensor is formed, and no closure of the selected
+VB structure space is assumed.
+
+\subsection{Triangular directions preserve the generated support}
+
+The support $S$ used above is the downward closure of the original touched
+spin products under the upper-triangular exterior transform, not the selected
+VB structure subspace itself. Write $P_S$ for its coordinate projector.
+Every $e_{pq}$ with $p\le q$ either keeps an occupation unchanged or replaces
+an occupied index by a lower index in one spin sector. Consequently,
+\begin{equation}
+ P_S e_{pq}P_S=e_{pq}P_S\quad(p\le q).
+ \label{eq:upper-support-invariance}
+\end{equation}
+For the Cholesky factor $R$, both $R$ and $\delta R$ are upper triangular,
+as is $L=\delta R R^{-1}$. The coefficient direction is therefore
+\begin{equation}
+ \delta Y=\Ta\Wa\delta\vv C+e(L)Y,\qquad
+ e(L)=\sum_{p\le q}L_{pq}e_{pq},\qquad P_S\delta Y=\delta Y.
+ \label{eq:upper-support-tangent}
+\end{equation}
+Thus the same support $S$ contains accepted states, selected-coefficient
+responses and their Cholesky representation directions. Their Hamiltonian
+channel sweeps need its one-generator closure $I$, not a second closure
+introduced merely by differentiating the upper-triangular transform.
+
+Only the upper-triangular part of the residual-generator cotangent is
+consumed by the Cholesky overlap pullback. For any residual $r$, including
+one that does not vanish outside the selected space,
+\begin{align}
+ \Gamma_{pq}&=\langle r,e_{pq}Y\rangle
+             =\langle P_Sr,e_{pq}Y\rangle,\qquad p\le q,\\
+ \delta\Gamma_{pq}&=\langle P_S\delta r,e_{pq}Y\rangle
+                  +\langle P_Sr,e_{pq}\delta Y\rangle,
+                  \qquad p\le q.
+ \label{eq:upper-residual-projection}
+\end{align}
+These identities permit a streamed physical overlap pullback to consume
+residual panels restricted to $S$, without retaining a complete residual
+carrier. They do not justify dropping the lower-triangular components from
+an interface that promises the full oriented generator cotangent. In general
+those components change under $P_S$ and can be nonzero.
+
+This is an invariant coordinate \emph{support} for upper-triangular actions,
+not closure of an arbitrarily selected VB structure space. Projection to
+selected structure coefficients before a residual-generator contraction
+remains invalid. The argument uses neither equal alpha/beta electron counts
+nor a common exchange parity.
+
 \subsection{Separation of the two spin factors}
 
 Define the same-spin channel actions

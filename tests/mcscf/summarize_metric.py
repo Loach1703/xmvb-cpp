@@ -68,11 +68,38 @@ def hvp(artifact):
                 **{f"integral_{key}": adjoint.get(key) for key in fields})
 
 
+def tiles(artifact):
+    """Generated-reader kernel proof, separate from converged SCF timing."""
+    native = values(artifact / "tile-adjoint12.out")
+    oracle = values(artifact / "tile-adjoint12-reference.out")
+    records = re.findall(r"^XMVB_TILE,([^\n]+)",
+                         (artifact / "tile-adjoint12.err").read_text(), re.M)
+    if len(records) != 1:
+        raise ValueError(f"{artifact}: expected one native generated channel sweep")
+    work = dict(item.split("=",1) for item in records[0].split(","))
+    return dict(run=artifact.name, kind="generated_support_sigma_adjoint",
+                orbitals=int(native["orbitals"]), alpha_strings=int(native["alpha_strings"]),
+                beta_strings=int(native["beta_strings"]),
+                generated_targets=int(work["targets"]),
+                full_targets=int(native["alpha_strings"])*int(native["beta_strings"]),
+                batches=int(work["batches"]), peak_payload_bytes=int(work["peak_payload"]),
+                generated_elements=int(work["source_elements"]),
+                prepare_seconds=float(work["prepare"]), read_seconds=float(work["read"]),
+                compute_seconds=float(work["compute"]), consume_seconds=float(work["write"]),
+                native_seconds=float(native["sigma_adjoint_seconds"]),
+                native_rss_mib=float(native["max_rss_kib"])/1024,
+                oracle_dense_seconds=float(oracle["reference_seconds"]),
+                oracle_process_rss_mib=float(oracle["max_rss_kib"])/1024,
+                sigma_error=float(oracle["sigma_error"]),
+                one_electron_error=float(oracle["one_electron_error"]),
+                pair_kernel_error=float(oracle["pair_kernel_error"]))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=("audit", "capture", "accepted", "hvp"))
+    parser.add_argument("kind", choices=("audit", "capture", "accepted", "hvp", "tiles"))
     parser.add_argument("output", type=Path)
     parser.add_argument("artifacts", type=Path, nargs="+")
     args = parser.parse_args()
-    extract = dict(audit=audit, capture=capture, accepted=accepted, hvp=hvp)[args.kind]
+    extract = dict(audit=audit, capture=capture, accepted=accepted, hvp=hvp, tiles=tiles)[args.kind]
     save(args.output,[extract(artifact) for artifact in args.artifacts])

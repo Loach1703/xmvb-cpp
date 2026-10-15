@@ -97,6 +97,13 @@ full `U * r` factors when a broad support makes those product-sized.
    integral adjoints, transferring self-adjoint generators onto the smaller ket
    source family to avoid repeated bra scatter. Both consumers reuse the common
    spin kernels and Hamiltonian-kernel pullback; factor VJP remains in item 4.
+   Generated product tiles now also have one shared sigma/integral-VJP graph:
+   scatter each input once, form the channel Gram, reuse its right slab for K*D,
+   and gather directly into a consumer. A second generated input reuses the
+   consumed input halo, not another product allocation. Both exchange parities
+   and unequal spin spaces are covered. The dense-carrier wrapping experiment
+   did not improve production convergence/performance and is removed; migrating
+   generated readers and residual/generator consumers remains necessary.
 4. [ ] Introduce sparse selected-state support coefficients at their producer.
    Replace dense accepted raw/orthogonal/residual carriers by a shared support
    plan, numerical source factors and streamed images. Migrate accepted integral
@@ -195,6 +202,12 @@ full `U * r` factors when a broad support makes those product-sized.
    terms and their support halo, and do not instantiate another full carrier.
    Structure-response producer migration is complete for direct CI. The separate
    non-direct pair consumers retain their own explicit numerical representation.
+   Cholesky directions preserve the generated downset S: delta-R R^-1 is
+   upper triangular, so both orbital and selected-coefficient dY remain in S.
+   The physical overlap pullback consumes only upper generator entries; those
+   entries and their derivatives depend only on residuals projected to S.
+   Verify and exploit this certificate in the streaming consumer, not a blanket
+   projection of general oriented generators or of arbitrary selected VB spaces.
 7. [ ] Validate the complete SCF chain on 240 COV/ION/FULL and selected CAS(12,12)
    spaces, then larger covalent cases. Report convergence, energy, HVP count,
    total wall time and native peak RSS, not only a fixed-point kernel speedup.
