@@ -432,6 +432,30 @@ void check_sigma_columns(const Fixture& fixture, int width) {
   }
 }
 
+void check_prefix_words() {
+  for (const int n : {4, 5, 12, 13, 16, 32, 63}) {
+    const int na = n / 2, nb = n - na;
+    const auto full = (std::uint64_t{1} << n) - 1;
+    const auto low_a = (std::uint64_t{1} << na) - 1;
+    const auto low_b = (std::uint64_t{1} << nb) - 1;
+    const std::vector<std::uint64_t> alpha{low_a, full ^ low_b, full & 0xAAAAAAAAAAAAAAAAULL};
+    const std::vector<std::uint64_t> beta{low_b, full ^ low_a, full ^ alpha.back()};
+    const xmvb::mcscf::CovalentSupport support(n, alpha, beta);
+    for (int a = 0; a < 3; ++a)
+      for (int b = 0; b < 3; ++b)
+        for (int depth = 0; depth <= 1; ++depth) {
+          int count = 0;
+          bool expected = true;
+          for (int k = 0; k < n; ++k) {
+            count += ((alpha[a] >> k) & 1) + ((beta[b] >> k) & 1);
+            expected = expected && count + depth >= k + 1;
+          }
+          require(support.contains(a, b, depth) == expected,
+                  "packed prefix comparison differs from scalar occupation counts");
+        }
+  }
+}
+
 void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width) {
   const auto fixture = make_fixture(n, n_alpha, n_beta_electrons);
   const auto integrals = xmvb::vb::orthogonalize_active_integrals(
@@ -618,6 +642,7 @@ int main(int argc, char** argv) {
       check_complete_unequal_spin_case();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
       check_sigma_columns(make_fixture(10, 5, 4), 2);
+      check_prefix_words();
       check_supported_sigma(4, 2, 2, 2);
       check_supported_sigma(5, 3, 2, 3);
       check_supported_sigma(6, 3, 3, 1);

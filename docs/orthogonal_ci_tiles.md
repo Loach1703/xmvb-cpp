@@ -64,6 +64,13 @@ generator are part of the Hamiltonian. Metadata retained across sweeps is
 linear in string count; the boolean output mask exists only for the bounded
 current excitation halo. No global product-sized support mask is stored.
 
+Prefix counts are packed into independent unsigned byte lanes (eight prefixes
+per machine word). Total electron count is at most 63, so adding the two spin
+prefixes and closure depth 0/1 cannot carry between lanes. A high-bit guard
+before subtracting packed prefix lengths prevents inter-lane borrows; every
+remaining high bit must be set. This is the same integer predicate, not an
+approximation. Scalar-oracle tests cover chunk boundaries and up to 63 orbitals.
+
 The alpha exterior forward transform skips paths outside S. During the
 adjoint, a path that leaves S cannot return to the final singly occupied
 support: every remaining adjoint shear only moves electrons toward higher
