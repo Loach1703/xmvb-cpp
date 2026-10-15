@@ -10,15 +10,6 @@
 namespace xmvb::mcscf {
 namespace {
 
-std::size_t saturating_product(
-    std::size_t left,
-    std::size_t right) noexcept {
-  if (right != 0 && left > std::numeric_limits<std::size_t>::max() / right) {
-    return std::numeric_limits<std::size_t>::max();
-  }
-  return left * right;
-}
-
 struct SpinSpaceAnalysis {
   bool complete = false;
   int n_electrons = 0;
@@ -122,14 +113,6 @@ DirectCiActionPlan plan_orthogonal_direct_ci_action(
   if (!plan.carrier_complete()) {
     return plan;
   }
-
-  // The direct path simultaneously owns input, Hamiltonian image, overlap
-  // image, and one transform/sigma workspace. A complete carrier can still
-  // be too large to materialize even when sparse sigma has fewer FLOPs.
-  constexpr std::size_t kSimultaneousCoefficientMatrices = 4;
-  plan.minimum_action_workspace_bytes = saturating_product(
-      saturating_product(alpha.dimension, beta.dimension),
-      kSimultaneousCoefficientMatrices * sizeof(double));
 
   plan.alpha_same_spin_connections =
       same_spin_connections(n_active_orbitals, alpha.n_electrons);

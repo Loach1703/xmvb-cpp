@@ -32,17 +32,17 @@ cmake -S "$source_dir" -B "$source_dir/build" \
  -DEIGEN3_ROOT_DIR="$deps" -DXMVB_BUILD_DEV_TARGETS=ON -DXMVB_ENABLE_CCACHE=ON \
  > "$artifact/configure.log" 2>&1
 cmake --build "$source_dir/build" --target test_casci -j16 > "$artifact/casci-build.log" 2>&1
-srun --exact --cpu-bind=cores "$source_dir/build/src/test_casci" > "$artifact/casci.out" 2> "$artifact/casci.err"
+srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores "$source_dir/build/src/test_casci" > "$artifact/casci.out" 2> "$artifact/casci.err"
 cd "$artifact"
-srun --exact --cpu-bind=cores python3 "$source_dir/tests/mcscf/reference.py" > reference.out 2> reference.err
+srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores python3 "$source_dir/tests/mcscf/reference.py" > reference.out 2> reference.err
 for name in F2 O2 H4; do
- srun --exact --cpu-bind=cores /usr/bin/time -v -o "$name.time" \
+ srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores /usr/bin/time -v -o "$name.time" \
   "$source_dir/build/src/test_casci" "$name.integrals" > "$name.out" 2> "$name.err"
 done
 cmake --build "$source_dir/build" --target xmvb test_orthogonal_direct_ci test_davidson \
  test_ciah test_neo test_ci_transport test_representation_overlap test_selected_ci_transport \
  test_coupled_structure test_spinor_strings test_spinor_projection -j16 > vb-build.log 2>&1
-srun --exact --cpu-bind=cores ctest --test-dir "$source_dir/build" \
+srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores ctest --test-dir "$source_dir/build" \
  -R '^(casci|orthogonal_direct_ci|davidson|ciah|neo|ci_transport|representation_overlap|selected_ci_transport|coupled_structure|spinor_strings|spinor_projection|neo_f2|neo_pyscf_reference_f2|eigensolver_equivalence_f2|eigensolver_equivalence_f2_oeo)$' \
  --output-on-failure > ctest.out 2>&1
 sha256sum "$source_dir/build/src/xmvb-cpp.exe" "$source_dir/build/src/test_casci" > binaries.sha256

@@ -345,10 +345,6 @@ void check_planner() {
       !duplicate_rejected.carrier_complete(),
       "count-complete carrier with a duplicate string was admitted");
 
-  constexpr std::size_t workspace_budget = 256ULL * 1024ULL * 1024ULL;
-  require(
-      loflea.fits_action_workspace(workspace_budget),
-      "LOFLEA-size direct-CI carrier exceeded the action workspace");
   const auto large_half_filled = complete_space(16, 8);
   const auto large_plan = xmvb::mcscf::plan_orthogonal_direct_ci_action(
       large_half_filled,
@@ -358,9 +354,6 @@ void check_planner() {
   require(
       large_plan.carrier_complete(),
       "large fixed-spin carrier was not recognized");
-  require(
-      !large_plan.fits_action_workspace(workspace_budget),
-      "multi-gigabyte direct-CI carrier passed the action workspace limit");
 }
 
 void check_sigma_action() {

@@ -265,8 +265,6 @@ int main(int argc, char** argv) {
       std::cout << "direct_ci_complete_carrier = "
                 << (direct_ci_plan.carrier_complete() ? "true" : "false")
                 << '\n';
-      std::cout << "direct_ci_minimum_action_workspace_bytes = "
-                << direct_ci_plan.minimum_action_workspace_bytes << '\n';
       std::cout << "direct_ci_kronecker_flops = "
                 << static_cast<double>(direct_ci_plan.kronecker_flops) << '\n';
       std::cout << "direct_ci_sigma_flops = "
@@ -477,8 +475,6 @@ int main(int argc, char** argv) {
     std::cout << "direct_ci_complete_carrier = "
               << (direct_ci_plan.carrier_complete() ? "true" : "false")
               << '\n';
-    std::cout << "direct_ci_minimum_action_workspace_bytes = "
-              << direct_ci_plan.minimum_action_workspace_bytes << '\n';
     std::cout << "direct_ci_favored_by_flops = "
               << (direct_ci_plan.favors_direct_ci() ? "true" : "false")
               << '\n';

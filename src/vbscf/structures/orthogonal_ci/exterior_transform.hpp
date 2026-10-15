@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
@@ -39,6 +40,12 @@ public:
   /** @brief Applies the transpose transform to a mutable matrix block in place. */
   void apply_adjoint_right_block(
       Eigen::Ref<Eigen::MatrixXd> coefficients) const;
+
+  /** @brief Retained rows of the exterior matrix for a contiguous row range.
+   * The immutable cache holds at most 64 MiB; borrowed rows remain valid
+   * after eviction through the returned shared ownership.
+   */
+  std::shared_ptr<const Eigen::MatrixXd> row_block(int begin, int count) const;
 
   /** @brief Applies the inverse exterior transform to rows in place. */
   void apply_inverse_left(Eigen::MatrixXd* coefficients) const;
@@ -81,6 +88,7 @@ public:
   std::size_t dynamic_bytes() const noexcept;
 
 private:
+  struct RowCache;
   struct DeterminantPair {
     int source = 0;
     int target = 0;
@@ -107,6 +115,7 @@ private:
   std::vector<std::uint64_t> masks_;
   Eigen::VectorXd determinant_scales_;
   std::vector<Shear> shears_;
+  std::shared_ptr<RowCache> row_cache_;
 };
 
 }  // namespace xmvb::vb

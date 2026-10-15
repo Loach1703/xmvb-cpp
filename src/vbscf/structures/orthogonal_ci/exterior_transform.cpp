@@ -1,8 +1,12 @@
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <iterator>
+#include <list>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -39,11 +43,25 @@ double replacement_sign(std::uint64_t source, int removed, int inserted) {
 
 }  // namespace
 
+struct ExteriorOrbitalTransform::RowCache {
+  struct Entry {
+    std::uint64_t key = 0;
+    std::shared_ptr<const Eigen::MatrixXd> rows;
+    std::size_t bytes = 0;
+  };
+
+  std::mutex mutex;
+  std::list<Entry> entries;
+  std::unordered_map<std::uint64_t, std::list<Entry>::iterator> index;
+  std::atomic<std::size_t> cached_bytes{0};
+};
+
 ExteriorOrbitalTransform::ExteriorOrbitalTransform(
     const std::vector<std::vector<int>>& determinants,
     const Eigen::Ref<const Eigen::MatrixXd>& upper_orbital_transform)
     : n_orbitals_(static_cast<int>(upper_orbital_transform.rows())),
-      orbital_transform_(upper_orbital_transform) {
+      orbital_transform_(upper_orbital_transform),
+      row_cache_(std::make_shared<RowCache>()) {
   if (n_orbitals_ <= 0 || n_orbitals_ > 63 ||
       upper_orbital_transform.cols() != n_orbitals_ ||
       determinants.empty() || !upper_orbital_transform.allFinite()) {
@@ -228,6 +246,65 @@ void ExteriorOrbitalTransform::apply_adjoint_right_block(
         "right exterior transform determinant dimension mismatch");
   }
   transform_right(coefficients, true, false);
+}
+
+std::shared_ptr<const Eigen::MatrixXd> ExteriorOrbitalTransform::row_block(
+    int begin, int count) const {
+  if (begin < 0 || count <= 0 || begin > dimension() - count) {
+    throw std::invalid_argument("exterior row block is out of range");
+  }
+  constexpr std::size_t kCacheBytes = 64ULL * 1024ULL * 1024ULL;
+  const std::uint64_t key =
+      (static_cast<std::uint64_t>(static_cast<std::uint32_t>(begin)) << 32) |
+      static_cast<std::uint32_t>(count);
+  {
+    std::lock_guard<std::mutex> lock(row_cache_->mutex);
+    const auto found = row_cache_->index.find(key);
+    if (found != row_cache_->index.end()) {
+      row_cache_->entries.splice(row_cache_->entries.begin(),
+                                 row_cache_->entries, found->second);
+      return found->second->rows;
+    }
+  }
+
+  // Generate outside the mutex; other readers may use cached rows meanwhile.
+  auto rows = std::make_shared<Eigen::MatrixXd>(count, dimension());
+  rows->setZero();
+  rows->middleCols(begin, count).setIdentity();
+  apply_adjoint_right_block(*rows);
+  const std::size_t width = static_cast<std::size_t>(dimension());
+  if (static_cast<std::size_t>(count) >
+      std::numeric_limits<std::size_t>::max() / width / sizeof(double)) {
+    throw std::length_error("exterior row block byte count overflows");
+  }
+  const std::size_t bytes =
+      static_cast<std::size_t>(count) * width * sizeof(double);
+  if (bytes > kCacheBytes) return rows;
+
+  std::lock_guard<std::mutex> lock(row_cache_->mutex);
+  const auto found = row_cache_->index.find(key);
+  if (found != row_cache_->index.end()) {
+    row_cache_->entries.splice(row_cache_->entries.begin(),
+                               row_cache_->entries, found->second);
+    return found->second->rows;
+  }
+  std::size_t resident = row_cache_->cached_bytes.load(std::memory_order_relaxed);
+  while (resident > kCacheBytes - bytes) {
+    auto last = std::prev(row_cache_->entries.end());
+    resident -= last->bytes;
+    row_cache_->index.erase(last->key);
+    row_cache_->entries.erase(last);
+  }
+  row_cache_->cached_bytes.store(resident, std::memory_order_relaxed);
+  row_cache_->entries.push_front(RowCache::Entry{key, rows, bytes});
+  try {
+    row_cache_->index.emplace(key, row_cache_->entries.begin());
+  } catch (...) {
+    row_cache_->entries.pop_front();
+    throw;
+  }
+  row_cache_->cached_bytes.store(resident + bytes, std::memory_order_relaxed);
+  return rows;
 }
 
 void ExteriorOrbitalTransform::validate_inverse() const {
@@ -559,6 +636,8 @@ std::size_t ExteriorOrbitalTransform::dynamic_bytes() const noexcept {
   for (const Shear& shear : shears_) {
     bytes += shear.pairs.capacity() * sizeof(DeterminantPair);
   }
+  if (row_cache_)
+    bytes += row_cache_->cached_bytes.load(std::memory_order_relaxed);
   return bytes;
 }
 

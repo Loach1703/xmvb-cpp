@@ -14,7 +14,11 @@
 #include "vbscf/structures/assembly/connection.hpp"
 #include "vbscf/structures/expansion/types.hpp"
 
+namespace xmvb::mcscf { class DirectCiSigmaAction; }
+
 namespace xmvb::vb {
+
+class ExteriorOrbitalTransform;
 
 class StructureMetricInverse;
 
@@ -141,12 +145,13 @@ public:
   /**
    * @brief Applies H/S with bounded spin-product and pair-tile workspaces.
    *
-   * This path never materializes a full `U_alpha x U_beta` intermediate and
-   * is therefore the explicit large-space action contract.  `apply()` selects
-   * it automatically when the full-grid fast path exceeds its byte budget.
+   * Complete carriers use the orthogonal panel pipeline unconditionally.
+   * Incomplete carriers use accepted-pair tiles. Neither path materializes
+   * a full `U_alpha x U_beta` intermediate in this entry point.
    */
   StructureActionResult apply_streamed(
-      const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
 
   /**
    * @brief Applies the exact first derivative of a complete-space direct-CI action.
@@ -316,6 +321,14 @@ public:
   StructureActionStorage storage() const noexcept;
 
 private:
+  /** @brief Bounded resident panels through expansion, sigma and projection. */
+  StructureActionResult apply_orthogonal_tiled(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const ExteriorOrbitalTransform& alpha_transform,
+      const ExteriorOrbitalTransform& beta_transform,
+      const mcscf::DirectCiSigmaAction& sigma,
+      bool overlap_only = false,
+      std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
   StructureResponseSweep contract_response(
       const StructureAdjointState& state,
       const std::function<Eigen::MatrixXd(int)>& coefficients,

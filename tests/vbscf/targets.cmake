@@ -43,6 +43,7 @@ set(_xmvb_vbscf_unit_targets
   test_support_preserving_gauge
   test_spectral_trust_region
   test_structure_spin
+  test_structure_tiles
   test_orbital_block_partition)
 
 foreach(target_name IN LISTS _xmvb_vbscf_unit_targets)
@@ -75,6 +76,7 @@ if (BUILD_TESTING)
   add_test(NAME oeo_normalization_pullback COMMAND test_oeo_normalization_pullback)
   add_test(NAME opposite_spin_pair_graph COMMAND test_opposite_spin_pair_graph)
   add_test(NAME orthogonal_direct_ci COMMAND test_orthogonal_direct_ci)
+  add_test(NAME structure_tiles COMMAND test_structure_tiles)
   add_test(NAME cofactor_differential COMMAND test_cofactor_differential)
   add_test(NAME coupled_structure COMMAND test_coupled_structure)
   set_tests_properties(coupled_structure PROPERTIES

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <vector>
@@ -58,6 +59,21 @@ public:
    */
   Eigen::MatrixXd apply(
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const;
+
+  /** @brief Stream the exact Hamiltonian action through beta-column callbacks.
+   *
+   * Each callback receives the requested alpha row indices and a
+   * `(alpha_rows.size(), block_width)` column slab. The
+   * reader fills its slab from an immutable input carrier; the accumulator
+   * adds its slab to a caller-owned, initially zero output carrier. Neither
+   * callback may alias the two temporary slabs across calls. Shared alpha
+   * excitation halos and worker scatter/reduction tiles are sized together
+   * under a workspace target; workers never copy the complete carrier.
+   */
+  void apply_tiled(
+      int block_width,
+      const std::function<void(int, const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>& read_column,
+      const std::function<void(int, const std::vector<int>&, const Eigen::Ref<const Eigen::MatrixXd>&)>& add_column) const;
 
   /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
    * Uses occupation lists and the retained two-electron kernel, not sigma

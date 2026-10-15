@@ -26,16 +26,9 @@ struct DirectCiActionPlan {
   long double kronecker_flops = 0.0L;
   long double direct_ci_flops = 0.0L;
   long double exterior_transform_flops = 0.0L;
-  /** Minimum coefficient workspace for one direct-CI action vector. */
-  std::size_t minimum_action_workspace_bytes = 0;
 
   bool carrier_complete() const noexcept {
     return alpha_carrier_complete && beta_carrier_complete;
-  }
-
-  bool fits_action_workspace(std::size_t workspace_bytes) const noexcept {
-    return carrier_complete() &&
-        minimum_action_workspace_bytes <= workspace_bytes;
   }
 
   long double total_direct_ci_flops() const noexcept {

@@ -26,12 +26,11 @@ constexpr int kMaximumStructureActionBatchColumns = 8;
 int bounded_structure_action_width(
     int requested,
     int n_unique_alpha,
-    int n_unique_beta,
-    bool direct_ci) {
+    int n_unique_beta) {
   const std::size_t spin_products =
       static_cast<std::size_t>(n_unique_alpha) *
       static_cast<std::size_t>(n_unique_beta);
-  const std::size_t simultaneous_spin_product_matrices = direct_ci ? 4 : 8;
+  const std::size_t simultaneous_spin_product_matrices = 8;
   const std::size_t bytes_per_column = std::max<std::size_t>(
       sizeof(double),
       simultaneous_spin_product_matrices * spin_products * sizeof(double));
@@ -533,12 +532,6 @@ StructureAction::StructureAction(
   // pair representation is retained only for mathematically incomplete
   // carriers, where the exterior transform is not closed.
   const bool use_direct_ci = direct_ci_plan.carrier_complete();
-  if (use_direct_ci &&
-      !direct_ci_plan.fits_action_workspace(kStructureActionWorkspaceBytes)) {
-    throw std::runtime_error(
-        "complete fixed-spin carrier exceeds the bounded direct-CI action "
-        "workspace; a streamed direct-CI action is required");
-  }
   if (!same_spin_pair_cache.has_pair_providers()) {
     throw std::invalid_argument(
         "structure action requires accepted-pair providers");
@@ -948,7 +941,13 @@ Eigen::MatrixXd StructureAction::apply_inverse_carrier_diagonal(
 }
 
 StructureActionResult StructureAction::apply_streamed(
-    const Eigen::Ref<const Eigen::MatrixXd>& vectors) const {
+    const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+    std::size_t workspace_bytes) const {
+  if (vectors.rows() != n_structures_ || vectors.cols() <= 0 || workspace_bytes == 0)
+    throw std::invalid_argument("invalid streamed structure input block");
+  if (direct_ci_)
+    return apply_orthogonal_tiled(vectors, direct_ci_->alpha_transform,
+        direct_ci_->beta_transform(), direct_ci_->sigma, false, workspace_bytes);
   if (!tiled_pairs_) {
     throw std::logic_error("tiled structure action has no pair providers");
   }
@@ -960,7 +959,7 @@ StructureActionResult StructureAction::apply_streamed(
   const int beta_electrons = tiled_pairs_->beta_strings.empty()
       ? 0
       : static_cast<int>(tiled_pairs_->beta_strings.front().size());
-  const std::size_t spin_workspace = kStructureActionWorkspaceBytes / 2;
+  const std::size_t spin_workspace = std::max<std::size_t>(1, workspace_bytes / 2);
   const int alpha_extent = detail::plan_pair_tile_extent(
       n_unique_alpha_,
       alpha_electrons,
@@ -1155,23 +1154,8 @@ Eigen::MatrixXd StructureAction::apply_overlap(
   if (vectors.rows() != n_structures_ || vectors.cols() <= 0 || !vectors.allFinite())
     throw std::invalid_argument("invalid structure overlap input block");
   if (!direct_ci_) return apply(vectors).overlap;
-  const int block_width = static_cast<int>(vectors.cols());
-  const int bounded_width = bounded_structure_action_width(
-      block_width, n_unique_alpha_, n_unique_beta_, true);
-  Eigen::MatrixXd result(n_structures_, block_width);
-  for (int first = 0; first < block_width; first += bounded_width) {
-    const int width = std::min(bounded_width, block_width - first);
-    Eigen::MatrixXd carrier = expand_structure_block(vectors.middleCols(first, width));
-    direct_ci_->alpha_transform.apply_left(&carrier);
-    for (int block = 0; block < width; ++block) {
-      auto values = carrier.middleCols(block * n_unique_beta_, n_unique_beta_);
-      direct_ci_->beta_transform().apply_right_block(values);
-      direct_ci_->beta_transform().apply_adjoint_right_block(values);
-    }
-    direct_ci_->alpha_transform.apply_adjoint_left(&carrier);
-    result.middleCols(first, width) = contract_spin_product_block(carrier);
-  }
-  return result;
+  return apply_orthogonal_tiled(vectors, direct_ci_->alpha_transform,
+      direct_ci_->beta_transform(), direct_ci_->sigma, true).overlap;
 }
 
 StructureActionResult StructureAction::apply(
@@ -1180,9 +1164,13 @@ StructureActionResult StructureAction::apply(
     throw std::invalid_argument(
         "structure vector block has incompatible dimensions");
   }
+  if (direct_ci_) {
+    return apply_orthogonal_tiled(vectors, direct_ci_->alpha_transform,
+        direct_ci_->beta_transform(), direct_ci_->sigma);
+  }
   const int block_width = static_cast<int>(vectors.cols());
   const int bounded_width = bounded_structure_action_width(
-      block_width, n_unique_alpha_, n_unique_beta_, direct_ci_ != nullptr);
+      block_width, n_unique_alpha_, n_unique_beta_);
   if (block_width > bounded_width) {
     StructureActionResult images{
         Eigen::MatrixXd(n_structures_, block_width),
@@ -1197,38 +1185,12 @@ StructureActionResult StructureAction::apply(
     return images;
   }
 
-  if (!direct_ci_ && !full_factorized_action_fits(
+  if (!full_factorized_action_fits(
                          n_unique_alpha_, n_unique_beta_, block_width)) {
     return apply_streamed(vectors);
   }
 
   Eigen::MatrixXd spin_vectors = expand_structure_block(vectors);
-  if (direct_ci_) {
-    direct_ci_->alpha_transform.apply_left(&spin_vectors);
-    for (int block = 0; block < block_width; ++block) {
-      auto coefficient_block = spin_vectors.middleCols(
-          block * n_unique_beta_, n_unique_beta_);
-      direct_ci_->beta_transform().apply_right_block(coefficient_block);
-    }
-
-    Eigen::MatrixXd spin_hamiltonians = direct_ci_->sigma.apply(spin_vectors);
-    Eigen::MatrixXd spin_overlaps = std::move(spin_vectors);
-    for (int block = 0; block < block_width; ++block) {
-      auto hamiltonian_block = spin_hamiltonians.middleCols(
-          block * n_unique_beta_, n_unique_beta_);
-      auto overlap_block = spin_overlaps.middleCols(
-          block * n_unique_beta_, n_unique_beta_);
-      direct_ci_->beta_transform().apply_adjoint_right_block(
-          hamiltonian_block);
-      direct_ci_->beta_transform().apply_adjoint_right_block(overlap_block);
-    }
-    direct_ci_->alpha_transform.apply_adjoint_left(&spin_hamiltonians);
-    direct_ci_->alpha_transform.apply_adjoint_left(&spin_overlaps);
-    return StructureActionResult{
-        contract_spin_product_block(spin_hamiltonians),
-        contract_spin_product_block(spin_overlaps)};
-  }
-
   if (!tiled_pairs_) {
     throw std::logic_error("structure action has no retained operator data");
   }
