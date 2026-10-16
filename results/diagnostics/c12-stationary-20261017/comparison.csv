@@ -1,0 +1,3 @@
+variant,node,cores,initial_Eh,final_Eh,steps,hvp,structure_response,scf_s,end_to_end_s,peak_rss_mib,cpu_percent,termination
+saved_native,anode40,32,-398.533053417516,-399.106646267331,4,36,36,41.505578,44.536831,2723.375,2678.0,ciah_projected_gradient_tolerance
+balanced_native,anode40,32,-398.533053417516,-399.106646267333,4,36,36,33.136628,36.085948,2692.1953125,2767.0,ciah_projected_gradient_tolerance

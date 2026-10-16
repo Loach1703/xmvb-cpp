@@ -31,7 +31,7 @@ enum class Phase {
   ChartGram, ChartCurvature, CiProductProjection,
   CiTransformBuild, CiOverlapApply, CiOverlapDirection, CiOverlapAdjoint,
   CiOverlapAdjointDirection, CiTransportRetract, CiTransportGradient,
-  CiTransportCurvature, CiOverlapTransport, CiOverlapTransportGradient,
+  CiOverlapTransportGradient,
   CiProductPattern, CiProductGenerate, CiProductPack, CiSupportedValidation,
   CiExteriorGeneratorPullback, CiExteriorMomentPullback, Count
 };
@@ -73,7 +73,7 @@ class PhaseTotals {
         "chart_gram", "chart_curvature", "ci_product_projection",
         "ci_transform_build", "ci_overlap_apply", "ci_overlap_direction", "ci_overlap_adjoint",
         "ci_overlap_adjoint_direction", "ci_transport_retract", "ci_transport_gradient",
-        "ci_transport_curvature", "ci_overlap_transport", "ci_overlap_transport_gradient",
+        "ci_overlap_transport_gradient",
         "ci_product_pattern", "ci_product_generate", "ci_product_pack", "ci_supported_validation",
         "ci_exterior_generator_pullback", "ci_exterior_moment_pullback"};
     static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Phase::Count));

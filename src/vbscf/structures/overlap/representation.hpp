@@ -20,16 +20,6 @@ struct UpperPair {
   Eigen::MatrixXd right;
 };
 
-/** @brief Three origin-chart contractions sharing the same selected factors.
- * For f(L,R)=lambda^T F(L)^T F(R)c, directional is D_R grad_R f[dR],
- * mixed is grad_R f with c replaced by dc, and image is D F(R)^T[dR] F(R)lambda.
- */
-struct OverlapTransportCurvature {
-  Eigen::MatrixXd directional;
-  Eigen::MatrixXd mixed;
-  Eigen::VectorXd image;
-};
-
 /** @brief Finite-transport chart cotangents and reference CI image. */
 struct OverlapTransportGradient {
   UpperPair charts;
@@ -121,17 +111,6 @@ public:
       const Eigen::Ref<const Eigen::VectorXd>& left_coeff,
       const Eigen::Ref<const Eigen::VectorXd>& right_coeff,
       OverlapSide side = OverlapSide::Both) const;
-
-  /** @brief Origin-chart directional/mixed cotangents and transpose action.
-   * Uses a single bounded tile sweep for an orthogonal-CI carrier. The
-   * selected structure columns need not be closed under orbital transforms.
-   */
-  OverlapTransportCurvature transport_curvature(
-      const Eigen::Ref<const Eigen::MatrixXd>& upper,
-      const Eigen::Ref<const Eigen::MatrixXd>& direction,
-      const Eigen::Ref<const Eigen::VectorXd>& lambda,
-      const Eigen::Ref<const Eigen::VectorXd>& coefficients,
-      const Eigen::Ref<const Eigen::VectorXd>& coefficient_direction) const;
 
   /** @brief Pull back the finite selected-space transport in one tile sweep. */
   OverlapTransportGradient transport_gradient(

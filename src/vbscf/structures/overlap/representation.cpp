@@ -478,33 +478,6 @@ UpperPair RepresentationOverlap::adjoint_direction(
           side != OverlapSide::Left ? upper_part(delta_left_upper * g + left_upper * dg) : Eigen::MatrixXd{}};
 }
 
-OverlapTransportCurvature RepresentationOverlap::transport_curvature(
-    const Eigen::Ref<const Eigen::MatrixXd>& upper,
-    const Eigen::Ref<const Eigen::MatrixXd>& direction,
-    const Eigen::Ref<const Eigen::VectorXd>& lambda,
-    const Eigen::Ref<const Eigen::VectorXd>& coefficients,
-    const Eigen::Ref<const Eigen::VectorXd>& coefficient_direction) const {
-  validate_chart(upper,n_active_);
-  validate_direction(direction,n_active_);
-  if (lambda.size()!=action_->n_structures() || coefficients.size()!=lambda.size() ||
-      coefficient_direction.size()!=lambda.size() || !lambda.allFinite() ||
-      !coefficients.allFinite() || !coefficient_direction.allFinite())
-    throw std::invalid_argument("invalid overlap transport coefficients");
-  if (complete_carrier_) {
-    ExteriorOrbitalTransform alpha(alpha_,upper);
-    std::optional<ExteriorOrbitalTransform> beta;
-    if (alpha_!=beta_) beta.emplace(beta_,upper);
-    return action_->cross_overlap_transport(lambda,coefficients,coefficient_direction,
-        alpha,beta ? *beta : alpha,direction);
-  }
-  // The occupied-minor representation is a different physical carrier;
-  // its existing exact derivatives do not require a complete exterior space.
-  const Eigen::MatrixXd zero=Eigen::MatrixXd::Zero(n_active_,n_active_);
-  return {adjoint_direction(upper,upper,zero,direction,lambda,coefficients,OverlapSide::Right).right,
-          adjoint(upper,upper,lambda,coefficient_direction,OverlapSide::Right).right,
-          apply_direction(upper,upper,direction,zero,lambda).col(0)};
-}
-
 OverlapTransportGradient RepresentationOverlap::transport_gradient(
     const Eigen::Ref<const Eigen::MatrixXd>& current,
     const Eigen::Ref<const Eigen::MatrixXd>& origin,

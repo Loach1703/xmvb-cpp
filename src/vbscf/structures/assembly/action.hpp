@@ -370,14 +370,6 @@ public:
       std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL,
       OverlapSide side = OverlapSide::Both) const;
 
-  /** @brief Fused overlap transport; shared panels, no transformed product array. */
-  OverlapTransportCurvature cross_overlap_transport(
-      const Eigen::VectorXd& lambda, const Eigen::VectorXd& coefficients,
-      const Eigen::VectorXd& coefficient_direction,
-      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
-      const Eigen::MatrixXd& direction,
-      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
-
   /** @brief Shared finite-transport VJP and reference coefficient image. */
   OverlapTransportGradient cross_overlap_transport_gradient(
       const Eigen::VectorXd& lambda, const Eigen::VectorXd& base,

@@ -222,7 +222,7 @@ VbScfCoupledKeyframeEvaluation fake_fixed_evaluation(
   return fixed;
 }
 
-void check_selected_transport() {
+void check_selected_transport(bool stationary) {
   const auto input = make_input();
   const SparseParameterLayout layout(input);
   const auto prepared = ActiveSpaceOrbitalPreparer().prepare(input);
@@ -232,9 +232,15 @@ void check_selected_transport() {
   const Eigen::Matrix3d k = model_hamiltonian();
   Eigen::Vector3d c0(0.64, -0.39, 0.52);
   c0 /= std::sqrt(c0.dot(m0 * c0));
+  if (stationary) {
+    const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::Matrix3d> roots(k,m0);
+    require(roots.info()==Eigen::Success,"stationary CI fixture failed");
+    c0=roots.eigenvectors().col(0);
+  }
   const double e0 = c0.dot(k * c0);
-  require((2.0 * (k - e0 * m0) * c0).norm() > 0.1,
-          "accepted CI state is accidentally stationary");
+  const Eigen::Vector3d gc0=2.0*(k-e0*m0)*c0;
+  require(stationary ? gc0.norm()<1e-11 : gc0.norm()>0.1,
+          "accepted CI fixture has the wrong stationarity");
 
   const OrbitalChart chart(
       input, layout, prepared.auxiliary_orbital_matrix.leftCols(4),
@@ -301,14 +307,15 @@ void check_selected_transport() {
   };
   const auto independent_energy = [&](const Eigen::VectorXd& p,
                                       const Eigen::VectorXd& q) {
-    return fixed_energy(chart.retract_step(input, p), layout,
-                        independent_coefficient(p, q), w, k);
+    const Eigen::Vector3d c=independent_coefficient(p,q);
+    const Eigen::Vector3d affine=c0+structure.coefficient_response_coordinates(q).col(0);
+    return fixed_energy(chart.retract_step(input, p), layout,c,w,k)-gc0.dot(c-affine);
   };
   const auto transport_gradient = [&](const Eigen::VectorXd& p,
                                       const Eigen::VectorXd& q) {
     const CiTransportPoint point = transport.retract(p, q);
-    return transport.gradient(point,
-                              fake_fixed_evaluation(point, layout, w, k));
+    return transport.evaluate_model(point,
+        fake_fixed_evaluation(point, layout, w, k)).gradient;
   };
   const auto old_gradient = [&](const Eigen::VectorXd& p,
                                 const Eigen::VectorXd& q) {
@@ -346,6 +353,12 @@ void check_selected_transport() {
   const Eigen::Vector3d reference_c = independent_coefficient(p, q);
   require(relative_error(point.coefficients.col(0), reference_c) < 2e-9,
           "finite selected transport differs from explicit least squares");
+  const auto model=transport.evaluate_model(point,fake_fixed_evaluation(point,layout,w,k));
+  require(std::abs(model.energy-independent_energy(p,q))<2e-9,
+          "balanced model energy differs from independent selected transport");
+  if (!stationary)
+    require(std::abs(gc0.dot(reference_c-point.base_coefficients.col(0)))>1e-6,
+            "nonstationary fixture does not exercise the balancing counterterm");
   const Eigen::MatrixXd fp = explicit_carrier(point.input, w);
   const Eigen::VectorXd target = f0 * point.base_coefficients.col(0) +
       [&]() {
@@ -378,7 +391,7 @@ void check_selected_transport() {
         (2.0 * h);
   }
   require(relative_error(actual_gradient, finite_gradient) < 5e-7,
-          "finite transported orbital/CI gradient fails independent energy FD");
+          "balanced orbital/CI gradient fails independent model-energy FD");
 
   const Eigen::VectorXd zero_p = Eigen::VectorXd::Zero(chart.reduced_size());
   const Eigen::VectorXd zero_q = Eigen::VectorXd::Zero(structure.tangent_size());
@@ -389,14 +402,9 @@ void check_selected_transport() {
       chart.reduced_size(), 0.8, -0.6);
   up.normalize();
   Eigen::Vector2d uq(0.48, -0.71);
-  const auto curvature = transport.curvature(up, uq);
-  Eigen::VectorXd correction(chart.reduced_size() + structure.tangent_size());
-  correction.head(chart.reduced_size()) =
-      curvature.orbital_from_orbital + curvature.orbital_from_structure;
-  correction.tail(structure.tangent_size()) =
-      curvature.structure_from_orbital;
-  require(correction.norm() > 1e-4,
-          "nonstationary CI fixture does not expose transport curvature");
+  const auto ci_gradient=transport.origin_structure_gradient();
+  require(stationary ? ci_gradient.norm()<1e-11 : ci_gradient.norm()>1e-3,
+          "balanced model erased the actual origin CI residual");
   constexpr double hvp_step = 2e-4;
   const Eigen::VectorXd new_hvp =
       (transport_gradient(hvp_step * up, hvp_step * uq) -
@@ -406,12 +414,12 @@ void check_selected_transport() {
       (old_gradient(hvp_step * up, hvp_step * uq) -
        old_gradient(-hvp_step * up, -hvp_step * uq)) /
       (2.0 * hvp_step);
-  require(relative_error(old_hvp + correction, new_hvp) < 2e-5,
-          "origin old HVP plus transport curvature fails gradient FD");
+  require(relative_error(old_hvp, new_hvp) < 2e-5,
+          "balanced origin HVP differs from the affine physical HVP");
 }
 
 /** @brief Two-state transport on a nonclosed three-structure subspace. */
-void check_multistate_transport() {
+void check_multistate_transport(bool stationary) {
   const auto input = make_input();
   const SparseParameterLayout layout(input);
   const auto prepared = ActiveSpaceOrbitalPreparer().prepare(input);
@@ -425,6 +433,16 @@ void check_multistate_transport() {
   c0 = (c0 * gram.matrixU().solve(Eigen::Matrix2d::Identity())).eval();
   Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> roots(c0.transpose() * k * c0);
   c0 = (c0 * roots.eigenvectors()).eval();
+  Eigen::Vector2d energies=roots.eigenvalues();
+  if (stationary) {
+    const Eigen::GeneralizedSelfAdjointEigenSolver<Eigen::Matrix3d> full_roots(k,m0);
+    require(full_roots.info()==Eigen::Success,"stationary multistate CI fixture failed");
+    c0=full_roots.eigenvectors().leftCols(2);
+    energies=full_roots.eigenvalues().head(2);
+  }
+  const Eigen::MatrixXd gc0=k*c0-m0*c0*(c0.transpose()*k*c0);
+  require(stationary ? gc0.norm()<1e-11 : gc0.norm()>1e-3,
+          "multistate CI fixture has the wrong stationarity");
   const OrbitalChart chart(input, layout, prepared.auxiliary_orbital_matrix.leftCols(4),
       prepared.physical_orbital_frame.normalized_orbital_matrix,
       nullptr, false, false, nullptr, OrbitalChart::Coordinates::Unwhitened);
@@ -439,7 +457,7 @@ void check_multistate_transport() {
   accepted->n_active_orbitals = accepted->n_structures = 3;
   accepted->selected_state_indices = {0, 1};
   accepted->normalized_state_weights = {0.5, 0.5};
-  accepted->selected_state_energies = {roots.eigenvalues()[0], roots.eigenvalues()[1]};
+  accepted->selected_state_energies = {energies[0],energies[1]};
   accepted->selected_state_eigenvectors = c0;
   accepted->selected_state_structure_images = StructureActionResult{k * c0, m0 * c0};
   accepted->selected_metric = selected_factor(action, topology, prepared);
@@ -474,10 +492,14 @@ void check_multistate_transport() {
   Eigen::VectorXd x = Eigen::VectorXd::LinSpaced(chart.reduced_size()+structure.tangent_size(), -0.04, 0.05);
   const auto value = [&](const Eigen::VectorXd& v) {
     auto point = transport.retract(v.head(chart.reduced_size()), v.tail(structure.tangent_size()));
-    return energy(point.input, point.coefficients);
+    return energy(point.input, point.coefficients)-
+        (gc0.array()*(point.coefficients-point.base_coefficients).array()).sum();
   };
   const auto point = transport.retract(x.head(chart.reduced_size()), x.tail(structure.tangent_size()));
-  const Eigen::VectorXd gradient = transport.gradient(point, fixed(point));
+  const auto model=transport.evaluate_model(point,fixed(point));
+  const Eigen::VectorXd gradient = model.gradient;
+  require(std::abs(model.energy-value(x))<2e-11,
+      "multistate balanced energy differs from its counterterm definition");
   Eigen::VectorXd numerical(x.size());
   for (Eigen::Index j = 0; j < x.size(); ++j) {
     Eigen::VectorXd plus=x, minus=x;
@@ -485,12 +507,12 @@ void check_multistate_transport() {
     numerical[j] = (value(plus)-value(minus))/2e-5;
   }
   require(relative_error(gradient, numerical) < 2e-6,
-      "multistate selected transport gradient fails energy finite differences");
+      "multistate balanced transport gradient fails model-energy finite differences");
   const auto derivative = [&](const Eigen::VectorXd& v, bool transported) {
     CiTransportPoint p;
     if (transported) {
       p = transport.retract(v.head(chart.reduced_size()), v.tail(structure.tangent_size()));
-      return transport.gradient(p, fixed(p));
+      return transport.evaluate_model(p, fixed(p)).gradient;
     }
     p.input = chart.retract_step(input, v.head(chart.reduced_size()));
     p.coefficients = c0 + structure.coefficient_response_coordinates(v.tail(structure.tangent_size()));
@@ -501,24 +523,21 @@ void check_multistate_transport() {
     return g;
   };
   const Eigen::VectorXd direction = x.normalized();
-  const auto curvature = transport.curvature(direction.head(chart.reduced_size()),
-                                             direction.tail(structure.tangent_size()));
-  Eigen::VectorXd correction(x.size());
-  correction.head(chart.reduced_size()) = curvature.orbital_from_orbital + curvature.orbital_from_structure;
-  correction.tail(structure.tangent_size()) = curvature.structure_from_orbital;
   const Eigen::VectorXd before = (derivative(2e-4*direction, false)-derivative(-2e-4*direction, false))/4e-4;
   const Eigen::VectorXd after = (derivative(2e-4*direction, true)-derivative(-2e-4*direction, true))/4e-4;
-  require(relative_error(before+correction, after) < 4e-5,
-      "multistate transport Hessian correction fails gradient finite differences");
+  require(relative_error(before, after) < 4e-5,
+      "multistate balanced origin HVP differs from the affine physical HVP");
 }
 
 }  // namespace
 
 int main() {
   try {
-    check_selected_transport();
-    check_multistate_transport();
-    std::cout << "Selected-space CI transport gradient and curvature: passed\n";
+    for (const bool stationary : {false,true}) {
+      check_selected_transport(stationary);
+      check_multistate_transport(stationary);
+    }
+    std::cout << "Selected-space balanced CI transport energy, gradient and HVP: passed\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

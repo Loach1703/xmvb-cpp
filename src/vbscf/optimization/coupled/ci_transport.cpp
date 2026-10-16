@@ -40,12 +40,6 @@ CiTransport::CiTransport(const OrbitalPreparationInput& input,
   const Eigen::MatrixXd state_h = c0_.transpose() * images.hamiltonian;
   gc0_ = (coordinate_scale_ * coordinate_scale_) *
       (images.hamiltonian - images.overlap * state_h);
-  lambda0_ = solve(upper_, gc0_);
-  residual_upper_gradient_ = zero_;
-  for (Eigen::Index s = 0; s < c0_.cols(); ++s)
-    residual_upper_gradient_ += overlap_.adjoint(upper_, upper_, lambda0_.col(s),
-        c0_.col(s),OverlapSide::Right).right;
-  residual_overlap_gradient_ = overlap_upper_gradient(upper_, residual_upper_gradient_);
 }
 
 Eigen::VectorXd CiTransport::raw_direction(const Eigen::VectorXd& reduced) const {
@@ -151,10 +145,13 @@ CiTransportPoint CiTransport::retract(const Eigen::VectorXd& orbital_step,
   return point;
 }
 
-Eigen::VectorXd CiTransport::gradient(const CiTransportPoint& point,
-                                    const VbScfCoupledKeyframeEvaluation& fixed) const {
+CiTransportModel CiTransport::evaluate_model(const CiTransportPoint& point,
+                                           const VbScfCoupledKeyframeEvaluation& fixed) const {
   profiling::ScopedPhase phase(profiling::Phase::CiTransportGradient);
-  const Eigen::MatrixXd lambda = solve(point.upper, fixed.coefficient_gradient);
+  // E_hat = E - <gc0, C_transport-C_affine>. Its first jet is physical,
+  // while the residual-weighted transport second jet cancels algebraically.
+  // Retain the actual finite gc0: no stationarity cutoff or zero replacement.
+  const Eigen::MatrixXd lambda = solve(point.upper, fixed.coefficient_gradient - gc0_);
   Eigen::MatrixXd current_upper = zero_, origin_upper = zero_;
   Eigen::MatrixXd structure_gradient(c0_.rows(),c0_.cols());
   for (Eigen::Index s = 0; s < c0_.cols(); ++s) {
@@ -162,43 +159,18 @@ Eigen::VectorXd CiTransport::gradient(const CiTransportPoint& point,
         lambda.col(s),point.base_coefficients.col(s),c0_.col(s),point.coefficients.col(s));
     current_upper+=pullback.charts.left;
     origin_upper+=pullback.charts.right;
-    structure_gradient.col(s)=pullback.image/coordinate_scale_;
+    structure_gradient.col(s)=(pullback.image+gc0_.col(s))/coordinate_scale_;
   }
   const OrbitalOverlapPullback current_pullback(point.input, point.prepared, layout_);
   Eigen::VectorXd orbital = fixed.orbital_gradient +
       current_pullback.gradient(overlap_upper_gradient(point.upper, current_upper)) +
       origin_pullback_.gradient(overlap_upper_gradient(upper_, origin_upper));
-  Eigen::VectorXd result(chart_.reduced_size() + structure_.tangent_size());
-  result.head(chart_.reduced_size()) = chart_.project_reduced_gradient(orbital);
-  result.tail(structure_.tangent_size()) = structure_.project_coordinates(structure_gradient);
-  return result;
-}
-
-CiTransportCurvature CiTransport::curvature(const Eigen::VectorXd& orbital_direction,
-                                          const Eigen::VectorXd& structure_direction) const {
-  profiling::ScopedPhase phase(profiling::Phase::CiTransportCurvature);
-  const Eigen::VectorXd packed = raw_direction(orbital_direction);
-  const Eigen::MatrixXd dr = overlap_upper_direction(upper_,
-      origin_pullback_.overlap_direction(packed));
-  const Eigen::MatrixXd dc = structure_.coefficient_response_coordinates(structure_direction);
-  Eigen::MatrixXd dg = zero_, mixed = zero_;
-  Eigen::MatrixXd forcing(c0_.rows(),c0_.cols());
-  for (Eigen::Index s = 0; s < c0_.cols(); ++s) {
-    const auto contractions=overlap_.transport_curvature(upper_,dr,lambda0_.col(s),
-        c0_.col(s),dc.col(s));
-    dg+=contractions.directional;
-    mixed+=contractions.mixed;
-    forcing.col(s)=contractions.image;
-  }
-  const Eigen::MatrixXd d_overlap_gradient = overlap_upper_gradient_direction(
-      upper_, dr, residual_upper_gradient_, dg);
-  CiTransportCurvature result;
-  result.orbital_from_orbital = -chart_.project_reduced_gradient(
-      origin_pullback_.gradient_direction(residual_overlap_gradient_, d_overlap_gradient, packed));
-  result.orbital_from_structure = -chart_.project_reduced_gradient(
-      origin_pullback_.gradient(overlap_upper_gradient(upper_, mixed)));
-  result.structure_from_orbital = -structure_.project_coordinates(
-      forcing / coordinate_scale_);
+  CiTransportModel result;
+  result.energy = fixed.energy -
+      (gc0_.array()*(point.coefficients-point.base_coefficients).array()).sum();
+  result.gradient.resize(chart_.reduced_size() + structure_.tangent_size());
+  result.gradient.head(chart_.reduced_size()) = chart_.project_reduced_gradient(orbital);
+  result.gradient.tail(structure_.tangent_size()) = structure_.project_coordinates(structure_gradient);
   return result;
 }
 

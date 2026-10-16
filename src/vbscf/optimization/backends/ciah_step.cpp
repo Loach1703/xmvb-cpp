@@ -40,7 +40,9 @@ constexpr int base_micro_cycles = 10;
 
 struct Keyframe {
   Eigen::VectorXd gradient;
+  /** Residual-balanced internal energy; macro acceptance remains physical. */
   double energy = 0.0;
+  double physical_energy = 0.0;
 };
 
 }  // namespace
@@ -167,25 +169,14 @@ bool build_ciah_macro_step(
       orbital_image.tail(ns) = forcing;
       structure_image.head(no) = adjoint;
       structure_image.tail(ns) = ci.hessian_coordinates;
-      const auto transport_start=std::chrono::steady_clock::now();
-      const auto curvature = transport->curvature(x.head(no), x.tail(ns));
-      if (mcscf::diagnostics::ciah_event_trace_enabled())
-        mcscf::diagnostics::ciah_trace("ciah_transport_magnitude",
-            "orbital_model=%.17g,structure_model=%.17g,transport_oo=%.17g,transport_oc=%.17g,transport_co=%.17g",
-            image.head(no).norm(), image.tail(ns).norm(),
-            curvature.orbital_from_orbital.norm(), curvature.orbital_from_structure.norm(),
-            curvature.structure_from_orbital.norm());
-      image.head(no) += curvature.orbital_from_orbital + curvature.orbital_from_structure;
-      image.tail(ns) += curvature.structure_from_orbital;
-      orbital_image.head(no) += curvature.orbital_from_orbital;
-      orbital_image.tail(ns) += curvature.structure_from_orbital;
-      structure_image.head(no) += curvature.orbital_from_structure;
+      // The residual-balanced finite model has the physical affine Hessian
+      // at this origin, even for a finite CI residual. Its coordinate second
+      // jet is cancelled in the keyframe energy AND gradient, not discarded.
       mcscf::diagnostics::ciah_trace("ciah_structure_cost",
-          "coupling=%.17g,orbital_adjoint=%.17g,projection=%.17g,transport_curvature=%.17g",
+          "coupling=%.17g,orbital_adjoint=%.17g,projection=%.17g",
           std::chrono::duration<double>(coupling_end-structure_start).count(),
           std::chrono::duration<double>(adjoint_end-coupling_end).count(),
-          std::chrono::duration<double>(transport_start-adjoint_end).count(),
-          std::chrono::duration<double>(std::chrono::steady_clock::now()-transport_start).count());
+          std::chrono::duration<double>(std::chrono::steady_clock::now()-adjoint_end).count());
       if (mcscf::diagnostics::ciah_event_trace_enabled()) {
         const double orbital_energy = x.head(no).dot(orbital.orbital_hessian);
         const double structure_energy = x.tail(ns).dot(ci.hessian_coordinates);
@@ -302,12 +293,15 @@ bool build_ciah_macro_step(
     if (ns) {
       const auto& point = transport_at(displacement);
       const auto exact = objective->evaluate_coupled_keyframe(parameters, point.coefficients);
-      keyframe.gradient = transport->gradient(point, exact);
-      keyframe.energy = exact.energy;
+      auto model = transport->evaluate_model(point, exact);
+      keyframe.gradient = std::move(model.gradient);
+      keyframe.energy = model.energy;
+      keyframe.physical_energy = exact.energy;
     } else {
       const auto exact = objective->evaluate_coupled_keyframe(parameters, c0);
       keyframe.gradient = chart.project_reduced_gradient(exact.orbital_gradient);
       keyframe.energy = exact.energy;
+      keyframe.physical_energy = exact.energy;
     }
     ++record->keyframes;
     return keyframe;
@@ -496,9 +490,9 @@ bool build_ciah_macro_step(
       // normal macro acceptance still reoptimizes CI and checks real energy.
       keyframes.save(exact.energy,displacement,hessian_displacement,last_step,candidate);
       mcscf::diagnostics::ciah_trace("ciah_keyframe",
-          "actual=%.17g,predicted=%.17g,mismatch=%.17g,mismatch_small=%d,energy=%.17g,accepted=%d",
+          "actual=%.17g,predicted=%.17g,mismatch=%.17g,mismatch_small=%d,energy=%.17g,physical_energy=%.17g,accepted=%d",
           actual_norm, predicted_norm, mismatch_norm, static_cast<int>(mismatch_small),
-          exact.energy, static_cast<int>(keep_keyframe));
+          exact.energy, exact.physical_energy, static_cast<int>(keep_keyframe));
       if (mcscf::diagnostics::ciah_event_trace_enabled()) {
         const double actual_orbital = chart.coordinate_dual_norm(exact.gradient.head(no));
         const double predicted_orbital = chart.coordinate_dual_norm(predicted_gradient.head(no));

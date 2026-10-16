@@ -366,32 +366,17 @@ void check_case(const std::vector<std::vector<int>>& alpha,
     }
   }
   for (const Eigen::MatrixXd& r : {left,Eigen::MatrixXd(identity)}) {
-    const auto fused=overlap.transport_curvature(r,dr,x,y,dc);
-    const auto expected_d=overlap.adjoint_direction(r,r,zero,dr,x,y);
-    const auto expected_m=overlap.adjoint(r,r,x,dc);
+    const auto expected_d=overlap.adjoint_direction(r,r,zero,dr,x,y,OverlapSide::Right);
+    const auto expected_m=overlap.adjoint(r,r,x,dc,OverlapSide::Right);
     const auto expected_image=overlap.apply_direction(r,r,dr,zero,x);
-    require(relative_error(fused.directional,expected_d.right)<3e-12 &&
-        relative_error(fused.mixed,expected_m.right)<3e-12 &&
-        relative_error(fused.image,expected_image)<3e-12,
-        "fused transport differs from independent overlap contractions");
-    require(std::abs(dot(fused.mixed,dr)-dc.dot(fused.image))<3e-11,
-        "fused transport mixed blocks violate transpose duality");
+    require(std::abs(dot(expected_m.right,dr)-dc.dot(expected_image.col(0)))<3e-11,
+        "selected overlap mixed derivatives violate transpose duality");
     const Eigen::MatrixXd finite_image=(reference_cross(r+h*dr,r,w,alpha,beta)-
         reference_cross(r-h*dr,r,w,alpha,beta))*x/(2*h);
-    require(relative_error(fused.image,finite_image)<2e-8,
-        "fused transport transpose image fails independent minor differences");
-    const auto stationary=overlap.transport_curvature(r,zero,x,y,dc);
-    require(stationary.directional.norm()<2e-12 && stationary.image.norm()<2e-12 &&
-        relative_error(stationary.mixed,expected_m.right)<3e-12,
-        "zero orbital direction changed the mixed transport cotangent");
+    require(relative_error(expected_image,finite_image)<2e-8,
+        "selected overlap transpose image fails independent minor differences");
     if (full_ambient) {
       const ExteriorOrbitalTransform a(alpha,r),b(beta,r);
-      const auto narrow=action.cross_overlap_transport(x,y,dc,a,b,dr,
-          8*sizeof(double)*(alpha.size()+beta.size()));
-      require(relative_error(narrow.directional,fused.directional)<3e-12 &&
-          relative_error(narrow.mixed,fused.mixed)<3e-12 &&
-          relative_error(narrow.image,fused.image)<3e-12,
-          "one-column transport tiles differ from wide panels");
       const auto single_a=action.cross_overlap_adjoint(x,y,a,b,a,b,nullptr,nullptr,
           8*sizeof(double)*(alpha.size()+beta.size()),OverlapSide::Left);
       const auto single_b=action.cross_overlap_adjoint(x,y,a,b,a,b,&zero,&dr,
@@ -495,12 +480,14 @@ void check_parallel_transport() {
       omp_set_num_threads(threads);
 #endif
       for (std::size_t columns : {1u,7u}) {
-        const auto fused=action.cross_overlap_transport(x,y,q,a,b,dr,
-            columns*8*sizeof(double)*(alpha.size()+beta.size()));
-        require(relative_error(fused.directional,reference_d.right)<3e-12 &&
-            relative_error(fused.mixed,reference_q.right)<3e-12 &&
-            relative_error(fused.image,reference_image)<3e-12,
-            "parallel unequal-spin transport changed the selected contractions");
+        const auto bytes=columns*16*sizeof(double)*(alpha.size()+beta.size());
+        const auto tiled_d=action.cross_overlap_adjoint(x,y,a,b,a,b,&zero,&dr,bytes,OverlapSide::Right);
+        const auto tiled_q=action.cross_overlap_adjoint(x,q,a,b,a,b,nullptr,nullptr,bytes,OverlapSide::Right);
+        const auto tiled_image=action.cross_overlap(x,a,b,a,b,&da,&db,&za,&zb,bytes);
+        require(relative_error(tiled_d.right,reference_d.right)<3e-12 &&
+            relative_error(tiled_q.right,reference_q.right)<3e-12 &&
+            relative_error(tiled_image,reference_image)<3e-12,
+            "parallel unequal-spin overlap changed the selected contractions");
         const auto finite=action.cross_overlap_transport_gradient(x,y,q,x+q,a,b,a,b,dr,
             columns*16*sizeof(double)*(alpha.size()+beta.size()));
         const auto base=action.cross_overlap_adjoint(x,y,a,b,a,b,nullptr,nullptr);
