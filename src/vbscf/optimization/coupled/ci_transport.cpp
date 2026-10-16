@@ -113,6 +113,7 @@ Eigen::MatrixXd CiTransport::solve(const Eigen::MatrixXd& upper,
 
 CiTransportPoint CiTransport::retract(const Eigen::VectorXd& orbital_step,
                                     const Eigen::VectorXd& structure_step) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiTransportRetract);
   CiTransportPoint point;
   point.input = chart_.retract_step(input_, orbital_step);
   point.prepared = ActiveSpaceOrbitalPreparer{}.prepare(point.input);
@@ -134,6 +135,7 @@ CiTransportPoint CiTransport::retract(const Eigen::VectorXd& orbital_step,
 
 Eigen::VectorXd CiTransport::gradient(const CiTransportPoint& point,
                                     const VbScfCoupledKeyframeEvaluation& fixed) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiTransportGradient);
   const Eigen::MatrixXd lambda = solve(point.upper, fixed.coefficient_gradient);
   Eigen::MatrixXd current_upper = zero_, origin_upper = zero_;
   for (Eigen::Index s = 0; s < c0_.cols(); ++s) {
@@ -158,6 +160,7 @@ Eigen::VectorXd CiTransport::gradient(const CiTransportPoint& point,
 
 CiTransportCurvature CiTransport::curvature(const Eigen::VectorXd& orbital_direction,
                                           const Eigen::VectorXd& structure_direction) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiTransportCurvature);
   const Eigen::VectorXd packed = raw_direction(orbital_direction);
   const Eigen::MatrixXd dr = overlap_upper_direction(upper_,
       origin_pullback_.overlap_direction(packed));

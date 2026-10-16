@@ -180,7 +180,7 @@ void check_contracted_density_span() {
     frame = (frame * rotation).eval();
   }
   // Independent four-index reference, including diagonal/repeated AO indices.
-  for (int width : {1,2,3,8,16}) {
+  for (int width : {1,2,3,8,16,52}) {
     Eigen::MatrixXd sources(n*n,width);
     for (int channel=0;channel<width;++channel)
       for (int mu=0;mu<n;++mu)
@@ -214,16 +214,26 @@ void check_contracted_density_span() {
       if ((row_result-result).cwiseAbs().maxCoeff()>5.0e-12)
         throw std::runtime_error("row-owned and packed AO contractions disagree");
       for (int n_core_sources : {0,width/2,width}) {
+       for (int n_mo : {n,n-2}) {
         xmvb::vb::AoDensityDiagonalWorkspace diagonal_workspace;
         Eigen::MatrixXd exchange_diagonal, coulomb_diagonal;
         xmvb::vb::apply_ao_density_diagonals(input.ao_integral_input,
-            row_sources,frame,n_core_sources,threads,3,&diagonal_workspace,
+            row_sources,frame.leftCols(n_mo),n_core_sources,threads,&diagonal_workspace,
             &exchange_diagonal,&coulomb_diagonal);
-        if (exchange_diagonal.rows()!=n || exchange_diagonal.cols()!=width ||
-            coulomb_diagonal.rows()!=n || coulomb_diagonal.cols()!=n_core_sources)
+        if (exchange_diagonal.rows()!=n_mo || exchange_diagonal.cols()!=width ||
+            coulomb_diagonal.rows()!=n_mo || coulomb_diagonal.cols()!=n_core_sources)
           throw std::runtime_error("projected density diagonal dimensions changed");
+        const int columns=width+n_core_sources;
+        for (std::size_t worker=0; worker<diagonal_workspace.rows.size(); ++worker)
+          if (diagonal_workspace.rows[worker].rows()!=n ||
+              diagonal_workspace.rows[worker].cols()!=columns ||
+              diagonal_workspace.images[worker].rows()!=n_mo ||
+              diagonal_workspace.images[worker].cols()!=columns ||
+              diagonal_workspace.partial[worker].rows()!=n_mo ||
+              diagonal_workspace.partial[worker].cols()!=columns)
+            throw std::runtime_error("projected density retained a worker AO response matrix");
         for (int channel=0;channel<width;++channel)
-          for (int orbital=0;orbital<n;++orbital) {
+          for (int orbital=0;orbital<n_mo;++orbital) {
             double expected_k=0.0, expected_j=0.0;
             for (int mu=0;mu<n;++mu)
               for (int nu=0;nu<n;++nu) {
@@ -245,6 +255,7 @@ void check_contracted_density_span() {
                 std::abs(coulomb_diagonal(orbital,channel)-expected_j)>5.0e-12)
               throw std::runtime_error("projected Coulomb diagonal disagrees with four-index reference");
           }
+       }
       }
       for (const auto& partial : workspace.partial)
         if (partial.rows()!=n*(n+1)/2)
@@ -270,7 +281,7 @@ void check_contracted_density_span() {
     xmvb::vb::AoDensityDiagonalWorkspace zero_workspace;
     Eigen::MatrixXd zero_k, zero_j;
     xmvb::vb::apply_ao_density_diagonals(zero_ao,zero_sources,frame,1,
-        threads,3,&zero_workspace,&zero_k,&zero_j);
+        threads,&zero_workspace,&zero_k,&zero_j);
     if (zero_k.cwiseAbs().maxCoeff()!=0.0 || zero_j.cwiseAbs().maxCoeff()!=0.0)
       throw std::runtime_error("empty CSR graph produced nonzero projected diagonals");
   }

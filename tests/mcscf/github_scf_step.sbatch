@@ -30,7 +30,7 @@ baseline=$(realpath "$2")
 current=$(realpath "$3")
 artifact="$source_dir/github-scf-step-$SLURM_JOB_ID"
 mode=${4:-paired}
-[[ $mode == paired || $mode == native || $mode == phases || $mode == vtune || $mode == converge ]] || exit 64
+[[ $mode == paired || $mode == native || $mode == phases || $mode == vtune || $mode == converge || $mode == converge-phases ]] || exit 64
 mkdir -p "$artifact"
 export LC_ALL=C OMP_NUM_THREADS=8 OMP_PLACES=cores OMP_PROC_BIND=close
 export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
@@ -65,8 +65,8 @@ for variant in "${variants[@]}"; do
   sha256sum input.xmi cc-pvdz.gbs xmvb-cpp.exe > hashes.sha256
   launcher=()
   iterations=(--max-iterations 1)
-  [[ $mode == converge ]] && iterations=()
-  if [[ $mode == phases || $mode == vtune ]]; then
+  [[ $mode == converge || $mode == converge-phases ]] && iterations=()
+  if [[ $mode == phases || $mode == converge-phases || $mode == vtune ]]; then
    export XMVB_PHASE_TIMING=1 XMVB_NEO_TRACE=scalar
   fi
   if [[ $mode == vtune ]]; then

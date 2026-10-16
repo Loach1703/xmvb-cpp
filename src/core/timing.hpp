@@ -28,7 +28,10 @@ enum class Phase {
   CiahMacro, CiahNext, CiahImages, CiahKeyframe, CiahRefresh,
   CiahTrial, CiahCompletion, CiahSetup, CiahStructure, CiahConnection,
   CiahObserve, ChartSpan, ChartQuotient, ChartWhitening,
-  ChartGram, ChartCurvature, CiProductProjection, Count
+  ChartGram, ChartCurvature, CiProductProjection,
+  CiTransformBuild, CiOverlapApply, CiOverlapDirection, CiOverlapAdjoint,
+  CiOverlapAdjointDirection, CiTransportRetract, CiTransportGradient,
+  CiTransportCurvature, Count
 };
 
 /** @brief Opt-in wall/process-CPU totals. Nested scopes are not additive.
@@ -65,7 +68,10 @@ class PhaseTotals {
         "ciah_macro", "ciah_next", "ciah_images", "ciah_keyframe", "ciah_refresh",
         "ciah_trial", "ciah_completion", "ciah_setup", "ciah_structure", "ciah_connection",
         "ciah_observe", "chart_span", "chart_quotient", "chart_whitening",
-        "chart_gram", "chart_curvature", "ci_product_projection"};
+        "chart_gram", "chart_curvature", "ci_product_projection",
+        "ci_transform_build", "ci_overlap_apply", "ci_overlap_direction", "ci_overlap_adjoint",
+        "ci_overlap_adjoint_direction", "ci_transport_retract", "ci_transport_gradient",
+        "ci_transport_curvature"};
     static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Phase::Count));
     return names[static_cast<std::size_t>(phase)];
   }

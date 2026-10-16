@@ -1,0 +1,135 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=25mm]{geometry}
+\usepackage{amsmath,amssymb,bm,booktabs,microtype}
+\usepackage{newtxtext,newtxmath}
+\usepackage[hidelinks]{hyperref}
+\newcommand{\T}{^{\mathsf T}}
+\title{Exact AO Density Projections for the Analytic Orbital Hessian Diagonal}
+\author{Theory and implementation note}
+\date{16 October 2026}
+\begin{document}
+\maketitle
+
+\section{Required quantities}
+
+Let $U\in\mathbb R^{N\times m}$ be the AO-coefficient frame used for the
+analytic orbital diagonal, where $N$ is the number of AO basis functions.
+The current complete frame has $m=N$; the identities below also hold for
+a rectangular frame. For a symmetric, not necessarily positive density
+$D$, define
+\begin{align}
+ J[D]_{\mu\nu}&=\sum_{\kappa\lambda}
+       (\mu\nu|\kappa\lambda)D_{\kappa\lambda},\\
+ K[D]_{\mu\nu}&=\sum_{\kappa\lambda}
+       (\mu\kappa|\nu\lambda)D_{\kappa\lambda}.
+\end{align}
+The analytic diagonal requires projected scalar responses
+\begin{equation}\label{eq:diag}
+ j_p[D]=U_p\T J[D]U_p,\qquad
+ k_p[D]=U_p\T K[D]U_p,
+\end{equation}
+not the full AO matrices $J[D]$ and $K[D]$. Here $U_p$ is column $p$ of
+$U$. For an inactive orbital $c$, $D_c=U_cU_c\T$. Both $j_p[D_c]$ and
+$k_p[D_c]$ enter the signed analytic curvature, including the combination
+$6k_p[D_c]-2j_p[D_c]$. These contributions cannot be discarded simply
+because the selected VB structure space is one-dimensional.
+
+For the active orbitals $A\in\mathbb R^{N\times n}$, all required density
+sources have the form $D_t=A W_t A\T$, where $W_t$ is a symmetric active
+matrix constructed from the accepted spin-free one- and two-particle
+integral adjoints. The existing untruncated source-span factorization
+requires $r=\min(n(n+1)/2,2n)$ basis sources. Its reconstruction matrix
+recovers the original $2n$ responses and their total one-particle source.
+No additional numerical rank test or approximation is introduced here.
+
+\section{Coulomb responses already available}
+
+The accepted integral preparation supplies
+\begin{equation}
+ \mathcal J_{p,ab}=(pp|ab).
+\end{equation}
+Consequently,
+\begin{equation}\label{eq:known-j}
+ j_p[D_t]=\sum_{ab}\mathcal J_{p,ab}(W_t)_{ab}.
+\end{equation}
+Recomputing $J[D_t]$ through the AO integral graph is unnecessary.
+Only the active exchange response must still be contracted. The physical
+response $2j_p[D_t]-k_p[D_t]$ is formed after Eq.~\eqref{eq:known-j}.
+The corresponding inactive Coulomb projections are not present in this
+active tensor and must be evaluated; they can share the exchange traversal.
+
+\section{Immediate row projection}
+
+At a fixed AO index $\mu$, collect the required exchange rows and inactive
+Coulomb rows in one matrix,
+\begin{equation}
+ R_\mu(\nu,t)=K[D_t]_{\mu\nu},\qquad
+ R_\mu(\nu,b+c)=J[D_c]_{\mu\nu},
+\end{equation}
+where $b$ is the current source batch width, and $c$ labels its $b_c$
+inactive sources. There are $s=b+b_c\leq2b$ columns. Once this AO row is
+complete, compute
+\begin{equation}\label{eq:row}
+ B_\mu=U\T R_\mu,\qquad
+ d_{pt}=\sum_\mu U_{\mu p}(B_\mu)_{pt}.
+\end{equation}
+Equation~\eqref{eq:row} is exactly Eq.~\eqref{eq:diag}, with the contraction
+order changed. It is not a diagonal approximation to an AO operator.
+The entire row panel is projected by one matrix multiplication and released
+before the next owned row. No full AO response, per-channel AO staging
+image, or second core-Coulomb AO-pair transformation is needed.
+
+Each OpenMP worker owns its AO row panel, projected row panel and partial
+diagonals. Workers borrow the same densities, integral graph and frame.
+The numerical row workspace is
+\begin{equation}\label{eq:memory}
+ 8T(N+2m)(b+b_c)\ \text{bytes},
+\end{equation}
+where $T$ is the worker count. Including a shared source batch, source-building
+scratch and required small outputs gives
+\begin{equation}
+ O\bigl(N^2b+N^2+T(N+2m)b+mP\bigr),
+\end{equation}
+for $P=n_{\mathrm{core}}+r$ sources. In particular, there is no worker-owned
+$N\times N$ response. Batch width and, when necessary, worker count are
+chosen within the existing workspace allowance. These choices affect only
+the exact contraction order and residency, never the physical state space.
+
+The shared density batch remains necessary for this row contraction.
+Its replacement by a generated or factored source would require a separate
+algorithm; it is not claimed by Eq.~\eqref{eq:row}. The arithmetic order
+$O(N^2mP)$ of the MO projection is also unchanged. The present reductions
+are redundant Coulomb work, response storage/copying, synchronization and
+repeated integral visits, not a new asymptotic integral factorization.
+
+\section{Integral traversal and batching}
+
+For a symmetric AO-pair CSR graph, let $e$ be its directed edge count and
+$d_\mu$ the length of the diagonal pair row $(\mu,\mu)$. One traversal of
+all ordered AO output rows visits
+\begin{equation}
+ R=2e-\sum_\mu d_\mu
+\end{equation}
+raw CSR records. If $I$ is the number of permutationally unique integrals,
+the canonical packed-scatter layout visits
+$I\lceil P/b_{\mathrm{stream}}\rceil$ records, whereas the projected row
+layout visits $R\lceil P/b\rceil$. These are record counts, not complete
+FLOP or wall-time estimates: the layouts exploit integral symmetry differently.
+Both exact storage orders remain useful, including the canonical stream when
+the integral graph cannot use 32-bit CSR addresses.
+
+If all $P$ channels fit the row workspace, the final SIMD remainder belongs
+in the same traversal. Replacing $P=52$ by a SIMD-aligned batch of 48 would
+force a second pass over the entire graph without a mathematical need.
+Alignment of nonfinal batches is useful; alignment must not create another
+batch when all channels already fit.
+
+For the LOFLEA CAS(12,12) input, $N=185$, $n_{\mathrm{core}}=28$, $r=24$
+and $P=52$. The saved eight-wide canonical run visits 517,740,328 records.
+A single projected row traversal visits 293,300,715. Actual speed and peak
+RSS must still be measured under Slurm; the record reduction alone is not
+a speedup measurement. Numerical validation compares the same signed
+analytic diagonal against independently transformed four-index integrals,
+including indefinite sources, repeated AO indices and zero-integral graphs.
+
+\end{document}

@@ -9,6 +9,7 @@
 
 #include <Eigen/LU>
 
+#include "core/timing.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
@@ -263,6 +264,7 @@ Eigen::MatrixXd RepresentationOverlap::apply(
     const Eigen::Ref<const Eigen::MatrixXd>& left_upper,
     const Eigen::Ref<const Eigen::MatrixXd>& right_upper,
     const Eigen::Ref<const Eigen::MatrixXd>& coeff) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiOverlapApply);
   validate_chart(left_upper, n_active_);
   validate_chart(right_upper, n_active_);
   if (coeff.rows() != action_->n_structures() || coeff.cols() <= 0 ||
@@ -283,6 +285,7 @@ Eigen::MatrixXd RepresentationOverlap::apply_direction(
     const Eigen::Ref<const Eigen::MatrixXd>& delta_left_upper,
     const Eigen::Ref<const Eigen::MatrixXd>& delta_right_upper,
     const Eigen::Ref<const Eigen::MatrixXd>& coeff) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiOverlapDirection);
   validate_chart(left_upper, n_active_);
   validate_chart(right_upper, n_active_);
   validate_direction(delta_left_upper, n_active_);
@@ -346,6 +349,7 @@ UpperPair RepresentationOverlap::adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& right_upper,
     const Eigen::Ref<const Eigen::VectorXd>& left_coeff,
     const Eigen::Ref<const Eigen::VectorXd>& right_coeff) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiOverlapAdjoint);
   validate_chart(left_upper, n_active_);
   validate_chart(right_upper, n_active_);
   if (left_coeff.size() != action_->n_structures() ||
@@ -403,6 +407,7 @@ UpperPair RepresentationOverlap::adjoint_direction(
     const Eigen::Ref<const Eigen::MatrixXd>& delta_right_upper,
     const Eigen::Ref<const Eigen::VectorXd>& left_coeff,
     const Eigen::Ref<const Eigen::VectorXd>& right_coeff) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiOverlapAdjointDirection);
   validate_chart(left_upper, n_active_);
   validate_chart(right_upper, n_active_);
   validate_direction(delta_left_upper, n_active_);

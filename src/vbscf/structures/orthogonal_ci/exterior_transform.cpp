@@ -63,6 +63,7 @@ ExteriorOrbitalTransform::ExteriorOrbitalTransform(
     : n_orbitals_(static_cast<int>(upper_orbital_transform.rows())),
       orbital_transform_(upper_orbital_transform),
       row_cache_(std::make_shared<RowCache>()) {
+  profiling::ScopedPhase phase(profiling::Phase::CiTransformBuild);
   if (n_orbitals_ <= 0 || n_orbitals_ > 63 ||
       upper_orbital_transform.cols() != n_orbitals_ ||
       determinants.empty() || !upper_orbital_transform.allFinite()) {
