@@ -72,13 +72,13 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(),
       static_cast<std::size_t>(row_limit) * width * pairs);
 
-  struct Group { int beta, begin, end, capacity, limit; };
+  struct Group { int beta, begin, end, capacity, limit; int column=0; };
   struct Incoming { int group, pair; double sign; };
   std::vector<Group> groups;
   std::vector<int> active, group_index, halo, columns, distinct_alpha;
   std::vector<int> halo_index(n_alpha_, -1), column_index(n_beta_, -1);
   std::vector<unsigned char> alpha_seen(n_alpha_, 0), active_support;
-  std::vector<int> same_group, offsets, positions, target_index;
+  std::vector<int> same_group, offsets, positions, target_index,beta_offsets;
   std::vector<Incoming> incoming;
   active.reserve(row_limit);
   active_support.reserve(row_limit);
@@ -123,7 +123,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   double prepare_time = 0, read_time = 0, compute_time = 0, write_time = 0, gram_time = 0;
   std::size_t gram_tiles=0;
   std::size_t batches = 0, source_columns = 0, source_elements = 0, peak_payload = 0;
-  std::size_t targets = 0, unsupported_targets = 0;
+  std::size_t targets = 0, unsupported_targets = 0, identity_halo_targets=0,beta_map_bytes=0;
   Clock::time_point compute_start, prepare_start, gram_start;
 #pragma omp parallel if(workers > 1) num_threads(workers)
   {
@@ -296,6 +296,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
               read_time += batch_read_time;
               ++batches;
               targets += count;
+              if (n_halo==n_alpha_) identity_halo_targets+=count;
               source_columns += n_columns;
               source_elements += panel_size;
               peak_payload = std::max(peak_payload, required * sizeof(double) +
@@ -314,11 +315,19 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
               for (int i = 1; i <= n_columns; ++i) offsets[i] += offsets[i - 1];
               positions = offsets;
               incoming.resize(offsets.back());
+              beta_offsets.resize(groups.size()*beta_graph.n_singles());
+              beta_map_bytes=std::max(beta_map_bytes,beta_offsets.capacity()*sizeof(int));
               for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
+                groups[g].column=column_index[groups[g].beta]*width;
                 const auto& links = beta_graph.singles(groups[g].beta);
-                for (int link = 0; link < static_cast<int>(links.size()); ++link)
+                for (int link = 0; link < static_cast<int>(links.size()); ++link) {
                   incoming[positions[column_index[links[link].source]]++] =
                       {g, links[link].pair, links[link].sign};
+                  // The same beta edge serves every alpha target and RHS.
+                  // A halo is bounded by 64 MiB, so its double offset fits int.
+                  beta_offsets[g*beta_graph.n_singles()+link]=static_cast<int>(
+                      static_cast<std::size_t>(n_halo)*column_index[links[link].source]*width);
+                }
               }
               profiling::record_matrix_shape(profiling::Phase::CiSigma, count * width, team);
               prepare_time -= batch_read_time;
@@ -344,15 +353,17 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
 
       const int first = count * width * thread / team;
       const int last = count * width * (thread + 1) / team;
+      const bool identity_halo=n_halo==n_alpha_;
       const auto scatter = [&](int row, Eigen::Ref<ChannelMatrix> target) {
         target.row(row).setZero();
         const int local = row % count, v = row / count;
-        const int a = active[local], beta = groups[group_index[local]].beta;
-        const int column = column_index[beta] * width + v;
+        const int a=active[local],g=group_index[local],beta=groups[g].beta;
+        const int h=identity_halo ? a:halo_index[a];
+        const double* column=input.col(groups[g].column+v).data();
         // A depth-one target outside S has no own coefficient, although its
         // one-body neighbors can still contribute to E*c and must be kept.
         if (active_support[local]) {
-          const double value = input(halo_index[a], column);
+          const double value = column[h];
           for (const int p : alpha_->occupied(a))
             target(row, core::PairIndex::packed_pair_index(p, p)) += value;
           for (const int p : beta_graph.occupied(beta))
@@ -361,11 +372,12 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
         const auto& alpha_links = alpha_->singles(a);
         for (int link = 0; link < static_cast<int>(alpha_links.size()); ++link)
           target(row, alpha_links[link].pair) += alpha_links[link].sign *
-              input(halo_index[alpha_links[link].source], column);
+              column[identity_halo ? alpha_links[link].source:halo_index[alpha_links[link].source]];
         const auto& beta_links = beta_graph.singles(beta);
+        const double* source=input.data()+h+static_cast<std::size_t>(n_halo)*v;
         for (int link = 0; link < static_cast<int>(beta_links.size()); ++link)
           target(row, beta_links[link].pair) += beta_links[link].sign *
-              input(halo_index[a], column_index[beta_links[link].source] * width + v);
+              source[beta_offsets[g*beta_graph.n_singles()+link]];
       };
       for (int row = first; row < last; ++row) scatter(row,scattered);
       if (collect_integrals) {
@@ -474,7 +486,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
               const int* index = target_index.data() + static_cast<std::size_t>(same) * n_halo;
               for (int i=begin;i<end;++i) {
                 const int a=rows ? rows[i]:halo[i];
-                const int local=rows ? halo_index[a]:i;
+                const int local=rows ? (identity_halo ? a:halo_index[a]):i;
                 if (local<first || local>=last) continue;
                 double sum = 0;
                 if (index[local] >= 0) {
@@ -488,7 +500,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
                 }
                 const auto& links = alpha_->singles(a);
                 for (int link = 0; link < static_cast<int>(links.size()); ++link) {
-                  const int h = halo_index[links[link].source];
+                  const int h = identity_halo ? links[link].source:halo_index[links[link].source];
                   const int target = h < 0 ? -1 : index[h];
                   if (target >= 0)
                     sum += links[link].sign *
@@ -508,7 +520,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
               const double sign = link.sign;
               for (int i=begin;i<end;++i) {
                 const int a=rows ? rows[i]:halo[i];
-                const int local=rows ? halo_index[a]:i;
+                const int local=rows ? (identity_halo ? a:halo_index[a]):i;
                 if (local<first || local>=last) continue;
                 const int target=index[local];
                 if (target>=0)
@@ -533,12 +545,13 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
     std::fprintf(stderr,
         "XMVB_TILE,batches=%zu,source_columns=%zu,source_elements=%zu,peak_payload=%zu,"
         "prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f,targets=%zu,exchange=%d,"
-        "skipped_diagonal_scatters=%zu,gram=%.9f,gram_tiles=%zu\n",
+        "skipped_diagonal_scatters=%zu,gram=%.9f,gram_tiles=%zu,"
+        "identity_halo_targets=%zu,beta_map_bytes=%zu\n",
         batches, source_columns, source_elements, peak_payload,
         prepare_time, read_time, compute_time, write_time, targets, exchange_parity,
         unsupported_targets * static_cast<std::size_t>(width) *
             (1 + static_cast<std::size_t>(collect_integrals && static_cast<bool>(state))),
-        gram_time,gram_tiles);
+        gram_time,gram_tiles,identity_halo_targets,beta_map_bytes);
   return collect_integrals ? pullback_channel_kernel(kernel_adjoint) : DirectCiIntegralAdjoint{};
 }
 
