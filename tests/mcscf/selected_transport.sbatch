@@ -35,12 +35,12 @@ if [[ ${1:-} == --build ]]; then
  cmake --build "$source_dir/build" --target xmvb test_ci_factors test_structure_tiles \
   test_orthogonal_direct_ci test_coupled_structure test_product_frontier \
   test_representation_overlap test_ci_transport test_selected_ci_transport \
-  test_selected_metric test_eigen_response test_keyframe -j8 > "$artifact/build.log" 2>&1
+  test_selected_metric test_eigen_response test_keyframe test_davidson -j8 > "$artifact/build.log" 2>&1
  cp "$source_dir/build/CMakeCache.txt" "$artifact/"
  sha256sum "$source_dir/build/src/xmvb-cpp.exe" > "$artifact/binary.sha256"
  srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
   ctest --test-dir "$source_dir/build" --output-on-failure \
-  -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|selected_metric|eigen_response|keyframe)$' \
+  -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|selected_metric|eigen_response|keyframe|davidson)$' \
   > "$artifact/ctest.out" 2>&1
  cp "$source_dir/build/Testing/Temporary/LastTest.log" "$artifact/test-details.log"
  exit 0

@@ -1547,13 +1547,74 @@ same constrained operator. The identity applies columnwise when different
 roots use different shifted carrier diagonals.
 
 The same closure identity permits direct evaluation of the complete-sector
-transport as $\vv C=G^{-1}\Wa^*\Ta(p)^{-1}b$. This does not license the
+transport as
+\begin{equation}
+ \vv C=G^{-1}\Wa^*\Ta(p)^{-1}b.
+\end{equation}
+This does not license the
 corresponding replacement in Eq.~\eqref{eq:transport-normal} for a nonclosed
 selection. Moreover, CI transport used only as an initial guess for a later
 fully relaxed root solve is distinct from the transport used to define a
 keyframe objective: altering the former can change iteration cost and root
 tracking, while altering the latter also changes the finite model and its
 pullback. These two roles must not be conflated.
+
+\subsection{Complete-sector CI coordinates}
+
+For a complete spin sector, the orbital map need not appear in any inner
+CI iteration. Factor the orbital-independent spin Gram by occupation blocks,
+$G=LL\Tr$, and put
+\begin{equation}
+ U=\Wa L^{-\mathsf T},\qquad U\Tr U=I,\qquad UU\Tr=P.
+\end{equation}
+Here $L$ is block diagonal in spatial occupations; no global dense factor is
+formed. The square change of selected-space coordinates and its inverse are
+\begin{equation}\label{eq:full-ci-coordinates}
+ J=U\Tr\Ta\Wa,\qquad
+ J^{-1}=G^{-1}\Wa\Tr\Ta^{-1}U.
+\end{equation}
+Indeed, $UJ=\Ta\Wa$ follows from $P\Ta\Wa=\Ta\Wa$.
+Consequently, the original generalized eigenproblem is exactly equivalent to
+\begin{equation}
+ H\vv C=M\vv C E\quad\Longleftrightarrow\quad
+ (U\Tr\Ha U)\vv x=\vv x E,\qquad \vv x=J\vv C.
+\end{equation}
+The dimension remains the number of independent selected spin-adapted
+structures, not the dimension of the ambient spin-string product carrier.
+An inner Hamiltonian action is $\vv x\mapsto U\Tr\Ha U\vv x$;
+its overlap action is the identity. Thus no inner exterior orbital map or
+orbital-dependent overlap action is mathematically needed.
+In the shared Davidson solver, the overlap images of the trial basis are
+then the trial basis itself. Their third stored basis matrix, associated
+matrix--vector products and separate reorthogonalization updates are omitted.
+The original subspace capacity is retained rather than spending the freed
+memory on a larger subspace.
+
+The existing complete-sector inverse preconditioner transforms by congruence
+to $U\Tr D^{-1}U$. In particular, $r_C=J\Tr r_x$ and
+$JQ_CJ\Tr=U\Tr D^{-1}U$ imply that the preconditioned correction is the
+same physical direction. Metric orthogonalization of the original trial
+vectors is ordinary orthogonalization of their images under $J$. The change
+of coordinates therefore does not replace Davidson by a different physical
+subspace algorithm. For a pure target-spin residual, its Euclidean norm in
+these coordinates is its physical carrier norm. The same requested physical
+stationarity accuracy is retained; a new relaxed threshold is not introduced.
+The algebraic backward-error gates are evaluated in the isometric coordinates
+with the same numerical tolerances. Those gates are coordinate dependent, so
+the last accepted CI iteration need not be identical to that in the original
+coefficient representation; the physical stationarity norm is invariant.
+Initial trial vectors must first be mapped with $J$, rather than reinterpreted
+as coordinates in a different basis. At the exit, return
+\begin{equation}
+ \vv C=J^{-1}\vv x,\qquad HC=J\Tr h,\qquad MC=J\Tr\vv x,
+ \qquad h=(U\Tr\Ha U)\vv x.
+\end{equation}
+The retained Ritz images supply $h$ without another Hamiltonian application.
+Only the boundary maps use $\Ta$ or its inverse. Carrier arrays are processed
+in budgeted RHS chunks and the sigma contraction retains its bounded internal
+tiles. No additional carrier-sized array is stored for each thread. This
+elimination requires the complete-sector identity; it is not valid for a
+general nonclosed selected VB space.
 
 \section{Correspondence with the current implementation}
 

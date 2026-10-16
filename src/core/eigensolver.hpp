@@ -75,6 +75,12 @@ struct DavidsonOptions {
    * algebraic relative residual among the requested roots.
    */
   std::function<void(int, int, double, double)> observe_iteration = {};
+  /** @brief Exact identity metric: the action returns an empty overlap image.
+   * Shares the generalized solver but omits the redundant S-basis storage,
+   * products and reorthogonalization updates. Subspace/accuracy budgets stay
+   * unchanged. The caller must establish an isometric coordinate model.
+   */
+  bool identity_overlap = false;
 };
 
 /**
@@ -90,6 +96,12 @@ DavidsonOptions make_davidson_options(
     double energy_tolerance,
     double relative_residual_tolerance,
     double stationarity_tolerance);
+
+/** @brief Deterministic diagonal/random initial block, before any coordinate map. */
+Eigen::MatrixXd make_davidson_initial_vectors(
+    const Eigen::Ref<const Eigen::VectorXd>& hamiltonian_diagonal,
+    const Eigen::Ref<const Eigen::VectorXd>& overlap_diagonal,
+    int n_vectors);
 
 /**
  * @brief Converged Davidson eigenpairs and solver diagnostics.

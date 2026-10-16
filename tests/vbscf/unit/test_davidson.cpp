@@ -118,22 +118,24 @@ bool run_case(
     const std::string& label,
     const DenseProblem& problem,
     int n_roots,
-    double eigenvector_tolerance) {
+    double eigenvector_tolerance,
+    bool identity_overlap = false) {
   const int dimension = static_cast<int>(problem.hamiltonian.rows());
   const xmvb::core::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
         xmvb::core::GeneralizedEigenActionResult images;
         images.hamiltonian.noalias() = problem.hamiltonian * vectors;
-        images.overlap.noalias() = problem.overlap * vectors;
+        if (!identity_overlap) images.overlap.noalias() = problem.overlap * vectors;
         return images;
       };
-  const xmvb::core::DavidsonOptions options{
+  xmvb::core::DavidsonOptions options{
       n_roots,
       4 * dimension,
       std::min(dimension, std::max(128, 24 * n_roots)),
       1.0,
       2.0e-8,
       2.0e-8};
+  options.identity_overlap=identity_overlap;
 
   const xmvb::core::GeneralizedEigensolver solver;
   const auto reference = solver.solve_dense(
@@ -488,7 +490,7 @@ bool run_outer_accuracy_case() {
   return passed;
 }
 
-bool run_bounded_multiroot_restart_case() {
+bool run_bounded_multiroot_restart_case(bool identity_overlap = false) {
   constexpr int dimension = 600;
   constexpr int n_roots = 3;
   const DenseProblem problem = make_tridiagonal_problem(dimension);
@@ -496,15 +498,16 @@ bool run_bounded_multiroot_restart_case() {
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
         return xmvb::core::GeneralizedEigenActionResult{
             problem.hamiltonian * vectors,
-            problem.overlap * vectors};
+            identity_overlap ? Eigen::MatrixXd{} : Eigen::MatrixXd(problem.overlap * vectors)};
       };
-  const xmvb::core::DavidsonOptions options{
+  xmvb::core::DavidsonOptions options{
       n_roots,
       300,
       128,
       1.0,
       2.0e-8,
       2.0e-8};
+  options.identity_overlap=identity_overlap;
   const xmvb::core::GeneralizedEigensolver solver;
   const auto reference = solver.solve_dense(
       flatten(problem.hamiltonian),
@@ -523,7 +526,7 @@ bool run_bounded_multiroot_restart_case() {
       result.iterations <= options.max_iterations &&
       result.peak_subspace_dimension == options.max_subspace_dimension - 1 &&
       eigenvalue_error <= 1.0e-8;
-  std::cout << "bounded multiroot restart"
+  std::cout << "bounded multiroot restart identity=" << identity_overlap
             << " iterations=" << result.iterations
             << " actions=" << result.block_actions
             << " subspace=" << result.peak_subspace_dimension
@@ -620,11 +623,15 @@ int main() {
                2.0e-5) &&
       passed;
   passed = run_recycled_case() && passed;
+  for (int roots : {1,3})
+    passed = run_case("identity metric n=200",make_tridiagonal_problem(200),
+        roots,1.0e-5,true) && passed;
   passed = run_residual_preconditioner_case() && passed;
   passed = run_invalid_residual_preconditioner_cases() && passed;
   passed = run_outer_accuracy_case() && passed;
   passed = run_physical_residual_case() && passed;
   passed = run_bounded_multiroot_restart_case() && passed;
+  passed = run_bounded_multiroot_restart_case(true) && passed;
   std::cout << (passed ? "ALL PASSED\n" : "SOME FAILED\n");
   return passed ? 0 : 1;
 }

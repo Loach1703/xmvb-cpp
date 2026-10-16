@@ -476,6 +476,9 @@ private:
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       bool collect_images) const;
   friend class StructureMetricInverse;
+  /** @brief Sigma in the orthogonal carrier; inner contraction remains tiled. */
+  Eigen::MatrixXd apply_carrier_hamiltonian(const Eigen::Ref<const Eigen::MatrixXd>& carrier) const;
+  void adjoint_orbital_transform(Eigen::MatrixXd* carrier) const;
   /** @brief Shared in-place carrier denominator, with the existing signed floor. */
   void divide_carrier_diagonal(Eigen::Ref<Eigen::MatrixXd> carrier,
       const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const;

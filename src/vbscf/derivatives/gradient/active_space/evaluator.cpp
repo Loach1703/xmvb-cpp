@@ -177,7 +177,8 @@ xmvb::core::DavidsonResult solve_selected_structure_roots(
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors,
     const xmvb::core::GeneralizedEigensolver& generalized_eigensolver,
     std::function<double(const Eigen::VectorXd&, double)> physical_residual_norm = {},
-    std::function<Eigen::VectorXd(const Eigen::VectorXd&, double)> residual_preconditioner = {}) {
+    std::function<Eigen::VectorXd(const Eigen::VectorXd&, double)> residual_preconditioner = {},
+    bool identity_overlap = false) {
   structure_solve_accuracy.validate();
   xmvb::core::DavidsonOptions options =
       xmvb::core::make_davidson_options(
@@ -188,6 +189,7 @@ xmvb::core::DavidsonResult solve_selected_structure_roots(
           structure_solve_accuracy.stationarity_tolerance());
   options.physical_residual_norm = std::move(physical_residual_norm);
   options.residual_preconditioner = std::move(residual_preconditioner);
+  options.identity_overlap=identity_overlap;
   if (diagnostics::neo_event_trace_enabled()) {
     options.observe_iteration = [](int iteration, int dimension,
         double energy, double residual) {
@@ -207,7 +209,9 @@ xmvb::core::DavidsonResult solve_selected_structure_roots(
             action,
             hamiltonian_diagonal,
             overlap_diagonal,
-            initial_eigenvectors.leftCols(n_roots),
+            // The FULL adapter also supplies the transformed default block;
+            // retain its random second half, not only the requested roots.
+            initial_eigenvectors.leftCols(identity_overlap ? initial_eigenvectors.cols():n_roots),
             options)
       : generalized_eigensolver.solve_davidson(
             action,
@@ -234,6 +238,42 @@ void retain_davidson_result(
       std::move(davidson.overlap_eigenvectors);
   context->hamiltonian_eigenvectors =
       std::move(davidson.hamiltonian_eigenvectors);
+}
+
+/** @brief Same-dimensional FULL solve; orbital maps occur only at its boundary. */
+core::DavidsonResult solve_complete_structure_roots(
+    const StructureAction& action,
+    const StructureMetricInverse& coordinates,
+    int n_roots,
+    StructureSolveAccuracy accuracy,
+    const Eigen::Ref<const Eigen::MatrixXd>& initial,
+    const core::GeneralizedEigensolver& solver) {
+  const auto& diagonal=action.preconditioner_diagonal();
+  const int n=action.n_structures();
+  const bool recycled=initial.rows()==n && initial.cols()>=n_roots && initial.allFinite();
+  const auto options=core::make_davidson_options(n,n_roots,accuracy.energy_tolerance,
+      accuracy.gradient_tolerance,accuracy.stationarity_tolerance());
+  const Eigen::MatrixXd seeds=recycled ? Eigen::MatrixXd(initial.leftCols(n_roots)) :
+      core::make_davidson_initial_vectors(diagonal.hamiltonian,diagonal.overlap,
+          std::min(options.max_subspace_dimension,2*n_roots));
+  const Eigen::MatrixXd guess=coordinates.to_ci_coordinates(seeds);
+  auto result=solve_selected_structure_roots(
+      [&coordinates](const Eigen::Ref<const Eigen::MatrixXd>& x) {
+        return core::GeneralizedEigenActionResult{
+            coordinates.apply_ci_hamiltonian(x),{}};
+      },diagonal.hamiltonian,diagonal.overlap,n,n_roots,accuracy,guess,solver,{},
+      [&coordinates](const Eigen::VectorXd& r,double energy) {
+        return Eigen::VectorXd(coordinates.apply_ci_preconditioner(
+            r,Eigen::VectorXd::Constant(1,energy),0.0).col(0));
+      },true);
+  const Eigen::Map<const Eigen::MatrixXd> x(result.eigenpairs.eigenvector_matrix.data(),n,n_roots);
+  const Eigen::MatrixXd coefficients=coordinates.from_ci_coordinates(x);
+  result.hamiltonian_eigenvectors=coordinates.ci_covector_to_structure(
+      result.hamiltonian_eigenvectors);
+  result.overlap_eigenvectors=coordinates.ci_covector_to_structure(x);
+  result.eigenpairs.eigenvector_matrix.assign(coefficients.data(),
+      coefficients.data()+coefficients.size());
+  return result;
 }
 
 void select_structure_states(
@@ -389,32 +429,36 @@ void solve_structure_problem(
         };
     stage_start_time = std::chrono::steady_clock::now();
     std::function<double(const Eigen::VectorXd&, double)> physical_residual;
-    std::function<Eigen::VectorXd(const Eigen::VectorXd&, double)> residual_preconditioner;
     if (input.complete_active_space && structure_action.storage().orthogonal_direct_ci) {
       physical_residual = [&structure_action](const Eigen::VectorXd& coefficients, double energy) {
-        return structure_action.complete_space_residual_norm(coefficients, energy);
+        const auto start = std::chrono::steady_clock::now();
+        const double norm = structure_action.complete_space_residual_norm(coefficients, energy);
+        diagnostics::neo_trace("ciah_ci_physical_residual", "seconds=%.17g",
+            std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
+        return norm;
       };
       constexpr std::size_t budget = 64ULL * 1024ULL * 1024ULL;
       const auto& alpha = context->same_spin_pair_cache.alpha_reuse_table.unique_determinants;
       const auto& beta = context->same_spin_pair_cache.beta_reuse_table.unique_determinants;
       if (structure_action.supports_carrier_diagonal() &&
           StructureMetricInverse::fits(structure_action,alpha,beta,budget,budget)) {
+        const auto inverse_start = std::chrono::steady_clock::now();
         context->structure_metric_inverse = std::make_unique<StructureMetricInverse>(
             structure_action,alpha,beta,true,budget,budget);
+        diagnostics::neo_trace("ciah_ci_inverse_setup", "seconds=%.17g",
+            std::chrono::duration<double>(std::chrono::steady_clock::now()-inverse_start).count());
         const auto* inverse = context->structure_metric_inverse.get();
-        // Complete-sector identity cancels the interior F M^-1 maps;
-        // both Riesz maps are retained algebraically, not applied separately.
-        residual_preconditioner = [inverse](
-            const Eigen::VectorXd& residual, double energy) {
-          const Eigen::VectorXd energies = Eigen::VectorXd::Constant(1,energy);
-          return Eigen::VectorXd(inverse->apply_carrier_inverse(residual,energies,0.0).col(0));
-        };
         diagnostics::neo_trace("ciah_ci_preconditioner",
             "carrier=1,factor_bytes=%zu,blocks=%zu,max_block=%d",
             inverse->factor_bytes(),inverse->block_count(),inverse->max_block_size());
       }
     }
-    retain_davidson_result(
+    if (context->structure_metric_inverse) {
+      retain_davidson_result(solve_complete_structure_roots(structure_action,
+          *context->structure_metric_inverse,n_roots,structure_solve_accuracy,
+          initial_eigenvectors,generalized_eigensolver),context);
+    } else {
+      retain_davidson_result(
         solve_selected_structure_roots(
             action,
             structure_action.preconditioner_diagonal().hamiltonian,
@@ -424,9 +468,9 @@ void solve_structure_problem(
             structure_solve_accuracy,
             initial_eigenvectors,
             generalized_eigensolver,
-            std::move(physical_residual),
-            std::move(residual_preconditioner)),
+            std::move(physical_residual)),
         context);
+    }
   }
   context->eigensolver_wall_time_seconds =
       std::chrono::duration<double>(

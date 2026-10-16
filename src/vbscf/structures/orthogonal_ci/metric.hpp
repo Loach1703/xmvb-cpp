@@ -41,6 +41,19 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& rhs,
       const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const;
 
+  /** @brief FULL-only isometric CI coordinates x=U^T T W C, U=W L^-T. */
+  Eigen::MatrixXd to_ci_coordinates(const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const;
+  /** @brief Return structure coefficients J^-1 x without changing the physical state. */
+  Eigen::MatrixXd from_ci_coordinates(const Eigen::Ref<const Eigen::MatrixXd>& coordinates) const;
+  /** @brief Pull a CI covector back by J^T; also restores retained H/M Ritz images. */
+  Eigen::MatrixXd ci_covector_to_structure(const Eigen::Ref<const Eigen::MatrixXd>& covector) const;
+  /** @brief U^T H_orth U; no orbital exterior maps or overlap action. */
+  Eigen::MatrixXd apply_ci_hamiltonian(const Eigen::Ref<const Eigen::MatrixXd>& coordinates) const;
+  /** @brief U^T D^-1 U, congruent to the original complete-sector inverse. */
+  Eigen::MatrixXd apply_ci_preconditioner(
+      const Eigen::Ref<const Eigen::MatrixXd>& covector,
+      const Eigen::Ref<const Eigen::VectorXd>& energies, double eigenvalue) const;
+
   /** @brief Trial metric inverse sharing immutable selected-sector factors. */
   Eigen::MatrixXd apply_at_transform(
       const Eigen::Ref<const Eigen::MatrixXd>& rhs,
@@ -75,7 +88,9 @@ private:
       const std::vector<std::vector<int>>& alpha_strings,
       const std::vector<std::vector<int>>& beta_strings);
 
-  Eigen::MatrixXd solve_spin(const Eigen::Ref<const Eigen::MatrixXd>& rhs) const;
+  enum class SpinFactor { Gram, Lower, Upper };
+  Eigen::MatrixXd solve_spin(const Eigen::Ref<const Eigen::MatrixXd>& rhs,
+      SpinFactor factor = SpinFactor::Gram) const;
   const StructureAction* action_;
   std::vector<Block> blocks_;
   std::size_t factor_bytes_ = 0;

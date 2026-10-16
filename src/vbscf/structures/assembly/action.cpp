@@ -1146,6 +1146,18 @@ double StructureAction::complete_space_residual_norm(
   return residual.stableNorm() / norm;
 }
 
+Eigen::MatrixXd StructureAction::apply_carrier_hamiltonian(
+    const Eigen::Ref<const Eigen::MatrixXd>& carrier) const {
+  return direct_ci_->sigma.apply(carrier, spin_exchange_parity_);
+}
+
+void StructureAction::adjoint_orbital_transform(Eigen::MatrixXd* carrier) const {
+  for (Eigen::Index first=0; first<carrier->cols(); first+=n_unique_beta_)
+    direct_ci_->beta_transform().apply_adjoint_right_block(
+        carrier->middleCols(first,n_unique_beta_));
+  direct_ci_->alpha_transform.apply_adjoint_left(carrier);
+}
+
 void StructureAction::inverse_orbital_transform(Eigen::MatrixXd* spin_products) const {
   if (!direct_ci_ || spin_products == nullptr ||
       spin_products->rows() != n_unique_alpha_ ||

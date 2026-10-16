@@ -1513,6 +1513,28 @@ void check_sigma_action() {
   require((cancelled-reference_p*metric_rhs).norm()<
               1e-10*std::max(1.0,(reference_p*metric_rhs).norm()),
           "cancelled multi-RHS carrier inverse differs from the independent pullback");
+  const Eigen::MatrixXd j=full_metric.to_ci_coordinates(identity);
+  const Eigen::MatrixXd ji=full_metric.from_ci_coordinates(identity);
+  require((j.transpose()*j-full_overlap).norm()<2e-11 &&
+              (j*ji-identity).norm()<2e-11,
+          "complete CI boundary maps changed the physical metric or round trip");
+  const Eigen::MatrixXd raw_h=full_expansion.transpose()*dense_hamiltonian*full_expansion;
+  const Eigen::MatrixXd ci_h=full_metric.apply_ci_hamiltonian(identity);
+  require((ci_h-ji.transpose()*raw_h*ji).norm()<2e-10 &&
+              (ci_h-ci_h.transpose()).norm()<2e-11,
+          "complete CI Hamiltonian is not the independent symmetric congruence");
+  require((full_metric.ci_covector_to_structure(metric_rhs)-j.transpose()*metric_rhs).norm()<2e-11,
+          "complete CI Ritz covector pullback is inconsistent");
+  require((full_metric.apply_ci_preconditioner(metric_rhs,
+              Eigen::VectorXd::Constant(metric_rhs.cols(),root_energy),0.0)-
+              j*reference_p*j.transpose()*metric_rhs).norm()<2e-10,
+          "complete CI preconditioner changed under the coordinate congruence");
+  const Eigen::MatrixXd restored=full_metric.from_ci_coordinates(metric_rhs);
+  const auto raw_images=full_action.apply(restored);
+  require((full_metric.ci_covector_to_structure(
+              full_metric.apply_ci_hamiltonian(metric_rhs))-raw_images.hamiltonian).norm()<2e-10 &&
+              (full_metric.ci_covector_to_structure(metric_rhs)-raw_images.overlap).norm()<2e-11,
+          "complete CI exit failed to restore H C and M C");
   auto original_action = std::make_unique<xmvb::vb::StructureAction>(
       full_terms,product_dimension,topology,packed_overlap,
       one_electron,two_electron,n_orbitals,&full_diagonal);
@@ -2324,6 +2346,15 @@ void check_spin_sector_carrier_inverse() {
         Eigen::VectorXd::Constant(n,energy),shift);
     require((actual-reference).norm()<1e-11,
         "complete spin-sector cancellation changed the carrier preconditioner");
+    const Eigen::MatrixXd j=metric.to_ci_coordinates(Eigen::MatrixXd::Identity(n,n));
+    const Eigen::MatrixXd ji=metric.from_ci_coordinates(Eigen::MatrixXd::Identity(n,n));
+    require((j.transpose()*j-f.transpose()*f).norm()<2e-12 &&
+                (j*ji-Eigen::MatrixXd::Identity(n,n)).norm()<2e-12,
+            "pure-spin CI coordinates are not an isometry");
+    const auto image=action.apply(ji);
+    const auto ci_h=metric.apply_ci_hamiltonian(Eigen::MatrixXd::Identity(n,n));
+    require((ci_h-ji.transpose()*image.hamiltonian).norm()<2e-12,
+            "complete pure-spin CI action changed the restricted Hamiltonian");
   }
 }
 
