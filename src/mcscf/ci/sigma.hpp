@@ -350,6 +350,16 @@ public:
       std::initializer_list<DirectCiStreamedGeneratorRequest> requests,
       bool symmetric_sum=false, bool spin_exchange_reduced=false) const;
 
+  /** @brief Independent left-panel adjoints sharing generated right arguments.
+   * Every left has the same shape. Readers, spectator gathers and signed links
+   * are shared; each returned orbital cotangent remains independent. Only the
+   * small orbital reductions scale with the number of left panels.
+   */
+  std::vector<Eigen::MatrixXd> generator_adjoint_streamed(int beta_begin,
+      std::span<const Eigen::Ref<const Eigen::MatrixXd>> lefts,
+      std::initializer_list<DirectCiStreamedGeneratorRequest> requests,
+      bool symmetric_sum=false, bool spin_exchange_reduced=false) const;
+
   /** @brief Numerical matrices plus referenced links, not exclusively owned bytes. */
   std::size_t dynamic_bytes() const noexcept;
 

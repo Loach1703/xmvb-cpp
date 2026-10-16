@@ -6,6 +6,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -2016,6 +2017,41 @@ void check_streamed_generator_adjoint_requests() {
   require((retained(false) - expected_upper).norm() < 2e-12 &&
               (retained(true) - expected_symmetric).norm() < 2e-12,
           "retained streamed columns differ from oriented generator adjoints");
+  Eigen::MatrixXd other = 0.37 * left;
+  for (int b = 0; b < count; ++b)
+    for (int a = 0; a < n_alpha; ++a)
+      other(a, b) += 0.21 * std::cos(0.23 * (a + 1) * (b + 3));
+  const Eigen::MatrixXd zero_left = Eigen::MatrixXd::Zero(n_alpha, count);
+  const std::array<Eigen::Ref<const Eigen::MatrixXd>, 3> lefts{left, other, zero_left};
+  const auto check_multiple = [&](bool retained_columns, bool symmetric_sum) {
+    const auto images = retained_columns
+        ? action.generator_adjoint_streamed(first,
+            std::span<const Eigen::Ref<const Eigen::MatrixXd>>(lefts),
+            {retained_request(right_a, scale_a, false, true),
+             retained_request(right_b, scale_b, true, false)}, symmetric_sum)
+        : action.generator_adjoint_streamed(first,
+            std::span<const Eigen::Ref<const Eigen::MatrixXd>>(lefts),
+            {request(right_a, scale_a, false, true),
+             request(right_b, scale_b, true, false)}, symmetric_sum);
+    require(images.size() == lefts.size(),
+            "multi-left streamed generator returned the wrong number of cotangents");
+    for (std::size_t i = 0; i < lefts.size(); ++i) {
+      Eigen::MatrixXd padded = Eigen::MatrixXd::Zero(n_alpha, n_beta);
+      padded.middleCols(first, count) = lefts[i];
+      Eigen::MatrixXd expected =
+          scale_a * action.one_body_generator_adjoint(padded, right_a) +
+          scale_b * action.one_body_generator_adjoint(padded, right_b).transpose();
+      if (symmetric_sum) expected = (expected + expected.transpose()).eval();
+      expected.triangularView<Eigen::StrictlyLower>().setZero();
+      require((images[i] - expected).norm() < 2e-12,
+              "multi-left streamed generator differs from independent dense adjoints");
+    }
+    require(images.back().isZero(),
+            "zero left in a multi-left streamed generator produced a cotangent");
+  };
+  for (const bool retained_columns : {false, true})
+    for (const bool symmetric_sum : {false, true})
+      check_multiple(retained_columns, symmetric_sum);
 #ifdef _OPENMP
   Eigen::MatrixXd nested, nested_retained, nested_retained_symmetric;
 #pragma omp parallel num_threads(2)
@@ -2098,6 +2134,7 @@ void check_exchange_reduced_generator() {
         right_b(b,a)=parity*right_b(a,b);
         if (parity<0 && a==b) left(a,b)=right_a(a,b)=right_b(a,b)=0.0;
       }
+    const Eigen::MatrixXd other = (0.37 * left + 0.19 * right_a).eval();
     const auto request=[&](const Eigen::MatrixXd& right,double scale,bool transpose) {
       const auto* carrier=&right;
       xmvb::mcscf::DirectCiTileReader read=[carrier](const std::vector<int>& betas,
@@ -2118,14 +2155,41 @@ void check_exchange_reduced_generator() {
       if (symmetric) expected=(reference+reference.transpose()).eval();
       expected.triangularView<Eigen::StrictlyLower>().setZero();
       Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n,n);
+      std::array<Eigen::MatrixXd,3> multi_result{
+          Eigen::MatrixXd::Zero(n,n), Eigen::MatrixXd::Zero(n,n),
+          Eigen::MatrixXd::Zero(n,n)};
       // Incomplete panels intentionally have no exchange parity themselves.
       for (int first=0;first<u;first+=2) {
         const Eigen::MatrixXd panel=left.middleCols(first,std::min(2,u-first));
         result+=action.generator_adjoint_streamed(first,panel,
             {request(right_a,0.37,false),request(right_b,-0.61,true)},symmetric,true);
+        const Eigen::MatrixXd other_panel=other.middleCols(first,std::min(2,u-first));
+        const Eigen::MatrixXd zero_panel=Eigen::MatrixXd::Zero(u,panel.cols());
+        const std::array<Eigen::Ref<const Eigen::MatrixXd>,3> lefts{
+            panel,other_panel,zero_panel};
+        const auto images=action.generator_adjoint_streamed(first,
+            std::span<const Eigen::Ref<const Eigen::MatrixXd>>(lefts),
+            {request(right_a,0.37,false),request(right_b,-0.61,true)},symmetric,true);
+        require(images.size()==lefts.size(),
+            "exchange-reduced multi-left generator returned the wrong number of cotangents");
+        for (std::size_t i=0;i<images.size();++i) multi_result[i]+=images[i];
       }
       require((result-expected).norm()<3e-12,
           "exchange-reduced panel sum differs from independent two-spin adjoint");
+      for (std::size_t i=0;i<multi_result.size();++i) {
+        Eigen::MatrixXd full_left=Eigen::MatrixXd::Zero(u,u);
+        if (i==0) full_left=left;
+        if (i==1) full_left=other;
+        Eigen::MatrixXd independent=
+            -0.37*action.one_body_generator_adjoint(full_left,right_a)+
+            0.61*action.one_body_generator_adjoint(full_left,right_b).transpose();
+        if (symmetric) independent=(independent+independent.transpose()).eval();
+        independent.triangularView<Eigen::StrictlyLower>().setZero();
+        require((multi_result[i]-independent).norm()<3e-12,
+            "exchange-reduced multi-left panels differ from independent two-spin adjoints");
+      }
+      require(multi_result.back().isZero(),
+          "zero exchange-reduced multi-left panel produced a cotangent");
     }
   }
 }

@@ -863,12 +863,25 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     std::initializer_list<DirectCiStreamedGeneratorRequest> requests,
     bool symmetric_sum, bool spin_exchange_reduced) const {
+  const Eigen::Ref<const Eigen::MatrixXd> lefts[]{left};
+  auto results=generator_adjoint_streamed(first,lefts,requests,symmetric_sum,spin_exchange_reduced);
+  return std::move(results.front());
+}
+
+std::vector<Eigen::MatrixXd> DirectCiSigmaAction::generator_adjoint_streamed(int first,
+    std::span<const Eigen::Ref<const Eigen::MatrixXd>> lefts,
+    std::initializer_list<DirectCiStreamedGeneratorRequest> requests,
+    bool symmetric_sum, bool spin_exchange_reduced) const {
   profiling::ScopedPhase phase(profiling::Phase::CiGeneratorAdjoint);
-  const Eigen::Index cols=left.cols();
+  if (lefts.empty()) throw std::invalid_argument("empty streamed generator panels");
+  const Eigen::Index cols=lefts.front().cols();
   if (first<0 || cols<=0 || cols>n_beta_ || first>n_beta_-cols ||
-      left.rows()!=n_alpha_ || requests.size()==0 ||
+      requests.size()==0 ||
       (spin_exchange_reduced && distinct_beta_))
     throw std::invalid_argument("invalid streamed generator panel");
+  for (const auto& left:lefts)
+    if (left.rows()!=n_alpha_ || left.cols()!=cols)
+      throw std::invalid_argument("incompatible streamed generator panels");
   for (const auto& request:requests)
     if (!request.read || !request.column || !std::isfinite(request.scale))
       throw std::invalid_argument("invalid streamed generator request");
@@ -890,7 +903,9 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
   const int workers=coarse_openmp_thread_count(
       cooperative_openmp_thread_count(),
       static_cast<std::size_t>(n_alpha_)*cols+beta_work);
-  std::vector<Eigen::MatrixXd> partials(workers,Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_));
+  const int n_lefts=static_cast<int>(lefts.size());
+  std::vector<Eigen::MatrixXd> partials(workers*n_lefts,
+      Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_));
   std::vector<Eigen::MatrixXd> values(n_requests);
   struct Event { int source,local,p,q,slot; double sign; };
   std::vector<Event> events;
@@ -914,22 +929,27 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
     // One metadata traversal serves every generated right argument. Tasks
     // only read the completed tiles and own their small orbital reductions.
     const auto alpha_contract=[&](std::ptrdiff_t part) {
-      auto& density=partials[part];
       for (int a=n_alpha_*part/workers;a<n_alpha_*(part+1)/workers;++a) {
-        if ((left.row(a).segment(offset,width).array()==0.0).all()) continue;
-        double diagonal=0;
-        for (int r=0;r<n_requests;++r)
-          diagonal+=requests.begin()[r].scale*
-              left.row(a).segment(offset,width).dot(values[r].row(a));
-        for (const int p:alpha_->occupied(a)) density(p,p)+=diagonal;
+        if (std::all_of(lefts.begin(),lefts.end(),[&](const auto& left) {
+              return (left.row(a).segment(offset,width).array()==0.0).all();
+            })) continue;
+        for (int l=0;l<n_lefts;++l) {
+          auto& density=partials[l*workers+part];
+          double diagonal=0;
+          for (int r=0;r<n_requests;++r)
+            diagonal+=requests.begin()[r].scale*
+                lefts[l].row(a).segment(offset,width).dot(values[r].row(a));
+          for (const int p:alpha_->occupied(a)) density(p,p)+=diagonal;
+        }
         for (const auto& link:alpha_->singles(a)) {
           for (int r=0;r<n_requests;++r) {
             const auto& request=requests.begin()[r];
             const int p=request.transpose ? link.annihilated:link.created;
             const int q=request.transpose ? link.created:link.annihilated;
             if (!symmetric_sum && p>q) continue;
-            density(p,q)+=request.scale*link.sign*
-                left.row(a).segment(offset,width).dot(values[r].row(link.source));
+            for (int l=0;l<n_lefts;++l)
+              partials[l*workers+part](p,q)+=request.scale*link.sign*
+                  lefts[l].row(a).segment(offset,width).dot(values[r].row(link.source));
           }
         }
       }
@@ -945,12 +965,16 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
     events.clear();
     for (int local=0;local<width;++local) {
       const int b=first+offset+local;
-      if ((left.col(offset+local).array()==0.0).all()) continue;
-      double diagonal=0;
-      for (int r=0;r<n_requests;++r)
-        diagonal+=requests.begin()[r].scale*
-            left.col(offset+local).dot(values[r].col(local));
-      for (const int p:graph.occupied(b)) partials[0](p,p)+=diagonal;
+      if (std::all_of(lefts.begin(),lefts.end(),[&](const auto& left) {
+            return (left.col(offset+local).array()==0.0).all();
+          })) continue;
+      for (int l=0;l<n_lefts;++l) {
+        double diagonal=0;
+        for (int r=0;r<n_requests;++r)
+          diagonal+=requests.begin()[r].scale*
+              lefts[l].col(offset+local).dot(values[r].col(local));
+        for (const int p:graph.occupied(b)) partials[l*workers](p,p)+=diagonal;
+      }
       for (const auto& link:graph.singles(b)) {
         const bool used=symmetric_sum || std::any_of(requests.begin(),requests.end(),
             [&](const DirectCiStreamedGeneratorRequest& request) {
@@ -998,45 +1022,49 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
         }
       cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
         if (begin==0) alpha_contract(part);
-        auto& density=partials[part];
         const std::size_t count=end-begin;
         const std::size_t base=count/workers,extra=count%workers;
         const std::size_t lo=begin+part*base+std::min<std::size_t>(part,extra);
         const std::size_t hi=lo+base+(static_cast<std::size_t>(part)<extra);
         for (std::size_t i=lo;i<hi;++i) {
           const auto& e=events[i];
-          const double* target=left.col(e.local).data();
           for (int r=0;r<n_requests;++r) {
             const auto& request=requests.begin()[r];
             const int p=request.transpose ? e.q:e.p;
             const int q=request.transpose ? e.p:e.q;
             if (!symmetric_sum && p>q) continue;
             const auto& right=gathered[r][e.slot].view;
-            double moment=0;
-            if (right.rows) {
+            for (int l=0;l<n_lefts;++l) {
+              const double* target=lefts[l].col(e.local).data();
+              double moment=0;
+              if (right.rows) {
 #pragma omp simd reduction(+:moment)
-              for (int a=0;a<right.count;++a)
-                moment+=target[right.rows[a]]*right.values[a];
-            } else {
+                for (int a=0;a<right.count;++a)
+                  moment+=target[right.rows[a]]*right.values[a];
+              } else {
 #pragma omp simd reduction(+:moment)
-              for (int a=0;a<right.count;++a)
-                moment+=target[a]*right.values[a];
+                for (int a=0;a<right.count;++a)
+                  moment+=target[a]*right.values[a];
+              }
+              partials[l*workers+part](p,q)+=request.scale*e.sign*moment;
             }
-            density(p,q)+=request.scale*e.sign*moment;
           }
         }
       });
       begin=end;
     }
   }
-  Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_);
-  for (const auto& density:partials) result+=density;
-  if (spin_exchange_reduced) result*=2.0;
-  if (symmetric_sum) {
-    result=(result+result.transpose()).eval();
-    result.triangularView<Eigen::StrictlyLower>().setZero();
+  std::vector<Eigen::MatrixXd> results(n_lefts,Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_));
+  for (int l=0;l<n_lefts;++l) {
+    auto& result=results[l];
+    for (int part=0;part<workers;++part) result+=partials[l*workers+part];
+    if (spin_exchange_reduced) result*=2.0;
+    if (symmetric_sum) {
+      result=(result+result.transpose()).eval();
+      result.triangularView<Eigen::StrictlyLower>().setZero();
+    }
   }
-  return result;
+  return results;
 }
 
 std::size_t DirectCiSigmaAction::dynamic_bytes() const noexcept {

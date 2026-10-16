@@ -440,9 +440,25 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         ++result.images.tiles.hamiltonian_projections;
         const int first=panel*extent,count=tile.pattern->columns();
         Eigen::MatrixXd images=tile.unpack(n_unique_alpha_);
-        const Eigen::MatrixXd h0=images.leftCols(count);
+        const auto h0=images.leftCols(count);
         if (weight!=0) {
-          if (!tangent || cached)
+          if (joint) {
+            // H*dy and H*q have the same right Y. Their cotangents stay
+            // independent while Y reads and signed spin links are shared.
+            const Eigen::Ref<const Eigen::MatrixXd> lefts[]{
+                images.middleCols((cached ? 0:w-1)*count,count),
+                images.middleCols(q_slot*count,count)};
+            const auto generators=sigma.generator_adjoint_streamed(first,lefts,
+                {{y,y_column,1.0,false,cached}},false,exchange_reduced);
+            result.generator.noalias()+=2*weight*generators[0];
+            ci_sweep->generator.noalias()+=2*weight*generators[1];
+            if (!cached) {
+              result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
+                  first,h0,{{dy,dy_column}},false,exchange_reduced);
+              ci_sweep->generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
+                  first,h0,{{q_reader,q_column}},false,exchange_reduced);
+            }
+          } else if (!tangent || cached)
             result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(first,h0,
                 {{y,y_column,1.0,false,cached}},false,exchange_reduced);
           else {
@@ -460,14 +476,8 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           }
         }
         if (joint) {
-          const Eigen::MatrixXd hq=images.middleCols(q_slot*count,count);
-          if (weight!=0) {
-            ci_sweep->generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
-                first,hq,{{y,y_column,1.0,false,cached}},false,exchange_reduced);
-            if (!cached) ci_sweep->generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
-                first,h0,{{q_reader,q_column}},false,exchange_reduced);
-          }
-          project(panel,hq,ci_sweep->images.hamiltonian.col(state_id));
+          project(panel,images.middleCols(q_slot*count,count),
+              ci_sweep->images.hamiltonian.col(state_id));
         }
         if (capture) {
           if (forcing) project(panel,images.middleCols(forcing_slot*count,count),
@@ -604,7 +614,14 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         if (tangent) {
           // D(R,Z)=D(Z,R)^T: both accepted cotangents share the generated
           // Z panel and one spin-link traversal, without unpacking R first.
-          if (cached) result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
+          if (cached && joint) {
+            const Eigen::Ref<const Eigen::MatrixXd> lefts[]{dv,dq};
+            const auto generators=sigma.generator_adjoint_streamed(first,lefts,
+                {{y,y_column,-energy,false,true},{residual_reader,residual_column,1.0,true,true}},
+                false,spin_exchange_parity_!=0);
+            result.generator.noalias()+=2*weight*generators[0];
+            ci_sweep->generator.noalias()+=2*weight*generators[1];
+          } else if (cached) result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
               first,dv,{{y,y_column,-energy,false,true},{residual_reader,residual_column,1.0,true,true}},
               false,spin_exchange_parity_!=0);
           else result.generator.noalias()-=2*weight*energy*
@@ -625,11 +642,8 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         }
       }
       if (joint) {
-        if (weight!=0) {
-          if (cached) ci_sweep->generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
-              first,dq,{{y,y_column,-energy,false,true},{residual_reader,residual_column,1.0,true,true}},
-              false,spin_exchange_parity_!=0);
-          else ci_sweep->generator.noalias()-=2*weight*energy*sigma.generator_adjoint_streamed(
+        if (weight!=0 && !cached) {
+          ci_sweep->generator.noalias()-=2*weight*energy*sigma.generator_adjoint_streamed(
               first,dq,{{y,y_column}},true,spin_exchange_parity_!=0);
         }
         project(panel,dq,ci_sweep->images.overlap.col(state_id));
