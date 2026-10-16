@@ -1,0 +1,5 @@
+run,structures,eigensolver,iterations,orbital_hvp,energy_Eh,scf_seconds,rss_mib
+source-cover-1261730,1,davidson,3,21,-342.941087950298,5.689477,1516.890625
+source-cover-1261730,1,dense,3,21,-342.941087950297,5.776582,1516.0234375
+source-cover-1261730,3,davidson,3,21,-343.040331009664,6.574676,1524.4921875
+source-cover-1261730,3,dense,3,21,-343.040331009666,7.135657,1522.375

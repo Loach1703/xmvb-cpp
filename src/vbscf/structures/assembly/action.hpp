@@ -43,6 +43,8 @@ struct StructureTileWork {
   std::size_t input_resident_bytes = 0, output_resident_bytes = 0;
   std::size_t source_tiles = 0, source_columns = 0, channel_blocks = 0;
   std::size_t source_workspace_bound = 0;
+  /** Generated sigma sweeps that also collect the integral cotangent. */
+  std::size_t integral_adjoint_sweeps = 0;
 };
 
 /** @brief Structure H/S images, each of shape `(n_structures, block_width)`.
@@ -68,6 +70,7 @@ struct StructureResponseSweep {
   StructureActionResult images;
   Eigen::MatrixXd one_electron;
   Eigen::MatrixXd pair_kernel;
+  /** Cholesky-generator cotangent; only its upper triangle is physical. */
   Eigen::MatrixXd generator;
 };
 
@@ -223,8 +226,8 @@ public:
    * @f$HZ-SZ\Lambda+SCM@f$. Equal-weight selected states therefore retain
    * their off-diagonal horizontal-gauge coupling.
    * `coefficient_response` contains columns in this action's selected
-   * structure space. Orbital representation directions,
-   * which need not remain on that support, are supplied separately.
+   * structure space. Orbital representation directions are supplied separately
+   * and need not lie in the selected VB subspace.
    * Coefficient and multiplier directions are independent; either may be null.
    */
   StructureActiveIntegralAdjoint active_integral_adjoint_direction(
@@ -416,6 +419,13 @@ private:
       const mcscf::DirectCiSigmaAction& sigma,
       bool overlap_only = false,
       std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
+  /** @brief One generated product graph for H/M and optional response adjoints. */
+  StructureResponseSweep contract_product_tiles(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,
+      std::size_t workspace_bytes,const StructureAdjointState* accepted = nullptr,
+      bool collect_images = true) const;
   StructureActionResult apply_source_tiles(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
       const ExteriorOrbitalTransform& alpha_transform,
@@ -472,7 +482,7 @@ private:
       const mcscf::DirectCiSigmaAction& sigma) const;
   StructureResponseSweep contract_response(
       const StructureAdjointState& state,
-      const std::function<Eigen::MatrixXd(int)>& coefficients,
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       bool collect_images) const;
   friend class StructureMetricInverse;
   friend class RestrictedMetricInverse;

@@ -1012,6 +1012,126 @@ residual product array is required. Each raw response is generated once
 on $\Omega$ and reused by the spin-factor adjoints and the tiled
 $\Wa^*\Ta^*\Ha Q_i$, $\Wa^*\Ta^*Q_i$ projections.
 
+\subsection{Product-tile response with resident accepted data}
+
+For a broad source graph the generated product order can be cheaper than
+factor-pair moments. Let $R_i=(\Ha-E_i)Y_i$ be the retained accepted residual.
+The transpose identity for real one-body generators is
+\begin{equation}
+ \mathcal D(L,R)=\mathcal D(R,L)\Tr,
+ \qquad (e_{pq})\Tr=e_{qp}.
+\end{equation}
+It rewrites the coefficient-response generator cotangent as
+\begin{equation}
+ \delta\Gamma_i=2\bigl[
+   \mathcal D(\Ha Q_i,Y_i)-E_i\mathcal D(Q_i,Y_i)
+   +\mathcal D(Q_i,R_i)\Tr\bigr].
+ \label{eq:product-response-generator}
+\end{equation}
+Every contraction now has a generated response panel as its left argument
+and a resident accepted array as its right argument. There is no need to
+build a complete $Q_i$, $\Ha Q_i$, or response residual array, nor to
+recompute $\Ha Y_i$. For disjoint beta-column projectors $P_t$, linearity
+gives $\mathcal D(L,R)=\sum_t\mathcal D(P_tL,R)$. The two input-panel
+terms in Eq.~\eqref{eq:product-response-generator} share their signed-link
+traversal; their second term is transposed only \emph{after} its oriented
+contraction. Truncating its lower triangle before transposition would lose
+required upper-triangular information.
+
+The generated Hamiltonian sweep also forms the channel Gram for
+$\mathcal J(Q_i,Y_i)$. Each emitted Hamiltonian panel is consumed both by
+the first term in Eq.~\eqref{eq:product-response-generator} and by the
+exterior/structure adjoint, before its storage is reused. Cache eviction
+may emit partial Hamiltonian panels: linearity of both consumers makes
+this exact without waiting for a complete sigma column. The physical
+Cholesky pullback needs only the upper triangle. By
+Eq.~\eqref{eq:upper-residual-projection}, the first term may therefore
+consume the Hamiltonian image restricted to the generated support $S$.
+This restriction does not assert closure in the selected structure basis.
+For a common exchange parity, the same summed-spin generators commute with
+the exchange projector, so the projected-action representative is sufficient
+for this physical cotangent as well as for the structure image.
+
+For a left panel whose beta columns belong to $B_t$, the two spin contributions
+to an oriented generator cotangent can be contracted as
+\begin{align}
+ \mathcal D^\alpha_{pq}(L,R)&=
+  \sum_{aa'}(e^\alpha_{pq})_{aa'}
+        \sum_{b\in B_t}L_{ab}R_{a'b},\\
+ \mathcal D^\beta_{pq}(L,R)&=
+  \sum_{b\in B_t,b'}(e^\beta_{pq})_{bb'}
+        \sum_aL_{ab}R_{ab'}.
+ \label{eq:spectator-first-generator}
+\end{align}
+The signed-link metadata is visited outside the spectator dot product.
+For $\ell_\sigma$ diagonal and single-replacement links per spin row, its
+traversal work per right-hand side changes from
+\[
+ O\bigl(U_\alpha |B_t|(\ell_\alpha+\ell_\beta)\bigr)
+ \quad\text{to}\quad
+ O\bigl(U_\alpha\ell_\alpha+|B_t|\ell_\beta\bigr).
+\]
+The numerical dot-product work retains the former order; this is a reduction
+of repeated indexing and branching, not a lower orbital power for the entire
+contraction. Beta contributions use contiguous column dots and alpha
+contributions borrow strided row views, with no transposed carrier copy.
+The implementation partitions alpha rows and beta link events separately,
+so even one beta column can share its long spectator contractions across
+the existing OpenMP team. Only orbital-matrix reductions are partition-local.
+Upper-triangle selection is performed after the requested transpose and
+outside the spectator dot. Exact-zero stripes may be skipped, but no
+amplitude threshold or norm-based small-vector rejection is used.
+
+\paragraph{Compact symbolic panels.}
+For a beta panel $B_t$, let
+$S_t=\{(a,b)\in S:b\in B_t\}$.
+The retained input and partial-image panels store only $|S_t|b$
+floating-point values for $b$ simultaneous right-hand sides, together with
+one shared row-index pattern of size $O(|S_t|+|B_t|)$. All entries in this
+pattern are retained, including exact zeros and arbitrarily small values.
+This is symbolic support compression, not numerical sparsification.
+The Slater--Condon gather adds directly into these indexed rows. An ordered
+exterior adjoint temporarily unpacks one bounded panel; it does not unpack
+the complete carrier. Full symbolic support uses implicit row indices.
+Both caches retain their byte limits, and partial-image eviction remains
+linear as above. Shared patterns are held only by resident panels, rather
+than by an additional unbounded support table.
+
+For a complete covalent family with $n=2m$ orbitals and $m$ electrons per
+spin, the generated support obeys the prefix condition
+$N_\alpha(k)+N_\beta(k)\geq k$ for every $k$.
+Its cardinality is
+\begin{equation}
+ |S_{\mathrm{cov}}|=
+ \binom{2m}{m}^{\!2}-\binom{2m}{m+1}^{\!2}.
+ \label{eq:covalent-panel-count}
+\end{equation}
+To count the excluded pairs, reflect both occupation bits,
+$(a_j,b_j)\mapsto(1-b_j,1-a_j)$, up to the first prefix with
+$N_\alpha(k)+N_\beta(k)=k-1$. This maps an excluded pair bijectively to
+two strings with $m+1$ electrons; the inverse reflects up to the first
+prefix excess of one. Any selected covalent subset has support contained
+in this set. Thus the complete-covalent upper bounds for 12 and 14 orbitals
+are 226512 and 2760615 stored coordinates, respectively, rather than
+853776 and 11778624 complete-product coordinates. This bound does not
+apply to arbitrary ionic selections: their own generated support determines
+the retained count, and the same bounded-cache algorithm still applies.
+
+Cache misses may occur inside the persistent sigma parallel region.
+The ordered exterior kernels therefore share its existing workers through
+disjoint-column or disjoint-row tasks, instead of opening a nested parallel
+region that executes serially. Each task borrows the same panel; there is
+no per-worker floating-point carrier. This changes scheduling, not the
+order of elementary shears acting on any coefficient.
+
+Accepted arrays $Y_i$ and $R_i$ are borrowed, not copied. Removing their
+storage is a separate migration of accepted and orbital-direction consumers;
+the present identities remove the additional \emph{response} carriers.
+Original-support incidence/value buffers, bounded column caches, small
+orbital reductions and the active-integral cotangent have separate storage
+costs. In particular, a touched-support buffer is not a guarantee of
+subquadratic memory if the original support itself fills the product grid.
+
 For positive state weights $w_i$ the contributions above are summed with $w_i$.
 The separate overlap-multiplier term is
 \begin{equation}
@@ -1253,11 +1373,14 @@ maps and Slater--Condon links without allocating numerical pair tables or
 product amplitudes. It must occur in the production entries, not only in
 selected-space test fixtures.
 
-Fixed-point structure Hamiltonian/overlap actions use the common factor
-sweep. Accepted-state integral gradients choose between the exact factor and
+Fixed-point structure Hamiltonian/overlap actions choose between the common
+factor sweep and generated product tiles. Accepted-state integral gradients
+choose between the exact factor and
 product contractions by their arithmetic costs. Raw state coefficients are
-retained in structure space. Broad product-order states and their
-generator-response consumers still require migration. Directional
+retained in structure space. Broad product-order states retain accepted
+orthogonal/residual arrays, but their coefficient-response consumers now use
+Eq.~\eqref{eq:product-response-generator} and compact symbolic panels.
+Accepted and orbital-direction producers still require migration. Directional
 integral adjoints use Eq.~\eqref{eq:factor-adjoint-tangent} when the factor
 order has less estimated arithmetic. A selected-space eigenvector need not be
 stationary on the full carrier: its residual contribution to the

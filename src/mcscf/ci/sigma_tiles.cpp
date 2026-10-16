@@ -384,20 +384,21 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
           // Evaluate E^T K E directly in the caller's output panel. The callback
           // owns panel lifetimes and schedules disjoint beta/RHS/alpha ranges.
           const DirectCiColumnAccumulator accumulate = [&](int source, int v,
-              int first, int last, double* destination, const std::uint8_t* allowed) {
-            // Trim structural zeros once, before visiting any beta edge.
-            // A completely unsupported stripe has no adjoint work at all.
-            if (allowed) {
-              while (first < last && !allowed[halo[first]]) ++first;
-              while (first < last && !allowed[halo[last - 1]]) --last;
-              if (first == last) return;
+              int first,int last,double* destination,const int* rows,int n_rows) {
+            if (first==last) return;
+            int begin=first,end=last;
+            if (rows) {
+              begin=std::lower_bound(rows,rows+n_rows,halo[first])-rows;
+              end=std::upper_bound(rows+begin,rows+n_rows,halo[last-1])-rows;
+              if (begin==end) return;
             }
             const int same = same_group[source];
             if (same >= 0) {
               const int* index = target_index.data() + static_cast<std::size_t>(same) * n_halo;
-              for (int local = first; local < last; ++local) {
-                const int a = halo[local];
-                if (allowed && !allowed[a]) continue;
+              for (int i=begin;i<end;++i) {
+                const int a=rows ? rows[i]:halo[i];
+                const int local=rows ? halo_index[a]:i;
+                if (local<first || local>=last) continue;
                 double sum = 0;
                 if (index[local] >= 0) {
                   const int row = v * count + index[local];
@@ -413,7 +414,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
                   if (target >= 0)
                     sum += links.signs[link] * transformed(v * count + target, links.pairs[link]);
                 }
-                destination[a] += sum;
+                destination[rows ? i:a] += sum;
               }
             }
             // One beta edge fixes the channel, sign and target-row map for
@@ -424,10 +425,13 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
               const double* values = transformed.data() +
                   static_cast<std::size_t>(v) * count * pairs + link.pair;
               const double sign = link.sign;
-              for (int local = first; local < last; ++local) {
-                const int a = halo[local], target = index[local];
-                if (target >= 0 && (!allowed || allowed[a]))
-                  destination[a] += sign * values[static_cast<std::size_t>(target) * pairs];
+              for (int i=begin;i<end;++i) {
+                const int a=rows ? rows[i]:halo[i];
+                const int local=rows ? halo_index[a]:i;
+                if (local<first || local>=last) continue;
+                const int target=index[local];
+                if (target>=0)
+                  destination[rows ? i:a]+=sign*values[static_cast<std::size_t>(target)*pairs];
               }
             }
           };

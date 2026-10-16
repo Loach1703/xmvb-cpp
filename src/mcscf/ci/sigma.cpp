@@ -783,7 +783,6 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::pullback_channel_kernel(
 Eigen::MatrixXd DirectCiSigmaAction::one_body_generator_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     const Eigen::Ref<const Eigen::MatrixXd>& right) const {
-  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiGeneratorAdjoint);
   if (left.rows() != n_alpha_ || right.rows() != n_alpha_ ||
       left.cols() <= 0 || left.cols() != right.cols() ||
       left.cols() % n_beta_ != 0 || !left.allFinite() ||
@@ -791,61 +790,94 @@ Eigen::MatrixXd DirectCiSigmaAction::one_body_generator_adjoint(
     throw std::invalid_argument(
         "direct-CI generator-adjoint blocks have incompatible dimensions");
   }
+  return generator_adjoint_columns(0,n_beta_,left,{{right,1.0,false}});
+}
 
-  const int block_width = static_cast<int>(left.cols()) / n_beta_;
+Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_columns(
+    int beta_begin,int beta_count,const Eigen::Ref<const Eigen::MatrixXd>& left,
+    std::initializer_list<DirectCiGeneratorAdjointRequest> requests,bool upper_only) const {
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiGeneratorAdjoint);
+  if (beta_begin<0 || beta_count<=0 || beta_begin+beta_count>n_beta_ ||
+      left.rows()!=n_alpha_ || left.cols()<=0 || left.cols()%beta_count || requests.size()==0)
+    throw std::invalid_argument("invalid generator-adjoint column panel");
+  const int block_width=left.cols()/beta_count;
+  for (const auto& request:requests)
+    if (request.right.rows()!=n_alpha_ || request.right.cols()!=block_width*n_beta_)
+      throw std::invalid_argument("invalid generator-adjoint right carrier");
   const SpinConnections& beta_graph = beta_connections();
-  const int work_items = block_width * n_alpha_ * n_beta_;
+  // Partition beta link events, not only beta columns: a narrow panel must
+  // still distribute its long contiguous spectator dots across the team.
+  std::vector<std::size_t> beta_offsets(beta_count+1,0);
+  for (int b=0;b<beta_count;++b)
+    beta_offsets[b+1]=beta_offsets[b]+1+beta_graph.singles[beta_begin+b].size();
+  const std::size_t work_items=block_width*(n_alpha_+beta_offsets.back());
+  bool in_team=false;
+  int team=1;
+#ifdef _OPENMP
+  in_team=omp_in_parallel();
+  if (in_team) team=omp_get_num_threads();
+#endif
   const int n_threads = coarse_openmp_thread_count(
-      effective_openmp_thread_count(), static_cast<std::size_t>(work_items));
+      in_team ? team : effective_openmp_thread_count(), static_cast<std::size_t>(work_items));
   std::vector<Eigen::MatrixXd> partials(
       n_threads,
       Eigen::MatrixXd::Zero(n_orbitals_, n_orbitals_));
 
-#pragma omp parallel if(n_threads > 1) num_threads(n_threads)
-  {
-    int thread = 0;
-#ifdef _OPENMP
-    thread = omp_get_thread_num();
-#endif
-    Eigen::MatrixXd& density = partials[thread];
-
-#pragma omp for schedule(static)
-    for (int work = 0; work < work_items; ++work) {
-      const int beta = work % n_beta_;
-      const int alpha = (work / n_beta_) % n_alpha_;
-      const int block = work / (n_alpha_ * n_beta_);
-      const int column = block * n_beta_ + beta;
-      const double left_value = left(alpha, column);
-      if (left_value == 0.0) {
-        continue;
-      }
-      const double diagonal_weight =
-          left_value * right(alpha, column);
-      for (const int orbital : alpha_->occupied[alpha]) {
-        density(orbital, orbital) += diagonal_weight;
-      }
-      for (const int orbital : beta_graph.occupied[beta]) {
-        density(orbital, orbital) += diagonal_weight;
-      }
-      const DensityConnections& alpha_singles = alpha_->singles[alpha];
-      for (std::size_t link = 0; link < alpha_singles.size(); ++link) {
-        density(
-            alpha_singles.annihilated_orbitals[link],
-            alpha_singles.created_orbitals[link]) +=
-            left_value * right(alpha_singles.sources[link], column) *
-            alpha_singles.signs[link];
-      }
-      const DensityConnections& beta_singles = beta_graph.singles[beta];
-      for (std::size_t link = 0; link < beta_singles.size(); ++link) {
-        density(
-            beta_singles.annihilated_orbitals[link],
-            beta_singles.created_orbitals[link]) +=
-            left_value * right(
-                alpha,
-                block * n_beta_ + beta_singles.sources[link]) *
-            beta_singles.signs[link];
-      }
-    }
+  const auto accumulate=[&](int part) {
+    Eigen::MatrixXd& density=partials[part];
+    const auto consume=[&](bool beta,const SpinConnections& graph,int rows) {
+      const std::size_t units=beta ? beta_offsets.back():static_cast<std::size_t>(rows);
+      const std::size_t base=units/n_threads,extra=units%n_threads;
+      const std::size_t first_unit=part*base+std::min<std::size_t>(part,extra);
+      const std::size_t last_unit=first_unit+base+(static_cast<std::size_t>(part)<extra);
+      if (first_unit==last_unit) return;
+      const int first=beta ? std::upper_bound(beta_offsets.begin(),beta_offsets.end(),first_unit)-
+          beta_offsets.begin()-1:static_cast<int>(first_unit);
+      const int last=beta ? std::lower_bound(beta_offsets.begin(),beta_offsets.end(),last_unit)-
+          beta_offsets.begin():static_cast<int>(last_unit);
+      for (int block=0;block<block_width;++block)
+        for (int local=first;local<last;++local) {
+          const int target=local+(beta ? beta_begin:0);
+          const auto& links=graph.singles[target];
+          const std::size_t begin=beta ? std::max(first_unit,beta_offsets[local])-beta_offsets[local]:0;
+          const std::size_t end=beta ? std::min(last_unit,beta_offsets[local+1])-beta_offsets[local]:
+              links.size()+1;
+          if (beta ? (left.col(block*beta_count+local).array()==0.0).all() :
+              (left.row(target).segment(block*beta_count,beta_count).array()==0.0).all()) continue;
+          const auto moment=[&](int source,const DirectCiGeneratorAdjointRequest& request) {
+            // Contract the spectator spin before revisiting any excitation
+            // metadata. Beta moments are contiguous column dots; alpha moments
+            // borrow strided row views, without transposed carrier copies.
+            if (beta) return left.col(block*beta_count+local).dot(
+                request.right.col(block*n_beta_+source));
+            return left.row(target).segment(block*beta_count,beta_count).dot(
+                request.right.row(source).segment(block*n_beta_+beta_begin,beta_count));
+          };
+          if (begin==0 && !graph.occupied[target].empty()) {
+            double diagonal=0;
+            for (const auto& request:requests) diagonal+=request.scale*moment(target,request);
+            for (const int orbital:graph.occupied[target]) density(orbital,orbital)+=diagonal;
+          }
+          for (std::size_t link=begin>0 ? begin-1:0;link+1<end;++link)
+            for (const auto& request:requests) {
+              const int p=links.created_orbitals[link],q=links.annihilated_orbitals[link];
+              const int row=request.transpose ? q:p,column=request.transpose ? p:q;
+              if (upper_only && row>column) continue;
+              density(row,column)+=request.scale*links.signs[link]*moment(links.sources[link],request);
+            }
+        }
+    };
+    consume(false,*alpha_,n_alpha_);
+    consume(true,beta_graph,beta_count);
+  };
+  // Consume evicted output tiles in the existing sigma team. Stable logical
+  // partitions own only n_orbital-square reductions, independent of scheduling.
+  if (in_team) {
+#pragma omp taskloop num_tasks(n_threads) shared(accumulate)
+    for (int part=0;part<n_threads;++part) accumulate(part);
+  } else {
+#pragma omp parallel for schedule(static) if(n_threads>1) num_threads(n_threads)
+    for (int part=0;part<n_threads;++part) accumulate(part);
   }
 
   Eigen::MatrixXd result = Eigen::MatrixXd::Zero(
@@ -853,10 +885,7 @@ Eigen::MatrixXd DirectCiSigmaAction::one_body_generator_adjoint(
   for (const Eigen::MatrixXd& partial : partials) {
     result += partial;
   }
-  // The determinant Hamiltonian stores a one-body element for the
-  // source-orbital/target-orbital pair. An orbital generator instead carries
-  // the target/source convention in `E(kappa)`, hence the transpose.
-  return result.transpose();
+  return result;
 }
 
 std::size_t DirectCiSigmaAction::dynamic_bytes() const noexcept {

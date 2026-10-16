@@ -32,6 +32,35 @@ inline int effective_openmp_thread_count() {
 #endif
 }
 
+/** @brief Available workers for shared-buffer tasks, including an existing team. */
+inline int cooperative_openmp_thread_count() {
+#ifdef _OPENMP
+  if (omp_in_parallel()) return omp_get_num_threads();
+#endif
+  return effective_openmp_thread_count();
+}
+
+/** @brief Independent work sharing caller-owned buffers, without a nested team.
+ * The callback must not throw and all tasks finish before returning. Its
+ * lifetime is borrowed: no coefficient matrix is firstprivate-copied.
+ */
+template<class Function>
+void cooperative_openmp_for(std::ptrdiff_t count,int workers,Function&& action) {
+  if (workers<=1) {
+    for (std::ptrdiff_t i=0;i<count;++i) action(i);
+    return;
+  }
+#ifdef _OPENMP
+  if (omp_in_parallel()) {
+#pragma omp taskloop num_tasks(workers) shared(action)
+    for (std::ptrdiff_t i=0;i<count;++i) action(i);
+    return;
+  }
+#endif
+#pragma omp parallel for schedule(static) num_threads(workers)
+  for (std::ptrdiff_t i=0;i<count;++i) action(i);
+}
+
 /**
  * @brief Bounds a requested worker count without narrowing the work size.
  *

@@ -25,7 +25,7 @@ export LD_LIBRARY_PATH="$deps/lib:${LD_LIBRARY_PATH:-}"
 hostname > "$artifact/node.txt"
 lscpu > "$artifact/cpu.txt"
 module list > "$artifact/modules.txt" 2>&1
-env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|SLURM_CPUS_PER_TASK=)' > "$artifact/environment.txt"
+env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|XMVB_PHASE_TIMING=|SLURM_CPUS_PER_TASK=)' > "$artifact/environment.txt"
 cmake -S "$source_dir" -B "$source_dir/build" > "$artifact/configure.log" 2>&1
 cmake --build "$source_dir/build" --target test_ci_factors test_structure_tiles test_orthogonal_direct_ci \
  test_coupled_structure test_product_frontier test_representation_overlap test_ci_transport \
@@ -35,11 +35,13 @@ sha256sum "$source_dir/build/src/test_structure_tiles" > "$artifact/binary.sha25
 sha256sum "$source_dir/build/src/test_ci_factors" >> "$artifact/binary.sha256"
 sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_tiles.cpp,sources.cpp,sources.hpp,action.cpp} \
  "$source_dir/tests/vbscf/unit/test_structure_tiles.cpp" > "$artifact/sources.sha256"
-sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_response.cpp,source_direction.cpp,source_image.cpp,action.hpp} >> "$artifact/sources.sha256"
+sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_response.cpp,source_direction.cpp,source_image.cpp,orthogonal_tiles.cpp,column_tiles.hpp,action.hpp} >> "$artifact/sources.sha256"
 sha256sum "$source_dir/src/vbscf/derivatives/gradient/active_space/evaluator.cpp" \
  "$source_dir/src/vbscf/derivatives/hessian/exact/apply.cpp" \
  "$source_dir/src/vbscf/determinants/pairs/same_spin_cache.cpp" >> "$artifact/sources.sha256"
 sha256sum "$source_dir/src/core/"{eigen_response.cpp,eigen_response.hpp} \
+ "$source_dir/src/core/openmp.hpp" \
+ "$source_dir/src/vbscf/structures/orthogonal_ci/exterior_transform.cpp" \
  "$source_dir/src/vbscf/derivatives/hessian/coupled/"{coupling.cpp,coupling.hpp} \
  "$source_dir/src/vbscf/derivatives/hessian/exact/"{operator.cpp,operator.hpp,state_internal.hpp} \
  "$source_dir/tests/vbscf/unit/test_keyframe.cpp" >> "$artifact/sources.sha256"
@@ -161,6 +163,15 @@ if [[ ${1:-} == --responses ]]; then
  if [[ -n ${2:-} ]]; then
   bash "$source_dir/tests/mcscf/factor_gradient.sbatch" "$2"
  fi
+ exit 0
+fi
+if [[ ${1:-} == --product-response14 ]]; then
+ for suffix in '' '-reference'; do
+  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
+   /usr/bin/time -v -o "$artifact/132-structure-response14$suffix.time" \
+   "$source_dir/build/src/test_structure_tiles" --structure-response14-once"$suffix" 132 \
+   > "$artifact/132-structure-response14$suffix.out" 2> "$artifact/132-structure-response14$suffix.err"
+ done
  exit 0
 fi
 if [[ ${1:-} == --generator16 ]]; then

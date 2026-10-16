@@ -17,12 +17,13 @@ class ProductSupport;
 
 /** @brief Add one adjoint column range directly to a caller-owned spin column.
  * Arguments are local beta, RHS, first/last indices into alpha_rows, and a
- * destination indexed by the original alpha string, and an optional exact
- * support mask in that same indexing. A null mask requests all rows.
+ * destination, and its optional sorted original alpha indices and count.
+ * A null index pointer uses dense original-alpha indexing; otherwise values
+ * are accumulated directly into the compact selected row list.
  * Disjoint ranges may run concurrently; the callback must complete before
  * the batch is released.
  */
-using DirectCiColumnAccumulator = std::function<void(int, int, int, int, double*, const std::uint8_t*)>;
+using DirectCiColumnAccumulator = std::function<void(int,int,int,int,double*,const int*,int)>;
 
 /** @brief Generated coefficient slab and immediately consumed sigma-column callbacks. */
 using DirectCiTileReader = std::function<void(const std::vector<int>&,
@@ -47,6 +48,13 @@ struct DirectCiGeneratorRequest {
   Eigen::Ref<const Eigen::MatrixXd> coefficients;
   Eigen::Ref<const Eigen::MatrixXd> generator;
   Eigen::MatrixXd* result;
+};
+
+/** @brief Resident right argument of a column-panel generator contraction. */
+struct DirectCiGeneratorAdjointRequest {
+  Eigen::Ref<const Eigen::MatrixXd> right;
+  double scale = 1.0;
+  bool transpose = false;
 };
 
 /**
@@ -229,6 +237,17 @@ public:
   Eigen::MatrixXd one_body_generator_adjoint(
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       const Eigen::Ref<const Eigen::MatrixXd>& right) const;
+
+  /** @brief Sum oriented generator adjoints from a bounded left beta panel.
+   * Left packs beta_count columns per RHS; right arguments pack the full beta
+   * range per RHS. Each request contributes scale*D(left,right), or its
+   * transpose. Multiple requests share the signed-link traversal. Only small
+   * orbital matrices are thread-local; no coefficient matrix is copied.
+   * upper_only restricts the final cotangent, after each requested transpose.
+   */
+  Eigen::MatrixXd generator_adjoint_columns(int beta_begin,int beta_count,
+      const Eigen::Ref<const Eigen::MatrixXd>& left,
+      std::initializer_list<DirectCiGeneratorAdjointRequest> requests,bool upper_only=false) const;
 
   /** @brief Numerical matrices plus referenced links, not exclusively owned bytes. */
   std::size_t dynamic_bytes() const noexcept;

@@ -124,22 +124,31 @@ def responses(artifacts, output):
                 continue
             count, n = map(int, case.groups())
             native = values(path)
-            reference = values(artifact / f"{count}-structure-response{n}-reference.out")
+            reference_path = artifact / f"{count}-structure-response{n}-reference.out"
+            reference = values(reference_path) if reference_path.exists() else {}
+            checked = int(reference.get("reference_checked",0))
             rows.append(dict(
                 run=artifact.name, orbitals=n, structures=count,
                 node=(artifact / "node.txt").read_text().strip(),
                 order="source" if int(native["source_columns"]) else "product",
                 cold_seconds=float(native["cold_response_seconds"]),
-                warm_seconds=float(native["warm_response_seconds"]),
+                warm_seconds=float(native["warm_response_seconds"]) if "warm_response_seconds" in native else None,
+                single_sweep=int(native.get("single_sweep",0)),
+                input_cache_bytes=native.get("input_resident_bytes"),
+                output_cache_bytes=native.get("output_resident_bytes"),
+                input_panels=native.get("input_panels"),
+                input_evictions=native.get("input_evictions"),
+                output_evictions=native.get("output_evictions"),
+                integral_adjoint_sweeps=native.get("integral_adjoint_sweeps"),
                 rss_mib=float(native["native_max_rss_kib"])/1024,
                 prepare_seconds=float(native["prepare_seconds"]),
                 source_columns=int(native["source_columns"]),
                 source_workspace_bound=int(native["source_workspace_bound"]),
                 checksum=float(native["checksum"]),
-                reference_checked=int(reference["reference_checked"]),
-                reference_adjoint_only_seconds=float(reference["reference_adjoint_only_seconds"]),
-                image_error=float(reference["image_error"]),
-                adjoint_error=float(reference["adjoint_error"])))
+                reference_checked=checked,
+                reference_adjoint_only_seconds=float(reference["reference_adjoint_only_seconds"]) if checked else None,
+                image_error=float(reference["image_error"]) if checked else None,
+                adjoint_error=float(reference["adjoint_error"]) if checked else None))
     rows.sort(key=lambda row: (row["run"], row["orbitals"], row["structures"]))
     save(output, rows)
 

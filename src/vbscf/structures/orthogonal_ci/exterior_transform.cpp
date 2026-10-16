@@ -273,9 +273,8 @@ void ExteriorOrbitalTransform::apply_adjoint_left_block(
     throw std::invalid_argument("invalid exterior projection block");
   profiling::ScopedPhase phase(profiling::Phase::CiTransformLeft);
   const int workers = bounded_openmp_thread_count(
-      coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients.size()), coefficients.cols());
-#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
-  for (Eigen::Index column = 0; column < coefficients.cols(); ++column) {
+      coarse_openmp_thread_count(cooperative_openmp_thread_count(), coefficients.size()), coefficients.cols());
+  cooperative_openmp_for(coefficients.cols(),workers,[&](std::ptrdiff_t column) {
     auto values = coefficients.col(column);
     for (int i = static_cast<int>(shears_.size()) - 1; i >= 0; --i) {
       const auto& shear = shears_[i];
@@ -285,7 +284,7 @@ void ExteriorOrbitalTransform::apply_adjoint_left_block(
       }
     }
     values.array() *= determinant_scales_.array();
-  }
+  });
 }
 
 void ExteriorOrbitalTransform::apply_supported_left(
@@ -294,14 +293,14 @@ void ExteriorOrbitalTransform::apply_supported_left(
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiTransformLeft);
   validate_left(*coefficients);
   const int workers = bounded_openmp_thread_count(
-      coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients->size()),
+      coarse_openmp_thread_count(cooperative_openmp_thread_count(), coefficients->size()),
       coefficients->cols());
   const int n_shears = static_cast<int>(shears_.size());
-#pragma omp parallel if(workers > 1) num_threads(workers)
-  {
+  cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
     std::vector<std::uint8_t> allowed(dimension());
-#pragma omp for schedule(static)
-    for (Eigen::Index column = 0; column < coefficients->cols(); ++column) {
+    const Eigen::Index first=coefficients->cols()*part/workers;
+    const Eigen::Index last=coefficients->cols()*(part+1)/workers;
+    for (Eigen::Index column=first;column<last;++column) {
       auto values = coefficients->col(column);
       const int beta = beta_begin + column % beta_count;
       std::fill(allowed.begin(), allowed.end(), 0);
@@ -326,7 +325,7 @@ void ExteriorOrbitalTransform::apply_supported_left(
         for (int alpha = 0; alpha < dimension(); ++alpha)
           if (allowed[alpha]) values[alpha] *= determinant_scales_[alpha];
     }
-  }
+  });
 }
 
 void ExteriorOrbitalTransform::apply_adjoint_right(
@@ -452,12 +451,11 @@ void ExteriorOrbitalTransform::transform_left(
   const bool reverse = adjoint != inverse;
   const int n_shears = static_cast<int>(shears_.size());
   const int workers = bounded_openmp_thread_count(
-      coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients.size()),
+      coarse_openmp_thread_count(cooperative_openmp_thread_count(), coefficients.size()),
       coefficients.cols());
   // A column is an independent vector. Keep it resident while applying the
   // complete ordered product, rather than streaming strided rows per shear.
-#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
-  for (Eigen::Index column = 0; column < coefficients.cols(); ++column) {
+  cooperative_openmp_for(coefficients.cols(),workers,[&](std::ptrdiff_t column) {
     auto values = coefficients.col(column);
     if (!reverse) {
       if (inverse) values.array() /= determinant_scales_.array();
@@ -476,7 +474,7 @@ void ExteriorOrbitalTransform::transform_left(
       if (inverse) values.array() /= determinant_scales_.array();
       else values.array() *= determinant_scales_.array();
     }
-  }
+  });
 }
 
 void ExteriorOrbitalTransform::transform_right(
@@ -485,12 +483,11 @@ void ExteriorOrbitalTransform::transform_right(
   const bool reverse = adjoint != inverse;
   const int n_shears = static_cast<int>(shears_.size());
   const int workers = bounded_openmp_thread_count(
-      coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients.size()),
+      coarse_openmp_thread_count(cooperative_openmp_thread_count(), coefficients.size()),
       coefficients.rows());
   // Workers own disjoint row ranges. Each range executes all shears without
   // intermediate barriers. Column segments stay contiguous for SIMD updates.
-#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
-  for (int part = 0; part < workers; ++part) {
+  cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
     const Eigen::Index first = coefficients.rows() * part / workers;
     const Eigen::Index end = coefficients.rows() * (part + 1) / workers;
     auto values = coefficients.middleRows(first, end - first);
@@ -511,7 +508,7 @@ void ExteriorOrbitalTransform::transform_right(
       if (inverse) values.array().rowwise() /= determinant_scales_.transpose().array();
       else values.array().rowwise() *= determinant_scales_.transpose().array();
     }
-  }
+  });
 }
 
 ExteriorTransformDirection ExteriorOrbitalTransform::direction(
@@ -605,12 +602,11 @@ void ExteriorOrbitalTransform::transform_directional_left(
   validate_left(*coefficients);
   const int n_shears = static_cast<int>(shears_.size());
   const int workers = bounded_openmp_thread_count(
-      coarse_openmp_thread_count(effective_openmp_thread_count(), coefficients->size()),
+      coarse_openmp_thread_count(cooperative_openmp_thread_count(), coefficients->size()),
       coefficients->cols());
   // Different columns are independent. Primal and tangent follow the same
   // ordered shears in one pass, with no thread-local copies or shear barriers.
-#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
-  for (Eigen::Index column = 0; column < coefficients->cols(); ++column) {
+  cooperative_openmp_for(coefficients->cols(),workers,[&](std::ptrdiff_t column) {
     auto value = coefficients->col(column);
     auto delta = tangent->col(column);
     const auto scale = [&]() {
@@ -632,7 +628,7 @@ void ExteriorOrbitalTransform::transform_directional_left(
       }
     }
     if (adjoint) scale();
-  }
+  });
 }
 
 void ExteriorOrbitalTransform::apply_directional_right(

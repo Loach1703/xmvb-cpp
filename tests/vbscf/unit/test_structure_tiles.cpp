@@ -19,6 +19,7 @@
 #include "mcscf/ci/product_support.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/assembly/column_tiles.hpp"
 #include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
@@ -653,6 +654,11 @@ void check_factor_structure_response(int parity, bool unequal = false) {
       (actual.one_electron-reference.one_electron).norm() < 2e-11 &&
       (actual.pair_kernel-reference.pair_kernel).norm() < 2e-11,
       "source structure response lost residual ordering, parity or multistate gauge");
+  const auto product=action.active_integral_response_adjoint(dense,q,mu);
+  require((product.overlap-reference.overlap).norm()<3e-11 &&
+          (product.one_electron-reference.one_electron).norm()<3e-11 &&
+          (product.pair_kernel-reference.pair_kernel).norm()<3e-11,
+          "product-tile structure response lost an oriented residual or selected-frame multiplier");
   // Coefficients and multipliers are independent linear directions, including
   // off-diagonal state-average multipliers and nonstationary carrier residuals.
   const xmvb::vb::StructureAdjointState* variants[] = {&sparse,&dense};
@@ -710,6 +716,66 @@ void check_factor_structure_response(int parity, bool unequal = false) {
               (reused.one_electron+0.34*base.one_electron-full.one_electron).norm() < 3e-11 &&
               (reused.pair_kernel+0.34*base.pair_kernel-full.pair_kernel).norm() < 3e-11,
               "known coefficient scaling cannot be reused from accepted active adjoints");
+    }
+  }
+}
+
+/** @brief Product response: selected nonclosed spaces, two roots and zero weights. */
+void check_product_response(int parity,bool unequal) {
+  const auto fixture=make_fixture(unequal ? 5:4,2,unequal ? 1:2);
+  Terms terms;
+  Strings alpha,beta;
+  const std::vector<std::pair<int,int>> edges=unequal ?
+      std::vector<std::pair<int,int>>{{0,0},{1,2},{2,4},{4,1},{5,3},{7,0},{9,4}} :
+      std::vector<std::pair<int,int>>{{0,2},{1,4},{3,5},{0,5}};
+  for (int i=0;i<static_cast<int>(edges.size());++i) {
+    const auto [a,b]=edges[i];
+    alpha.push_back(fixture.alpha[a]); beta.push_back(fixture.beta[b]); terms.push_back({{i,0.7}});
+    if (parity) {
+      alpha.push_back(fixture.alpha[b]); beta.push_back(fixture.beta[a]);
+      terms.push_back({{i,0.7*parity}});
+    }
+  }
+  const int ns=edges.size();
+  const auto cache=topology(fixture,alpha,beta);
+  const xmvb::vb::StructureAction action(terms,ns,cache,fixture.overlap,
+      fixture.one_electron,fixture.two_electron,fixture.n,nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const Eigen::MatrixXd c=test_vectors(ns,2),q=0.02*c.array().cos().matrix();
+  const Eigen::MatrixXd mu=(Eigen::Matrix2d()<<0.01,0.02,-0.03,0.005).finished();
+  for (const auto& weights:{std::vector<double>{0.3,0.7},std::vector<double>{1.0,0.0}}) {
+    const auto state=action.prepare_active_adjoint(c,weights,{-1.1,-0.7});
+    Eigen::MatrixXd multipliers=mu;
+    // The zero-weight test requests no gauge coupling to its unprepared root.
+    if (weights.back()==0.0) multipliers.setZero();
+    require(!state.source_factors,"product-response fixture selected source factors");
+    auto sweep=action.apply_response(state,q);
+    require(sweep.images.tiles.input_panels>0 && sweep.images.tiles.integral_adjoint_sweeps>0,
+            "product response bypassed the fused generated sigma/adjoint graph");
+    check_images(sweep.images,reference_images(fixture,terms,alpha,beta,q));
+    const auto actual=action.finish_response(state,std::move(sweep),multipliers);
+    const auto oracle=action.active_integral_adjoint_direction(state,&q,&multipliers,{},{},{},nullptr,false);
+    require((actual.overlap-oracle.overlap).norm()<3e-11 &&
+            (actual.one_electron-oracle.one_electron).norm()<3e-11 &&
+            (actual.pair_kernel-oracle.pair_kernel).norm()<3e-11,
+            "product response differs from the independent complete-carrier differential");
+    const auto adjoint=action.active_integral_response_adjoint(state,q,multipliers);
+    require((actual.overlap-adjoint.overlap).norm()<3e-11 &&
+            (actual.one_electron-adjoint.one_electron).norm()<3e-11 &&
+            (actual.pair_kernel-adjoint.pair_kernel).norm()<3e-11,
+            "disabling structure projection changed the physical response adjoint");
+    if (weights.back()!=0.0) {
+      const Eigen::MatrixXd tiny=1e-180*q;
+      auto scaled=action.apply_response(state,tiny);
+      scaled.images.hamiltonian*=1e180;
+      scaled.images.overlap*=1e180;
+      check_images(scaled.images,reference_images(fixture,terms,alpha,beta,q));
+      const auto small=action.finish_response(state,std::move(scaled),Eigen::MatrixXd::Zero(2,2));
+      const auto pure=action.active_integral_adjoint_direction(state,&q,nullptr,{},{},{},nullptr,false);
+      require((1e180*small.overlap-pure.overlap).norm()<3e-11 &&
+              (1e180*small.one_electron-pure.one_electron).norm()<3e-11 &&
+              (1e180*small.pair_kernel-pure.pair_kernel).norm()<3e-11,
+              "exact-zero pruning discarded a representable tiny linear response");
     }
   }
 }
@@ -903,6 +969,65 @@ void check_mixed_exchange_space() {
   check_images(action.apply_streamed(vectors, 512), reference);
 }
 
+void check_exterior_team() {
+  const auto strings=complete_strings(8,4);
+  Eigen::MatrixXd upper=Eigen::MatrixXd::Identity(8,8),delta=Eigen::MatrixXd::Zero(8,8);
+  for (int j=0;j<8;++j)
+    for (int i=0;i<=j;++i) {
+      upper(i,j)+=0.01*std::sin(i+2*j+1);
+      delta(i,j)=0.03*std::cos(2*i+j+1);
+    }
+  const xmvb::vb::ExteriorOrbitalTransform transform(strings,upper);
+  const auto direction=transform.direction(delta);
+  const int size=strings.size();
+  Eigen::MatrixXd seed(size,size);
+  for (int j=0;j<size;++j)
+    for (int i=0;i<size;++i) seed(i,j)=std::sin(0.2*(i+1)*(j+3));
+  const auto compare=[&](auto operation) {
+    Eigen::MatrixXd reference=seed,actual=seed;
+    operation(reference);
+#pragma omp parallel num_threads(2)
+#pragma omp single
+    operation(actual);
+    require((actual-reference).norm()<1e-13,"exterior action changed inside an existing team");
+  };
+  compare([&](auto& x){transform.apply_left(&x);});
+  compare([&](auto& x){transform.apply_adjoint_left(&x);});
+  compare([&](auto& x){transform.apply_inverse_left(&x);});
+  compare([&](auto& x){transform.apply_inverse_adjoint_left(&x);});
+  compare([&](auto& x){transform.apply_right(&x);});
+  compare([&](auto& x){transform.apply_adjoint_right(&x);});
+  compare([&](auto& x){transform.apply_inverse_right_block(x);});
+  compare([&](auto& x){transform.apply_inverse_adjoint_right_block(x);});
+  const auto projection=transform.projection({0,4,19});
+  compare([&](auto& x){transform.apply_adjoint_left(&x,projection);});
+  const xmvb::mcscf::ProductSupport support(8,transform.occupations(),transform.occupations());
+  compare([&](auto& x){transform.apply_supported_left(&x,support,0,size);});
+  compare([&](auto& x){transform.apply_supported_left(&x,support,0,size,true);});
+  Eigen::MatrixXd x=seed,dx=0.3*seed,y=x,dy=dx;
+  transform.apply_directional_left(direction,&x,&dx);
+#pragma omp parallel num_threads(2)
+#pragma omp single
+  transform.apply_directional_left(direction,&y,&dy);
+  require((x-y).norm()<1e-13 && (dx-dy).norm()<1e-13,"directional exterior team action changed");
+  // A separate transform ensures an actual cache miss inside the team.
+  const xmvb::vb::ExteriorOrbitalTransform fresh(strings,upper);
+  std::shared_ptr<const Eigen::MatrixXd> rows;
+#pragma omp parallel num_threads(2)
+#pragma omp single
+  rows=fresh.row_block(3,7);
+  require((*rows-*transform.row_block(3,7)).norm()<1e-13,"cooperative exterior row generation changed");
+
+  auto pattern=std::make_shared<xmvb::vb::detail::ColumnPattern>();
+  pattern->offsets.resize(4); pattern->offsets<<0,2,2,3;
+  pattern->rows.resize(3); pattern->rows<<0,4,2;
+  Eigen::MatrixXd dense=Eigen::MatrixXd::Zero(5,6);
+  dense(0,0)=1e-180; dense(4,0)=2; dense(2,2)=-3; dense(4,3)=4;
+  auto tile=xmvb::vb::detail::pack_columns(dense,pattern);
+  require(tile.values.rows()==3 && tile.values.cols()==2 &&
+      (tile.unpack(5).array()==dense.array()).all(),"compact columns changed structural zeros or tiny entries");
+}
+
 void check_sigma_columns(const Fixture& fixture, int width) {
   const auto integrals = xmvb::vb::orthogonalize_active_integrals(
       fixture.overlap, fixture.one_electron, fixture.two_electron, fixture.n);
@@ -937,7 +1062,7 @@ void check_sigma_columns(const Fixture& fixture, int width) {
         for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
           for (int vector = 0; vector < width; ++vector)
             accumulate(beta_local, vector, 0, static_cast<int>(alpha_rows.size()),
-                tiled.col(vector * n_beta + betas[beta_local]).data(), nullptr);
+                tiled.col(vector * n_beta + betas[beta_local]).data(), nullptr, 0);
       };
   const auto check_adjoint = [&](const xmvb::mcscf::DirectCiIntegralAdjoint& value,
                                  const xmvb::mcscf::DirectCiIntegralAdjoint& reference) {
@@ -971,6 +1096,40 @@ void check_sigma_columns(const Fixture& fixture, int width) {
   require((tiled-ordinary).norm() < 2e-11*std::max(1.0,ordinary.norm()),
           "state-channel slab reuse corrupted the response sigma");
   check_adjoint(sigma.apply_tiled_with_adjoint(width,read,{},read_right),cross);
+  Eigen::MatrixXd orbital(fixture.n,fixture.n);
+  for (int q=0;q<fixture.n;++q)
+    for (int p=0;p<fixture.n;++p) orbital(p,q)=std::sin(0.29*(p+2)*(q+1));
+  Eigen::MatrixXd panel_generator=Eigen::MatrixXd::Zero(fixture.n,fixture.n);
+  for (int first=0;first<n_beta;first+=3) {
+    const int count=std::min(3,n_beta-first);
+    Eigen::MatrixXd panel(carrier.rows(),width*count);
+    for (int v=0;v<width;++v) panel.middleCols(v*count,count)=carrier.middleCols(v*n_beta+first,count);
+    panel_generator+=sigma.generator_adjoint_columns(first,count,panel,
+        {{right,-0.37,false},{carrier,0.23,true}});
+  }
+  const Eigen::MatrixXd image=-0.37*sigma.apply_one_body_generator(right,orbital)+
+      0.23*sigma.apply_one_body_generator(carrier,orbital.transpose());
+  require(std::abs((panel_generator.array()*orbital.array()).sum()-
+                  (carrier.array()*image.array()).sum())<
+              3e-11*std::max(1.0,carrier.norm()*image.norm()),
+          "column-panel generator requests failed the independent forward-action identity");
+  Eigen::MatrixXd team_generator;
+#pragma omp parallel num_threads(2)
+  {
+#pragma omp single
+    team_generator=sigma.generator_adjoint_columns(0,n_beta,carrier,
+        {{right,-0.37,false},{carrier,0.23,true}});
+  }
+  require((team_generator-panel_generator).norm()<
+              3e-11*std::max(1.0,panel_generator.norm()),
+          "column generator failed inside an existing OpenMP team");
+  const auto upper_generator=sigma.generator_adjoint_columns(0,n_beta,carrier,
+      {{right,-0.37,false},{carrier,0.23,true}},true);
+  Eigen::MatrixXd upper_reference=team_generator;
+  upper_reference.triangularView<Eigen::StrictlyLower>().setZero();
+  require((upper_generator-upper_reference).norm()<
+              3e-11*std::max(1.0,upper_reference.norm()),
+          "upper generator discarded lower information before a requested transpose");
   if (fixture.alpha == fixture.beta) {
     const Eigen::MatrixXd unsymmetrized = carrier;
     for (const int parity : {1, -1}) {
@@ -1008,19 +1167,23 @@ void check_sigma_columns(const Fixture& fixture, int width) {
   }
   if (fixture.n == 5) {
     // Only output is projected; omitted output rows still feed the channels.
-    std::vector<std::uint8_t> mask(carrier.rows());
-    for (int a = 0; a < carrier.rows(); ++a) mask[a] = a % 2 == 0;
+    std::vector<int> selected_rows;
+    for (int a = 0; a < carrier.rows(); a += 2) selected_rows.push_back(a);
+    Eigen::MatrixXd compact = Eigen::MatrixXd::Zero(selected_rows.size(), carrier.cols());
     tiled.setZero();
     sigma.apply_tiled(width, read,
         [&](const std::vector<int>& betas, const std::vector<int>& rows,
             const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
           for (int j = 0; j < static_cast<int>(betas.size()); ++j)
             for (int v = 0; v < width; ++v)
-              accumulate(j, v, 0, rows.size(), tiled.col(v * n_beta + betas[j]).data(), mask.data());
+              accumulate(j, v, 0, rows.size(), compact.col(v * n_beta + betas[j]).data(),
+                  selected_rows.data(), selected_rows.size());
         });
+    for (int i = 0; i < static_cast<int>(selected_rows.size()); ++i)
+      tiled.row(selected_rows[i]) = compact.row(i);
     Eigen::MatrixXd projected = ordinary;
     for (int a = 0; a < carrier.rows(); ++a)
-      if (!mask[a]) projected.row(a).setZero();
+      if (a % 2) projected.row(a).setZero();
     require((tiled - projected).norm() <= 2e-11 * std::max(1.0, projected.norm()),
             "output mask changed the unprojected sigma intermediates");
     bool read_failed = false, write_failed = false;
@@ -1277,7 +1440,7 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
         for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
           for (int v = 0; v < width; ++v)
             accumulate(beta_local, v, 0, static_cast<int>(rows.size()),
-                actual.col(v * nb + betas[beta_local]).data(), nullptr);
+                actual.col(v * nb + betas[beta_local]).data(), nullptr, 0);
       };
   sigma.apply_tiled(width,read,add,&support);
   auto expected = sigma.apply(carrier);
@@ -1626,7 +1789,7 @@ void benchmark_selected12(int selected_count, bool compare_reference,
 }
 
 /** @brief Complete response consumer; native and oracle runs stay separate. */
-void benchmark_structure_response(int n, int selected_count, bool compare_reference) {
+void benchmark_structure_response(int n,int selected_count,bool compare_reference,bool single_sweep=false) {
   require(selected_count == 1 || selected_count == 2 || selected_count == 3 ||
           selected_count == 20 || selected_count == 132,
           "structure-response count must be 1, 2, 3, 20, or 132");
@@ -1654,7 +1817,7 @@ void benchmark_structure_response(int n, int selected_count, bool compare_refere
   const auto prepared = Clock::now();
   auto cold = action.apply_response(accepted,q);
   const auto end_cold = Clock::now();
-  auto warm = action.apply_response(accepted,q);
+  auto warm = single_sweep ? cold : action.apply_response(accepted,q);
   const auto end_warm = Clock::now();
   const auto source_columns = warm.images.tiles.source_columns;
   const auto workspace = warm.images.tiles.source_workspace_bound;
@@ -1675,8 +1838,9 @@ void benchmark_structure_response(int n, int selected_count, bool compare_refere
     image_error = (images.hamiltonian-reference_images.hamiltonian).norm();
     const auto product_state = explicit_product_state(fixture,cache,action,accepted);
     const auto start = Clock::now();
-    // Same-binary product sigma/adjoint consumer, without structure H/M images.
-    const auto reference = action.active_integral_response_adjoint(product_state,q,mu);
+    // Independent complete-carrier differential, not the migrated tile sweep.
+    const auto reference = action.active_integral_adjoint_direction(product_state,
+        &q,&mu,{},{},{},nullptr,false);
     reference_seconds = std::chrono::duration<double>(Clock::now()-start).count();
     adjoint_error = std::max({(gradient.overlap-reference.overlap).norm(),
         (gradient.one_electron-reference.one_electron).norm(),
@@ -1690,10 +1854,17 @@ void benchmark_structure_response(int n, int selected_count, bool compare_refere
             << "case=CAS(" << n << ',' << n << ")_structure_response\nstructures=" << selected_count << '\n'
             << "orbitals=" << n << '\n'
             << "prepare_seconds=" << seconds(begin,prepared) << '\n'
-            << "cold_response_seconds=" << seconds(prepared,end_cold) << '\n'
-            << "warm_response_seconds=" << seconds(end_cold,end_warm) << '\n'
+            << "cold_response_seconds=" << seconds(prepared,end_cold) << '\n';
+  if (!single_sweep) std::cout << "warm_response_seconds=" << seconds(end_cold,end_warm) << '\n';
+  std::cout << "single_sweep=" << single_sweep << '\n'
             << "source_columns=" << source_columns << '\n'
             << "source_workspace_bound=" << workspace << '\n'
+            << "input_resident_bytes=" << images.tiles.input_resident_bytes << '\n'
+            << "output_resident_bytes=" << images.tiles.output_resident_bytes << '\n'
+            << "input_panels=" << images.tiles.input_panels << '\n'
+            << "input_evictions=" << images.tiles.input_evictions << '\n'
+            << "output_evictions=" << images.tiles.output_evictions << '\n'
+            << "integral_adjoint_sweeps=" << images.tiles.integral_adjoint_sweeps << '\n'
             << "checksum=" << images.hamiltonian.sum()+gradient.overlap.sum()+
                 gradient.one_electron.sum()+gradient.pair_kernel.sum() << '\n'
             << "native_max_rss_kib=" << native_rss << '\n'
@@ -1954,7 +2125,7 @@ void benchmark_tile_adjoint(bool oracle) {
           const xmvb::mcscf::DirectCiColumnAccumulator& add) {
         for (int j=0;j<static_cast<int>(betas.size());++j) {
           column.setZero();
-          add(j,0,0,rows.size(),column.data(),nullptr);
+          add(j,0,0,rows.size(),column.data(),nullptr,0);
           for (const int a:rows) energy+=column[a]*coefficient(a,betas[j]);
         }
       },{},&support);
@@ -2254,6 +2425,10 @@ int main(int argc, char** argv) {
       benchmark_structure_response(12,std::stoi(argv[2]),false);
     } else if (argc == 3 && std::string(argv[1]) == "--structure-response12-reference") {
       benchmark_structure_response(12,std::stoi(argv[2]),true);
+    } else if (argc==3 && (std::string(argv[1])=="--structure-response14-once" ||
+                          std::string(argv[1])=="--structure-response14-once-reference")) {
+      benchmark_structure_response(14,std::stoi(argv[2]),
+          std::string(argv[1])=="--structure-response14-once-reference",true);
     } else if (argc == 3 && std::string(argv[1]) == "--structure-response14") {
       benchmark_structure_response(14,std::stoi(argv[2]),false);
     } else if (argc == 3 && std::string(argv[1]) == "--structure-response14-reference") {
@@ -2309,11 +2484,14 @@ int main(int argc, char** argv) {
       check_mixed_source_images();
       for (int parity : {0,1,-1}) check_factor_structure_response(parity);
       check_factor_structure_response(0,true);
+      for (int parity:{0,1,-1}) check_product_response(parity,false);
+      check_product_response(0,true);
       check_factor_accepted_gradient();
       check_factor_accepted_gradient(true);
       check_factor_state_average();
       check_complete_unequal_spin_case();
       check_mixed_exchange_space();
+      check_exterior_team();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
       check_sigma_columns(make_fixture(4, 2, 2), 3);
       check_sigma_columns(make_fixture(10, 5, 4), 2);

@@ -25,8 +25,8 @@ or memory-based admission to a different physical representation is allowed.
   chosen by their own moment/link work rather than the Hamiltonian-channel cost.
 - Product-order `apply_integral_direction()` allocates stacked product arrays for the base
   coefficients, sigma, coefficient direction and overlap direction.
-- Product-order `active_integral_adjoint_direction()` and `contract_response()` still consume
-  those dense carriers for the residual/generator terms. The former now uses
+- Product-order `active_integral_adjoint_direction()` still consumes
+  those dense carriers for the residual/generator terms. It now uses
   exact directional source factors for its integral adjoint when their work is
   smaller. Tiling only the Davidson H/M action is therefore not a
   bounded-memory VBSCF implementation.
@@ -41,7 +41,11 @@ or memory-based admission to a different physical representation is allowed.
   `apply_structure_response_adjoint()` and the gauge/relaxed-response branches
   of `exact/apply.cpp` no longer create a raw selected-state product bundle.
   Source-order consumers expand only original touched support. Product-order
-  consumers expand one state locally, not an upstream multi-state response bundle.
+  consumers generate response columns and consume their sigma/generator adjoints
+  in the same tile sweep, with no full response carrier. Accepted arrays remain
+  resident on this broad-support path. Symbolic-support column panels share row
+  indices across RHSs; their bounded caches retain zeros inside the support but
+  do not store the forbidden rows.
   Pure response adjoints omit unused structure H/M output projection.
 - Without a supplied Davidson diagonal, `StructureAction` still evaluates a
   double loop over the expansion terms of each structure through spin-pair
@@ -208,6 +212,17 @@ full `U * r` factors when a broad support makes those product-sized.
    entries and their derivatives depend only on residuals projected to S.
    Verify and exploit this certificate in the streaming consumer, not a blanket
    projection of general oriented generators or of arbitrary selected VB spaces.
+   Completed for coefficient response: H/M, sigma/adjoint and physical generator
+   pullback share generated panels and reuse accepted Y/R. Compact exact-support
+   rows remove padded-zero cache thrashing without increasing cache budgets.
+   Hanhai22 job1261729 validates a CAS14/14 selected132 response against an
+   independent complete-carrier differential (image1.11e-15, adjoint6.45e-16).
+   Cold response falls293.93 ->3.33 s versus saved1261623, process RSS1661.66
+   ->438.14 MiB; all11 focused tests pass. This is a coefficient-response kernel
+   result, not a complete-SCF speedup. See `product_response.md` and its CSV.
+   Accepted broad-support Y/R and orbital-direction carriers remain the next
+   ownership migration. The single-source factor path's older70 ms record also
+   remains a separate target; this change does not improve every contraction order.
 7. [ ] Validate the complete SCF chain on 240 COV/ION/FULL and selected CAS(12,12)
    spaces, then larger covalent cases. Report convergence, energy, HVP count,
    total wall time and native peak RSS, not only a fixed-point kernel speedup.
