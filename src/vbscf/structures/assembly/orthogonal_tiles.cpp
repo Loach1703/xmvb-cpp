@@ -159,10 +159,11 @@ StructureResponseSweep StructureAction::contract_product_tiles(
                              Eigen::MatrixXd& image, Eigen::MatrixXd& target) {
       // C^T (T_alpha^T image T_beta): only touched original spin products
       // are sampled. This is exact for any selected structure subspace.
-      if (support)
-        alpha_transform.apply_supported_left(&image, *support,
-            panel * extent, rows.rows(), true);
-      else alpha_transform.apply_adjoint_left(&image);
+      const auto pattern=pattern_at(panel);
+      if (pattern->full) alpha_transform.apply_adjoint_left(&image);
+      else alpha_transform.apply_supported_left(&image,
+          {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
+          {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())},true);
 #pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
       for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group) {
         const int alpha = spin_products_[group] / n_unique_beta_;
@@ -195,6 +196,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     std::vector<bool> overlap_consumed(count, !collect_overlap);
     ColumnPanels input(cache_bytes, [&](int panel) -> ColumnTile {
       ++result.tiles.input_panels;
+      const auto pattern=pattern_at(panel);
       const auto row_tile = beta_rows(panel);
       const Eigen::MatrixXd& rows = *row_tile;
       Eigen::MatrixXd values = Eigen::MatrixXd::Zero(n_unique_alpha_, width * rows.rows());
@@ -212,10 +214,10 @@ StructureResponseSweep StructureAction::contract_product_tiles(
           }
         }
       }
-      if (support)
-        alpha_transform.apply_supported_left(&values, *support,
-            panel * extent, rows.rows());
-      else alpha_transform.apply_left(&values);
+      if (pattern->full) alpha_transform.apply_left(&values);
+      else alpha_transform.apply_supported_left(&values,
+          {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
+          {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())});
       if (!overlap_consumed[panel]) {
         ++result.tiles.overlap_projections;
         if (collect_images) {
@@ -224,7 +226,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
         }
         overlap_consumed[panel] = true;
       }
-      return detail::pack_columns(std::move(values),pattern_at(panel));
+      return detail::pack_columns(std::move(values),pattern);
     });
     if (overlap_only) {
       for (const int panel:reachable_panels) input.get(panel);

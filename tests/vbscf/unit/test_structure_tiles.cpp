@@ -1252,8 +1252,32 @@ void check_exterior_team() {
   const auto projection=transform.projection({0,4,19});
   compare([&](auto& x){transform.apply_adjoint_left(&x,projection);});
   const xmvb::mcscf::ProductSupport support(8,transform.occupations(),transform.occupations());
-  compare([&](auto& x){transform.apply_supported_left(&x,support,0,size);});
-  compare([&](auto& x){transform.apply_supported_left(&x,support,0,size,true);});
+  std::vector<int> support_offsets{0}, support_rows;
+  for (int beta=0;beta<size;++beta) {
+    auto cursor=support.column(beta,0);
+    int alpha, emitted_beta;
+    bool in_support;
+    while (cursor.next(alpha,emitted_beta,in_support)) {
+      require(emitted_beta==beta && in_support,"depth-zero column changed its support label");
+      support_rows.push_back(alpha);
+    }
+    std::sort(support_rows.begin()+support_offsets.back(),support_rows.end());
+    support_offsets.push_back(support_rows.size());
+  }
+  compare([&](auto& x){transform.apply_supported_left(&x,support_offsets,support_rows);});
+  compare([&](auto& x){transform.apply_supported_left(&x,support_offsets,support_rows,true);});
+  Eigen::MatrixXd two_rhs(size,2*size);
+  for (int j=0;j<two_rhs.cols();++j)
+    for (int i=0;i<size;++i) two_rhs(i,j)=std::cos(0.17*(i+1)*(j+2));
+  for (const bool adjoint : {false,true}) {
+    Eigen::MatrixXd reference=two_rhs,actual=two_rhs;
+    transform.apply_supported_left(&reference,support_offsets,support_rows,adjoint);
+#pragma omp parallel num_threads(2)
+#pragma omp single
+    transform.apply_supported_left(&actual,support_offsets,support_rows,adjoint);
+    require((actual-reference).norm()<1e-13,
+            "two-RHS supported exterior action changed inside an existing team");
+  }
   Eigen::MatrixXd x=seed,dx=0.3*seed,y=x,dy=dx;
   transform.apply_directional_left(direction,&x,&dx);
 #pragma omp parallel num_threads(2)
@@ -1722,6 +1746,83 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
           (fused.pair_kernel-integral.pair_kernel).norm() <
               3e-11*std::max(1.0,integral.pair_kernel.norm()),
           "support-aware sigma/adjoint dropped intermediate or outside-support contributions");
+  // Both directional readers have exact depth-zero support. The shared
+  // scatter must retain off-support depth-one channels for both of them.
+  Eigen::MatrixXd state_carrier = Eigen::MatrixXd::Zero(na, width * nb);
+  for (int a = 0; a < na; ++a)
+    for (int b = 0; b < nb; ++b)
+      if (support.contains(a, b))
+        for (int v = 0; v < width; ++v)
+          state_carrier(a, v * nb + b) = std::cos(0.23 * (a + 2) * (b + v + 1));
+  const xmvb::mcscf::DirectCiTileReader read_state =
+      [&](const std::vector<int>& betas, const std::vector<int>& rows,
+          Eigen::Ref<Eigen::MatrixXd> values) {
+        for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
+          for (int v = 0; v < width; ++v)
+            for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+              values(i, beta_local * width + v) =
+                  state_carrier(rows[i], v * nb + betas[beta_local]);
+      };
+  Eigen::MatrixXd forcing = Eigen::MatrixXd::Zero(na, width * nb);
+  const xmvb::mcscf::DirectCiTileWriter add_forcing =
+      [&](const std::vector<int>& betas, const std::vector<int>& rows,
+          const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
+        for (int beta_local = 0; beta_local < static_cast<int>(betas.size()); ++beta_local)
+          for (int v = 0; v < width; ++v)
+            accumulate(beta_local, v, 0, static_cast<int>(rows.size()),
+                forcing.col(v * nb + betas[beta_local]).data(), nullptr, 0);
+      };
+  actual.setZero();
+  const xmvb::mcscf::DirectCiSigmaAction direction(sigma, integrals);
+  const auto directional = sigma.apply_tiled_direction(
+      width, read, read_state, direction, add, add_forcing, &support);
+  const auto expected_forcing = direction.apply(state_carrier);
+  const auto expected_combined = expected + expected_forcing;
+  const auto expected_directional = sigma.integral_adjoint(carrier, state_carrier);
+  require((actual - expected_combined).norm() <
+              2e-11 * std::max(1.0, expected_combined.norm()) &&
+          (forcing - expected_forcing).norm() <
+              2e-11 * std::max(1.0, expected_forcing.norm()) &&
+          (directional.one_electron - expected_directional.one_electron).norm() <
+              3e-11 * std::max(1.0, expected_directional.one_electron.norm()) &&
+          (directional.pair_kernel - expected_directional.pair_kernel).norm() <
+              3e-11 * std::max(1.0, expected_directional.pair_kernel.norm()),
+          "support-aware directional sigma/adjoint dropped depth-one channels");
+  if (products.empty() && n_alpha == n_beta_electrons) {
+    for (const int parity : {1, -1}) {
+      Eigen::MatrixXd parity_carrier = carrier;
+      for (int v = 0; v < width; ++v) {
+        const Eigen::MatrixXd block = carrier.middleCols(v * nb, nb);
+        parity_carrier.middleCols(v * nb, nb) = block + parity * block.transpose();
+      }
+      Eigen::MatrixXd quotient = Eigen::MatrixXd::Zero(na, width * nb);
+      const xmvb::mcscf::DirectCiTileReader parity_read =
+          [&](const std::vector<int>& betas, const std::vector<int>& rows,
+              Eigen::Ref<Eigen::MatrixXd> values) {
+            for (int j = 0; j < static_cast<int>(betas.size()); ++j)
+              for (int v = 0; v < width; ++v)
+                for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+                  values(i, j * width + v) = parity_carrier(rows[i], v * nb + betas[j]);
+          };
+      const xmvb::mcscf::DirectCiTileWriter parity_add =
+          [&](const std::vector<int>& betas, const std::vector<int>& rows,
+              const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
+            for (int j = 0; j < static_cast<int>(betas.size()); ++j)
+              for (int v = 0; v < width; ++v)
+                accumulate(j, v, 0, static_cast<int>(rows.size()),
+                    quotient.col(v * nb + betas[j]).data(), nullptr, 0);
+          };
+      sigma.apply_tiled(width, parity_read, parity_add, &support, parity);
+      for (int v = 0; v < width; ++v) {
+        const Eigen::MatrixXd block = quotient.middleCols(v * nb, nb);
+        quotient.middleCols(v * nb, nb) = 0.5 * (block + parity * block.transpose());
+      }
+      const auto parity_expected = sigma.apply(parity_carrier);
+      require((quotient - parity_expected).norm() <
+                  2e-11 * std::max(1.0, parity_expected.norm()),
+              "supported exchange quotient changed the projected sigma image");
+    }
+  }
   Eigen::MatrixXd generator = Eigen::MatrixXd::Ones(n, n);
   const auto one_body = sigma.apply_one_body_generator(carrier, generator);
   double outside_input = 0.0;

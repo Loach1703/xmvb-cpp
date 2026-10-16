@@ -77,10 +77,11 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   std::vector<Group> groups;
   std::vector<int> active, group_index, halo, columns, distinct_alpha;
   std::vector<int> halo_index(n_alpha_, -1), column_index(n_beta_, -1);
-  std::vector<unsigned char> alpha_seen(n_alpha_, 0);
+  std::vector<unsigned char> alpha_seen(n_alpha_, 0), active_support;
   std::vector<int> same_group, offsets, positions, target_index;
   std::vector<Incoming> incoming;
   active.reserve(row_limit);
+  active_support.reserve(row_limit);
   group_index.reserve(row_limit);
   std::unique_ptr<double[]> workspace;
   std::size_t capacity = 0, panel_size = 0, channel_size = 0;
@@ -121,7 +122,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   };
   double prepare_time = 0, read_time = 0, compute_time = 0, write_time = 0;
   std::size_t batches = 0, source_columns = 0, source_elements = 0, peak_payload = 0;
-  std::size_t targets = 0;
+  std::size_t targets = 0, unsupported_targets = 0;
   Clock::time_point compute_start, prepare_start;
 #pragma omp parallel if(workers > 1) num_threads(workers)
   {
@@ -184,6 +185,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
             if (slots < limit) break;
           }
           active.resize(reserved);
+          active_support.resize(reserved);
           continued = false;
           finished = groups.empty();
         } catch (...) { failure = std::current_exception(); }
@@ -200,7 +202,8 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
             bool label;
             while (group.end - group.begin < group.capacity && cursor.next(a, b, label)) {
               if (exchange_parity && (a > b || (a == b && exchange_parity < 0))) continue;
-              active[group.end++] = a;
+              active[group.end] = a;
+              active_support[group.end++] = label;
             }
             if (group.capacity < group.limit) {
               continued = group.end - group.begin == group.capacity;
@@ -210,8 +213,10 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
           } else {
             const int first_alpha = g == 0 ? full_alpha_offset : 0;
             const int alpha_end = exchange_parity ? group.beta + (exchange_parity > 0) : n_alpha_;
-            for (int a = first_alpha; a < alpha_end && group.end - group.begin < group.capacity; ++a)
-              active[group.end++] = a;
+            for (int a = first_alpha; a < alpha_end && group.end - group.begin < group.capacity; ++a) {
+              active[group.end] = a;
+              active_support[group.end++] = 1;
+            }
             if (group.capacity < group.limit) {
               full_alpha_offset = first_alpha + group.end - group.begin;
               continued = full_alpha_offset < alpha_end;
@@ -232,13 +237,17 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
             for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
               auto& group = groups[g];
               const int length = group.end - group.begin;
-              for (int i = 0; i < length; ++i)
+              for (int i = 0; i < length; ++i) {
                 active[packed + i] = active[group.begin + i];
+                active_support[packed + i] = active_support[group.begin + i];
+                unsupported_targets += !active_support[packed + i];
+              }
               group.begin = packed;
               packed += length;
               group.end = packed;
             }
             active.resize(packed);
+            active_support.resize(packed);
             group_index.resize(packed);
             for (int g = 0; g < static_cast<int>(groups.size()); ++g)
               std::fill(group_index.begin() + groups[g].begin,
@@ -339,11 +348,15 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
         const int local = row % count, v = row / count;
         const int a = active[local], beta = groups[group_index[local]].beta;
         const int column = column_index[beta] * width + v;
-        const double value = input(halo_index[a], column);
-        for (const int p : alpha_->occupied(a))
-          target(row, core::PairIndex::packed_pair_index(p, p)) += value;
-        for (const int p : beta_graph.occupied(beta))
-          target(row, core::PairIndex::packed_pair_index(p, p)) += value;
+        // A depth-one target outside S has no own coefficient, although its
+        // one-body neighbors can still contribute to E*c and must be kept.
+        if (active_support[local]) {
+          const double value = input(halo_index[a], column);
+          for (const int p : alpha_->occupied(a))
+            target(row, core::PairIndex::packed_pair_index(p, p)) += value;
+          for (const int p : beta_graph.occupied(beta))
+            target(row, core::PairIndex::packed_pair_index(p, p)) += value;
+        }
         const auto& alpha_links = alpha_->singles(a);
         for (int link = 0; link < static_cast<int>(alpha_links.size()); ++link)
           target(row, alpha_links[link].pair) += alpha_links[link].sign *
@@ -504,9 +517,12 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   if (timing)
     std::fprintf(stderr,
         "XMVB_TILE,batches=%zu,source_columns=%zu,source_elements=%zu,peak_payload=%zu,"
-        "prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f,targets=%zu,exchange=%d\n",
+        "prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f,targets=%zu,exchange=%d,"
+        "skipped_diagonal_scatters=%zu\n",
         batches, source_columns, source_elements, peak_payload,
-        prepare_time, read_time, compute_time, write_time, targets, exchange_parity);
+        prepare_time, read_time, compute_time, write_time, targets, exchange_parity,
+        unsupported_targets * static_cast<std::size_t>(width) *
+            (1 + static_cast<std::size_t>(collect_integrals && static_cast<bool>(state))));
   return collect_integrals ? pullback_channel_kernel(kernel_adjoint) : DirectCiIntegralAdjoint{};
 }
 

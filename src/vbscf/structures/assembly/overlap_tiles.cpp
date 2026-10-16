@@ -104,52 +104,52 @@ Eigen::MatrixXd StructureAction::cross_overlap(
     const std::size_t groups=spin_products_.size();
     const std::size_t factor_rows=(directional ? 4:2)*
         (static_cast<std::size_t>(n_unique_alpha_)+n_unique_beta_);
-    // One factor panel, one sampled Gram panel and two RHS product blocks.
-    // The same budget bounds all of them; there is no groups-squared cache.
+    // Source factors do not depend on the CI RHS. Project each factor panel
+    // to structures once, then apply all RHS batches. Associativity removes
+    // both groups-by-RHS arrays and repeated exterior maps across RHS batches.
     const std::size_t capacity=workspace_bytes/sizeof(double);
-    if (capacity>=factor_rows+3*groups) {
+    if (capacity>factor_rows+static_cast<std::size_t>(n_structures_)) {
       const int width=std::min<std::size_t>(vectors.cols(),
-          (capacity-factor_rows-groups)/(2*groups));
-      const int extent=std::min<std::size_t>(sources.columns.size(),
+          capacity-factor_rows-n_structures_);
+      const int extent=std::min<std::size_t>(groups,
           std::min<std::size_t>(8*effective_openmp_thread_count(),
-              (capacity-2*groups*width)/(factor_rows+groups)));
+              capacity/(factor_rows+n_structures_+width)));
       Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n_structures_,vectors.cols());
-      for (int first=0; first<vectors.cols(); first+=width) {
-        const int count_rhs=std::min<int>(width,vectors.cols()-first);
-        Eigen::MatrixXd coefficients=Eigen::MatrixXd::Zero(groups,count_rhs);
-#pragma omp parallel for schedule(static) if(groups>32)
-        for (int g=0;g<static_cast<int>(groups);++g)
-          for (std::size_t t=spin_term_offsets_[g];t<spin_term_offsets_[g+1];++t) {
-            const auto& term=spin_terms_[t];
-            coefficients.row(g).noalias()+=term.coefficient*vectors.row(term.structure).segment(first,count_rhs);
-          }
-        Eigen::MatrixXd image=Eigen::MatrixXd::Zero(groups,count_rhs);
-        for (int begin=0;begin<static_cast<int>(groups);begin+=extent) {
-          const int count=std::min<int>(extent,groups-begin);
-          Factor a(n_unique_alpha_,count,directional),b(n_unique_beta_,count,directional);
-          for (int j=0;j<count;++j) {
-            a.value(spin_products_[begin+j]/n_unique_beta_,j)=1;
-            b.value(spin_products_[begin+j]%n_unique_beta_,j)=1;
-          }
-          transform(ra,dra,a); transform(la,dla,a,true);
-          transform(rb,drb,b); transform(lb,dlb,b,true);
-          Eigen::MatrixXd gram(groups,count);
-#pragma omp parallel for schedule(static) if(groups>32)
-          for (int g=0;g<static_cast<int>(groups);++g) {
-            const int ai=spin_products_[g]/n_unique_beta_,bi=spin_products_[g]%n_unique_beta_;
-            if (directional)
-              gram.row(g)=(a.tangent.row(ai).array()*b.value.row(bi).array()+
-                  a.value.row(ai).array()*b.tangent.row(bi).array()).matrix();
-            else gram.row(g)=(a.value.row(ai).array()*b.value.row(bi).array()).matrix();
-          }
-          image.noalias()+=gram*coefficients.middleRows(begin,count);
+      for (int begin=0;begin<static_cast<int>(groups);begin+=extent) {
+        const int count=std::min<int>(extent,groups-begin);
+        Factor a(n_unique_alpha_,count,directional),b(n_unique_beta_,count,directional);
+        for (int j=0;j<count;++j) {
+          a.value(spin_products_[begin+j]/n_unique_beta_,j)=1;
+          b.value(spin_products_[begin+j]%n_unique_beta_,j)=1;
         }
+        transform(ra,dra,a); transform(la,dla,a,true);
+        transform(rb,drb,b); transform(lb,dlb,b,true);
+        Eigen::MatrixXd projected=Eigen::MatrixXd::Zero(n_structures_,count);
 #pragma omp parallel for schedule(static) if(n_structures_>32)
         for (int s=0;s<n_structures_;++s)
           for (auto t=structure_term_offsets_[s];t<structure_term_offsets_[s+1];++t) {
             const auto& term=spin_terms_[structure_term_indices_[t]];
-            result.row(s).segment(first,count_rhs).noalias()+=term.coefficient*image.row(term.group);
+            const int ai=spin_products_[term.group]/n_unique_beta_;
+            const int bi=spin_products_[term.group]%n_unique_beta_;
+            if (directional)
+              projected.row(s).array()+=term.coefficient*(
+                  a.tangent.row(ai).array()*b.value.row(bi).array()+
+                  a.value.row(ai).array()*b.tangent.row(bi).array());
+            else projected.row(s).array()+=term.coefficient*
+                a.value.row(ai).array()*b.value.row(bi).array();
           }
+        for (int first=0;first<vectors.cols();first+=width) {
+          const int count_rhs=std::min<int>(width,vectors.cols()-first);
+          Eigen::MatrixXd coefficients=Eigen::MatrixXd::Zero(count,count_rhs);
+#pragma omp parallel for schedule(static) if(count>32)
+          for (int j=0;j<count;++j)
+            for (auto t=spin_term_offsets_[begin+j];t<spin_term_offsets_[begin+j+1];++t) {
+              const auto& term=spin_terms_[t];
+              coefficients.row(j).noalias()+=term.coefficient*
+                  vectors.row(term.structure).segment(first,count_rhs);
+            }
+          result.middleCols(first,count_rhs).noalias()+=projected*coefficients;
+        }
       }
       return result;
     }

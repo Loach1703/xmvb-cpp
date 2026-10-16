@@ -12,7 +12,6 @@
 
 #include "parallel/openmp.hpp"
 #include "core/timing.hpp"
-#include "mcscf/ci/product_support.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -289,42 +288,55 @@ void ExteriorOrbitalTransform::apply_adjoint_left_block(
 }
 
 void ExteriorOrbitalTransform::apply_supported_left(
-    Eigen::MatrixXd* coefficients, const mcscf::ProductSupport& support,
-    int beta_begin, int beta_count, bool adjoint) const {
+    Eigen::MatrixXd* coefficients, std::span<const int> offsets,
+    std::span<const int> rows, bool adjoint) const {
+  if (!coefficients || offsets.size() < 2 || offsets.front() != 0 ||
+      offsets.back() != static_cast<int>(rows.size()))
+    throw std::invalid_argument("invalid supported exterior column pattern");
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiTransformLeft);
   validate_left(*coefficients);
+  const int beta_count=static_cast<int>(offsets.size()-1);
+  if (coefficients->cols() % beta_count != 0)
+    throw std::invalid_argument("supported exterior beta columns do not match RHS blocks");
+  for (int beta=0;beta<beta_count;++beta) {
+    if (offsets[beta]<0 || offsets[beta]>offsets[beta+1] ||
+        offsets[beta+1]>static_cast<int>(rows.size()))
+      throw std::invalid_argument("invalid supported exterior column offsets");
+  }
+  for (const int alpha:rows)
+    if (alpha<0 || alpha>=dimension())
+      throw std::invalid_argument("supported exterior row is outside the spin space");
   const int workers = bounded_openmp_thread_count(
       coarse_openmp_thread_count(cooperative_openmp_thread_count(), coefficients->size()),
-      coefficients->cols());
+      beta_count);
   const int n_shears = static_cast<int>(shears_.size());
   cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
     std::vector<std::uint8_t> allowed(dimension());
-    const Eigen::Index first=coefficients->cols()*part/workers;
-    const Eigen::Index last=coefficients->cols()*(part+1)/workers;
-    for (Eigen::Index column=first;column<last;++column) {
-      auto values = coefficients->col(column);
-      const int beta = beta_begin + column % beta_count;
+    const int first=beta_count*part/workers;
+    const int last=beta_count*(part+1)/workers;
+    for (int beta=first;beta<last;++beta) {
       std::fill(allowed.begin(), allowed.end(), 0);
-      auto paths = support.column(beta, 0);
-      int alpha_index, beta_index;
-      bool in_support;
-      while (paths.next(alpha_index, beta_index, in_support)) allowed[alpha_index] = 1;
-      for (int alpha = 0; alpha < dimension(); ++alpha) {
-        if (!allowed[alpha]) values[alpha] = 0.0;
-        else if (!adjoint) values[alpha] *= determinant_scales_[alpha];
-      }
-      for (int index = 0; index < n_shears; ++index) {
-        const Shear& shear = shears_[adjoint ? n_shears - 1 - index : index];
-        for (const auto& pair : shear.pairs) {
-          if (!allowed[pair.source] || !allowed[pair.target]) continue;
-          const int target = adjoint ? pair.source : pair.target;
-          const int source = adjoint ? pair.target : pair.source;
-          values[target] += shear.coefficient * pair.sign * values[source];
+      for (int index=offsets[beta];index<offsets[beta+1];++index)
+        allowed[rows[index]]=1;
+      for (Eigen::Index column=beta;column<coefficients->cols();column+=beta_count) {
+        auto values = coefficients->col(column);
+        for (int alpha = 0; alpha < dimension(); ++alpha) {
+          if (!allowed[alpha]) values[alpha] = 0.0;
+          else if (!adjoint) values[alpha] *= determinant_scales_[alpha];
         }
+        for (int index = 0; index < n_shears; ++index) {
+          const Shear& shear = shears_[adjoint ? n_shears - 1 - index : index];
+          for (const auto& pair : shear.pairs) {
+            if (!allowed[pair.source] || !allowed[pair.target]) continue;
+            const int target = adjoint ? pair.source : pair.target;
+            const int source = adjoint ? pair.target : pair.source;
+            values[target] += shear.coefficient * pair.sign * values[source];
+          }
+        }
+        if (adjoint)
+          for (int alpha = 0; alpha < dimension(); ++alpha)
+            if (allowed[alpha]) values[alpha] *= determinant_scales_[alpha];
       }
-      if (adjoint)
-        for (int alpha = 0; alpha < dimension(); ++alpha)
-          if (allowed[alpha]) values[alpha] *= determinant_scales_[alpha];
     }
   });
 }

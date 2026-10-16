@@ -2,11 +2,10 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include <Eigen/Core>
-
-namespace xmvb::mcscf { class ProductSupport; }
 
 namespace xmvb::vb {
 
@@ -55,10 +54,12 @@ public:
       const ExteriorProjection& projection) const;
   /** @brief Left transform within exact selected support, with ordered beta columns.
    * For the adjoint this discards only paths that cannot return to a selected
-   * input under the remaining upper-triangular beta adjoint.
+   * input under the remaining upper-triangular beta adjoint. The CSR rows are
+   * the exact depth-zero support of each beta column; consecutive RHS blocks
+   * repeat the same beta-column order.
    */
   void apply_supported_left(Eigen::MatrixXd* coefficients,
-      const mcscf::ProductSupport& support, int beta_begin, int beta_count,
+      std::span<const int> offsets, std::span<const int> rows,
       bool adjoint = false) const;
   /** @brief Applies the transpose exterior transform to matrix columns. */
   void apply_adjoint_right(Eigen::MatrixXd* coefficients) const;

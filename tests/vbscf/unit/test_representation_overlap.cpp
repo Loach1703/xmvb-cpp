@@ -250,6 +250,26 @@ void check_case(const std::vector<std::vector<int>>& alpha,
     require(relative_error(action.cross_overlap(block, la, lb, ra, rb,
         &dla, &dlb, &dra, &drb, one_column), analytic_action_direction) < 2e-12,
         "one-column derivative panels differ from wide panels");
+    if (matching) {
+      // More RHSs than selected structures force bounded RHS reuse. The
+      // independent occupied-minor oracle does not share the source sweep.
+      Eigen::MatrixXd many(3,19);
+      for (int j=0;j<many.cols();++j)
+        for (int i=0;i<many.rows();++i)
+          many(i,j)=std::sin(0.17*(i+1)*(j+2));
+      const Eigen::MatrixXd derivative=(
+          reference_cross(left+h*dl,right+h*dr,w,alpha,beta)-
+          reference_cross(left-h*dl,right-h*dr,w,alpha,beta))/(2*h);
+      for (std::size_t bytes : {sizeof(double)*(4*(alpha.size()+beta.size())+5),
+                               4*one_column}) {
+        require(relative_error(action.cross_overlap(many,la,lb,ra,rb,
+            nullptr,nullptr,nullptr,nullptr,bytes),reference*many)<2e-12,
+            "source-major Gram sweep changed a multi-batch selected action");
+        require(relative_error(action.cross_overlap(many,la,lb,ra,rb,
+            &dla,&dlb,&dra,&drb,bytes),derivative*many)<2e-8,
+            "source-major Gram jet changed a multi-batch derivative");
+      }
+    }
     const auto tiled = action.cross_overlap_adjoint(x, y, la, lb, ra, rb,
         nullptr, nullptr, 2 * one_column);
     const auto wide = overlap.adjoint(left, right, x, y);

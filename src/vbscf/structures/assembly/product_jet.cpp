@@ -119,6 +119,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     if (response && !resident_input) q=expand_support(response->col(state_id));
     detail::ColumnPanels input(cache_bytes,[&](int panel) {
       ++result.images.tiles.input_panels;
+      const auto pattern=pattern_at(panel);
       const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);
       const auto rows=beta.row_block(first,count);
       Eigen::MatrixXd values=Eigen::MatrixXd::Zero(n_unique_alpha_,(cached ? 1:width)*count);
@@ -140,12 +141,16 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       if (delta_upper) alpha.apply_directional_left(da,&primal,&dy);
       else {
         if (!cached) {
-          if (support) alpha.apply_supported_left(&primal,*support,first,count);
-          else alpha.apply_left(&primal);
+          if (pattern->full) alpha.apply_left(&primal);
+          else alpha.apply_supported_left(&primal,
+              {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
+              {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())});
         }
         if (tangent) {
-          if (support) alpha.apply_supported_left(&dy,*support,first,count);
-          else alpha.apply_left(&dy);
+          if (pattern->full) alpha.apply_left(&dy);
+          else alpha.apply_supported_left(&dy,
+              {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
+              {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())});
         }
       }
       if (cached) values=std::move(dy);
@@ -153,7 +158,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         values.leftCols(count)=primal;
         if (tangent) values.rightCols(count)=dy;
       }
-      return detail::pack_columns(std::move(values),pattern_at(panel));
+      return detail::pack_columns(std::move(values),pattern);
     });
     // Independent readers borrow the same bounded primal/tangent panels.
     const auto reader=[&](int family) -> mcscf::DirectCiTileReader {
@@ -295,8 +300,13 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       if (differentiate) {
         dvalues=Eigen::MatrixXd::Zero(image.rows(),image.cols());
         alpha.apply_directional_adjoint_left(da,&values,&dvalues);
-      } else if (support) alpha.apply_supported_left(&values,*support,first,count,true);
-      else alpha.apply_adjoint_left(&values);
+      } else {
+        const auto pattern=pattern_at(panel);
+        if (pattern->full) alpha.apply_adjoint_left(&values);
+        else alpha.apply_supported_left(&values,
+            {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
+            {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())},true);
+      }
       auto found=std::find(projection_targets.begin(),projection_targets.end(),target.data());
       const int target_id=found-projection_targets.begin();
       if (found==projection_targets.end()) projection_targets.push_back(target.data());

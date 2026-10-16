@@ -205,6 +205,80 @@ The byte budget bounds panel temporaries, not the caller-owned vectors and
 immutable topology. It changes batching only, never the physical space.
 This chain does not use the compound-row cache.
 
+## Shared source sweep for multiple right-hand sides
+
+For column-singleton original support, enumerate its touched products as
+$g=(a_g,b_g)$, $g=1,\ldots,s$, and regard $W$ as an $s\times N_{\rm str}$
+sparse matrix. This includes the complete covalent family, but does not require
+a complete structure space. The cross-product Gram entries are
+
+$$
+G_{gh}=K_\alpha[a_g,a_h]K_\beta[b_g,b_h],\qquad
+M_{LR}=W^TGW.
+$$
+
+Let $V$ contain $d$ structure-space right-hand sides. A source panel $J$
+generates $G[:,J]$ through two single-spin factor panels. Define
+
+$$
+L_J=W^TG[:,J],\qquad Q_J=W[J,:]V.
+$$
+
+Then the complete selected action is exactly
+
+$$
+M_{LR}V=\sum_J L_JQ_J.
+$$
+
+The factors and their structure projection $L_J$ are independent of the
+right-hand side. Therefore source panels are the outer loop; bounded RHS
+batches are the inner loop. Neither $WV$ nor $GWV$ is stored as an
+$s\times d$ array. The sampled $G[:,J]$ is also not stored: each required
+factor product is accumulated directly into $L_J$ using the structure
+incidence lists.
+
+For a directional action, the same ordering gives
+
+$$
+\dot M_{LR}V=\sum_J \dot L_JQ_J,\qquad
+\dot G_{gh}=\dot K_\alpha[a_g,a_h]K_\beta[b_g,b_h]
+             +K_\alpha[a_g,a_h]\dot K_\beta[b_g,b_h].
+$$
+
+Here $V$ and the selected expansion $W$ are held fixed. CI coefficient
+directions remain the caller's responsibility, as for the single-RHS action.
+
+With source width $b$ and RHS width $d_b$, the principal temporary storage is
+
+$$
+O\!\left[b(U_\alpha+U_\beta+N_{\rm str}+d_b)\right].
+$$
+
+An existing byte budget bounds these panels jointly. Primal and tangent
+factors require different constant numbers of copies, but neither introduces
+an $s^2$ allocation. The caller-owned $N_{\rm str}\times d$ result is not a
+panel temporary.
+
+If $\ell_\sigma$ counts links in the elementary single-spin maps, this direct
+incidence contraction costs
+
+$$
+O\!\left[
+s(\ell_\alpha+\ell_\beta)
+s\,\operatorname{nnz}(W)
+d\,\operatorname{nnz}(W)
+sN_{\rm str}d
+\right].
+$$
+
+This expression does not claim that direct incidence projection is always
+cheaper than materializing sampled Gram panels: it repeats some scalar factor
+products when structures share touched products. Its specific benefit is
+eliminating repeated exterior maps and structure projections across RHS
+batches, and avoiding the two product-by-RHS arrays. In particular, the old
+workspace partition could leave room for only one source column when forming
+a bounded selected metric; reassociation removes that artificial restriction.
+
 For one CAS(12,12) covalent structure, $r=64$ while $U_\alpha=U_\beta=924$.
 The transform's source-column count is therefore reduced by a factor of
 $924/64=14.4375$ relative to a full-column transform; this is an operation-count

@@ -84,9 +84,17 @@ All eleven changed production/test source files matched the compute-node
 source manifest. The final run uses the exact same `C14.xmi` and preserves
 its `ITMAX=200`; there is no added diagnostic macro-step cap.
 
-The native rerun has reached the initial energy `-534.3944115253 Eh` and is
-running its first CIAH macro step on `anode40`. Full C14 convergence has **not
-yet been established**. Numerical diagnostics are evidence for this solve fix,
-not a completed optimizer run. Build/test and diagnostic evidence is retained
-in `metric-fix-evidence.tar.gz`; native long-run output remains in
-`/home/guqqgroup/xiatao/xmvb-runs/c14-ciah-20261016/fix-1264476`.
+The native rerun completed on `anode40` with exit code zero and no metric-CG
+stagnation. It converged in **4 accepted steps, 46 orbital HVPs**, with energy
+changing from `-534.394411525272` to `-535.672671742972 Eh` and final projected
+gradient infinity norm `5.73084698e-6`. There were 17 keyframes and two rejected
+macro candidates. Application end-to-end time was **1190.925493 s**; external
+GNU-time wall time was **1191.54 s** and process peak RSS **6,400,232 KiB**
+(6.1037 GiB). These are application measurements, not the full Slurm job
+elapsed time, which includes compilation and tests.
+
+This completed run is the retained C14 baseline for the next contraction
+optimization; it will not be rerun as an old-version timing control. Build/test
+and diagnostic evidence is retained in `metric-fix-evidence.tar.gz`; full native
+output is in `fix-1264476/` locally and at
+`/home/guqqgroup/xiatao/xmvb-runs/c14-ciah-20261016/fix-1264476` remotely.
