@@ -30,6 +30,7 @@
 #include "vbscf/structures/assembly/states.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
+#include "vbscf/structures/overlap/metric.hpp"
 #include "mcscf/optimization/trace.hpp"
 
 namespace xmvb::vb {
@@ -42,6 +43,7 @@ struct ActiveSpaceGradientForwardContext {
   // Stable address across forward-context moves: the metric inverse borrows it.
   std::unique_ptr<StructureAction> structure_action;
   std::unique_ptr<StructureMetricInverse> structure_metric_inverse;
+  std::shared_ptr<const SelectedMetric> selected_metric;
   std::optional<StructureAdjointState> structure_adjoint_state;
   StructureAccumulationResult structure_matrices;
   xmvb::linalg::GeneralizedEigenResult eigen_result;
@@ -266,12 +268,7 @@ linalg::DavidsonResult solve_complete_structure_roots(
  * The residual r is a covector; M^-1 r is its physical tangent representative.
  * This metric preconditioner is positive and invariant to basis congruences.
  */
-struct SelectedCiMetric {
-  Eigen::MatrixXd overlap;
-  Eigen::LLT<Eigen::MatrixXd> factor;
-};
-
-std::shared_ptr<SelectedCiMetric> selected_ci_metric(const StructureAction& action,
+std::shared_ptr<const SelectedMetric> selected_ci_metric(const StructureAction& action,
     const SameSpinPairCacheContext& topology,const std::vector<double>& overlap,int n) {
   if (!RepresentationOverlap::PreparedMetric::fits_selected(action.n_structures())) return {};
   const auto& alpha=topology.alpha_reuse_table.unique_determinants;
@@ -279,11 +276,6 @@ std::shared_ptr<SelectedCiMetric> selected_ci_metric(const StructureAction& acti
   const auto upper=overlap_upper(Eigen::Map<const Eigen::MatrixXd>(overlap.data(),n,n));
   const auto metric=RepresentationOverlap(action,alpha,beta,n).prepare_metric(upper);
   if (!metric.selected_matrix().size()) return {};
-  auto result=std::make_shared<SelectedCiMetric>();
-  result->overlap=metric.selected_matrix();
-  result->factor.compute(result->overlap);
-  if (result->factor.info()!=Eigen::Success)
-    throw std::runtime_error("selected CI metric is not positive definite");
   if (mcscf::diagnostics::ciah_event_trace_enabled()) {
     const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(metric.selected_matrix(),Eigen::EigenvaluesOnly);
     const Eigen::VectorXd scale=action.preconditioner_diagonal().overlap.array().rsqrt();
@@ -295,7 +287,7 @@ std::shared_ptr<SelectedCiMetric> selected_ci_metric(const StructureAction& acti
         normalized.eigenvalues().tail(1)[0]/normalized.eigenvalues()[0],
         sizeof(double)*static_cast<std::size_t>(action.n_structures())*action.n_structures());
   }
-  return result;
+  return metric.selected_metric();
 }
 
 void select_structure_states(
@@ -484,7 +476,8 @@ void solve_structure_problem(
           ? selected_ci_metric(structure_action,context->same_spin_pair_cache,
               prepared.orbital_result.active_orbital_overlap_matrix,
               input.orbital_preparation_input.n_active_orbitals)
-          : std::shared_ptr<SelectedCiMetric>{};
+          : std::shared_ptr<const SelectedMetric>{};
+      context->selected_metric = metric;
       auto selected_action=action;
       std::function<Eigen::VectorXd(const Eigen::VectorXd&,double)> preconditioner;
       if (metric) {
@@ -595,6 +588,7 @@ finalize_active_space_second_order_context(
   context->prepared_active_space =
       std::move(forward_context->timed_active_space_context.prepared_active_space);
   context->same_spin_pair_cache = std::move(forward_context->same_spin_pair_cache);
+  context->selected_metric = std::move(forward_context->selected_metric);
   if (forward_context->structure_action) {
     context->structure_action.emplace(std::move(*forward_context->structure_action));
     if (forward_context->structure_metric_inverse) {

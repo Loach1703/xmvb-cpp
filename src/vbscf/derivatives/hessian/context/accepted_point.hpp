@@ -12,6 +12,8 @@
 
 namespace xmvb::vb {
 
+struct SelectedMetric;
+
 /**
  * @brief Accepted-point active-space context for exact matrix-free second-order work.
  *
@@ -49,6 +51,9 @@ struct AcceptedPointContext {
   const StructureMetricInverse* metric_inverse(const StructureAction& action) const;
   mutable std::shared_ptr<const StructureMetricInverse> structure_metric_inverse;
   mutable bool structure_metric_planned = false;
+
+  /** @brief Existing bounded selected Gram/factor retained from Davidson. */
+  std::shared_ptr<const SelectedMetric> selected_metric;
 
   /**
    * @brief Accepted Hamiltonian and overlap images of the selected states.

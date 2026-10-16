@@ -13,6 +13,7 @@ struct AcceptedPointContext;
 struct VbScfCoupledKeyframeEvaluation;
 class StructureMetricInverse;
 class StructureTangentOperator;
+struct SelectedMetric;
 
 /** @brief One selected-space retraction and its immutable trial geometry. */
 struct CiTransportPoint {
@@ -76,6 +77,7 @@ private:
   /** One trial chart, shared by retraction and its gradient solve. */
   mutable Eigen::MatrixXd metric_upper_;
   mutable std::optional<RepresentationOverlap::PreparedMetric> prepared_metric_;
+  mutable std::shared_ptr<const SelectedMetric> selected_metric_;
 };
 
 }  // namespace xmvb::vb

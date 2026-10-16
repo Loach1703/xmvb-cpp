@@ -18,8 +18,11 @@
 #include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
+#include "vbscf/orbitals/preparation/cholesky.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/overlap/metric.hpp"
+#include "vbscf/structures/overlap/representation.hpp"
 
 namespace {
 
@@ -78,6 +81,34 @@ Eigen::Matrix3d active_overlap(const OrbitalPreparationResult& prepared) {
           "unexpected active-overlap dimension");
   return Eigen::Map<const Eigen::Matrix3d>(
       prepared.active_orbital_overlap_matrix.data());
+}
+
+std::shared_ptr<const SelectedMetric> selected_factor(
+    const StructureAction& action, const SameSpinPairCacheContext& topology,
+    const OrbitalPreparationResult& prepared) {
+  RepresentationOverlap representation(
+      action, topology.alpha_reuse_table.unique_determinants,
+      topology.beta_reuse_table.unique_determinants, 3);
+  const auto metric = representation.prepare_metric(
+      overlap_upper(active_overlap(prepared)));
+  require(metric.selected_metric() != nullptr,
+          "small selected metric did not retain its factor");
+  return metric.selected_metric();
+}
+
+void check_horizontal_inverse(const StructureTangentOperator& structure) {
+  const int dimension = structure.tangent_size();
+  Eigen::MatrixXd metric(dimension, dimension);
+  for (int column = 0; column < dimension; ++column)
+    metric.col(column) = structure.apply_metric_coordinates(
+        Eigen::VectorXd::Unit(dimension, column));
+  const Eigen::VectorXd rhs = Eigen::VectorXd::LinSpaced(
+      dimension, 0.27, -0.41);
+  const Eigen::VectorXd actual = structure.apply_inverse_metric_model(rhs);
+  const Eigen::VectorXd expected = metric.llt().solve(rhs);
+  require(relative_error(actual, expected) < 2e-11 &&
+              (metric * actual - rhs).norm() < 2e-11,
+          "shared selected factor changed the horizontal inverse");
 }
 
 // The 1-alpha/1-beta full ambient carrier has nine indexed spin products.
@@ -232,9 +263,13 @@ void check_selected_transport() {
   accepted->selected_state_eigenvectors = c0;
   accepted->selected_state_structure_images =
       StructureActionResult{k * c0, m0 * c0};
+  accepted->selected_metric = selected_factor(action, topology, prepared);
+  require(relative_error(accepted->selected_metric->overlap, m0) < 2e-11,
+          "accepted selected factor differs from the physical overlap");
   const StructureTangentOperator structure(accepted, action);
   require(structure.tangent_size() == 2,
           "selected three-structure tangent dimension is wrong");
+  check_horizontal_inverse(structure);
   const CiTransport transport(input, layout, chart, *accepted, action, structure);
 
   // Cache an independent five-point derivative of the explicit carrier map.
@@ -300,6 +335,14 @@ void check_selected_transport() {
   p *= 0.12;
   Eigen::Vector2d q(0.065, -0.047);
   const CiTransportPoint point = transport.retract(p, q);
+  const auto trial_factor = RepresentationOverlap(
+      action, topology.alpha_reuse_table.unique_determinants,
+      topology.beta_reuse_table.unique_determinants, 3)
+      .prepare_metric(point.upper).selected_metric();
+  require(trial_factor != nullptr &&
+              trial_factor != accepted->selected_metric &&
+              (trial_factor->overlap - accepted->selected_metric->overlap).norm() > 1e-5,
+          "changed trial chart reused the accepted metric factor");
   const Eigen::Vector3d reference_c = independent_coefficient(p, q);
   require(relative_error(point.coefficients.col(0), reference_c) < 2e-9,
           "finite selected transport differs from explicit least squares");
@@ -399,7 +442,9 @@ void check_multistate_transport() {
   accepted->selected_state_energies = {roots.eigenvalues()[0], roots.eigenvalues()[1]};
   accepted->selected_state_eigenvectors = c0;
   accepted->selected_state_structure_images = StructureActionResult{k * c0, m0 * c0};
+  accepted->selected_metric = selected_factor(action, topology, prepared);
   const StructureTangentOperator structure(accepted, action);
+  check_horizontal_inverse(structure);
   const CiTransport transport(input, layout, chart, *accepted, action, structure);
   const auto energy = [&](const OrbitalPreparationInput& trial, const Eigen::MatrixXd& c) {
     const Eigen::MatrixXd f = explicit_carrier(trial, w);

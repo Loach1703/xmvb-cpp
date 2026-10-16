@@ -12,6 +12,7 @@
 #include "vbscf/orbitals/preparation/cholesky.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
+#include "vbscf/structures/overlap/metric.hpp"
 
 namespace xmvb::vb {
 
@@ -33,7 +34,8 @@ CiTransport::CiTransport(const OrbitalPreparationInput& input,
       c0_(origin.selected_state_eigenvectors),
       coordinate_scale_(std::sqrt(2.0 * origin.normalized_state_weights.at(0))),
       diagonal_(action.preconditioner_diagonal().overlap),
-      inverse_(origin.metric_inverse(action)) {
+      inverse_(origin.metric_inverse(action)), metric_upper_(upper_),
+      selected_metric_(origin.selected_metric) {
   const auto& images = origin.selected_state_structure_images.value();
   const Eigen::MatrixXd state_h = c0_.transpose() * images.hamiltonian;
   gc0_ = (coordinate_scale_ * coordinate_scale_) *
@@ -77,14 +79,20 @@ Eigen::MatrixXd CiTransport::solve(const Eigen::MatrixXd& upper,
     return result;
   }
   // Actual selected M, not the identity on a presumed closed carrier.
-  if (!prepared_metric_ || metric_upper_.rows() != upper.rows() ||
+  if ((!prepared_metric_ && !selected_metric_) || metric_upper_.rows() != upper.rows() ||
       !(metric_upper_.array() == upper.array()).all()) {
-    prepared_metric_.emplace(overlap_.prepare_metric(upper));
+    if (origin_.selected_metric && (upper_.array() == upper.array()).all()) {
+      selected_metric_ = origin_.selected_metric;
+      prepared_metric_.reset();
+    } else {
+      prepared_metric_.emplace(overlap_.prepare_metric(upper));
+      selected_metric_ = prepared_metric_->selected_metric();
+    }
     metric_upper_ = upper;
   }
-  // Solve only the selected Gram. The positive accepted-point diagonal is a
-  // Jacobi preconditioner also at a trial chart: it changes convergence, not
-  // the normal equation. Do not complete the selected space to precondition it.
+  // Reuse the exact bounded Gram factor, including at its own trial chart.
+  // Streamed selections retain Jacobi; neither path completes the VB space.
+  // Both are certified against the same selected metric at unchanged accuracy.
   Eigen::MatrixXd result(rhs.rows(), rhs.cols());
   int actions = 0, iterations = 0, certifications = 0;
   double residual = 0.0;
@@ -92,17 +100,26 @@ Eigen::MatrixXd CiTransport::solve(const Eigen::MatrixXd& upper,
     linalg::MetricSolveStats stats;
     Eigen::VectorXd seed;
     if (initial) seed = initial->col(s);
-    result.col(s) = linalg::solve_metric(rhs.col(s),
-      [&](const Eigen::VectorXd& x) {
-        const auto action_start = timed ? Clock::now() : Clock::time_point{};
-        Eigen::VectorXd image = (*prepared_metric_)(x).col(0);
-        if (timed) action_seconds += std::chrono::duration<double>(Clock::now() - action_start).count();
-        return image;
-      },
-      [&](const Eigen::VectorXd& x) {
-        return Eigen::VectorXd(x.cwiseQuotient(diagonal_));
-      },
-      timed ? &stats : nullptr, initial ? &seed : nullptr);
+    try {
+      result.col(s) = linalg::solve_metric(rhs.col(s),
+          [&](const Eigen::VectorXd& x) {
+            const auto action_start = timed ? Clock::now() : Clock::time_point{};
+            Eigen::VectorXd image = selected_metric_
+                ? Eigen::VectorXd(selected_metric_->overlap * x)
+                : Eigen::VectorXd((*prepared_metric_)(x).col(0));
+            if (timed) action_seconds += std::chrono::duration<double>(Clock::now() - action_start).count();
+            return image;
+          },
+          [&](const Eigen::VectorXd& x) {
+            return selected_metric_ ? Eigen::VectorXd(selected_metric_->factor.solve(x))
+                                    : Eigen::VectorXd(x.cwiseQuotient(diagonal_));
+          },
+          &stats, initial ? &seed : nullptr);
+    } catch (const std::runtime_error& error) {
+      report("selected_cg_failed", stats.actions, stats.iterations,
+          stats.certifications, stats.relative_residual);
+      throw std::runtime_error(std::string("CI transport selected metric: ") + error.what());
+    }
     actions += stats.actions;
     iterations += stats.iterations;
     certifications += stats.certifications;

@@ -9,6 +9,7 @@ namespace xmvb::vb {
 
 class StructureAction;
 class ExteriorOrbitalTransform;
+struct SelectedMetric;
 
 /** @brief Chart cotangents actually consumed by the caller. */
 enum class OverlapSide { Left, Right, Both };
@@ -60,7 +61,11 @@ public:
     Eigen::MatrixXd operator()(
         const Eigen::Ref<const Eigen::MatrixXd>& structure_coeff_block) const;
     /** @brief Bounded selected Gram, empty when the operator is streamed. */
-    const Eigen::MatrixXd& selected_matrix() const noexcept { return selected_gram_; }
+    const Eigen::MatrixXd& selected_matrix() const noexcept;
+    /** @brief Shared factor of the already resident selected Gram, if any. */
+    const std::shared_ptr<const SelectedMetric>& selected_metric() const noexcept {
+      return selected_metric_;
+    }
     /** @brief Whether the selected matrix fits its existing workspace quarter. */
     static bool fits_selected(int dimension) noexcept;
 
@@ -78,7 +83,7 @@ public:
     std::shared_ptr<const ExteriorOrbitalTransform> alpha_transform_;
     std::shared_ptr<const ExteriorOrbitalTransform> beta_transform_;
     Eigen::MatrixXd kernel_;
-    Eigen::MatrixXd selected_gram_;
+    std::shared_ptr<const SelectedMetric> selected_metric_;
   };
 
   PreparedMetric prepare_metric(

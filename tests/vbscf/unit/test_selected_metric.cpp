@@ -2,18 +2,21 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 #include <Eigen/Core>
 #include <Eigen/Cholesky>
+#include <Eigen/Eigenvalues>
 #include <Eigen/LU>
 
 #include "linalg/metric_solve.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "integrals/active/two_electron.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/overlap/metric.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
 
 namespace {
@@ -95,6 +98,10 @@ void compare_dense(Fixture& fixture) {
   xmvb::vb::RepresentationOverlap representation(
       action, fixture.alpha, fixture.beta, fixture.upper.rows());
   const auto prepared_metric = representation.prepare_metric(fixture.upper);
+  require(prepared_metric.selected_metric() != nullptr &&
+              prepared_metric.selected_metric()->overlap.data() ==
+                  prepared_metric.selected_matrix().data(),
+          "bounded selected factor does not share the resident Gram");
   const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(
       fixture.selected.cols(), fixture.selected.cols());
   const auto exterior = [&](const std::vector<std::vector<int>>& strings) {
@@ -172,6 +179,10 @@ void compare_dense(Fixture& fixture) {
   trial(0, trial.cols() - 1) += 0.17;
   const auto trial_action = representation.prepare_metric(trial);
   const Eigen::MatrixXd trial_metric = trial_action(identity);
+  require(trial_action.selected_metric() != nullptr &&
+              trial_action.selected_metric() != prepared_metric.selected_metric() &&
+              (trial_metric - metric).norm() > 1e-5,
+          "trial chart reused the accepted selected factor");
   for (int col = 0; col < rhs.cols(); ++col) {
     const Eigen::VectorXd x = xmvb::linalg::solve_metric(
         Eigen::VectorXd(rhs.col(col)),
@@ -185,6 +196,48 @@ void compare_dense(Fixture& fixture) {
     require((x - reference_trial).norm() < 2.0e-10 * std::max(1.0, reference_trial.norm()),
             "accepted Jacobi diagonal changed the trial-chart solution");
   }
+}
+
+void check_retained_ill_conditioned_metric() {
+  Eigen::MatrixXd selected = Eigen::MatrixXd::Zero(9, 3);
+  selected(0, 0) = 1.0;
+  selected(0, 1) = 1.0;
+  selected(4, 1) = 8.0e-4;
+  selected(8, 2) = 1.0;
+  Fixture fixture(3, 1, 1, selected);
+  const auto action = fixture.action();
+  std::shared_ptr<const xmvb::vb::SelectedMetric> retained;
+  {
+    xmvb::vb::RepresentationOverlap representation(
+        action, fixture.alpha, fixture.beta, fixture.upper.rows());
+    const auto prepared = representation.prepare_metric(fixture.upper);
+    retained = prepared.selected_metric();
+  }
+  require(retained != nullptr && retained->factor.info() == Eigen::Success,
+          "selected factor did not survive its prepared action");
+  const Eigen::MatrixXd& metric = retained->overlap;
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(metric);
+  require(spectrum.info() == Eigen::Success &&
+              spectrum.eigenvalues()[0] > 0.0 &&
+              spectrum.eigenvalues().tail(1)[0] /
+                  spectrum.eigenvalues()[0] > 1.0e6,
+          "selected Gram fixture is not ill-conditioned and positive");
+  const Eigen::VectorXd rhs = 1.0e-9 * Eigen::Vector3d(0.31, -0.27, 0.44);
+  xmvb::linalg::MetricSolveStats stats;
+  const Eigen::VectorXd solution = xmvb::linalg::solve_metric(
+      rhs,
+      [&](const Eigen::VectorXd& vector) {
+        return Eigen::VectorXd(action.apply_overlap(vector).col(0));
+      },
+      [&](const Eigen::VectorXd& residual) {
+        return Eigen::VectorXd(retained->factor.solve(residual));
+      }, &stats);
+  const double relative_residual =
+      (rhs - action.apply_overlap(solution).col(0)).norm() / rhs.norm();
+  require(stats.certifications >= 1 &&
+              relative_residual <=
+                  std::sqrt(std::numeric_limits<double>::epsilon()),
+          "retained factor lost the original metric residual certificate");
 }
 
 void singlet_case() {
@@ -260,6 +313,7 @@ void doublet_case() {
 }  // namespace
 
 int main() {
+  check_retained_ill_conditioned_metric();
   singlet_case();
   doublet_case();
   std::cout << "selected metric checks passed\n";

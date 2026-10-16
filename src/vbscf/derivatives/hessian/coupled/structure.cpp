@@ -14,6 +14,7 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
+#include "vbscf/structures/overlap/metric.hpp"
 #include "linalg/metric_solve.hpp"
 #include "mcscf/optimization/trace.hpp"
 
@@ -475,9 +476,12 @@ double StructureTangentOperator::diagonal_dual_norm(
 
 Eigen::VectorXd StructureTangentOperator::apply_inverse_metric_model(
     const Eigen::VectorXd& covector) const {
-  if (!metric_inverse_) return apply_inverse_metric_diagonal(covector);
+  const auto& selected_metric = accepted_point_->selected_metric;
+  if (!metric_inverse_ && !selected_metric) return apply_inverse_metric_diagonal(covector);
   const Eigen::MatrixXd rhs = expand(covector).scaled_coefficients;
-  Eigen::MatrixXd image = metric_inverse_->apply(rhs);
+  Eigen::MatrixXd image;
+  if (metric_inverse_) image = metric_inverse_->apply(rhs);
+  else image = selected_metric->factor.solve(rhs);
   // Z spans ker[(M C)^T]. The exact horizontal inverse is
   // Z^T [M^-1 - C (C^T M C)^-1 C^T] Z, not Z^T M^-1 Z.
   image.noalias() -= selected_ *
@@ -500,12 +504,12 @@ linalg::MetricImage StructureTangentOperator::metric_image(const Eigen::VectorXd
   linalg::MetricSolveStats stats;
   const auto action = [this](const Eigen::VectorXd& x) { return apply_metric_coordinates(x); };
   const auto precondition = [this](const Eigen::VectorXd& x) { return apply_inverse_metric_model(x); };
-  // A complete-space inverse already solves in one CG step; recycle only the
-  // selected-space solves that otherwise repeat long Krylov traversals.
+  // Exact complete-space or resident selected factors need no recycling.
+  // Recycle only streamed selected solves that repeat long Krylov traversals.
   linalg::MetricImage result;
   if (workspace) {
     result = workspace->image(covector, action, precondition, trace ? &stats : nullptr,
-        initial, !metric_inverse_);
+        initial, !metric_inverse_ && !accepted_point_->selected_metric);
   } else {
     Eigen::VectorXd image;
     result.inverse = linalg::solve_metric(covector, action, precondition,

@@ -23,3 +23,7 @@ Native output, per-macro CIAH counters, GNU time resource data, binary/input
 hashes and actual core affinity are retained there. The standard performance
 audit's Slurm/native-resource procedure is used on user-requested Hanhai22.
 No optional profiler is enabled. OpenMP uses 32 workers and BLAS one thread.
+
+The original run failed before accepting a step, at a selected-metric CG solve.
+See [metric-fix.md](metric-fix.md) for the measured diagnosis, unchanged-accuracy
+factor-reuse repair, passing regressions and replacement full run **1264476**.

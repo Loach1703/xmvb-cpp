@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -43,7 +44,9 @@ Eigen::VectorXd solve_metric(const Eigen::VectorXd& rhs,
                             MetricSolveStats* stats = nullptr,
                             const Eigen::VectorXd* initial = nullptr,
                             Eigen::VectorXd* metric_image = nullptr) {
-  if (stats) *stats = {};
+  MetricSolveStats local_stats;
+  if (!stats) stats = &local_stats;
+  *stats = {};
   const auto apply = [&](const Eigen::VectorXd& v) {
     if (stats) ++stats->actions;
     return action(v);
@@ -105,8 +108,18 @@ Eigen::VectorXd solve_metric(const Eigen::VectorXd& rhs,
       if (!std::isfinite(norm)) throw std::runtime_error("non-finite true metric residual");
       if (norm <= target) return x;
       if (!(cycle_norm - norm > std::numeric_limits<double>::epsilon() *
-            std::max(cycle_norm, rhs_norm)))
-        throw std::runtime_error("metric CG stagnated above certified tolerance");
+            std::max(cycle_norm, rhs_norm))) {
+        std::ostringstream message;
+        message.precision(17);
+        message << "metric CG stagnated above certified tolerance"
+                << ": dimension=" << rhs.size()
+                << ", iterations=" << stats->iterations
+                << ", certifications=" << stats->certifications
+                << ", rhs_norm=" << rhs_norm
+                << ", residual=" << norm << ", target=" << target
+                << ", cycle_initial_residual=" << cycle_norm;
+        throw std::runtime_error(message.str());
+      }
       z = inverse(r);
       p = z;
       rz = r.dot(z);

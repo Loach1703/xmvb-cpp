@@ -48,6 +48,10 @@ add_executable(test_metric_point EXCLUDE_FROM_ALL
   ${CMAKE_SOURCE_DIR}/tests/vbscf/diagnostics/metric_point.cpp)
 target_link_libraries(test_metric_point PRIVATE xmvb_input xmvb_vbscf)
 
+add_executable(test_selected_metric_point EXCLUDE_FROM_ALL
+  ${CMAKE_SOURCE_DIR}/tests/vbscf/diagnostics/selected_metric_point.cpp)
+target_link_libraries(test_selected_metric_point PRIVATE xmvb_input xmvb_vbscf)
+
 if (BUILD_TESTING)
   add_test(NAME ci_transport COMMAND test_ci_transport)
   add_test(NAME representation_overlap COMMAND test_representation_overlap)

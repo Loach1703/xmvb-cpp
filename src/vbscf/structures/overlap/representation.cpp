@@ -12,6 +12,7 @@
 
 #include "core/timing.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/overlap/metric.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
 namespace xmvb::vb {
@@ -232,9 +233,10 @@ RepresentationOverlap::PreparedMetric::PreparedMetric(
     // existing budget for construction and quarters for identity/result.
     const std::size_t n=action.n_structures();
     if (fits_selected(action.n_structures())) {
-      selected_gram_=action.cross_overlap(Eigen::MatrixXd::Identity(n,n),
+      selected_metric_ = std::make_shared<SelectedMetric>(
+          action.cross_overlap(Eigen::MatrixXd::Identity(n,n),
           *alpha_transform_,*beta_transform_,*alpha_transform_,*beta_transform_,
-          nullptr,nullptr,nullptr,nullptr,kRowWorkspaceBytes/2);
+          nullptr,nullptr,nullptr,nullptr,kRowWorkspaceBytes/2));
       alpha_transform_.reset();
       beta_transform_.reset();
     }
@@ -247,12 +249,17 @@ Eigen::MatrixXd RepresentationOverlap::PreparedMetric::operator()(
     const Eigen::Ref<const Eigen::MatrixXd>& coeff) const {
   if (coeff.rows() != action_->n_structures() || coeff.cols() <= 0 ||
       !coeff.allFinite()) throw std::invalid_argument("invalid structure block");
-  if (selected_gram_.size()) return selected_gram_*coeff;
+  if (selected_metric_) return selected_metric_->overlap * coeff;
   if (!alpha_transform_)
     return apply_pair_kernel(*action_, *alpha_, *beta_, kernel_, coeff);
 
   return action_->cross_overlap(coeff, *alpha_transform_, *beta_transform_,
                                 *alpha_transform_, *beta_transform_);
+}
+
+const Eigen::MatrixXd& RepresentationOverlap::PreparedMetric::selected_matrix() const noexcept {
+  static const Eigen::MatrixXd empty;
+  return selected_metric_ ? selected_metric_->overlap : empty;
 }
 
 RepresentationOverlap::PreparedMetric RepresentationOverlap::prepare_metric(
