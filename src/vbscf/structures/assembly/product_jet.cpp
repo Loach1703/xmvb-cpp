@@ -204,7 +204,8 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     }
     // Independent readers borrow the same bounded primal/tangent panels.
     const auto reader=[&](int family) -> mcscf::DirectCiTileReader {
-      return [&,family,position=std::vector<int>(n_unique_alpha_,-1)](
+      return [&,family,position=std::vector<int>(n_unique_alpha_,-1),
+          tiles=std::vector<const detail::ColumnTile*>(panels,nullptr)](
           const std::vector<int>& betas,const std::vector<int>& rows,
           Eigen::Ref<Eigen::MatrixXd> values) mutable {
         if (resident_input && (!cached || family==1)) {
@@ -217,33 +218,47 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           });
           return;
         }
-        for (int a=0;a<static_cast<int>(rows.size());++a) position[rows[a]]=a;
+        // Rows are sorted and distinct. A complete alpha range needs no map.
+        const bool full_rows=rows.size()==static_cast<std::size_t>(n_unique_alpha_);
+        if (!full_rows)
+          for (int a=0;a<static_cast<int>(rows.size());++a) position[rows[a]]=a;
         const int component=cached ? (family==2 ? 1:0):family;
         const auto copy_column=[&](int col,const detail::ColumnTile& tile) {
           const int b=betas[col]%extent;
           const int first=tile.pattern->offsets[b],last=tile.pattern->offsets[b+1];
           if (tile.pattern->full) {
-            for (int a=0;a<static_cast<int>(rows.size());++a)
-              values(a,col)=tile.values(first+rows[a],component);
+            if (full_rows) values.col(col)=tile.values.col(component).segment(first,n_unique_alpha_);
+            else for (int a=0;a<static_cast<int>(rows.size());++a)
+                values(a,col)=tile.values(first+rows[a],component);
           } else {
             values.col(col).setZero();
             for (int k=first;k<last;++k) {
-              const int a=position[tile.pattern->rows[k]];
+              const int a=full_rows ? tile.pattern->rows[k]:position[tile.pattern->rows[k]];
               if (a>=0) values(a,col)=tile.values(k,component);
             }
           }
         };
-        if (cached && family!=1) {
-          // Immutable accepted panels span the entire requested column batch:
-          // use one shared team, not one task launch per source panel.
+        if (cached) {
+          // A directional component on the accepted two-component support
+          // also fits the same budget. Its borrowed owners therefore survive
+          // the whole read, just like the immutable accepted Y/residual tiles.
+          // Gather only owner pointers, then copy ALL beta columns in one team.
+          if (family==1) {
+            std::fill(tiles.begin(),tiles.end(),nullptr);
+            for (const int b:betas) {
+              const int panel=b/extent;
+              if (reachable_mask[panel] && !tiles[panel]) tiles[panel]=&input.get(panel);
+            }
+          }
           const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),
               rows.size()*betas.size());
           cooperative_openmp_for(betas.size(),workers,[&](std::ptrdiff_t col) {
             const int panel=betas[col]/extent;
             if (!reachable_mask[panel]) values.col(col).setZero();
-            else copy_column(col,state.product_images->states[state_id][panel]);
+            else copy_column(col,family==1 ? *tiles[panel]:
+                state.product_images->states[state_id][panel]);
           });
-          for (const int a:rows) position[a]=-1;
+          if (!full_rows) for (const int a:rows) position[a]=-1;
           return;
         }
         for (int j=0;j<static_cast<int>(betas.size());) {
@@ -258,7 +273,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           });
           j=end;
         }
-        for (const int a:rows) position[a]=-1;
+        if (!full_rows) for (const int a:rows) position[a]=-1;
       };
     };
     const auto y=reader(0),dy=reader(tangent ? 1:0);
