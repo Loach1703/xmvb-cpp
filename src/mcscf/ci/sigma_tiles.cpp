@@ -115,7 +115,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   struct Group { int beta, begin, end, capacity, limit; int column=0; };
   struct Incoming { int group, pair; double sign; };
   std::vector<Group> groups;
-  std::vector<int> active, group_index, halo, columns, distinct_alpha;
+  std::vector<int> active, group_index, halo, columns, distinct_alpha,diagonal_rows;
   std::vector<int> halo_index(n_alpha_, -1), column_index(n_beta_, -1);
   std::vector<unsigned char> alpha_seen(n_alpha_, 0), active_support;
   std::vector<int> same_group, offsets, positions, target_index,beta_offsets;
@@ -185,6 +185,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
           for (const int a : distinct_alpha) alpha_seen[a] = 0;
           distinct_alpha.clear();
           active.clear();
+          diagonal_rows.clear();
           group_index.clear();
           groups.clear();
           halo.clear();
@@ -284,6 +285,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               for (int i = 0; i < length; ++i) {
                 active[packed + i] = active[group.begin + i];
                 active_support[packed + i] = active_support[group.begin + i];
+                if (exchange_parity && active[packed+i]==group.beta)
+                  diagonal_rows.push_back(packed+i);
                 unsupported_targets += !active_support[packed + i];
               }
               group.begin = packed;
@@ -422,6 +425,20 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
           target(row, beta_links[link].pair) += beta_links[link].sign *
               source[beta_offsets[g*beta_graph.n_singles()+link]];
       };
+      // Orbit weights are 2 except on a=b. Apply them to the small Gram,
+      // not to B: temporal responses and deltaK*B share its unweighted slab.
+      const auto subtract_diagonal=[&](auto&& gram,int begin,int end,int row,int col) {
+        for (int v=0;v<width;++v) {
+          const int lo=std::max(0,begin-v*count),hi=std::min(count,end-v*count);
+          if (lo>=hi) continue;
+          auto entry=std::lower_bound(diagonal_rows.begin(),diagonal_rows.end(),lo);
+          for (;entry!=diagonal_rows.end() && *entry<hi;++entry) {
+            const int r=v*count+*entry;
+            gram.noalias()-=scattered.row(r).segment(row,gram.rows()).transpose()*
+                state_channels.row(r).segment(col,gram.cols());
+          }
+        }
+      };
       for (std::size_t request_id=0;request_id<requests.size();++request_id) {
         const auto& request=requests[request_id];
         const auto& add_columns=request.image;
@@ -467,11 +484,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
           } else if (!state && last > first) {
             state_channels.middleRows(first,last-first) = scattered.middleRows(first,last-first);
           }
-          // B remains weighted and immutable for every temporal response.
-          if (exchange_parity && (request_id==0 || !state))
-            for (int row = first; row < last; ++row)
-              if (active[row % count] != groups[group_index[row % count]].beta)
-                state_channels.row(row) *= 2.0;
+          // B remains unweighted and immutable for every temporal response.
 #pragma omp barrier
           // G=sum_t A_t^T B_t. The consumed input halo can hold the local Gram
           // images without allocating or copying channel slabs. If it cannot
@@ -501,8 +514,10 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               const int begin=count*width*thread/parts,end=count*width*(thread+1)/parts;
               Eigen::Map<Eigen::MatrixXd> partial(
                   workspace.get()+thread*tile_area,pairs,pairs);
-              partial.noalias()=scattered.middleRows(begin,end-begin).transpose()*
+              partial.noalias()=(exchange_parity ? 2.0:1.0)*
+                  scattered.middleRows(begin,end-begin).transpose()*
                   state_channels.middleRows(begin,end-begin);
+              if (exchange_parity) subtract_diagonal(partial,begin,end,0,0);
             }
 #pragma omp barrier
 #pragma omp for schedule(static)
@@ -517,8 +532,10 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             for (int block=0;block<blocks*blocks;++block) {
               const int row=(block/blocks)*extent,col=(block%blocks)*extent;
               const int rows=std::min(extent,pairs-row),cols=std::min(extent,pairs-col);
-              kernel_adjoint.block(row,col,rows,cols).noalias()+=
+              auto gram=kernel_adjoint.block(row,col,rows,cols);
+              gram.noalias()+=(exchange_parity ? 2.0:1.0)*
                   scattered.middleCols(row,rows).transpose()*state_channels.middleCols(col,cols);
+              if (exchange_parity) subtract_diagonal(gram,0,count*width,row,col);
             }
           }
           if (timing) {
@@ -535,9 +552,6 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
           if (add_columns) multiply_in_place(scattered.middleRows(first,last-first),
               hamiltonian_pair_kernel_,scratch);
           if (direction && (add_columns || add_forcing)) {
-            if (exchange_parity) for (int row=first;row<last;++row)
-              if (active[row%count]!=groups[group_index[row%count]].beta)
-                state_channels.row(row)*=0.5;
             multiply_in_place(state_channels.middleRows(first,last-first),
                 direction->hamiltonian_pair_kernel_,scratch);
             if (add_columns) transformed.middleRows(first,last-first)+=
@@ -548,22 +562,10 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
           transformed.middleRows(first, last - first).noalias() =
               scattered.middleRows(first, last - first) * hamiltonian_pair_kernel_.transpose();
         if (!temporal_in_place && direction && (add_columns || add_forcing) && last > first) {
-          // The adjoint used orbit multiplicities. The directional image must
-          // use the original state; reconstruction is applied only once below.
-          if (exchange_parity && requests.size()==1)
-            for (int row = first; row < last; ++row)
-              if (active[row % count] != groups[group_index[row % count]].beta)
-                state_channels.row(row) *= 0.5;
           // Base K*A has consumed A. Reuse its slab for deltaK*B, then add to C.
           scattered.middleRows(first, last - first).noalias() =
               state_channels.middleRows(first, last - first) *
               direction->hamiltonian_pair_kernel_.transpose();
-          // For a sequence, never overwrite its common weighted B. Undo the
-          // orbit multiplicity on deltaK*B instead, before combining images.
-          if (exchange_parity && requests.size()>1)
-            for (int row=first;row<last;++row)
-              if (active[row%count]!=groups[group_index[row%count]].beta)
-                scattered.row(row)*=0.5;
           if (add_columns)
             transformed.middleRows(first, last - first) +=
                 scattered.middleRows(first, last - first);

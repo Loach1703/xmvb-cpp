@@ -27,6 +27,15 @@ unset XMVB_PHASE_TIMING XMVB_CIAH_TRACE
 hostname > "$artifact/node.txt"
 lscpu > "$artifact/cpu.txt"
 module list > "$artifact/modules.txt" 2>&1
+bundle=''
+if [[ ${1:-} == --bundle ]]; then
+ bundle=$(realpath "$2")
+ # A queued run must not silently rebuild later source. Reuse the qualified
+ # executable pair, original inputs and source manifest as one frozen bundle.
+ cp "$bundle/"{CMakeCache.txt,sources.sha256} "$artifact/"
+ cp "$bundle/bin/"{xmvb-cpp.exe,test_structure_tiles} "$artifact/bin/"
+ printf '%s\n' "$bundle" > "$artifact/bundle.txt"
+else
 cmake -S "$source_dir" -B "$source_dir/build" > "$artifact/configure.log" 2>&1
 cmake --build "$source_dir/build" --target xmvb test_structure_tiles \
  test_representation_overlap test_selected_metric test_ci_transport \
@@ -42,8 +51,9 @@ srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2
 cp "$source_dir/build/Testing/Temporary/LastTest.log" "$artifact/test-details.log"
 if [[ ${1:-} == --tests-only ]]; then exit 0; fi
 cp "$source_dir/build/src/"{xmvb-cpp.exe,test_structure_tiles} "$artifact/bin/"
+fi
 sha256sum "$artifact/bin/"* > "$artifact/binaries.sha256"
-export C12_RUN_ROOT="$artifact" C12_RUN_SOURCE="$source_dir"
+export C12_RUN_ROOT="$artifact" C12_RUN_SOURCE="$source_dir" C12_FROZEN_BUNDLE="$bundle"
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores bash -se <<'RUN'
 root="$C12_RUN_ROOT"
 source_dir="$C12_RUN_SOURCE"
@@ -56,8 +66,12 @@ done
 for mode in native loflea-phases; do
  mkdir -p "$root/$mode"
  cd "$root/$mode"
- sed -E 's/^iscf=.*/iscf=9/I' "$source_dir/testdata/vbscf/csd_LOFLEA_vb.xmi" > input.xmi
- cp "$source_dir/basis/cc-pvdz.gbs" .
+ if [[ -n $C12_FROZEN_BUNDLE ]]; then
+  cp "$C12_FROZEN_BUNDLE/native/"{input.xmi,cc-pvdz.gbs} .
+ else
+  sed -E 's/^iscf=.*/iscf=9/I' "$source_dir/testdata/vbscf/csd_LOFLEA_vb.xmi" > input.xmi
+  cp "$source_dir/basis/cc-pvdz.gbs" .
+ fi
  sha256sum input.xmi cc-pvdz.gbs > input.sha256
  unset XMVB_PHASE_TIMING XMVB_CIAH_TRACE
  if [[ $mode == loflea-phases ]]; then
