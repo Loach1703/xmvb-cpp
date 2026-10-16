@@ -2744,6 +2744,120 @@ void check_tiled_integral_direction_case(
   }
 }
 
+/** @brief The complete 8-orbital halo holds one full Gram tile per worker. */
+void check_full_square_tiled_gram() {
+  constexpr int n = 8, width = 2;
+  const auto spin = complete_space(n, 3);
+  const int u = static_cast<int>(spin.size());
+  const int pairs = xmvb::integrals::packed_active_pair_count(n);
+  require(u == 56 && static_cast<std::size_t>(u * u * width) >= 4u * pairs * pairs,
+          "full-square Gram fixture does not fit four partials in its input halo");
+  xmvb::mcscf::ActiveIntegrals integrals;
+  integrals.one_electron.resize(n, n);
+  integrals.pair_kernel.resize(pairs, pairs);
+  for (int q = 0; q < n; ++q)
+    for (int p = 0; p <= q; ++p)
+      integrals.one_electron(p, q) = integrals.one_electron(q, p) =
+          0.13 * std::cos(0.17 * (p + 1) * (q + 2)) + (p == q ? 0.27 : 0.0);
+  for (int q = 0; q < pairs; ++q)
+    for (int p = 0; p <= q; ++p)
+      integrals.pair_kernel(p, q) = integrals.pair_kernel(q, p) =
+          0.019 * std::sin(0.11 * (p + 2) * (q + 1));
+  const xmvb::mcscf::DirectCiSigmaAction action(spin, spin, integrals);
+  const auto reader = [u, width](const Eigen::MatrixXd& carrier)
+      -> xmvb::mcscf::DirectCiTileReader {
+    const Eigen::MatrixXd* source = &carrier;
+    return [source, u, width](const std::vector<int>& betas,
+                       const std::vector<int>& rows,
+                       Eigen::Ref<Eigen::MatrixXd> tile) {
+      for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+        for (int v = 0; v < width; ++v)
+          for (int a = 0; a < static_cast<int>(rows.size()); ++a)
+            tile(a, b * width + v) = (*source)(rows[a], v * u + betas[b]);
+    };
+  };
+  const auto writer = [u, width](Eigen::MatrixXd& image)
+      -> xmvb::mcscf::DirectCiTileWriter {
+    Eigen::MatrixXd* target = &image;
+    return [target, u, width](const std::vector<int>& betas,
+                       const std::vector<int>& rows,
+                       const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
+      for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+        for (int v = 0; v < width; ++v)
+          accumulate(b, v, 0, static_cast<int>(rows.size()),
+              target->col(v * u + betas[b]).data(), nullptr, 0);
+    };
+  };
+  const auto close = [](const Eigen::MatrixXd& actual,
+                        const Eigen::MatrixXd& expected) {
+    return (actual - expected).norm() < 3e-11 * std::max(1.0, expected.norm());
+  };
+#ifdef _OPENMP
+  const int saved_threads = omp_get_max_threads();
+  const std::vector<int> thread_counts{2, 4};
+#else
+  const std::vector<int> thread_counts{1};
+#endif
+  for (const int parity : {0, 1, -1}) {
+    Eigen::MatrixXd response(u, width * u), state(u, width * u);
+    for (int v = 0; v < width; ++v) {
+      Eigen::MatrixXd r(u, u), s(u, u);
+      for (int b = 0; b < u; ++b)
+        for (int a = 0; a < u; ++a) {
+          r(a, b) = std::sin(0.071 * (a + 1) * (b + 2) + 0.23 * v);
+          s(a, b) = std::cos(0.053 * (a + 3) * (b + 1) - 0.31 * v);
+        }
+      if (parity) {
+        r = (r + parity * r.transpose()).eval();
+        s = (s + parity * s.transpose()).eval();
+      }
+      response.middleCols(v * u, u) = r;
+      state.middleCols(v * u, u) = s;
+    }
+    require((response - state).norm() > 1.0,
+            "full-square Gram response accidentally equals its state");
+    const Eigen::MatrixXd second = 0.37 * response + 0.21 * state;
+    const std::array<Eigen::MatrixXd, 2> responses{response, second};
+    const std::array<Eigen::MatrixXd, 2> expected_images{
+        action.apply(response), action.apply(second)};
+    const std::array<xmvb::mcscf::DirectCiIntegralAdjoint, 2> expected_adjoints{
+        action.integral_adjoint(response, state, parity),
+        action.integral_adjoint(second, state, parity)};
+    for (const int threads : thread_counts) {
+#ifdef _OPENMP
+      omp_set_num_threads(threads);
+#else
+      (void)threads;
+#endif
+      std::array<Eigen::MatrixXd, 2> images{
+          Eigen::MatrixXd::Zero(u, width * u),
+          Eigen::MatrixXd::Zero(u, width * u)};
+      const std::array<xmvb::mcscf::DirectCiTileRequest, 2> requests{{
+          {reader(responses[0]), writer(images[0]), nullptr, {}},
+          {reader(responses[1]), writer(images[1]), nullptr, {}}}};
+      const auto actual = action.apply_tiled_responses(
+          width, requests, reader(state), nullptr, parity);
+      require(actual.size() == requests.size(),
+              "full-square Gram lost a temporal integral adjoint");
+      for (std::size_t i = 0; i < requests.size(); ++i) {
+        if (parity)
+          for (int v = 0; v < width; ++v) {
+            const Eigen::MatrixXd block = images[i].middleCols(v * u, u);
+            images[i].middleCols(v * u, u) =
+                0.5 * (block + parity * block.transpose());
+          }
+        require(close(images[i], expected_images[i]) &&
+                close(actual[i].one_electron, expected_adjoints[i].one_electron) &&
+                close(actual[i].pair_kernel, expected_adjoints[i].pair_kernel),
+                "full-square row-partitioned Gram differs from dense CI oracles");
+      }
+    }
+  }
+#ifdef _OPENMP
+  omp_set_num_threads(saved_threads);
+#endif
+}
+
 void check_tiled_integral_direction() {
   const auto unequal_alpha = complete_space(4, 1);
   const auto unequal_beta = complete_space(4, 2);
@@ -2777,8 +2891,19 @@ void check_tiled_integral_direction() {
   check_tiled_integral_direction_case(equal_spin, equal_spin, 1, 1,
       nullptr, false, true);
   // Tiny unequal-spin halos also need correct width and worker ownership.
+#ifdef _OPENMP
+  const int saved_threads=omp_get_max_threads();
+  omp_set_num_threads(4);
+#endif
   for (int width:{1,2})
     check_tiled_integral_direction_case(complete_space(4,0),complete_space(4,1),width,0);
+  // One occupied full-spin carrier leaves fewer rows than four workers and a
+  // minimal input halo, which must use direct output ownership without partials.
+  for (int width:{1,2})
+    check_tiled_integral_direction_case(complete_space(4,4),complete_space(4,0),width,0);
+#ifdef _OPENMP
+  omp_set_num_threads(saved_threads);
+#endif
 #ifdef _OPENMP
 #pragma omp parallel num_threads(2)
   {
@@ -2964,6 +3089,7 @@ int main(int argc, char** argv) {
     check_exchange_reduced_generator();
     check_fused_spin_sectors();
     check_tiled_integral_direction();
+    check_full_square_tiled_gram();
     check_spin_sector_carrier_inverse();
     check_exchange_adjoint();
     check_demand_driven_structure_diagonal();

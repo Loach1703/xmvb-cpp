@@ -163,6 +163,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   };
   double prepare_time = 0, read_time = 0, compute_time = 0, write_time = 0, gram_time = 0;
   std::size_t gram_tiles=0;
+  std::size_t gram_scratch_bytes=0;
+  int gram_partitions=0,gram_extent=0;
   std::size_t batches = 0, source_columns = 0, source_elements = 0, peak_payload = 0;
   std::size_t targets = 0, unsupported_targets = 0, identity_halo_targets=0,beta_map_bytes=0;
   Clock::time_point compute_start, prepare_start, gram_start;
@@ -471,27 +473,57 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               if (active[row % count] != groups[group_index[row % count]].beta)
                 state_channels.row(row) *= 2.0;
 #pragma omp barrier
-          // G(I,J)=A(:,I)^T B(:,J): a square output grid avoids each narrow
-          // row-stripe worker rereading the entire right-channel slab. Views
-          // share existing storage; every output block has exactly one owner.
+          // G=sum_t A_t^T B_t. The consumed input halo can hold the local Gram
+          // images without allocating or copying channel slabs. If it cannot
+          // hold full local images, own output blocks directly instead: tiny
+          // halos must not launch one barrier per scalar Gram entry.
+          const int available=std::min(team,count*width);
+          const auto full_area=static_cast<std::size_t>(pairs)*pairs;
+          const bool row_partition=available>1 && full_area<=scratch_size/available;
+          const int parts=row_partition ? available:1;
           int axis=1;
-          while (axis*axis<team) axis*=2;
+          if (!row_partition) while (axis*axis<team) axis*=2;
           const int extent=(pairs+axis-1)/axis;
           const int blocks=(pairs+extent-1)/extent;
+          const auto tile_area=static_cast<std::size_t>(extent)*extent;
           if (timing) {
 #pragma omp single
-            { gram_start=tick(); }
+            {
+              gram_start=tick();
+              gram_partitions=std::max(gram_partitions,parts);
+              gram_extent=std::max(gram_extent,extent);
+              if (row_partition) gram_scratch_bytes=std::max(gram_scratch_bytes,
+                  parts*tile_area*sizeof(double));
+            }
           }
+          if (row_partition) {
+            if (thread<parts) {
+              const int begin=count*width*thread/parts,end=count*width*(thread+1)/parts;
+              Eigen::Map<Eigen::MatrixXd> partial(
+                  workspace.get()+thread*tile_area,pairs,pairs);
+              partial.noalias()=scattered.middleRows(begin,end-begin).transpose()*
+                  state_channels.middleRows(begin,end-begin);
+            }
+#pragma omp barrier
 #pragma omp for schedule(static)
-          for (int block=0;block<blocks*blocks;++block) {
-            const int row=(block/blocks)*extent,col=(block%blocks)*extent;
-            const int rows=std::min(extent,pairs-row),cols=std::min(extent,pairs-col);
-            kernel_adjoint.block(row,col,rows,cols).noalias()+=
-                scattered.middleCols(row,rows).transpose()*state_channels.middleCols(col,cols);
+            for (int entry=0;entry<pairs*pairs;++entry) {
+              double value=0;
+              for (int part=0;part<parts;++part)
+                value+=workspace[part*tile_area+entry];
+              kernel_adjoint.data()[entry]+=value;
+            }
+          } else {
+#pragma omp for schedule(static)
+            for (int block=0;block<blocks*blocks;++block) {
+              const int row=(block/blocks)*extent,col=(block%blocks)*extent;
+              const int rows=std::min(extent,pairs-row),cols=std::min(extent,pairs-col);
+              kernel_adjoint.block(row,col,rows,cols).noalias()+=
+                  scattered.middleCols(row,rows).transpose()*state_channels.middleCols(col,cols);
+            }
           }
           if (timing) {
 #pragma omp single
-            { gram_time+=seconds(gram_start,tick()); gram_tiles+=blocks*blocks; }
+            { gram_time+=seconds(gram_start,tick()); gram_tiles+=parts*blocks*blocks; }
           }
         }
         if (temporal_in_place && last>first) {
@@ -638,12 +670,14 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
         "XMVB_TILE,batches=%zu,source_columns=%zu,source_elements=%zu,peak_payload=%zu,"
         "prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f,targets=%zu,exchange=%d,"
         "skipped_diagonal_scatters=%zu,gram=%.9f,gram_tiles=%zu,"
-        "identity_halo_targets=%zu,beta_map_bytes=%zu\n",
+        "identity_halo_targets=%zu,beta_map_bytes=%zu,gram_partitions=%d,"
+        "gram_extent=%d,gram_scratch_bytes=%zu\n",
         batches, source_columns, source_elements, peak_payload,
         prepare_time, read_time, compute_time, write_time, targets, exchange_parity,
         unsupported_targets * static_cast<std::size_t>(width) *
             (requests.size() + static_cast<std::size_t>(collect_integrals && static_cast<bool>(state))),
-        gram_time,gram_tiles,identity_halo_targets,beta_map_bytes);
+        gram_time,gram_tiles,identity_halo_targets,beta_map_bytes,
+        gram_partitions,gram_extent,gram_scratch_bytes);
   std::vector<DirectCiIntegralAdjoint> results(requests.size());
   if (collect_integrals) for (std::size_t r=0;r<requests.size();++r)
     results[r]=pullback_channel_kernel(kernel_adjoints[r]);
