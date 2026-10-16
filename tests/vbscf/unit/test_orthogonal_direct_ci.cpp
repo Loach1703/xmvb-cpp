@@ -2697,6 +2697,26 @@ void check_tiled_integral_direction_case(
               close(ordered[1].one_electron,expected_adjoint.one_electron) &&
               close(ordered[1].pair_kernel,expected_adjoint.pair_kernel),
           "ordered temporal reuse changed an independent image or cotangent");
+  // The final orbital image consumes both Hamiltonian products, but has no
+  // separate forcing consumer. Its scratch may be fused after the Grams.
+  const int ordered_state_reads=state_reads;
+  ci_image.setZero(); orbital_image.setZero(); orbital_forcing.setConstant(-97.0);
+  state_reads=0; response_reads={};
+  const std::array<xmvb::mcscf::DirectCiTileRequest,2> no_forcing_requests{{
+      {counted_reader(ci_response,response_reads[0]),writer(ci_image),nullptr,{}},
+      {counted_reader(response,response_reads[1]),writer(orbital_image),&direction,{}}}};
+  const auto no_forcing=action.apply_tiled_responses(width,no_forcing_requests,
+      counted_reader(state,state_reads),support,parity);
+  require(no_forcing.size()==2 && state_reads==ordered_state_reads &&
+              state_reads==response_reads[0] && state_reads==response_reads[1] &&
+              close(project(ci_image),action.apply(ci_response)) &&
+              close(project(orbital_image),expected_combined) &&
+              close(no_forcing[0].one_electron,expected_ci_adjoint.one_electron) &&
+              close(no_forcing[0].pair_kernel,expected_ci_adjoint.pair_kernel) &&
+              close(no_forcing[1].one_electron,expected_adjoint.one_electron) &&
+              close(no_forcing[1].pair_kernel,expected_adjoint.pair_kernel) &&
+              (orbital_forcing.array()==-97.0).all(),
+          "ordered temporal direction without forcing changed images or adjoints");
   require(close(project(combined), expected_combined),
           "tiled direction changed H*response + deltaH*state");
   require(close(project(forcing), expected_forcing),

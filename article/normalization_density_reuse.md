@@ -4,7 +4,26 @@ Status: the density identity and its derivative were independently validated.
 The complete production rewrite was tested in Hanhai22 jobs 1264640 and
 1264642, but not retained: fewer generator contractions did not yield a faster
 complete C12 run. The current production cache still stores Y and (H-E)Y.
-The formulas below remain a validated option for a future larger fusion.
+The formulas below remain valid independently of that rejected rewrite.
+
+## Minimal accepted-only reuse
+
+A narrower follow-up reuses only $J(Y,Y)$ in the accepted norm multiplier,
+without changing the retained Y/(H-E)Y representation or any oriented
+directional contraction. The already returned, unweighted one-electron
+cotangent supplies $-2wE\operatorname{up}J(Y,Y)$ and the single-state gauge
+density. It is not rebuilt by a separate generator sweep. If neither selected
+images nor diagnostics are requested, the subsequent accepted-carrier reread
+is also unnecessary. Overlap projection remains when requested.
+
+This needs no CI-stationarity assumption and no added carrier or per-thread
+matrix. Temporal/unequal-spin response moments remain oriented and unchanged.
+The minimal change was retained after Hanhai22 job1264805 passed9/9 tests
+and converged in4steps/36HVP to-399.106646267331Eh. It removes64 generator
+calls (416 to352), but native application time is unchanged at24.22s versus
+the saved24.21s; there is no significant end-to-end speedup or RSS reduction
+claim. This is separate from the earlier rejected full cache rewrite; see
+results/diagnostics/c12-projection-review-20261017 for all raw qualifications.
 
 For real spin carriers define the oriented generator moment
 

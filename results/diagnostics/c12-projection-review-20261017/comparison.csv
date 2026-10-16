@@ -1,0 +1,8 @@
+variant,job,steps,hvp,structure_responses,energy_Eh,scf_s,application_s,process_s,rss_MiB,termination
+saved_baseline,1264786,4,36,36,-399.106646267332,21.394834,24.205419,24.43,2650.94921875,ciah_projected_gradient_tolerance
+combined_copyback_rejected,1264789,4,36,36,-399.106646267331,21.659273,24.503898,24.72,2697.6015625,ciah_projected_gradient_tolerance
+column_reuse_rejected,1264791,4,36,36,-399.106646267331,22.183739,24.900395,25.14,2685.4609375,ciah_projected_gradient_tolerance
+source_row_packing_rejected,1264792,4,36,36,-399.106646267330,20.570733,23.404603,23.64,2702.4765625,ciah_projected_gradient_tolerance
+supported_jet_rejected,1264796,4,36,36,-399.106646267330,21.264987,24.068527,24.29,2694.71875,ciah_projected_gradient_tolerance
+supported_and_density_probe,1264804,4,36,36,-399.106646267331,21.664261,24.767611,25.02,2651.12890625,ciah_projected_gradient_tolerance
+minimal_accepted_density,1264805,4,36,36,-399.106646267331,21.421274,24.221871,24.45,2761.80078125,ciah_projected_gradient_tolerance

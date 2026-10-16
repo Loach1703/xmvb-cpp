@@ -557,6 +557,16 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         // Keep state weights outside the shared scatter and both kernel actions.
         result.one_electron.noalias()+=(tangent ? 2*weight:weight)*gradient.one_electron;
         result.pair_kernel.noalias()+=(tangent ? 2*weight:weight)*gradient.pair_kernel;
+        if (!tangent) {
+          // d<Y|H|Y>/dh is the same accepted 1-RDM as D(Y,Y).
+          // Reuse it for the norm multiplier; a second generator sweep
+          // would only reconstruct this already available symmetric moment.
+          for (int j=0;j<n;++j)
+            for (int i=0;i<=j;++i)
+              result.generator(i,j)-=2*weight*energy*gradient.one_electron(i,j);
+          if (states==1 && state.product_images)
+            state.product_images->density=gradient.one_electron;
+        }
         ++result.images.tiles.integral_adjoint_sweeps;
       }
       if (output.evictions==0 && (spin_exchange_parity_ || (!tangent && state.product_images)))
@@ -599,7 +609,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     sweep();
     double norm=0,parallel=0,square=0;
     std::vector<int> all_rows(n_unique_alpha_); std::iota(all_rows.begin(),all_rows.end(),0);
-    for (const int panel:reachable) {
+    if (tangent || collect_images || capture) for (const int panel:reachable) {
       const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);
       std::vector<int> betas(count); std::iota(betas.begin(),betas.end(),first);
       Eigen::MatrixXd values,dv;
@@ -610,8 +620,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       if (tangent) { dv.resize(n_unique_alpha_,count); dy(betas,all_rows,dv); }
       Eigen::MatrixXd dq;
       if (joint) { dq.resize(n_unique_alpha_,count); q_reader(betas,all_rows,dq); }
-      if (weight!=0) {
-        if (tangent) {
+      if (weight!=0 && tangent) {
           // D(R,Z)=D(Z,R)^T: both accepted cotangents share the generated
           // Z panel and one spin-link traversal, without unpacking R first.
           if (cached && joint) {
@@ -626,13 +635,6 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
               false,spin_exchange_parity_!=0);
           else result.generator.noalias()-=2*weight*energy*
               sigma.generator_adjoint_streamed(first,dv,{{y,y_column}},true,spin_exchange_parity_!=0);
-        }
-        else {
-          const auto density=sigma.generator_adjoint_streamed(
-              first,values,{{y,y_column}},false,spin_exchange_parity_!=0);
-          result.generator.noalias()-=2*weight*energy*density;
-          if (states==1 && state.product_images) state.product_images->density+=density;
-        }
       }
       if (collect_images) {
         if (!tangent) project(panel,values,result.images.overlap.col(state_id));
