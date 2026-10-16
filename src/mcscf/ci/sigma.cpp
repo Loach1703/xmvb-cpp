@@ -1,6 +1,7 @@
 #include "mcscf/ci/sigma.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
@@ -52,13 +53,6 @@ std::uint64_t determinant_mask(
   return mask;
 }
 
-int only_set_bit(std::uint64_t mask) {
-  if (mask == 0 || (mask & (mask - 1)) != 0) {
-    throw std::logic_error("direct-CI single excitation is inconsistent");
-  }
-  return __builtin_ctzll(mask);
-}
-
 double replacement_sign(std::uint64_t source, int removed, int inserted) {
   const int low = std::min(removed, inserted);
   const int high = std::max(removed, inserted);
@@ -85,36 +79,6 @@ void add_symmetric_entry(
 }
 
 }  // namespace
-
-void DirectCiSigmaAction::DensityConnections::reserve(std::size_t capacity) {
-  sources.reserve(capacity);
-  pairs.reserve(capacity);
-  signs.reserve(capacity);
-  created_orbitals.reserve(capacity);
-  annihilated_orbitals.reserve(capacity);
-}
-
-void DirectCiSigmaAction::DensityConnections::append(
-    int source,
-    int pair,
-    double sign,
-    int created_orbital,
-    int annihilated_orbital) {
-  sources.push_back(source);
-  pairs.push_back(pair);
-  signs.push_back(sign);
-  created_orbitals.push_back(created_orbital);
-  annihilated_orbitals.push_back(annihilated_orbital);
-}
-
-std::size_t
-DirectCiSigmaAction::DensityConnections::dynamic_bytes() const noexcept {
-  return sources.capacity() * sizeof(int) +
-      pairs.capacity() * sizeof(int) +
-      signs.capacity() * sizeof(double) +
-      created_orbitals.capacity() * sizeof(int) +
-      annihilated_orbitals.capacity() * sizeof(int);
-}
 
 DirectCiSigmaAction::DirectCiSigmaAction(
     const std::vector<std::vector<int>>& alpha_determinants,
@@ -167,12 +131,12 @@ DirectCiSigmaAction::DirectCiSigmaAction(
     throw std::invalid_argument("direct-CI shared links have incompatible orbitals");
   }
   const int n_electrons = static_cast<int>(
-      alpha_->occupied.front().size() + beta_connections().occupied.front().size());
+      alpha_->n_occupied() + beta_connections().n_occupied());
   hamiltonian_pair_kernel_ = build_hamiltonian_pair_kernel(integrals, n_electrons);
 }
 
 std::size_t DirectCiSigmaAction::spin_link_count() const noexcept {
-  const std::size_t a = alpha_->occupied.front().size(), b = beta_connections().occupied.front().size();
+  const std::size_t a = alpha_->n_occupied(), b = beta_connections().n_occupied();
   return static_cast<std::size_t>(n_alpha_) * a * (n_orbitals_-a+1) +
       static_cast<std::size_t>(n_beta_) * b * (n_orbitals_-b+1);
 }
@@ -187,8 +151,8 @@ long double DirectCiSigmaAction::channel_search_work() const noexcept {
     return static_cast<long double>(rows) *
         (comparisons(occupied)+comparisons(occupied*(n_orbitals_-occupied)));
   };
-  return count(n_alpha_,alpha_->occupied.front().size()) +
-      count(n_beta_,beta_connections().occupied.front().size());
+  return count(n_alpha_,alpha_->n_occupied()) +
+      count(n_beta_,beta_connections().n_occupied());
 }
 
 Eigen::MatrixXd DirectCiSigmaAction::diagonal(
@@ -207,14 +171,14 @@ Eigen::MatrixXd DirectCiSigmaAction::diagonal(
   }
   const auto spin_diagonal=[&](const SpinConnections& links,
       Eigen::MatrixXd* occupations) {
-    const Eigen::Index count=links.occupied.size();
+    const Eigen::Index count=links.n_strings();
     occupations->setZero(count,n_orbitals_);
     Eigen::VectorXd result=Eigen::VectorXd::Zero(count);
     for (Eigen::Index string=0;string<count;++string) {
-      for (const int p:links.occupied[string]) {
+      for (const int p:links.occupied(string)) {
         (*occupations)(string,p)=1.0;
         result[string]+=one_electron(p,p);
-        for (const int q:links.occupied[string])
+        for (const int q:links.occupied(string))
           result[string]+=0.5*(coulomb(p,q)-exchange(p,q));
       }
     }
@@ -229,7 +193,7 @@ Eigen::MatrixXd DirectCiSigmaAction::diagonal(
   return result;
 }
 
-DirectCiSigmaAction::SpinConnections
+SpinConnections
 DirectCiSigmaAction::build_spin_connections(
     const std::vector<std::vector<int>>& determinants) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiConnections);
@@ -246,56 +210,62 @@ DirectCiSigmaAction::build_spin_connections(
     }
   }
   SpinConnections result;
-  result.singles.resize(dimension);
-  result.occupied = determinants;
+  const int electrons=determinants.front().size();
+  const int n_singles=electrons*(n_orbitals_-electrons);
+  result.strings=dimension;
+  result.degree=n_singles;
+  result.links.resize(static_cast<std::size_t>(n_singles)*dimension);
+  result.occupations.resize(electrons,dimension);
   const int n_threads = coarse_openmp_thread_count(
       effective_openmp_thread_count(), static_cast<std::size_t>(dimension));
 
 #pragma omp parallel for schedule(static) if(n_threads > 1) num_threads(n_threads)
   for (int target = 0; target < dimension; ++target) {
-    auto& singles = result.singles[target];
     const auto& target_occupied = determinants[target];
-    std::vector<int> target_virtual;
-    target_virtual.reserve(n_orbitals_ - target_occupied.size());
+    for (int i=0;i<electrons;++i) result.occupations(i,target)=target_occupied[i];
+    std::array<int,63> target_virtual;
+    int n_virtual=0,link=0;
     for (int orbital = 0; orbital < n_orbitals_; ++orbital) {
       if ((masks[target] & (std::uint64_t{1} << orbital)) == 0) {
-        target_virtual.push_back(orbital);
+        target_virtual[n_virtual++]=orbital;
       }
     }
-    const std::size_t n_singles =
-        target_occupied.size() * target_virtual.size();
-    singles.reserve(n_singles);
-
-    const auto add_source = [&](std::uint64_t source_mask) {
+    const auto add_source = [&](int removed,int inserted) {
+      const auto source_mask=masks[target] ^ (std::uint64_t{1} << removed) ^
+          (std::uint64_t{1} << inserted);
       const auto source_entry = index_by_mask.find(source_mask);
       if (source_entry == index_by_mask.end()) {
         throw std::logic_error(
             "direct-CI excitation left the fixed-spin determinant space");
       }
       const int source = source_entry->second;
-      const int removed = only_set_bit(source_mask & ~masks[target]);
-      const int inserted = only_set_bit(masks[target] & ~source_mask);
-      const double sign = replacement_sign(source_mask, removed, inserted);
-      singles.append(
-          source,
-          xmvb::core::PairIndex::packed_pair_index(removed, inserted),
-          sign,
-          inserted,
-          removed);
+      auto& entry=result.links[static_cast<std::size_t>(target)*n_singles+link];
+      entry.source=source;
+      entry.pair=core::PairIndex::packed_pair_index(removed,inserted);
+      entry.sign=replacement_sign(source_mask,removed,inserted);
+      entry.created=inserted;
+      entry.annihilated=removed;
+      ++link;
     };
 
     // Increasing maximum/minimum orbital indices are packed-channel order.
     // Opposite occupations generate every single replacement exactly once;
     // no sorting copy or channel-by-string offset table is needed.
     for (int high = 0; high < n_orbitals_; ++high) {
-      const auto& opposite = masks[target] & (std::uint64_t{1} << high)
-          ? target_virtual : target_occupied;
-      for (const int low : opposite) {
+      const bool occupied=masks[target] & (std::uint64_t{1} << high);
+      const int* opposite=occupied ? target_virtual.data():target_occupied.data();
+      const int count=occupied ? n_virtual:electrons;
+      for (int i=0;i<count;++i) {
+        const int low=opposite[i];
         if (low >= high) break;
-        add_source(masks[target] ^ (std::uint64_t{1} << high) ^ (std::uint64_t{1} << low));
+        // These labels are already known: do not decode the same two bits again.
+        add_source(occupied ? low:high,occupied ? high:low);
       }
     }
   }
+  if (profiling::phase_totals().enabled)
+    std::fprintf(stderr,"XMVB_LINKS,strings=%d,occupied=%d,singles=%d,retained_bytes=%zu\n",
+        dimension,electrons,n_singles,result.dynamic_bytes());
   return result;
 }
 
@@ -347,7 +317,7 @@ Eigen::MatrixXd DirectCiSigmaAction::build_hamiltonian_pair_kernel(
   return 0.5 * (result + result.transpose());
 }
 
-const DirectCiSigmaAction::SpinConnections&
+const SpinConnections&
 DirectCiSigmaAction::beta_connections() const noexcept {
   return distinct_beta_ ? *distinct_beta_ : *alpha_;
 }
@@ -383,18 +353,18 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
               1);
     }
   };
-  for (const int occupied : beta_graph.occupied[beta_target]) {
+  for (const int occupied : beta_graph.occupied(beta_target)) {
     add_beta_link(
         beta_target,
         xmvb::core::PairIndex::packed_pair_index(occupied, occupied),
         1.0);
   }
-  const DensityConnections& beta_singles = beta_graph.singles[beta_target];
+  const DensityConnections& beta_singles = beta_graph.singles(beta_target);
   for (std::size_t link = 0; link < beta_singles.size(); ++link) {
     add_beta_link(
-        beta_singles.sources[link],
-        beta_singles.pairs[link],
-        beta_singles.signs[link]);
+        beta_singles[link].source,
+        beta_singles[link].pair,
+        beta_singles[link].sign);
   }
 
   for (int local_alpha = 0; local_alpha < alpha_count; ++local_alpha) {
@@ -407,18 +377,18 @@ void DirectCiSigmaAction::scatter_one_body_intermediate(
                 alpha_source, block * n_beta_ + beta_target);
       }
     };
-    for (const int occupied : alpha_->occupied[alpha_target]) {
+    for (const int occupied : alpha_->occupied(alpha_target)) {
       add_alpha_link(
           alpha_target,
           xmvb::core::PairIndex::packed_pair_index(occupied, occupied),
           1.0);
     }
-    const DensityConnections& alpha_singles = alpha_->singles[alpha_target];
+    const DensityConnections& alpha_singles = alpha_->singles(alpha_target);
     for (std::size_t link = 0; link < alpha_singles.size(); ++link) {
       add_alpha_link(
-          alpha_singles.sources[link],
-          alpha_singles.pairs[link],
-          alpha_singles.signs[link]);
+          alpha_singles[link].source,
+          alpha_singles[link].pair,
+          alpha_singles[link].sign);
     }
   }
 }
@@ -472,29 +442,29 @@ void DirectCiSigmaAction::apply_one_body_generators(
       const auto& coefficients = request.coefficients;
       const auto& generator = request.generator;
       double value = 0.0;
-      for (const int orbital : alpha_->occupied[alpha]) {
+      for (const int orbital : alpha_->occupied(alpha)) {
         value += generator(orbital, orbital) * coefficients(alpha, column);
       }
-      for (const int orbital : beta_graph.occupied[beta]) {
+      for (const int orbital : beta_graph.occupied(beta)) {
         value += generator(orbital, orbital) * coefficients(alpha, column);
       }
-      const DensityConnections& alpha_singles = alpha_->singles[alpha];
+      const DensityConnections& alpha_singles = alpha_->singles(alpha);
       for (std::size_t single = 0; single < alpha_singles.size(); ++single) {
-        value += alpha_singles.signs[single] *
+        value += alpha_singles[single].sign *
             generator(
-                alpha_singles.created_orbitals[single],
-                alpha_singles.annihilated_orbitals[single]) *
-            coefficients(alpha_singles.sources[single], column);
+                alpha_singles[single].created,
+                alpha_singles[single].annihilated) *
+            coefficients(alpha_singles[single].source, column);
       }
-      const DensityConnections& beta_singles = beta_graph.singles[beta];
+      const DensityConnections& beta_singles = beta_graph.singles(beta);
       for (std::size_t single = 0; single < beta_singles.size(); ++single) {
-        value += beta_singles.signs[single] *
+        value += beta_singles[single].sign *
             generator(
-                beta_singles.created_orbitals[single],
-                beta_singles.annihilated_orbitals[single]) *
+                beta_singles[single].created,
+                beta_singles[single].annihilated) *
             coefficients(
                 alpha,
-                block * n_beta_ + beta_singles.sources[single]);
+                block * n_beta_ + beta_singles[single].source);
       }
       (*request.result)(alpha, column) = value;
     }
@@ -545,12 +515,12 @@ void DirectCiSigmaAction::apply_sigma_tile(
               sign * transformed(block * count + alpha, pair);
         }
       };
-      for (int occupied : alpha_->occupied[target]) {
+      for (int occupied : alpha_->occupied(target)) {
         add(target, xmvb::core::PairIndex::packed_pair_index(occupied, occupied), 1.0);
       }
-      const auto& links = alpha_->singles[target];
+      const auto& links = alpha_->singles(target);
       for (std::size_t link = 0; link < links.size(); ++link) {
-        add(links.sources[link], links.pairs[link], links.signs[link]);
+        add(links[link].source, links[link].pair, links[link].sign);
       }
     }
   }
@@ -578,12 +548,12 @@ void DirectCiSigmaAction::apply_sigma_tile(
         }
       }
     };
-    for (int occupied : beta_graph.occupied[beta]) {
+    for (int occupied : beta_graph.occupied(beta)) {
       add(beta, xmvb::core::PairIndex::packed_pair_index(occupied, occupied), 1.0);
     }
-    const auto& links = beta_graph.singles[beta];
+    const auto& links = beta_graph.singles(beta);
     for (std::size_t link = 0; link < links.size(); ++link) {
-      add(links.sources[link], links.pairs[link], links.signs[link]);
+      add(links[link].source, links[link].pair, links[link].sign);
     }
   }
 }
@@ -758,8 +728,8 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::pullback_channel_kernel(
       0.25 * (effective_kernel_adjoint +
               effective_kernel_adjoint.transpose());
   const int n_electrons =
-      static_cast<int>(alpha_->occupied.front().size() +
-                       beta_connections().occupied.front().size());
+      static_cast<int>(alpha_->n_occupied() +
+                       beta_connections().n_occupied());
   for (int row = 0; row < n_orbitals_; ++row) {
     for (int column = 0; column <= row; ++column) {
       const int pair =
@@ -809,7 +779,7 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_columns(
   // still distribute its long contiguous spectator dots across the team.
   std::vector<std::size_t> beta_offsets(beta_count+1,0);
   for (int b=0;b<beta_count;++b)
-    beta_offsets[b+1]=beta_offsets[b]+1+beta_graph.singles[beta_begin+b].size();
+    beta_offsets[b+1]=beta_offsets[b]+1+beta_graph.singles(beta_begin+b).size();
   const std::size_t work_items=block_width*(n_alpha_+beta_offsets.back());
   bool in_team=false;
   int team=1;
@@ -838,7 +808,7 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_columns(
       for (int block=0;block<block_width;++block)
         for (int local=first;local<last;++local) {
           const int target=local+(beta ? beta_begin:0);
-          const auto& links=graph.singles[target];
+          const auto& links=graph.singles(target);
           const std::size_t begin=beta ? std::max(first_unit,beta_offsets[local])-beta_offsets[local]:0;
           const std::size_t end=beta ? std::min(last_unit,beta_offsets[local+1])-beta_offsets[local]:
               links.size()+1;
@@ -853,17 +823,17 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_columns(
             return left.row(target).segment(block*beta_count,beta_count).dot(
                 request.right.row(source).segment(block*n_beta_+beta_begin,beta_count));
           };
-          if (begin==0 && !graph.occupied[target].empty()) {
+          if (begin==0 && graph.occupied(target).size()!=0) {
             double diagonal=0;
             for (const auto& request:requests) diagonal+=request.scale*moment(target,request);
-            for (const int orbital:graph.occupied[target]) density(orbital,orbital)+=diagonal;
+            for (const int orbital:graph.occupied(target)) density(orbital,orbital)+=diagonal;
           }
           for (std::size_t link=begin>0 ? begin-1:0;link+1<end;++link)
             for (const auto& request:requests) {
-              const int p=links.created_orbitals[link],q=links.annihilated_orbitals[link];
+              const int p=links[link].created,q=links[link].annihilated;
               const int row=request.transpose ? q:p,column=request.transpose ? p:q;
               if (upper_only && row>column) continue;
-              density(row,column)+=request.scale*links.signs[link]*moment(links.sources[link],request);
+              density(row,column)+=request.scale*links[link].sign*moment(links[link].source,request);
             }
         }
     };
@@ -889,23 +859,11 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_columns(
 }
 
 std::size_t DirectCiSigmaAction::dynamic_bytes() const noexcept {
-  const auto spin_bytes = [](const SpinConnections& spin) {
-    std::size_t bytes =
-        spin.singles.capacity() * sizeof(DensityConnections) +
-        spin.occupied.capacity() * sizeof(std::vector<int>);
-    for (const DensityConnections& connections : spin.singles) {
-      bytes += connections.dynamic_bytes();
-    }
-    for (const auto& occupied : spin.occupied) {
-      bytes += occupied.capacity() * sizeof(int);
-    }
-    return bytes;
-  };
   std::size_t bytes = static_cast<std::size_t>(
       pair_kernel_.size() + hamiltonian_pair_kernel_.size()) * sizeof(double) +
-      spin_bytes(*alpha_);
+      alpha_->dynamic_bytes();
   if (distinct_beta_) {
-    bytes += spin_bytes(*distinct_beta_);
+    bytes += distinct_beta_->dynamic_bytes();
   }
   return bytes;
 }

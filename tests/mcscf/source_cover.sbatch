@@ -45,7 +45,7 @@ sha256sum "$source_dir/src/core/"{eigen_response.cpp,eigen_response.hpp} \
  "$source_dir/src/vbscf/derivatives/hessian/coupled/"{coupling.cpp,coupling.hpp} \
  "$source_dir/src/vbscf/derivatives/hessian/exact/"{operator.cpp,operator.hpp,state_internal.hpp} \
  "$source_dir/tests/vbscf/unit/test_keyframe.cpp" >> "$artifact/sources.sha256"
-sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,factors_internal.hpp,factor_generator.cpp,factor_plan.cpp,sigma.cpp,sigma_tiles.cpp,sigma.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
+sha256sum "$source_dir/src/mcscf/ci/"{factors.cpp,factors.hpp,factors_internal.hpp,factor_generator.cpp,factor_plan.cpp,sigma.cpp,sigma_tiles.cpp,sigma.hpp,links.hpp,spin_channels.cpp} >> "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" \
  -R '^(ci_factors|orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric|eigen_response|keyframe)$' \

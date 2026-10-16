@@ -10,6 +10,7 @@
 #include <Eigen/Core>
 
 #include "mcscf/ci/integrals.hpp"
+#include "mcscf/ci/links.hpp"
 
 namespace xmvb::mcscf {
 
@@ -253,29 +254,6 @@ public:
   std::size_t dynamic_bytes() const noexcept;
 
 private:
-  struct DensityConnections {
-    std::vector<int> sources;
-    std::vector<int> pairs;
-    std::vector<double> signs;
-    std::vector<int> created_orbitals;
-    std::vector<int> annihilated_orbitals;
-
-    std::size_t size() const noexcept { return sources.size(); }
-    void reserve(std::size_t capacity);
-    void append(
-        int source,
-        int pair,
-        double sign,
-        int created_orbital,
-        int annihilated_orbital);
-    std::size_t dynamic_bytes() const noexcept;
-  };
-
-  struct SpinConnections {
-    std::vector<DensityConnections> singles;
-    std::vector<std::vector<int>> occupied;
-  };
-
   SpinConnections build_spin_connections(
       const std::vector<std::vector<int>>& determinants) const;
   Eigen::MatrixXd build_hamiltonian_pair_kernel(

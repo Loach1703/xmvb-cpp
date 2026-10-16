@@ -7,6 +7,19 @@ or memory-based admission to a different physical representation is allowed.
 
 ## Current audit
 
+- Data formats are specified in `src/mcscf/ci/README.md`: shared CSR incidence
+  and reverse indices, compact CSC support panels, fixed-stride one-spin links,
+  and dense bounded GEMM slabs. Do not replace them all with generic CSR/BSR.
+  One-spin links now use a contiguous record table, one occupied-orbital Eigen
+  array and borrowed row views, not six independent vectors per string. Their integer
+  widths follow the exact orbital-index bounds, while signs keep the numerical
+  kernel's double type. Floating precision and excitation order are unchanged.
+- Index correctness still needs migration: original product IDs are flattened
+  into signed `int` in `action.cpp:631` and adjacent source/support interfaces.
+  CAS18/18 has48620 strings/spin and2363904400 logical products, so that encoding
+  can overflow even for a tiny selected VB space. Use explicit string pairs or
+  a wide product ID; do not confuse bounded numerical tiles with safe logical
+  indexing. Add an index-only test without allocating the product space.
 - All three active-space forward entries now complete the computational
   one-spin topology before constructing `StructureAction`. Previously only
   synthetic selected-space tests called that constructor; real incomplete

@@ -84,9 +84,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   std::optional<ProductSupport::Cursor> continuation;
   int full_alpha_offset = 0;
   bool continued = false, finished = false;
-  std::size_t maximum_neighbors = 1;
-  for (const auto& links : alpha_->singles)
-    maximum_neighbors = std::max(maximum_neighbors, links.size() + 1);
+  const std::size_t maximum_neighbors=alpha_->n_singles()+1;
   // Retain the former two-panel bound after removing the output slab, so
   // batches remain comparable under the same 64 MiB target.
   const auto payload = [&](std::size_t rows, std::size_t h, std::size_t b, std::size_t g) {
@@ -134,8 +132,8 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
             const int limit = exchange_parity ? beta + (exchange_parity > 0) : n_alpha_;
             std::size_t b = columns.size();
             b += column_index[beta] < 0;
-            for (const int source : beta_graph.singles[beta].sources)
-              b += column_index[source] < 0;
+            for (const auto& edge:beta_graph.singles(beta))
+              b += column_index[edge.source] < 0;
             const auto bound = [&](int rows) {
               const auto h = std::min<std::size_t>(n_alpha_,
                   static_cast<std::size_t>(rows) * maximum_neighbors);
@@ -161,8 +159,8 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
             groups.push_back({beta, reserved, reserved, slots, limit});
             reserved += slots;
             include(beta, columns, column_index);
-            for (const int source : beta_graph.singles[beta].sources)
-              include(source, columns, column_index);
+            for (const auto& edge:beta_graph.singles(beta))
+              include(edge.source, columns, column_index);
             if (slots < limit) break;
           }
           active.resize(reserved);
@@ -233,7 +231,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
               alpha_seen[a] = 1;
               distinct_alpha.push_back(a);
               include(a);
-              for (const int source : alpha_->singles[a].sources) include(source);
+              for (const auto& edge:alpha_->singles(a)) include(edge.source);
             }
             if (!active.empty()) {
               count = active.size();
@@ -275,17 +273,17 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
                 same_group[column_index[groups[g].beta]] = g;
                 for (int i = groups[g].begin; i < groups[g].end; ++i)
                   target_index[static_cast<std::size_t>(g) * n_halo + halo_index[active[i]]] = i;
-                for (const int source : beta_graph.singles[groups[g].beta].sources)
-                  ++offsets[column_index[source] + 1];
+                for (const auto& edge:beta_graph.singles(groups[g].beta))
+                  ++offsets[column_index[edge.source] + 1];
               }
               for (int i = 1; i <= n_columns; ++i) offsets[i] += offsets[i - 1];
               positions = offsets;
               incoming.resize(offsets.back());
               for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
-                const auto& links = beta_graph.singles[groups[g].beta];
+                const auto& links = beta_graph.singles(groups[g].beta);
                 for (int link = 0; link < static_cast<int>(links.size()); ++link)
-                  incoming[positions[column_index[links.sources[link]]]++] =
-                      {g, links.pairs[link], links.signs[link]};
+                  incoming[positions[column_index[links[link].source]]++] =
+                      {g, links[link].pair, links[link].sign};
               }
               profiling::record_matrix_shape(profiling::Phase::CiSigma, count * width, team);
               prepare_time -= batch_read_time;
@@ -314,18 +312,18 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
         const int a = active[local], beta = groups[group_index[local]].beta;
         const int column = column_index[beta] * width + v;
         const double value = input(halo_index[a], column);
-        for (const int p : alpha_->occupied[a])
+        for (const int p : alpha_->occupied(a))
           target(row, core::PairIndex::packed_pair_index(p, p)) += value;
-        for (const int p : beta_graph.occupied[beta])
+        for (const int p : beta_graph.occupied(beta))
           target(row, core::PairIndex::packed_pair_index(p, p)) += value;
-        const auto& alpha_links = alpha_->singles[a];
+        const auto& alpha_links = alpha_->singles(a);
         for (int link = 0; link < static_cast<int>(alpha_links.size()); ++link)
-          target(row, alpha_links.pairs[link]) += alpha_links.signs[link] *
-              input(halo_index[alpha_links.sources[link]], column);
-        const auto& beta_links = beta_graph.singles[beta];
+          target(row, alpha_links[link].pair) += alpha_links[link].sign *
+              input(halo_index[alpha_links[link].source], column);
+        const auto& beta_links = beta_graph.singles(beta);
         for (int link = 0; link < static_cast<int>(beta_links.size()); ++link)
-          target(row, beta_links.pairs[link]) += beta_links.signs[link] *
-              input(halo_index[a], column_index[beta_links.sources[link]] * width + v);
+          target(row, beta_links[link].pair) += beta_links[link].sign *
+              input(halo_index[a], column_index[beta_links[link].source] * width + v);
       };
       for (int row = first; row < last; ++row) scatter(row,scattered);
       if (collect_integrals) {
@@ -402,17 +400,17 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
                 double sum = 0;
                 if (index[local] >= 0) {
                   const int row = v * count + index[local];
-                  for (const int p : alpha_->occupied[a])
+                  for (const int p : alpha_->occupied(a))
                     sum += transformed(row, core::PairIndex::packed_pair_index(p, p));
-                  for (const int p : beta_graph.occupied[columns[source]])
+                  for (const int p : beta_graph.occupied(columns[source]))
                     sum += transformed(row, core::PairIndex::packed_pair_index(p, p));
                 }
-                const auto& links = alpha_->singles[a];
+                const auto& links = alpha_->singles(a);
                 for (int link = 0; link < static_cast<int>(links.size()); ++link) {
-                  const int h = halo_index[links.sources[link]];
+                  const int h = halo_index[links[link].source];
                   const int target = h < 0 ? -1 : index[h];
                   if (target >= 0)
-                    sum += links.signs[link] * transformed(v * count + target, links.pairs[link]);
+                    sum += links[link].sign * transformed(v * count + target, links[link].pair);
                 }
                 destination[rows ? i:a] += sum;
               }

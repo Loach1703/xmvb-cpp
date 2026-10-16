@@ -127,6 +127,12 @@ def responses(artifacts, output):
             reference_path = artifact / f"{count}-structure-response{n}-reference.out"
             reference = values(reference_path) if reference_path.exists() else {}
             checked = int(reference.get("reference_checked",0))
+            log_path = artifact / f"{count}-structure-response{n}.err"
+            log = log_path.read_text() if log_path.exists() else ""
+            links = re.findall(r"^XMVB_LINKS,.*retained_bytes=(\d+)$",log,re.M)
+            build = re.search(r"^XMVB_PHASE,ci_connections,\d+,([\d.]+)$",log,re.M)
+            tiles = re.findall(r"^XMVB_TILE,([^\n]+)$",log,re.M)
+            tile = dict(item.split("=",1) for item in tiles[0].split(",")) if tiles else {}
             rows.append(dict(
                 run=artifact.name, orbitals=n, structures=count,
                 node=(artifact / "node.txt").read_text().strip(),
@@ -140,6 +146,12 @@ def responses(artifacts, output):
                 input_evictions=native.get("input_evictions"),
                 output_evictions=native.get("output_evictions"),
                 integral_adjoint_sweeps=native.get("integral_adjoint_sweeps"),
+                retained_link_bytes=sum(map(int,links)) if links else None,
+                link_build_seconds=float(build[1]) if build else None,
+                first_tile_prepare_seconds=tile.get("prepare"),
+                first_tile_read_seconds=tile.get("read"),
+                first_tile_compute_seconds=tile.get("compute"),
+                first_tile_write_seconds=tile.get("write"),
                 rss_mib=float(native["native_max_rss_kib"])/1024,
                 prepare_seconds=float(native["prepare_seconds"]),
                 source_columns=int(native["source_columns"]),

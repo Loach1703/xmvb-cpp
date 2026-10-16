@@ -1033,13 +1033,26 @@ void check_sigma_columns(const Fixture& fixture, int width) {
       fixture.overlap, fixture.one_electron, fixture.two_electron, fixture.n);
   const xmvb::mcscf::DirectCiSigmaAction sigma(
       fixture.alpha, fixture.beta, integrals);
+  const auto spin_bytes=[&](int strings,int electrons)->std::size_t {
+    // A single fixed-stride record array, shared by all numerical consumers.
+    constexpr auto link_bytes=sizeof(xmvb::mcscf::SpinLink);
+    return static_cast<std::size_t>(strings)*
+        (link_bytes*electrons*(fixture.n-electrons)+electrons);
+  };
+  const std::size_t expected_links=spin_bytes(fixture.alpha.size(),fixture.alpha.front().size())+
+      (fixture.alpha==fixture.beta ? 0:spin_bytes(fixture.beta.size(),fixture.beta.front().size()));
+  const auto pairs=integrals.pair_kernel.rows();
+  require(sigma.dynamic_bytes()==expected_links+2*sizeof(double)*pairs*pairs,
+          "direct-CI links are not compact/shared as declared");
   const xmvb::vb::ExteriorOrbitalTransform transform(
       fixture.alpha, integrals.orbital_transform);
-  const auto rows = transform.row_block(1, 3);
-  require(rows.get() == transform.row_block(1, 3).get(),
+  const int row_begin=fixture.alpha.size()>1 ? 1:0;
+  const int row_count=std::min<int>(3,fixture.alpha.size()-row_begin);
+  const auto rows = transform.row_block(row_begin,row_count);
+  require(rows.get() == transform.row_block(row_begin,row_count).get(),
           "accepted-point exterior rows were regenerated");
-  Eigen::MatrixXd selected = Eigen::MatrixXd::Zero(3, fixture.alpha.size());
-  selected.middleCols(1, 3).setIdentity();
+  Eigen::MatrixXd selected = Eigen::MatrixXd::Zero(row_count,fixture.alpha.size());
+  selected.middleCols(row_begin,row_count).setIdentity();
   transform.apply_adjoint_right_block(selected);
   require((*rows - selected).norm() < 1e-14,
           "cached exterior rows differ from the shear transform");
@@ -2494,6 +2507,8 @@ int main(int argc, char** argv) {
       check_exterior_team();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
       check_sigma_columns(make_fixture(4, 2, 2), 3);
+      check_sigma_columns(make_fixture(4, 0, 1), 2);
+      check_sigma_columns(make_fixture(4, 4, 1), 2);
       check_sigma_columns(make_fixture(10, 5, 4), 2);
       check_prefix_words();
       check_supported_sigma(4, 2, 2, 2);

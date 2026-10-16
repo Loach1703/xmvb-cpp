@@ -11,12 +11,24 @@ namespace xmvb::mcscf {
 namespace {
 
 /** @brief Half-open range in immutable sorted link/occupation metadata. */
-std::pair<int,int> channel_range(const std::vector<int>& indices, int first, int last) {
-  if (indices.empty()) return {0,0};
-  const auto begin = first <= indices.front() ? indices.begin() :
+template<class Indices>
+std::pair<int,int> channel_range(const Indices& indices, int first, int last) {
+  if (indices.size()==0) return {0,0};
+  const auto begin = first <= indices[0] ? indices.begin() :
       std::lower_bound(indices.begin(),indices.end(),first);
-  const auto end = last > indices.back() ? indices.end() : std::lower_bound(begin,indices.end(),last);
+  const auto end = last > indices[indices.size()-1] ? indices.end() : std::lower_bound(begin,indices.end(),last);
   return {static_cast<int>(begin-indices.begin()),static_cast<int>(end-indices.begin())};
+}
+
+/** @brief A packed-channel interval in the fixed-stride record row. */
+std::pair<int,int> link_range(const DensityConnections& links,int first,int last) {
+  if (links.size()==0) return {0,0};
+  const auto less=[](const SpinLink& link,int pair){return link.pair<pair;};
+  const auto begin=first<=links[0].pair ? links.begin():
+      std::lower_bound(links.begin(),links.end(),first,less);
+  const auto end=last>links[links.size()-1].pair ? links.end():
+      std::lower_bound(begin,links.end(),last,less);
+  return {static_cast<int>(begin-links.begin()),static_cast<int>(end-links.begin())};
 }
 
 /** @brief Orbital interval whose packed diagonal channels belong to this tile. */
@@ -50,11 +62,11 @@ Eigen::MatrixXd DirectCiSigmaAction::spin_generator_adjoint(bool beta,
 #pragma omp for schedule(static)
     for (int target = 0; target < rows; ++target) {
       const double value = left.row(target).dot(right.row(target));
-      for (int occupied : graph.occupied[target]) density(occupied,occupied) += value;
-      const auto& links = graph.singles[target];
+      for (int occupied : graph.occupied(target)) density(occupied,occupied) += value;
+      const auto& links = graph.singles(target);
       for (std::size_t link = 0; link < links.size(); ++link)
-        density(links.created_orbitals[link], links.annihilated_orbitals[link]) +=
-            links.signs[link] * left.row(target).dot(right.row(links.sources[link]));
+        density(links[link].created, links[link].annihilated) +=
+            links[link].sign * left.row(target).dot(right.row(links[link].source));
     }
   }
   Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_orbitals_, n_orbitals_);
@@ -78,13 +90,13 @@ void DirectCiSigmaAction::apply_spin_generator(bool beta,
   for (int index = 0; index < rows * factors.cols(); ++index) {
     const int column = index / rows, target = index % rows;
     double value = 0;
-    for (int occupied : graph.occupied[target])
+    for (int occupied : graph.occupied(target))
       value += generator(occupied, occupied) * factors(target, column);
-    const auto& links = graph.singles[target];
+    const auto& links = graph.singles(target);
     for (std::size_t link = 0; link < links.size(); ++link)
-      value += links.signs[link] *
-          generator(links.created_orbitals[link], links.annihilated_orbitals[link]) *
-          factors(links.sources[link], column);
+      value += links[link].sign *
+          generator(links[link].created, links[link].annihilated) *
+          factors(links[link].source, column);
     image(target, column) = value;
   }
 }
@@ -108,16 +120,16 @@ void DirectCiSigmaAction::scatter_spin(bool beta,
     const auto add = [&](int source, int pair, double sign) {
       result(target, (pair - first) * width + column) += sign * factors(source, column);
     };
-    const auto& occupied = graph.occupied[target];
+    const auto& occupied = graph.occupied(target);
     const auto occ = channel_range(occupied,diagonal.first,diagonal.second);
     for (int o = occ.first; o < occ.second; ++o) {
-      const int orbital = graph.occupied[target][o];
+      const int orbital = graph.occupied(target)[o];
       add(target, core::PairIndex::packed_pair_index(orbital, orbital), 1.0);
     }
-    const auto& links = graph.singles[target];
-    const auto range = channel_range(links.pairs,first,first+count);
+    const auto& links = graph.singles(target);
+    const auto range = link_range(links,first,first+count);
     for (int i = range.first; i < range.second; ++i)
-      add(links.sources[i], links.pairs[i], links.signs[i]);
+      add(links[i].source, links[i].pair, links[i].sign);
   }
 }
 
@@ -139,16 +151,16 @@ void DirectCiSigmaAction::gather_spin(bool beta,
     const auto add = [&](int source, int pair, double sign) {
       images(target, column) += sign * channels(source, (pair - first) * width + column);
     };
-    const auto& occupied = graph.occupied[target];
+    const auto& occupied = graph.occupied(target);
     const auto occ = channel_range(occupied,diagonal.first,diagonal.second);
     for (int o = occ.first; o < occ.second; ++o) {
-      const int orbital = graph.occupied[target][o];
+      const int orbital = graph.occupied(target)[o];
       add(target, core::PairIndex::packed_pair_index(orbital, orbital), 1.0);
     }
-    const auto& links = graph.singles[target];
-    const auto range = channel_range(links.pairs,first,first+count);
+    const auto& links = graph.singles(target);
+    const auto range = link_range(links,first,first+count);
     for (int i = range.first; i < range.second; ++i)
-      add(links.sources[i], links.pairs[i], links.signs[i]);
+      add(links[i].source, links[i].pair, links[i].sign);
   }
 }
 
