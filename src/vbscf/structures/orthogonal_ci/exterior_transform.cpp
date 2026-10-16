@@ -748,14 +748,20 @@ Eigen::MatrixXd ExteriorOrbitalTransform::generator_pullback(
         if (directional)
           dg(inserted, removed) += pair.sign * contract(pair.target, pair.source, true);
       }
+  return moment_pullback(g,directional ? &dg:nullptr,delta_upper);
+}
+
+Eigen::MatrixXd ExteriorOrbitalTransform::moment_pullback(
+    const Eigen::Ref<const Eigen::MatrixXd>& moment,
+    const Eigen::MatrixXd* delta_moment,const Eigen::MatrixXd* delta_upper) const {
   const Eigen::MatrixXd inverse = orbital_transform_.triangularView<Eigen::Upper>()
       .solve(Eigen::MatrixXd::Identity(n_orbitals_, n_orbitals_)).transpose();
   Eigen::MatrixXd result;
-  if (directional) {
+  if (delta_upper) {
     const Eigen::MatrixXd di = -inverse * delta_upper->transpose() * inverse;
-    result = dg * inverse + g * di;
+    result = *delta_moment * inverse + moment * di;
   } else {
-    result = g * inverse;
+    result = moment * inverse;
   }
   result.triangularView<Eigen::StrictlyLower>().setZero();
   return result;

@@ -117,14 +117,17 @@ bool build_ciah_macro_step(
     } else {
       const auto orbital = hessian.apply_orbital_coupling(x.head(no));
       xmvb::profiling::ScopedPhase structure_phase(xmvb::profiling::Phase::CiahStructure, true);
+      const auto structure_start=std::chrono::steady_clock::now();
       StructureActiveIntegralAdjoint active_adjoint;
       const bool direct_ci = hessian.structure_action().supports_integral_direction();
       const auto ci = structure.apply_coupling_coordinates(x.tail(ns),
           direct_ci ? &active_adjoint : nullptr);
+      const auto coupling_end=std::chrono::steady_clock::now();
       const Eigen::VectorXd adjoint = direct_ci
           ? hessian.apply_structure_coupling_adjoint(active_adjoint)
           : hessian.apply_structure_coupling_adjoint(
               ci.coefficient_response, ci.adjoint_multipliers);
+      const auto adjoint_end=std::chrono::steady_clock::now();
       if (metric_image) metric_image->tail(ns) = ci.metric_coordinates;
       const Eigen::VectorXd forcing = structure.project_coordinates(
           orbital.scaled_structure_forcing);
@@ -164,12 +167,19 @@ bool build_ciah_macro_step(
       orbital_image.tail(ns) = forcing;
       structure_image.head(no) = adjoint;
       structure_image.tail(ns) = ci.hessian_coordinates;
+      const auto transport_start=std::chrono::steady_clock::now();
       const auto curvature = transport->curvature(x.head(no), x.tail(ns));
       image.head(no) += curvature.orbital_from_orbital + curvature.orbital_from_structure;
       image.tail(ns) += curvature.structure_from_orbital;
       orbital_image.head(no) += curvature.orbital_from_orbital;
       orbital_image.tail(ns) += curvature.structure_from_orbital;
       structure_image.head(no) += curvature.orbital_from_structure;
+      diagnostics::neo_trace("ciah_structure_cost",
+          "coupling=%.17g,orbital_adjoint=%.17g,projection=%.17g,transport_curvature=%.17g",
+          std::chrono::duration<double>(coupling_end-structure_start).count(),
+          std::chrono::duration<double>(adjoint_end-coupling_end).count(),
+          std::chrono::duration<double>(transport_start-adjoint_end).count(),
+          std::chrono::duration<double>(std::chrono::steady_clock::now()-transport_start).count());
       if (diagnostics::neo_event_trace_enabled()) {
         const double orbital_energy = x.head(no).dot(orbital.orbital_hessian);
         const double structure_energy = x.tail(ns).dot(ci.hessian_coordinates);

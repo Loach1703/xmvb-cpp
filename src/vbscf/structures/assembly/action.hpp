@@ -331,8 +331,9 @@ public:
   Eigen::MatrixXd contract_spin_product_block(
       const Eigen::Ref<const Eigen::MatrixXd>& spin_images) const;
 
-  /** @brief Selected cross Gram action, factored by original touched beta columns.
-   * Computes F_left^T F_right V without a full product-grid coefficient array.
+  /** @brief Selected cross Gram action in a bounded exact contraction order.
+   * Uses touched beta factors or one shared carrier for broad support.
+   * Computes F_left^T F_right V without enlarging the selected structure space.
    * If all four directions are supplied, returns its directional derivative.
    * The workspace budget controls panel/RHS batching, never the physical space.
    */
@@ -348,7 +349,8 @@ public:
       const ExteriorTransformDirection* delta_right_beta = nullptr,
       std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
 
-  /** @brief Factorized pullback of left^T F(left_chart)^T F(right_chart) right.
+  /** @brief Bounded pullback of left^T F(left_chart)^T F(right_chart) right.
+   * Broad-support common spatial charts use direct one-body generator moments.
    * Optional chart directions request the derivative of the pullback.
    */
   UpperPair cross_overlap_adjoint(const Eigen::VectorXd& left,

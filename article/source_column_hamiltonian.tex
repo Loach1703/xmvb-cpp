@@ -1616,6 +1616,78 @@ tiles. No additional carrier-sized array is stored for each thread. This
 elimination requires the complete-sector identity; it is not valid for a
 general nonclosed selected VB space.
 
+\subsection{Cross-overlap generator moments}
+\label{sec:cross-moments}
+
+CI transport also requires overlaps between two orbital representations.
+Write $T_s=T_{s\alpha}\otimes T_{s\beta}$, where the exterior maps on
+side $s\in\{l,r\}$ are induced by the same spatial upper-triangular
+matrix $R_s$ for both spins. For arbitrary selected coefficients, define
+\begin{equation}
+ L=T_l\Wa c_l,\qquad R=T_r\Wa c_r,\qquad
+ f=L\Tr R.
+\end{equation}
+These physical amplitudes lie in the ambient spin-string product carrier;
+no closure of $\operatorname{range}(\Wa)$ under $T_s$ is assumed.
+The cross-overlap action can be evaluated in the exact order
+\begin{equation}
+ c\longmapsto\Wa\Tr T_l\Tr[T_r\Wa c].
+ \label{eq:cross-direct}
+\end{equation}
+Each exterior map and its directional derivative is applied once to the
+shared amplitude array. In particular, it is unnecessary to reconstruct
+every output product from all source columns after the transforms.
+
+The adjoint admits an additional contraction reduction. Let
+$\hat E_{pq}=\hat a^\dagger_{p\alpha}\hat a_{q\alpha}
++\hat a^\dagger_{p\beta}\hat a_{q\beta}$ and define
+\begin{equation}
+ D_{pq}=\langle R|\hat E_{pq}|L\rangle,\qquad
+ K_s=\delta R_sR_s^{-1}.
+\end{equation}
+The representation derivatives are
+$\delta L=\hat E(K_l)L$ and $\delta R=\hat E(K_r)R$, with
+$\hat E(K)=\sum_{pq}K_{pq}\hat E_{pq}$. Thus the upper-triangular
+orbital adjoints are
+\begin{equation}
+ g_l=\operatorname{upper}(DR_l^{-T}),\qquad
+ g_r=\operatorname{upper}(D\Tr R_r^{-T}).
+ \label{eq:cross-moment-adjoint}
+\end{equation}
+Here $\operatorname{upper}$ retains the diagonal and upper triangle;
+the transpose on $D$ follows from real one-body matrix elements, not from
+equality of the left and right states. For a simultaneous direction,
+\begin{align}
+ \delta D_{pq}&=\langle\delta R|\hat E_{pq}|L\rangle
+                 +\langle R|\hat E_{pq}|\delta L\rangle,\\
+ \delta g_l&=\operatorname{upper}\bigl[
+   \delta D R_l^{-T}-DR_l^{-T}(\delta R_l)\Tr R_l^{-T}\bigr],\\
+ \delta g_r&=\operatorname{upper}\bigl[
+   (\delta D)\Tr R_r^{-T}
+   -D\Tr R_r^{-T}(\delta R_r)\Tr R_r^{-T}\bigr].
+ \label{eq:cross-moment-jet}
+\end{align}
+Only one-body Slater--Condon links and small orbital triangular solves are
+needed. No Hamiltonian sigma, cofactor, or extra structure projection is
+required for these adjoints. Residual-weighted transport curvature uses
+these identities without setting the finite CI Ritz residual to zero.
+
+If $A$ and $B$ denote the numbers of spin strings and $r$ the number of
+source columns, the source-factor adjoint includes reconstruction work
+$O(|\Omega|r)$, in addition to its exterior transforms and generator
+contractions. For broad touched support, $|\Omega|=AB$ and $r=B$.
+Equations~\eqref{eq:cross-direct}--\eqref{eq:cross-moment-jet} replace that
+reconstruction by $O(\operatorname{nnz}\Wa+n_{\rm act}^2 AB)$ work.
+This is a different exact contraction order, not a low-rank truncation.
+It requires one or two shared carrier arrays for the overlap action,
+and two to four for its adjoint jet, depending on which side varies.
+They are admitted only within the existing caller workspace budget;
+there are no per-thread carrier copies. Narrow touched support or a
+carrier exceeding that budget retains the bounded source-panel order.
+Independent spin-dependent orbital maps also use that order, since
+Eq.~\eqref{eq:cross-moment-adjoint} combines the two spins only for a
+common spatial chart. Neither schedule changes the selected VB space.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};

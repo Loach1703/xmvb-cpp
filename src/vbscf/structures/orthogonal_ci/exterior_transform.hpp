@@ -117,6 +117,12 @@ public:
       const Eigen::MatrixXd* delta_seed = nullptr,
       const Eigen::MatrixXd* delta_image = nullptr,
       const Eigen::MatrixXd* delta_upper = nullptr) const;
+  /** @brief Upper-chart pullback of an already contracted one-body moment. */
+  Eigen::MatrixXd moment_pullback(
+      const Eigen::Ref<const Eigen::MatrixXd>& moment,
+      const Eigen::MatrixXd* delta_moment = nullptr,
+      const Eigen::MatrixXd* delta_upper = nullptr) const;
+  const Eigen::MatrixXd& orbital_transform() const noexcept { return orbital_transform_; }
   int n_electrons() const noexcept { return n_electrons_; }
   /** @brief Spin-string occupations in the transform's immutable ordering. */
   const std::vector<std::uint64_t>& occupations() const noexcept { return masks_; }

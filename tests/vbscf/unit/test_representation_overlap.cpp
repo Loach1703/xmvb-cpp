@@ -73,6 +73,10 @@ StructureAction make_action(
     const std::vector<std::vector<int>>& beta,
     const Eigen::MatrixXd& w) {
   const int n_beta = static_cast<int>(beta.size());
+  int n_orbitals=0;
+  for (const auto& strings : {alpha,beta})
+    for (const auto& occupied : strings)
+      for (int p:occupied) n_orbitals=std::max(n_orbitals,p+1);
   std::vector<std::vector<int>> determinant_alpha, determinant_beta;
   std::vector<std::vector<StructureExpansionTerm>> terms(w.rows());
   for (int a = 0; a < static_cast<int>(alpha.size()); ++a) {
@@ -87,16 +91,16 @@ StructureAction make_action(
     }
   }
   const auto topology = build_same_spin_pair_topology(
-      determinant_alpha, determinant_beta, 4);
-  const Eigen::Matrix4d identity = Eigen::Matrix4d::Identity();
+      determinant_alpha, determinant_beta, n_orbitals);
+  const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(n_orbitals,n_orbitals);
   const std::vector<double> packed_overlap(identity.data(),
                                             identity.data() + identity.size());
   ActiveSpaceTwoElectronResult two_electron;
   two_electron.packed_active_two_electron_integrals.assign(
-      packed_active_two_electron_integral_count(4), 0.0);
+      packed_active_two_electron_integral_count(n_orbitals), 0.0);
   return StructureAction(
-      terms, 3, topology, packed_overlap, Eigen::Matrix4d::Zero(),
-      two_electron, 4, nullptr, StructureActionMode::ActionOnly);
+      terms, 3, topology, packed_overlap, Eigen::MatrixXd::Zero(n_orbitals,n_orbitals),
+      two_electron, n_orbitals, nullptr, StructureActionMode::ActionOnly);
 }
 
 // Independent small-system oracle: enumerate each occupied minor directly.
@@ -307,10 +311,47 @@ void check_case(const std::vector<std::vector<int>>& alpha,
   }
 }
 
+/** @brief Both exact contraction orders, including one-sided chart derivatives. */
+void check_broad_moment_budget() {
+  std::vector<std::vector<int>> spin;
+  for (int p=0;p<5;++p) for (int q=p+1;q<5;++q) spin.push_back({p,q});
+  const auto w=selected_expansion(spin.size(),spin.size());
+  const auto action=make_action(spin,spin,w);
+  Eigen::MatrixXd l=Eigen::MatrixXd::Identity(5,5),r=1.2*l;
+  Eigen::MatrixXd dl=Eigen::MatrixXd::Zero(5,5),dr=dl;
+  for (int q=0;q<5;++q) for (int p=0;p<=q;++p) {
+    if (p<q) { l(p,q)=0.07*std::sin(p+2*q+1); r(p,q)=0.08*std::cos(2*p+q+1); }
+    dl(p,q)=0.03*std::cos(p+q+2); dr(p,q)=0.04*std::sin(p+2*q+2);
+  }
+  const ExteriorOrbitalTransform la(spin,l),ra(spin,r);
+  const Eigen::Vector3d x(0.4,-0.7,0.8),y(-0.2,0.6,0.3);
+  const auto primal=action.cross_overlap_adjoint(x,y,la,la,ra,ra);
+  const auto factor=action.cross_overlap_adjoint(x,y,la,la,ra,ra,nullptr,nullptr,1280);
+  require(relative_error(primal.left,factor.left)<2e-12 &&
+              relative_error(primal.right,factor.right)<2e-12,
+          "broad one-body moment differs from the bounded source adjoint");
+  const Eigen::MatrixXd zero=Eigen::MatrixXd::Zero(5,5);
+  for (bool left_direction : {false,true}) for (bool right_direction : {false,true}) {
+    const auto& a=left_direction ? dl:zero;
+    const auto& b=right_direction ? dr:zero;
+    const auto dense=action.cross_overlap_adjoint(x,y,la,la,ra,ra,&a,&b);
+    const auto narrow=action.cross_overlap_adjoint(x,y,la,la,ra,ra,&a,&b,2560);
+    require(relative_error(dense.left,narrow.left)<3e-12 &&
+                relative_error(dense.right,narrow.right)<3e-12,
+            "broad moment derivative differs from the bounded source derivative");
+    const auto da=la.direction(a),db=ra.direction(b);
+    const auto image=action.cross_overlap(y,la,la,ra,ra,&da,&da,&db,&db);
+    const auto tiled=action.cross_overlap(y,la,la,ra,ra,&da,&da,&db,&db,1280);
+    require(relative_error(image,tiled)<3e-12,
+            "broad cross-overlap jet differs from bounded source panels");
+  }
+}
+
 }  // namespace
 
 int main() {
   try {
+    check_broad_moment_budget();
     const std::vector<std::vector<int>> full_alpha = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
     const std::vector<std::vector<int>> full_beta = {
