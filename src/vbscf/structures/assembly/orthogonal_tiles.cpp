@@ -18,8 +18,8 @@ int StructureAction::detect_spin_exchange() const {
   for (std::size_t group = 0; group < spin_products_.size(); ++group) {
     const auto begin = spin_term_offsets_[group], end = spin_term_offsets_[group + 1];
     if (begin == end) continue;
-    const int product = spin_products_[group];
-    const int exchanged = (product % n_unique_beta_) * n_unique_alpha_ +
+    const auto product = spin_products_[group];
+    const auto exchanged = (product % n_unique_beta_) * n_unique_alpha_ +
                           product / n_unique_beta_;
     const auto found = std::lower_bound(spin_products_.begin(), spin_products_.end(), exchanged);
     if (found == spin_products_.end() || *found != exchanged) return 0;
@@ -56,16 +56,14 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
 StructureResponseSweep StructureAction::contract_product_tiles(
     const Eigen::Ref<const Eigen::MatrixXd>& vectors,
     const ExteriorOrbitalTransform& alpha_transform,const ExteriorOrbitalTransform& beta_transform,
-    const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,std::size_t workspace_bytes,
-    const StructureAdjointState* accepted,bool collect_images) const {
-  const int n=sigma.n_orbitals(),d=sigma.channel_kernel().rows();
+    const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,std::size_t workspace_bytes) const {
+  constexpr bool collect_images=true;
   StructureResponseSweep sweep{{Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,vectors.cols()),
       Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,vectors.cols())},
-      Eigen::MatrixXd::Zero(accepted ? n:0,accepted ? n:0),
-      Eigen::MatrixXd::Zero(accepted ? d:0,accepted ? d:0),
-      Eigen::MatrixXd::Zero(accepted ? n:0,accepted ? n:0)};
+      Eigen::MatrixXd{},
+      Eigen::MatrixXd{},
+      Eigen::MatrixXd{}};
   auto& result=sweep.images;
-  if (accepted && (vectors.array()==0.0).all()) return sweep;
   // The budget controls residency and RHS batching, never admission to CI.
   const std::size_t cache_bytes = std::max<std::size_t>(1, workspace_bytes / 4);
   const std::size_t pairs = static_cast<std::size_t>(alpha_transform.n_orbitals()) *
@@ -202,7 +200,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
       // no determinant vector or full raw spin-product grid is formed.
 #pragma omp parallel for schedule(static) if(n_unique_alpha_ > 32)
       for (int alpha = 0; alpha < n_unique_alpha_; ++alpha) {
-        const int first = alpha * n_unique_beta_;
+        const auto first = mcscf::product_index(alpha,0,n_unique_beta_);
         auto group = std::lower_bound(spin_products_.begin(), spin_products_.end(), first);
         for (; group != spin_products_.end() && *group < first + n_unique_beta_; ++group) {
           const auto id = static_cast<std::size_t>(group - spin_products_.begin());
@@ -218,18 +216,6 @@ StructureResponseSweep StructureAction::contract_product_tiles(
       else alpha_transform.apply_left(&values);
       if (!overlap_consumed[panel]) {
         ++result.tiles.overlap_projections;
-        if (accepted)
-          for (int v=0;v<width;++v) {
-            const int state=vector_begin+v;
-            const double weight=accepted->weights[state];
-            if (weight==0) continue;
-            // D(r,q)=D(q,r)^T. Both right carriers are accepted data, so
-            // the generated q panel needs neither neighbors nor another H.
-            sweep.generator.noalias()+=2*weight*sigma.generator_adjoint_columns(
-                panel*extent,rows.rows(),values.middleCols(v*rows.rows(),rows.rows()),
-                {{accepted->orthogonal_coefficients[state],-accepted->energies[state],false},
-                 {accepted->residuals[state],1.0,true}},true);
-          }
         if (collect_images) {
           Eigen::MatrixXd overlap = values;
           project(panel, rows, overlap, m_products);
@@ -259,17 +245,6 @@ StructureResponseSweep StructureAction::contract_product_tiles(
           ++result.tiles.hamiltonian_projections;
           Eigen::MatrixXd image=tile.unpack(n_unique_alpha_);
           const int cols=tile.pattern->columns();
-          if (accepted)
-            for (int v=0;v<width;++v) {
-              const int state=vector_begin+v;
-              if (accepted->weights[state]==0) continue;
-              // E_pq Y stays in S for p<=q. The S-masked image therefore
-              // supplies the exact upper Cholesky cotangent, including when
-              // sigma is an exchange representative of a common parity.
-              sweep.generator.noalias()+=2*accepted->weights[state]*sigma.generator_adjoint_columns(
-                  panel*extent,cols,image.middleCols(v*cols,cols),
-                  {{accepted->orthogonal_coefficients[state],1.0,false}},true);
-            }
           if (collect_images) {
             const auto rows=beta_rows(panel);
             project(panel,*rows,image,h_products);
@@ -363,24 +338,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
             first = last;
           }
         };
-    if (accepted) {
-      const mcscf::DirectCiTileReader right = [&](const std::vector<int>& betas,
-          const std::vector<int>& rows,Eigen::Ref<Eigen::MatrixXd> values) {
-        for (int j=0;j<static_cast<int>(betas.size());++j)
-          for (int v=0;v<width;++v) {
-            const int state=vector_begin+v;
-            const double weight=accepted->weights[state];
-            if (weight==0) values.col(j*width+v).setZero();
-            else
-              for (int a=0;a<static_cast<int>(rows.size());++a)
-                values(a,j*width+v)=weight*accepted->orthogonal_coefficients[state](rows[a],betas[j]);
-          }
-      };
-      const auto adjoint=sigma.apply_tiled_with_adjoint(width,read,add,right,support,spin_exchange_parity_);
-      ++result.tiles.integral_adjoint_sweeps;
-      sweep.one_electron.noalias()+=2*adjoint.one_electron;
-      sweep.pair_kernel.noalias()+=2*adjoint.pair_kernel;
-    } else sigma.apply_tiled(width,read,add,support,spin_exchange_parity_);
+    sigma.apply_tiled(width,read,add,support,spin_exchange_parity_);
     output.finish();
     // Exchange quotienting may never request some input columns. The overlap
     // is still the complete Gram action, independent of the Hamiltonian sweep.

@@ -35,12 +35,10 @@ are not additive; sampling profiles are not native timing results.
   array and borrowed row views, not six independent vectors per string. Their integer
   widths follow the exact orbital-index bounds, while signs keep the numerical
   kernel's double type. Floating precision and excitation order are unchanged.
-- Index correctness still needs migration: original product IDs are flattened
-  into signed `int` in `action.cpp:631` and adjacent source/support interfaces.
-  CAS18/18 has48620 strings/spin and2363904400 logical products, so that encoding
-  can overflow even for a tiny selected VB space. Use explicit string pairs or
-  a wide product ID; do not confuse bounded numerical tiles with safe logical
-  indexing. Add an index-only test without allocating the product space.
+- Logical product addresses now use signed64-bit `ProductIndex` throughout
+  incidence, source-cover and support planning. Individual string/tile indices
+  remain int. The CAS18/18 index-only test decodes address2363904399 without
+  allocating its2363904400-entry product space.
 - All three active-space forward entries now complete the computational
   one-spin topology before constructing `StructureAction`. Previously only
   synthetic selected-space tests called that constructor; real incomplete
@@ -54,16 +52,21 @@ are not additive; sampling profiles are not native timing results.
   not as a product matrix. Its integral adjoint can stream spin factors using
   the exact factor/product arithmetic planner. Source-order accepted states
   now omit orthogonal/residual product arrays and use factor derivatives.
-  Broad product-order states still retain those arrays.
+  Broad product-order states now use the shared accepted/tangent product jet.
+  Their unbounded orthogonal/residual fields have been deleted, not left as
+  an alternative path. Compact accepted wave-function/residual residency has one shared
+  budget across all roots; otherwise accepted and tangent H images share a
+  generated sweep. This residency choice never changes the physical space.
   Transition one-body densities now have an exact streamed factor order,
   chosen by their own moment/link work rather than the Hamiltonian-channel cost.
-- Product-order `apply_integral_direction()` allocates stacked product arrays for the base
-  coefficients, sigma, coefficient direction and overlap direction.
-- Product-order `active_integral_adjoint_direction()` still consumes
-  those dense carriers for the residual/generator terms. It now uses
-  exact directional source factors for its integral adjoint when their work is
-  smaller. Tiling only the Davidson H/M action is therefore not a
-  bounded-memory VBSCF implementation.
+- Product-order `apply_integral_direction()` now generates primal/tangent
+  exterior panels from original support, including the left-transform
+  derivative. Each emitted H panel supplies structure projection, integral
+  adjoints and the physical upper generator cotangent before release.
+  Its reverse consumer borrows the prepared integral tangent and small
+  accumulated cotangents, rather than reconstructing a directional carrier
+  or repeating the integral-coordinate transformation. General oriented
+  transition densities remain distinct from the upper Cholesky cotangent.
 - `SelectedStateDeterminantCoefficients::coefficient_matrix` is itself dense;
   changing only its downstream consumers cannot remove this allocation.
   The accepted-point producer now skips those arrays for direct CI; the NEO
@@ -76,8 +79,8 @@ are not additive; sampling profiles are not native timing results.
   of `exact/apply.cpp` no longer create a raw selected-state product bundle.
   Source-order consumers expand only original touched support. Product-order
   consumers generate response columns and consume their sigma/generator adjoints
-  in the same tile sweep, with no full response carrier. Accepted arrays remain
-  resident on this broad-support path. Symbolic-support column panels share row
+  in the same tile sweep, with no full response carrier. Accepted panels are
+  reused only within a bounded compact residency budget. Symbolic-support column panels share row
   indices across RHSs; their bounded caches retain zeros inside the support but
   do not store the forbidden rows.
   Pure response adjoints omit unused structure H/M output projection.
@@ -313,6 +316,23 @@ moments; the residual consumer still restricts partial-channel ket width to one.
   affinity, native time/RSS and full allocation ownership.
 - A source-factor improvement is not automatically a gradient/HVP improvement.
   Retain this distinction until milestones 4 and 5 are complete.
+
+### Accepted/directional migration checkpoint
+
+The broad-support accepted/orbital/reverse ownership loop is now implemented
+in `product_jet.cpp`; unbounded accepted/directional carrier fields and their
+old consumers are deleted. All11 focused tests pass, including an independent
+complete-carrier response oracle, forced eviction and unequal spin sectors.
+CAS12 selected1/3/20/132 energy/gradient/HVP probes and all five converged240
+subspaces are recorded in
+`results/diagnostics/orthogonal-tiles-20261015/product_jet.md`.
+Numerical accuracy passes, and broad response RSS falls19--27%, but response
+time still misses the excellent saved baseline by about2x. The one-socket
+32-core240 FULL run keeps4 steps/30 HVP and the same energy within2e-12 Eh,
+but3.78350 s is slower than the saved3.39735/3.08273 s controls. This closes
+the producer/consumer memory migration, not the performance gate. Keep the
+remaining inverse/preconditioner and transition-density work separate; do not
+restore unbounded carriers or relax precision to conceal the runtime gap.
 
 Theory: [TeX derivation](article/source_column_hamiltonian.tex),
 [PDF](article/source_column_hamiltonian.pdf).

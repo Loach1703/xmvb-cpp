@@ -32,6 +32,18 @@ using DirectCiTileReader = std::function<void(const std::vector<int>&,
 using DirectCiTileWriter = std::function<void(const std::vector<int>&,
     const std::vector<int>&, const DirectCiColumnAccumulator&)>;
 
+/** @brief Borrowed Eigen column payload, valid until the next column read.
+ * A null rows pointer denotes all alpha rows; otherwise rows is sorted and
+ * values contains only those coordinates. Consumers must finish before
+ * requesting another column, which may evict its owning panel.
+ */
+struct DirectCiColumnView {
+  const double* values;
+  const int* rows;
+  int count;
+};
+using DirectCiColumnReader=std::function<DirectCiColumnView(int)>;
+
 /** @brief Integral adjoint of one orthonormal direct-CI bilinear form. */
 struct DirectCiIntegralAdjoint {
   Eigen::MatrixXd one_electron;
@@ -249,6 +261,18 @@ public:
   Eigen::MatrixXd generator_adjoint_columns(int beta_begin,int beta_count,
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       std::initializer_list<DirectCiGeneratorAdjointRequest> requests,bool upper_only=false) const;
+
+  /** @brief Upper orbital cotangent against generated right columns.
+   * Spectator columns are loaded in bounded batches, not a full right carrier.
+   * The reader has one RHS. symmetric_sum returns upper(D+D^T), reusing
+   * the transpose identity instead of traversing the other argument again.
+   * This is the Cholesky pullback, not a replacement
+   * for an oriented full one-body density.
+   */
+  Eigen::MatrixXd generator_adjoint_streamed(int beta_begin,
+      const Eigen::Ref<const Eigen::MatrixXd>& left,
+      const DirectCiTileReader& right,const DirectCiColumnReader& right_column,
+      bool symmetric_sum=false) const;
 
   /** @brief Numerical matrices plus referenced links, not exclusively owned bytes. */
   std::size_t dynamic_bytes() const noexcept;

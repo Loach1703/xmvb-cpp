@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "mcscf/ci/factors.hpp"
+#include "mcscf/ci/product_index.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
 namespace xmvb::vb {
@@ -26,13 +27,13 @@ struct SpinSources {
   std::vector<int> offsets, groups;
   ExteriorProjection alpha_projection, beta_projection;
 
-  SpinSources(const std::vector<int>& products, int na, int nb, int parity = 0);
+  SpinSources(const std::vector<mcscf::ProductIndex>& products, int na, int nb, int parity = 0);
 
   /** @brief Load raw source factors from original-support coefficients.
    * Both output views are overwritten. Parity weights belong to this plan;
    * callers apply their orbital transforms after loading the raw factors.
    */
-  void load(const std::vector<int>& products,
+  void load(const std::vector<mcscf::ProductIndex>& products,
       const Eigen::Ref<const Eigen::VectorXd>& coefficients, int first, int width,
       Eigen::Ref<Eigen::MatrixXd> alpha, Eigen::Ref<Eigen::MatrixXd> beta) const;
 
@@ -41,7 +42,7 @@ struct SpinSources {
    * exchange-parity representative. Metadata, values and transforms must
    * outlive the provider; only its requested source panel is materialized.
    */
-  mcscf::SpinFactorSource orthogonal_source(const std::vector<int>& products,
+  mcscf::SpinFactorSource orthogonal_source(const std::vector<mcscf::ProductIndex>& products,
       const Eigen::Ref<const Eigen::VectorXd>& coefficients,
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
       bool physical = false) const;
@@ -52,7 +53,7 @@ struct SpinSources {
    * All borrowed inputs must outlive the provider. Loading needs only one
    * single-spin scratch panel, never a product array or all-source factors.
    */
-  mcscf::SpinFactorSource tangent_source(const std::vector<int>& products,
+  mcscf::SpinFactorSource tangent_source(const std::vector<mcscf::ProductIndex>& products,
       const Eigen::Ref<const Eigen::VectorXd>& coefficients,
       const Eigen::VectorXd* coefficient_direction,
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,

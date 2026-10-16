@@ -34,7 +34,6 @@ StructureActionResult StructureAction::source_integral_action(
   const bool moving = !generator.isZero(0.0);
   const bool capture = direction && direction->capture_connection;
   if (direction) {
-    direction->coefficient_direction.resize(0,0); direction->sigma_direction.resize(0,0);
     direction->generator_direction = Eigen::MatrixXd::Zero(sigma.n_orbitals(),sigma.n_orbitals());
     direction->connection.reset();
     if (capture) direction->connection = StructureConnectionDirection{

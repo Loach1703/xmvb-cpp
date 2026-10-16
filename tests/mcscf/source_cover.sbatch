@@ -35,7 +35,8 @@ sha256sum "$source_dir/build/src/test_structure_tiles" > "$artifact/binary.sha25
 sha256sum "$source_dir/build/src/test_ci_factors" >> "$artifact/binary.sha256"
 sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_tiles.cpp,sources.cpp,sources.hpp,action.cpp} \
  "$source_dir/tests/vbscf/unit/test_structure_tiles.cpp" > "$artifact/sources.sha256"
-sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_response.cpp,source_direction.cpp,source_image.cpp,orthogonal_tiles.cpp,column_tiles.hpp,action.hpp} >> "$artifact/sources.sha256"
+sha256sum "$source_dir/src/vbscf/structures/assembly/"{source_response.cpp,source_direction.cpp,source_image.cpp,orthogonal_tiles.cpp,product_jet.cpp,column_tiles.hpp,action.hpp} >> "$artifact/sources.sha256"
+sha256sum "$source_dir/src/mcscf/ci/"{product_index.hpp,product_support.hpp} >> "$artifact/sources.sha256"
 sha256sum "$source_dir/src/vbscf/derivatives/gradient/active_space/evaluator.cpp" \
  "$source_dir/src/vbscf/derivatives/hessian/exact/apply.cpp" \
  "$source_dir/src/vbscf/determinants/pairs/same_spin_cache.cpp" >> "$artifact/sources.sha256"

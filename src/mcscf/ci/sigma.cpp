@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <numeric>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -854,6 +855,78 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_columns(
       n_orbitals_, n_orbitals_);
   for (const Eigen::MatrixXd& partial : partials) {
     result += partial;
+  }
+  return result;
+}
+
+Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
+    const Eigen::Ref<const Eigen::MatrixXd>& left,const DirectCiTileReader& read,
+    const DirectCiColumnReader& column,bool symmetric_sum) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiGeneratorAdjoint);
+  const int cols=left.cols();
+  if (first<0 || cols<=0 || first+cols>n_beta_ || left.rows()!=n_alpha_)
+    throw std::invalid_argument("invalid streamed generator panel");
+  std::vector<int> rows(n_alpha_),betas(cols);
+  std::iota(rows.begin(),rows.end(),0);
+  std::iota(betas.begin(),betas.end(),first);
+  Eigen::MatrixXd values(n_alpha_,cols);
+  read(betas,rows,values);
+  const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),
+      static_cast<std::size_t>(n_alpha_)*cols);
+  std::vector<Eigen::MatrixXd> partials(workers,Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_));
+  // Stay in the existing sigma team. A nested parallel region serializes
+  // this contraction when OMP_MAX_ACTIVE_LEVELS=1.
+  cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
+    auto& density=partials[part];
+    for (int a=n_alpha_*part/workers;a<n_alpha_*(part+1)/workers;++a) {
+      if ((left.row(a).array()==0.0).all()) continue;
+      const double diagonal=left.row(a).dot(values.row(a));
+      for (const int p:alpha_->occupied(a)) density(p,p)+=diagonal;
+      for (const auto& link:alpha_->singles(a))
+        if (symmetric_sum || link.created<=link.annihilated)
+          density(link.created,link.annihilated)+=link.sign*
+              left.row(a).dot(values.row(link.source));
+    }
+  });
+  Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_);
+  const auto& graph=beta_connections();
+  struct Event { int source,local,p,q; double sign; };
+  std::vector<Event> events;
+  for (int b=0;b<cols;++b) {
+    if ((left.col(b).array()==0.0).all()) continue;
+    const double diagonal=left.col(b).dot(values.col(b));
+    for (const int p:graph.occupied(first+b))
+      result(p,p)+=diagonal;
+    for (const auto& link:graph.singles(first+b))
+      if (symmetric_sum || link.created<=link.annihilated)
+        events.push_back({link.source,b,link.created,link.annihilated,link.sign});
+  }
+  std::sort(events.begin(),events.end(),[](const Event& a,const Event& b) { return a.source<b.source; });
+  // Borrow spectator columns directly. Copying every neighboring column
+  // into dense slabs repeats an O(U_alpha) read even when it has few entries.
+  // A view is consumed before the next LRU access; it cannot outlive eviction.
+  for (std::size_t begin=0;begin<events.size();) {
+    const int source=events[begin].source;
+    std::size_t end=begin+1;
+    while (end<events.size() && events[end].source==source) ++end;
+    const auto right=column(source);
+    if (right.count==0) { begin=end; continue; }
+    for (auto event=begin;event<end;++event) {
+      const auto& e=events[event];
+      double moment=0;
+      if (right.rows) {
+        const double* target=left.col(e.local).data();
+#pragma omp simd reduction(+:moment)
+        for (int a=0;a<right.count;++a) moment+=target[right.rows[a]]*right.values[a];
+      } else moment=left.col(e.local).dot(Eigen::Map<const Eigen::VectorXd>(right.values,right.count));
+      result(e.p,e.q)+=e.sign*moment;
+    }
+    begin=end;
+  }
+  for (const auto& density:partials) result+=density;
+  if (symmetric_sum) {
+    result=(result+result.transpose()).eval();
+    result.triangularView<Eigen::StrictlyLower>().setZero();
   }
   return result;
 }

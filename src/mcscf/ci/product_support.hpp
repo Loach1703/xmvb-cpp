@@ -11,6 +11,7 @@
 
 #include "mcscf/ci/covalent_support.hpp"
 #include "mcscf/ci/product_paths.hpp"
+#include "mcscf/ci/product_index.hpp"
 
 namespace xmvb::mcscf {
 
@@ -39,7 +40,7 @@ public:
 
   /** @brief Seeds are flattened alpha*n_beta+beta indices, not CI amplitudes. */
   ProductSupport(int n_orbitals, const std::vector<Mask>& alpha,
-                 const std::vector<Mask>& beta, const std::vector<int>& products)
+                 const std::vector<Mask>& beta, const std::vector<ProductIndex>& products)
       : n_(n_orbitals), alpha_(alpha), beta_(beta) {
     initialize_strings();
     const Mask full = (Mask{1} << n_) - 1;
@@ -47,7 +48,7 @@ public:
                          products.size() == beta_.size();
     std::vector<Seed> seeds;
     seeds.reserve(products.size());
-    for (const int product : products) {
+    for (const ProductIndex product : products) {
       if (product < 0 || static_cast<std::size_t>(product) >=
                              alpha_.size() * beta_.size())
         throw std::invalid_argument("product support seed is outside the spin spaces");

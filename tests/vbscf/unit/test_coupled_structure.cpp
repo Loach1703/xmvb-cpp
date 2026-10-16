@@ -603,7 +603,8 @@ void check_connection(const StructureFixture& fixture) {
           tangent.apply_hessian_coordinates(gamma)).norm() < 1e-12,
           "complete stationary carrier connection is not C gamma");
     } else {
-      require(state.residuals[0].norm() > 1e-3,
+      const auto image=fixture.action.apply(state.structure_coefficients);
+      require((image.hamiltonian-energy*image.overlap).norm() > 1e-3,
           "nonstationary connection test accidentally has zero carrier residual");
     }
   }

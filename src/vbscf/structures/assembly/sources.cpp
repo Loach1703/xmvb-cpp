@@ -87,7 +87,7 @@ struct SupportMatching {
 
 } // namespace
 
-SpinSources::SpinSources(const std::vector<int>& products, int na, int nb, int parity)
+SpinSources::SpinSources(const std::vector<mcscf::ProductIndex>& products, int na, int nb, int parity)
     : alpha_offsets(na + 1, 0), beta_groups(nb), parity_(parity) {
   std::vector<std::vector<int>> edges(na);
   const auto representative = [=](int a, int b) {
@@ -156,7 +156,7 @@ SpinSources::SpinSources(const std::vector<int>& products, int na, int nb, int p
   }
 }
 
-void SpinSources::load(const std::vector<int>& products,
+void SpinSources::load(const std::vector<mcscf::ProductIndex>& products,
     const Eigen::Ref<const Eigen::VectorXd>& coefficients, int first, int width,
     Eigen::Ref<Eigen::MatrixXd> alpha, Eigen::Ref<Eigen::MatrixXd> beta) const {
   alpha.setZero(); beta.setZero();
@@ -176,7 +176,7 @@ void SpinSources::load(const std::vector<int>& products,
   }
 }
 
-mcscf::SpinFactorSource SpinSources::orthogonal_source(const std::vector<int>& products,
+mcscf::SpinFactorSource SpinSources::orthogonal_source(const std::vector<mcscf::ProductIndex>& products,
     const Eigen::Ref<const Eigen::VectorXd>& coefficients,
     const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
     bool physical) const {
@@ -202,7 +202,7 @@ mcscf::SpinFactorSource SpinSources::orthogonal_source(const std::vector<int>& p
           2.0L * groups.size()/std::max(1,rank) + 1 + (project ? alpha.dimension() : 0)};
 }
 
-mcscf::SpinFactorSource SpinSources::tangent_source(const std::vector<int>& products,
+mcscf::SpinFactorSource SpinSources::tangent_source(const std::vector<mcscf::ProductIndex>& products,
     const Eigen::Ref<const Eigen::VectorXd>& coefficients,
     const Eigen::VectorXd* coefficient_direction,
     const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,

@@ -1322,6 +1322,86 @@ one ket column because the shared forward workspace and moment buffers must
 use the same channel width. Full-channel sweeps allow wider ket panels.
 This is a workspace scheduling limit, not a restriction on the selected VB space.
 
+\section{A shared accepted--tangent product sweep}\label{sec:product-jet}
+
+For broad source support, retain the generated product contraction order
+without retaining unbounded accepted or directional product arrays.
+Write $F=\Ta\Wa$, $Y=F\vv C$, and let $\delta F$ denote the change of
+the exterior map under the orbital direction. The complete directional
+wave function and the accepted residual are
+\begin{equation}
+ Z=\delta F\vv C+F\delta\vv C,
+ \qquad R_Y=(\Ha-E)Y.
+\end{equation}
+Here $E$ is held fixed in the orbital Lagrangian; its response and the
+state-average gauge multipliers are included separately as in
+Section~\ref{sec:factor-response}. Differentiating the complete projection,
+rather than projecting an intermediate wave function, gives
+\begin{align}
+ \delta(F^*\Ha Y)&=F^*(\delta\Ha Y+\Ha Z)+(\delta F)^*\Ha Y,\label{eq:product-jet-H}\\
+ \delta(F^*Y)&=F^*Z+(\delta F)^*Y.
+ \label{eq:product-jet-images}
+\end{align}
+The left-map derivative is necessary even when $\delta\vv C=0$.
+No invariance of the selected structure space is used.
+
+With $\mathcal J$ and $\mathcal D$ defined above, the accepted and
+directional orbital-generator cotangents are
+\begin{align}
+ \Gamma&=2\mathcal D(R_Y,Y),\\
+ \delta\mathcal J&=2\mathcal J(Z,Y),\\
+ \delta\Gamma&=2\left[
+   \mathcal D(\Ha Z+\delta\Ha Y,Y)
+   +\mathcal D(R_Y,Z)-E\mathcal D(Z,Y)\right].
+ \label{eq:product-jet-generator}
+\end{align}
+Only the upper triangle of the final generator cotangent is needed by
+the Cholesky pullback. The previously proved support certificate permits
+$R_Y$ and the emitted Hamiltonian images to be restricted to $S$ for these
+upper cotangents. It does not permit replacing a general oriented transition
+density by its upper triangle.
+
+If compact accepted panels of $(Y,R_Y)$ are resident, the same panels supply
+the right readers, $\mathcal D(R_Y,Z)$, and
+$\Ha Y=R_Y+EY$ in the left projection of
+Eq.~\eqref{eq:product-jet-H}. Thus a coefficient-only response
+requires neither another accepted exterior transform nor another accepted
+Hamiltonian action. The channel sweep producing $\Ha Z$ also accumulates
+$\mathcal J(Z,Y)$ before its slabs are released.
+The forward orbital-direction consumer retains the resulting small
+cotangents and prepared integral tangent; its reverse consumer reuses them.
+
+When accepted panels cannot all remain resident under the shared budget,
+generate $Y$ and $Z$ together and apply $\Ha$ to this two-column-family
+block. The equivalent unretained form of the generator response is
+\begin{equation}
+ \delta\Gamma=2\left[
+ \mathcal D(\Ha Z+\delta\Ha Y,Y)+\mathcal D(\Ha Y,Z)
+ -E\{\mathcal D(Z,Y)+\mathcal D(Y,Z)\}\right].
+\end{equation}
+For real wave functions the last brace equals
+$\mathcal D(Z,Y)+\mathcal D(Z,Y)\Tr$. One complete oriented traversal
+therefore supplies both terms, followed by upper-triangle selection.
+The resident and streamed equations are identical; residency changes only
+reuse, not the variational space or accuracy. This does not assert that
+all accepted work can be retained at fixed memory without recomputation.
+
+Each emitted Hamiltonian panel is consumed by the structure projection and
+generator adjoint before release. Partial images emitted on eviction are
+valid because both consumers are linear. A one-body generator's neighbor
+columns are themselves read in bounded batches; their union must not become
+a complete right carrier. With panel width $b$, shared residency bound $B$
+and the existing bounded sigma workspace $W_\sigma$, auxiliary numerical
+storage, excluding immutable incidence and one-spin topology, is
+\begin{equation}
+ O\left(t+(U_\alpha+U_\beta)b+B+W_\sigma+n^4\right)
+\end{equation}
+per sequentially processed state, in addition to the selected coefficient
+block. The $n^4$ term denotes the retained active integral and adjoint tensors,
+not a spin-product array. If original touched support is complete, $t$
+itself can equal $U_\alpha U_\beta$; this bound does not conceal that input
+cost. Accepted residency is shared across roots, never copied per worker.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};
@@ -1345,6 +1425,8 @@ Selected-structure response and its adjoints &
 \path{vbscf/structures/assembly/source_response.cpp} \\
 Source-state orbital directions and HVP pullback &
 \path{vbscf/structures/assembly/source_direction.cpp} \\
+Broad-support accepted/tangent sweep &
+\path{vbscf/structures/assembly/product_jet.cpp} \\
 Shared H-image projection and generator adjoint &
 \path{vbscf/structures/assembly/source_image.cpp} \\
 Generator and residual-weighted factor adjoints &
@@ -1377,12 +1459,11 @@ Fixed-point structure Hamiltonian/overlap actions choose between the common
 factor sweep and generated product tiles. Accepted-state integral gradients
 choose between the exact factor and
 product contractions by their arithmetic costs. Raw state coefficients are
-retained in structure space. Broad product-order states retain accepted
-orthogonal/residual arrays, but their coefficient-response consumers now use
-Eq.~\eqref{eq:product-response-generator} and compact symbolic panels.
-Accepted and orbital-direction producers still require migration. Directional
-integral adjoints use Eq.~\eqref{eq:factor-adjoint-tangent} when the factor
-order has less estimated arithmetic. A selected-space eigenvector need not be
+retained in structure space. Broad product-order accepted, directional and
+reverse consumers use Section~\ref{sec:product-jet}. Compact accepted
+wave-function/residual panels may remain under one shared residency cap;
+unbounded accepted and directional carrier fields are deleted.
+A selected-space eigenvector need not be
 stationary on the full carrier: its residual contribution to the
 exterior-transform gradient is retained.
 Accepted-state transition densities use Eq.~\eqref{eq:generator-factor}
@@ -1393,7 +1474,8 @@ The coupled coefficient-response consumer in
 Section~\ref{sec:factor-response} uses neither accepted nor response product
 arrays when its factor contraction order is cheaper. Section~\ref{sec:source-state}
 extends that ownership to source-state orbital directions and HVPs. Broad
-product-order consumers and the selected-state/metric producers still require migration.
+product-order derivative consumers now share the generated product jet.
+Complete-space inverse/preconditioner consumers remain a separate ownership boundary.
 
 \paragraph{Main result.}
 Equations~\eqref{eq:Hfactor}--\eqref{eq:final} give the exact

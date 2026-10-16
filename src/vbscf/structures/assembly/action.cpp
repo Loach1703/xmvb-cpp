@@ -1,4 +1,5 @@
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/assembly/column_tiles.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -22,8 +23,7 @@
 namespace xmvb::vb {
 namespace {
 
-constexpr std::size_t kStructureActionWorkspaceBytes =
-    256ULL * 1024ULL * 1024ULL;
+constexpr std::size_t kStructureActionWorkspaceBytes = detail::kStructureTileWorkspaceBytes;
 constexpr int kMaximumStructureActionBatchColumns = 8;
 
 int bounded_structure_action_width(
@@ -338,8 +338,8 @@ Eigen::MatrixXd transpose_matrix_blocks(
  */
 DeterminantPairScalars evaluate_spin_product_pair(
     const SameSpinPairCacheContext& cache,
-    int left_spin_product,
-    int right_spin_product,
+    mcscf::ProductIndex left_spin_product,
+    mcscf::ProductIndex right_spin_product,
     int n_unique_beta,
     const ActiveSpaceTwoElectronView& two_electron_view,
     int n_active_orbitals,
@@ -612,7 +612,7 @@ StructureAction::StructureAction(
   }
 
   struct PendingSpinTerm {
-    int spin_product = 0;
+    mcscf::ProductIndex spin_product = 0;
     StructureTerm term;
   };
   std::vector<PendingSpinTerm> pending_terms;
@@ -628,7 +628,7 @@ StructureAction::StructureAction(
                           .determinant_to_unique_id[determinant];
     const int beta = same_spin_pair_cache.beta_reuse_table
                          .determinant_to_unique_id[determinant];
-    const int spin_product = alpha * n_unique_beta_ + beta;
+    const auto spin_product = mcscf::product_index(alpha,beta,n_unique_beta_);
     for (const auto& term : determinant_to_structure_terms[determinant]) {
       if (term.structure_index < 0 ||
           term.structure_index >= n_structures_) {
@@ -659,7 +659,7 @@ StructureAction::StructureAction(
   spin_term_offsets_.push_back(0);
   std::size_t pending = 0;
   while (pending < pending_terms.size()) {
-    const int spin_product = pending_terms[pending].spin_product;
+    const auto spin_product = pending_terms[pending].spin_product;
     spin_products_.push_back(spin_product);
     while (pending < pending_terms.size() &&
            pending_terms[pending].spin_product == spin_product) {
@@ -705,7 +705,7 @@ StructureAction::StructureAction(
     sources->alpha_projection = direct_ci_->alpha_transform.projection(sources->alpha_rows);
     sources->beta_projection = direct_ci_->beta_transform().projection(sources->columns);
     sources_ = std::move(sources);
-    std::vector<int> touched;
+    std::vector<mcscf::ProductIndex> touched;
     touched.reserve(spin_products_.size());
     for (std::size_t group=0; group<spin_products_.size(); ++group)
       if (spin_term_offsets_[group] != spin_term_offsets_[group+1])
@@ -832,8 +832,8 @@ void StructureAction::add_spin_product_tile(
 
   for (int alpha_local = 0; alpha_local < tile_images.rows(); ++alpha_local) {
     const int alpha = alpha_begin + alpha_local;
-    const int first_product = alpha * n_unique_beta_ + beta_begin;
-    const int last_product = first_product + beta_size;
+    const auto first_product = mcscf::product_index(alpha,beta_begin,n_unique_beta_);
+    const auto last_product = first_product + beta_size;
     auto group = std::lower_bound(
         spin_products_.begin(), spin_products_.end(), first_product);
     while (group != spin_products_.end() && *group < last_product) {
@@ -871,7 +871,7 @@ Eigen::MatrixXd StructureAction::expand_structure_block(
       std::min(xmvb::effective_openmp_thread_count(), n_groups));
 #pragma omp parallel for schedule(static) if(n_threads > 1) num_threads(n_threads)
   for (int group = 0; group < n_groups; ++group) {
-    const int spin_product = spin_products_[group];
+    const auto spin_product = spin_products_[group];
     const int alpha = spin_product / n_unique_beta_;
     const int beta = spin_product % n_unique_beta_;
     for (std::size_t term_index = spin_term_offsets_[group];
@@ -910,8 +910,8 @@ Eigen::MatrixXd StructureAction::expand_structure_tile(
 #pragma omp parallel for schedule(static) if(n_threads > 1) num_threads(n_threads)
   for (int alpha_local = 0; alpha_local < alpha_size; ++alpha_local) {
     const int alpha = alpha_begin + alpha_local;
-    const int first_product = alpha * n_unique_beta_ + beta_begin;
-    const int last_product = first_product + beta_size;
+    const auto first_product = mcscf::product_index(alpha,beta_begin,n_unique_beta_);
+    const auto last_product = first_product + beta_size;
     auto group = std::lower_bound(
         spin_products_.begin(), spin_products_.end(), first_product);
     while (group != spin_products_.end() && *group < last_product) {
@@ -1301,13 +1301,15 @@ StructureActionResult StructureAction::apply_integral_direction(
       one_electron_direction.data(),
       n_active_orbitals,
       n_active_orbitals);
-  const OrthogonalActiveIntegrals integral_direction =
+  const auto prepared_direction = std::make_shared<OrthogonalActiveIntegrals>(
       orthogonalize_active_integral_direction(
           direct_ci_->integrals,
           overlap_direction,
           delta_one_electron,
           packed_two_electron_direction,
-          n_active_orbitals);
+          n_active_orbitals));
+  const auto& integral_direction=*prepared_direction;
+  if (direct_ci_direction) direct_ci_direction->integrals=prepared_direction;
   const xmvb::mcscf::DirectCiSigmaAction sigma_direction(
       direct_ci_->sigma,
       integral_direction);
@@ -1325,147 +1327,18 @@ StructureActionResult StructureAction::apply_integral_direction(
         direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,
         sigma_direction,direct_ci_direction);
 
-  const int block_width =
-      static_cast<int>(state.structure_coefficients.cols());
-  if (block_width <= 0 ||
-      state.orthogonal_coefficients.size() !=
-          static_cast<std::size_t>(block_width) ||
-      state.residuals.size() != static_cast<std::size_t>(block_width) ||
-      state.energies.size() != static_cast<std::size_t>(block_width)) {
-    throw std::invalid_argument(
-        "prepared direct-CI state does not match the structure-vector block");
+  auto sweep=product_jet(state,nullptr,&integral_direction.orbital_transform,&sigma_direction,
+      direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,true,direct_ci_direction);
+  if (direct_ci_direction) {
+    direct_ci_direction->generator_direction=std::move(sweep.generator);
+    direct_ci_direction->one_electron_direction=std::move(sweep.one_electron);
+    direct_ci_direction->pair_kernel_direction=std::move(sweep.pair_kernel);
   }
-  Eigen::MatrixXd spin_vectors(
-      n_unique_alpha_, block_width * n_unique_beta_);
-  Eigen::MatrixXd spin_hamiltonians(
-      n_unique_alpha_, block_width * n_unique_beta_);
-  for (int block = 0; block < block_width; ++block) {
-    const auto& orthogonal = state.orthogonal_coefficients[block];
-    const auto& residual = state.residuals[block];
-    if (orthogonal.rows() != n_unique_alpha_ ||
-        orthogonal.cols() != n_unique_beta_ ||
-        residual.rows() != n_unique_alpha_ ||
-        residual.cols() != n_unique_beta_ ||
-        !std::isfinite(state.energies[block])) {
-      throw std::invalid_argument(
-          "prepared direct-CI state has incompatible coefficient blocks");
-    }
-    spin_vectors.middleCols(
-        block * n_unique_beta_, n_unique_beta_) = orthogonal;
-    spin_hamiltonians.middleCols(
-        block * n_unique_beta_, n_unique_beta_) =
-        residual + state.energies[block] * orthogonal;
-  }
-  Eigen::MatrixXd delta_spin_vectors;
-  Eigen::MatrixXd delta_spin_overlaps;
-  const Eigen::MatrixXd transposed_relative_direction =
-      relative_orbital_direction.transpose();
-  direct_ci_->sigma.apply_one_body_generators({
-      {spin_vectors, relative_orbital_direction, &delta_spin_vectors},
-      {spin_vectors, transposed_relative_direction, &delta_spin_overlaps}});
-
-  delta_spin_overlaps += delta_spin_vectors;
-  Eigen::MatrixXd delta_spin_hamiltonians =
-      direct_ci_->sigma.apply(delta_spin_vectors, spin_exchange_parity_);
-  // Diagnostics are shared per action, bounded independently of thread count.
-  const bool capture_connection = direct_ci_direction != nullptr &&
-      direct_ci_direction->capture_connection &&
-      4.0 * sizeof(double) * block_width *
-          (static_cast<double>(n_unique_alpha_) * n_unique_beta_ + n_structures_ + 1) <=
-          16.0 * 1024 * 1024;
-  Eigen::MatrixXd representation, integral, connection;
-  Eigen::VectorXd connection_norm;
-  if (capture_connection) {
-    representation = delta_spin_hamiltonians;
-    connection = delta_spin_vectors;
-    connection_norm.resize(block_width);
-    for (int block = 0; block < block_width; ++block) {
-      const auto y = spin_vectors.middleCols(block * n_unique_beta_, n_unique_beta_);
-      const auto dy = delta_spin_vectors.middleCols(block * n_unique_beta_, n_unique_beta_);
-      const double projection = (y.array() * dy.array()).sum();
-      connection_norm[block] = dy.squaredNorm() -
-          projection * projection / y.squaredNorm();
-    }
-  }
-  {
-    Eigen::MatrixXd integral_image = sigma_direction.apply(spin_vectors, spin_exchange_parity_);
-    delta_spin_hamiltonians += integral_image;
-    if (capture_connection) integral = std::move(integral_image);
-  }
-  if (direct_ci_direction != nullptr) {
-    direct_ci_direction->coefficient_direction = delta_spin_vectors;
-    direct_ci_direction->sigma_direction = delta_spin_hamiltonians;
-  }
-  {
-    Eigen::MatrixXd left_image = direct_ci_->sigma.apply_one_body_generator(
-        spin_hamiltonians, transposed_relative_direction);
-    delta_spin_hamiltonians += left_image;
-    if (capture_connection) {
-      representation += left_image;
-      for (int block = 0; block < block_width; ++block)
-        representation.middleCols(block * n_unique_beta_, n_unique_beta_) -=
-            state.energies[block] * delta_spin_overlaps.middleCols(
-                block * n_unique_beta_, n_unique_beta_);
-    }
-  }
-  if (capture_connection) {
-    const auto project = [&](Eigen::MatrixXd values) {
-      for (int block = 0; block < block_width; ++block) {
-        Eigen::MatrixXd local = values.middleCols(
-            block * n_unique_beta_, n_unique_beta_);
-        direct_ci_->beta_transform().apply_adjoint_right(&local);
-        values.middleCols(block * n_unique_beta_, n_unique_beta_) = local;
-      }
-      direct_ci_->alpha_transform.apply_adjoint_left(&values);
-      return contract_spin_product_block(values);
-    };
-    direct_ci_direction->connection = StructureConnectionDirection{
-        project(std::move(representation)), project(std::move(integral)),
-        project(std::move(connection)), std::move(connection_norm)};
-  }
-  for (int block = 0; block < block_width; ++block) {
-    auto delta_hamiltonian_block =
-        delta_spin_hamiltonians.middleCols(
-            block * n_unique_beta_, n_unique_beta_);
-    auto delta_overlap_block =
-        delta_spin_overlaps.middleCols(
-            block * n_unique_beta_, n_unique_beta_);
-    direct_ci_->beta_transform().apply_adjoint_right_block(delta_hamiltonian_block);
-    direct_ci_->beta_transform().apply_adjoint_right_block(delta_overlap_block);
-  }
-  direct_ci_->alpha_transform.apply_adjoint_left(
-      &delta_spin_hamiltonians);
-  direct_ci_->alpha_transform.apply_adjoint_left(
-      &delta_spin_overlaps);
-  return StructureActionResult{
-      contract_spin_product_block(delta_spin_hamiltonians),
-      contract_spin_product_block(delta_spin_overlaps)};
+  return std::move(sweep.images);
 }
 
 bool StructureAction::supports_integral_direction() const noexcept {
   return direct_ci_ != nullptr;
-}
-
-bool StructureAction::prefer_factor_adjoint(int left_sources, int right_sources) const {
-  const long double l = left_sources, r = right_sources;
-  const long double d = direct_ci_->sigma.channel_kernel().rows();
-  const long double rows = static_cast<long double>(n_unique_alpha_) + n_unique_beta_;
-  const long double product_rows = spin_exchange_parity_ == 0
-      ? static_cast<long double>(n_unique_alpha_) * n_unique_beta_
-      : static_cast<long double>(n_unique_alpha_) * (n_unique_alpha_ + spin_exchange_parity_) / 2;
-  const long double work = 2 * rows * std::min(l,r) * d * d + 4 * rows * l * r * (d+1);
-  return l > 0 && r > 0 && work < 2 * product_rows * d * d;
-}
-
-bool StructureAction::prefer_factor_generator() const {
-  const long double na = n_unique_alpha_, nb = n_unique_beta_;
-  const long double n = direct_ci_->sigma.n_orbitals();
-  const long double ea = direct_ci_->alpha_transform.n_electrons();
-  const long double eb = direct_ci_->beta_transform().n_electrons();
-  const long double a_links = ea * (n-ea+1), b_links = eb * (n-eb+1);
-  const long double r = sources_->nodes.size(), l = r * (spin_exchange_parity_ ? 2 : 1);
-  const long double factor_work = 2 * (na+nb) * l * r + r * (na*a_links + nb*b_links);
-  return r > 0 && factor_work < na * nb * (a_links+b_links);
 }
 
 Eigen::MatrixXd StructureAction::source_generator_adjoint(
@@ -1478,34 +1351,6 @@ Eigen::MatrixXd StructureAction::source_generator_adjoint(
   const auto ket = sources_->orthogonal_source(spin_products_, right == left ? a : b,
       direct_ci_->alpha_transform, direct_ci_->beta_transform());
   return mcscf::factor_generator_adjoint(direct_ci_->sigma,bra,ket);
-}
-
-mcscf::DirectCiIntegralAdjoint StructureAction::source_integral_direction(
-    const StructureAdjointState& state, int index,
-    const Eigen::MatrixXd* orbital_direction, const Eigen::MatrixXd* coefficient_response) const {
-  const Eigen::VectorXd values = expand_support(state.structure_coefficients.col(index));
-  const auto ket = sources_->orthogonal_source(spin_products_, values,
-      direct_ci_->alpha_transform, direct_ci_->beta_transform());
-  Eigen::MatrixXd relative_direction;
-  if (orbital_direction != nullptr) {
-    relative_direction = direct_ci_->integrals.orbital_transform.transpose()
-        .template triangularView<Eigen::Lower>().solve(orbital_direction->transpose()).transpose();
-  }
-  Eigen::VectorXd response_values;
-  if (coefficient_response != nullptr) {
-    response_values = expand_support(coefficient_response->col(index));
-  }
-  const auto direction = sources_->tangent_source(spin_products_,values,
-      coefficient_response ? &response_values : nullptr,
-      direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,
-      orbital_direction ? &relative_direction : nullptr);
-  const auto physical_direction = sources_->tangent_source(spin_products_,values,
-      coefficient_response ? &response_values : nullptr,
-      direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,
-      orbital_direction ? &relative_direction : nullptr,true);
-  const auto physical = sources_->orthogonal_source(spin_products_,values,
-      direct_ci_->alpha_transform,direct_ci_->beta_transform(),true);
-  return sources_->integral_tangent(direct_ci_->sigma,ket,physical,direction,physical_direction);
 }
 
 StructureAdjointState StructureAction::prepare_active_adjoint(
@@ -1529,14 +1374,10 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
   const int n_pairs = packed_active_pair_count(n_orbitals);
   StructureAdjointState result;
   result.structure_coefficients = structure_coefficients;
-  result.orthogonal_coefficients.reserve(n_states);
-  result.residuals.reserve(n_states);
   result.weights = state_weights;
   result.energies = state_energies;
   // Compare the arithmetic of this consumer, independently of the H/M order.
   // Source-pair moments are quadratic in rank and must not be omitted here.
-  const int rank = sources_->nodes.size();
-  result.factor_integrals = prefer_factor_adjoint(rank * (spin_exchange_parity_ ? 2 : 1), rank);
   result.source_factors = prefer_factor_response(direct_ci_->sigma);
   result.one_electron_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);
@@ -1545,81 +1386,40 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
   result.generator_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);
 
+  if (!result.source_factors) {
+    result.product_images=std::make_shared<detail::ProductImages>();
+    const auto sweep=product_jet(result,nullptr,nullptr,nullptr,direct_ci_->alpha_transform,
+        direct_ci_->beta_transform(),direct_ci_->sigma,false);
+    result.one_electron_gradient=sweep.one_electron;
+    result.pair_kernel_gradient=sweep.pair_kernel;
+    result.generator_gradient=sweep.generator;
+  }
   for (int state = 0; state < n_states; ++state) {
     const double state_weight = state_weights[state];
     if (!std::isfinite(state_weight) || state_weight < 0.0 ||
         !std::isfinite(state_energies[state])) {
       throw std::invalid_argument("invalid selected-state adjoint input");
     }
-    if (state_weight == 0.0) {
-      if (!result.source_factors) {
-        result.orthogonal_coefficients.emplace_back();
-        result.residuals.emplace_back();
-      }
-      continue;
-    }
-    if (result.source_factors) {
-      const Eigen::VectorXd values = expand_support(structure_coefficients.col(state));
-      const auto y = sources_->orthogonal_source(spin_products_,values,
-          direct_ci_->alpha_transform,direct_ci_->beta_transform());
-      const auto physical = sources_->orthogonal_source(spin_products_,values,
-          direct_ci_->alpha_transform,direct_ci_->beta_transform(),true);
-      const auto integral = mcscf::factor_integral_adjoint(direct_ci_->sigma,physical,y);
-      result.one_electron_gradient.noalias() += state_weight*integral.one_electron;
-      result.pair_kernel_gradient.noalias() += state_weight*integral.pair_kernel;
-      result.generator_gradient.noalias() += 2*state_weight*mcscf::factor_residual_generator_adjoint(
-          direct_ci_->sigma,physical,y,state_energies[state]);
-      continue;
-    }
-    Eigen::MatrixXd orthogonal_coefficients = expand_structure_block(structure_coefficients.col(state));
-    Eigen::VectorXd support_values;
-    if (result.factor_integrals) {
-      support_values.resize(spin_products_.size());
-      for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group)
-        support_values[group] = orthogonal_coefficients(
-            spin_products_[group] / n_unique_beta_, spin_products_[group] % n_unique_beta_);
-    }
-    direct_ci_->alpha_transform.apply_left(&orthogonal_coefficients);
-    direct_ci_->beta_transform().apply_right(&orthogonal_coefficients);
-    mcscf::DirectCiResponse contracted;
-    if (result.factor_integrals) {
-      const auto bra = sources_->orthogonal_source(spin_products_, support_values,
-          direct_ci_->alpha_transform, direct_ci_->beta_transform(), true);
-      const auto ket = sources_->orthogonal_source(spin_products_, support_values,
-          direct_ci_->alpha_transform, direct_ci_->beta_transform());
-      contracted.integrals = mcscf::factor_integral_adjoint(direct_ci_->sigma, bra, ket);
-      contracted.sigma = direct_ci_->sigma.apply(orthogonal_coefficients, spin_exchange_parity_);
-    } else {
-      contracted = direct_ci_->sigma.apply_with_adjoint(
-          orthogonal_coefficients, orthogonal_coefficients, spin_exchange_parity_);
-    }
-    result.orthogonal_coefficients.push_back(
-        std::move(orthogonal_coefficients));
-    result.residuals.push_back(
-        contracted.sigma - state_energies[state] *
-            result.orthogonal_coefficients.back());
-    const auto& integral_gradient = contracted.integrals;
-    result.one_electron_gradient.noalias() +=
-        state_weight * integral_gradient.one_electron;
-    result.pair_kernel_gradient.noalias() +=
-        state_weight * integral_gradient.pair_kernel;
-    result.generator_gradient.noalias() +=
-        2.0 * state_weight *
-        direct_ci_->sigma.one_body_generator_adjoint(
-            result.residuals.back(),
-            result.orthogonal_coefficients.back());
+    if (state_weight==0 || !result.source_factors) continue;
+    const Eigen::VectorXd values = expand_support(structure_coefficients.col(state));
+    const auto y = sources_->orthogonal_source(spin_products_,values,
+        direct_ci_->alpha_transform,direct_ci_->beta_transform());
+    const auto physical = sources_->orthogonal_source(spin_products_,values,
+        direct_ci_->alpha_transform,direct_ci_->beta_transform(),true);
+    const auto integral = mcscf::factor_integral_adjoint(direct_ci_->sigma,physical,y);
+    result.one_electron_gradient.noalias() += state_weight*integral.one_electron;
+    result.pair_kernel_gradient.noalias() += state_weight*integral.pair_kernel;
+    result.generator_gradient.noalias() += 2*state_weight*mcscf::factor_residual_generator_adjoint(
+        direct_ci_->sigma,physical,y,state_energies[state]);
   }
 
-  const bool factor_transitions = prefer_factor_generator();
   for (std::size_t i = 0; i < result.weights.size(); ++i)
     for (std::size_t j = 0; j <= i; ++j) {
       if (result.weights[i] == 0.0 || result.weights[j] == 0.0)
         result.overlap_generators.push_back(Eigen::MatrixXd::Zero(n_orbitals, n_orbitals));
-      else if (result.source_factors || factor_transitions)
-        result.overlap_generators.push_back(source_generator_adjoint(result,j,i));
-      else
-        result.overlap_generators.push_back(direct_ci_->sigma.one_body_generator_adjoint(
-            result.orthogonal_coefficients[j], result.orthogonal_coefficients[i]));
+      else if (n_states==1 && result.product_images)
+        result.overlap_generators.push_back(result.product_images->density);
+      else result.overlap_generators.push_back(source_generator_adjoint(result,j,i));
     }
   return result;
 }
@@ -1661,8 +1461,6 @@ StructureAction::active_integral_adjoint_direction(
   if (n_states == 0 || state.energies.size() != n_states ||
       state.structure_coefficients.rows() != n_structures_ ||
       state.structure_coefficients.cols() != static_cast<Eigen::Index>(n_states) ||
-      (!state.source_factors && (state.orthogonal_coefficients.size() != n_states ||
-       state.residuals.size() != n_states)) ||
       (include_state_response &&
        (coefficient_response->rows() != n_structures_ ||
         coefficient_response->cols() != static_cast<Eigen::Index>(n_states) ||
@@ -1680,18 +1478,10 @@ StructureAction::active_integral_adjoint_direction(
   const int n_orbitals =
       static_cast<int>(direct_ci_->integrals.one_electron.rows());
   const int n_pairs = packed_active_pair_count(n_orbitals);
-  if (!state.source_factors && include_integral_response && direct_ci_direction != nullptr &&
-      (direct_ci_direction->coefficient_direction.rows() != n_unique_alpha_ ||
-       direct_ci_direction->coefficient_direction.cols() !=
-           static_cast<Eigen::Index>(n_states) * n_unique_beta_ ||
-       direct_ci_direction->sigma_direction.rows() != n_unique_alpha_ ||
-       direct_ci_direction->sigma_direction.cols() !=
-           static_cast<Eigen::Index>(n_states) * n_unique_beta_)) {
-    throw std::invalid_argument(
-        "prepared direct-CI direction has incompatible dimensions");
-  }
-  OrthogonalActiveIntegrals integral_direction;
-  if (include_integral_response) {
+  OrthogonalActiveIntegrals computed_direction;
+  const auto* prepared=include_integral_response && direct_ci_direction ?
+      direct_ci_direction->integrals.get():nullptr;
+  if (include_integral_response && !prepared) {
     if (one_electron_direction.size() !=
         static_cast<std::size_t>(n_orbitals) * n_orbitals) {
       throw std::invalid_argument(
@@ -1699,19 +1489,20 @@ StructureAction::active_integral_adjoint_direction(
     }
     const Eigen::Map<const Eigen::MatrixXd> delta_one_electron(
         one_electron_direction.data(), n_orbitals, n_orbitals);
-    integral_direction = orthogonalize_active_integral_direction(
+    computed_direction = orthogonalize_active_integral_direction(
         direct_ci_->integrals,
         overlap_direction,
         delta_one_electron,
         packed_two_electron_direction,
         n_orbitals);
-  } else {
-    integral_direction.orbital_transform = Eigen::MatrixXd::Zero(
+  } else if (!include_integral_response) {
+    computed_direction.orbital_transform = Eigen::MatrixXd::Zero(
         n_orbitals, n_orbitals);
-    integral_direction.one_electron = Eigen::MatrixXd::Zero(
+    computed_direction.one_electron = Eigen::MatrixXd::Zero(
         n_orbitals, n_orbitals);
-    integral_direction.pair_kernel = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
+    computed_direction.pair_kernel = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
   }
+  const auto& integral_direction=prepared ? *prepared:computed_direction;
 
   if (state.source_factors) {
     const Eigen::MatrixXd empty;
@@ -1721,157 +1512,29 @@ StructureAction::active_integral_adjoint_direction(
         direct_ci_->beta_transform(),direct_ci_->sigma,include_integral_response,direct_ci_direction);
   }
 
-  ExteriorTransformDirection alpha_transform_direction;
-  ExteriorTransformDirection beta_transform_direction;
-  std::unique_ptr<xmvb::mcscf::DirectCiSigmaAction> sigma_direction;
-  if (include_integral_response && direct_ci_direction == nullptr) {
-    alpha_transform_direction = direct_ci_->alpha_transform.direction(
-        integral_direction.orbital_transform);
-    beta_transform_direction = direct_ci_->beta_transform().direction(
-        integral_direction.orbital_transform);
-    sigma_direction = std::make_unique<xmvb::mcscf::DirectCiSigmaAction>(
-        direct_ci_->sigma,
-        integral_direction);
-  }
-
-  Eigen::MatrixXd orthogonal_one_gradient_direction = Eigen::MatrixXd::Zero(
-      n_orbitals, n_orbitals);
-  Eigen::MatrixXd orthogonal_pair_gradient_direction = Eigen::MatrixXd::Zero(
-      n_pairs, n_pairs);
-  Eigen::MatrixXd generator_gradient_direction = Eigen::MatrixXd::Zero(
-      n_orbitals, n_orbitals);
-
-  for (std::size_t state_index = 0;
-       state_index < n_states;
-       ++state_index) {
-    const double state_weight = state.weights[state_index];
-    if (!std::isfinite(state_weight) || state_weight < 0.0 ||
-        !std::isfinite(state.energies[state_index])) {
-      throw std::invalid_argument("invalid selected-state adjoint input");
-    }
-    if (state_weight == 0.0) {
-      continue;
-    }
-    const auto& orthogonal_coefficients =
-        state.orthogonal_coefficients[state_index];
-    const auto& residual = state.residuals[state_index];
-    if (orthogonal_coefficients.rows() != n_unique_alpha_ ||
-        orthogonal_coefficients.cols() != n_unique_beta_ ||
-        residual.rows() != n_unique_alpha_ ||
-        residual.cols() != n_unique_beta_) {
-      throw std::invalid_argument("invalid selected-state adjoint input");
-    }
-
-    Eigen::MatrixXd directional_orthogonal_coefficients =
-        Eigen::MatrixXd::Zero(n_unique_alpha_, n_unique_beta_);
-    if (include_integral_response) {
-      if (direct_ci_direction != nullptr) {
-        directional_orthogonal_coefficients =
-            direct_ci_direction->coefficient_direction.middleCols(
-                static_cast<Eigen::Index>(state_index) * n_unique_beta_,
-                n_unique_beta_);
-      } else {
-        Eigen::MatrixXd transformed_source =
-            expand_structure_block(state.structure_coefficients.col(state_index));
-        direct_ci_->alpha_transform.apply_directional_left(
-            alpha_transform_direction,
-            &transformed_source,
-            &directional_orthogonal_coefficients);
-        direct_ci_->beta_transform().apply_directional_right(
-            beta_transform_direction,
-            &transformed_source,
-            &directional_orthogonal_coefficients);
-      }
-    }
-    Eigen::MatrixXd orthogonal_state_response;
-    if (include_state_response) {
-      orthogonal_state_response = expand_structure_block(coefficient_response->col(state_index));
-      direct_ci_->alpha_transform.apply_left(&orthogonal_state_response);
-      direct_ci_->beta_transform().apply_right(&orthogonal_state_response);
-      directional_orthogonal_coefficients += orthogonal_state_response;
-    }
-
-    Eigen::MatrixXd directional_sigma;
-    if (include_integral_response && direct_ci_direction != nullptr) {
-      directional_sigma = direct_ci_direction->sigma_direction.middleCols(
-          static_cast<Eigen::Index>(state_index) * n_unique_beta_,
-          n_unique_beta_);
+  StructureResponseSweep sweep{{},Eigen::MatrixXd::Zero(n_orbitals,n_orbitals),
+      Eigen::MatrixXd::Zero(n_pairs,n_pairs),Eigen::MatrixXd::Zero(n_orbitals,n_orbitals)};
+  if (include_integral_response) {
+    if (direct_ci_direction) {
+      sweep.one_electron=direct_ci_direction->one_electron_direction;
+      sweep.pair_kernel=direct_ci_direction->pair_kernel_direction;
+      sweep.generator=direct_ci_direction->generator_direction;
     } else {
-      directional_sigma = direct_ci_->sigma.apply(
-          directional_orthogonal_coefficients, spin_exchange_parity_);
+      const mcscf::DirectCiSigmaAction delta_sigma(direct_ci_->sigma,integral_direction);
+      sweep=product_jet(state,nullptr,&integral_direction.orbital_transform,&delta_sigma,
+          direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,false);
     }
-    if (include_integral_response && direct_ci_direction == nullptr) {
-      directional_sigma.noalias() +=
-          sigma_direction->apply(orthogonal_coefficients, spin_exchange_parity_);
-    }
-    if (include_state_response && include_integral_response &&
-        direct_ci_direction != nullptr) {
-      directional_sigma.noalias() +=
-          direct_ci_->sigma.apply(orthogonal_state_response, spin_exchange_parity_);
-    }
-    Eigen::MatrixXd directional_residual =
-        directional_sigma -
-        state.energies[state_index] * directional_orthogonal_coefficients;
-    if (directional_state_multipliers != nullptr) {
-      for (std::size_t coupled_state = 0;
-           coupled_state < n_states;
-           ++coupled_state) {
-        const double multiplier = (*directional_state_multipliers)(
-                static_cast<Eigen::Index>(coupled_state),
-                static_cast<Eigen::Index>(state_index)) * 0.5 +
-            (*directional_state_multipliers)(
-                static_cast<Eigen::Index>(state_index),
-                static_cast<Eigen::Index>(coupled_state)) *
-                (0.5 * state.weights[coupled_state] / state_weight);
-        if (multiplier != 0.0) {
-          directional_residual.noalias() +=
-              multiplier * state.orthogonal_coefficients[coupled_state];
-        }
-      }
-    }
-
-    // dY = E(dR R^-1)Y + T W dC. Compare this exact factor order
-    // against the product Gram, including every directional source family.
-    const int rank = sources_->nodes.size();
-    const int physical_rank = rank * (spin_exchange_parity_ ? 2 : 1);
-    const int direction_rank = physical_rank *
-        (include_integral_response ? 2 : static_cast<int>(include_state_response));
-    xmvb::mcscf::DirectCiIntegralAdjoint directional_integral_gradient;
-    if (prefer_factor_adjoint(direction_rank, rank)) {
-      directional_integral_gradient = source_integral_direction(state, state_index,
-          include_integral_response ? &integral_direction.orbital_transform : nullptr,
-          coefficient_response);
-    } else {
-      directional_integral_gradient = direct_ci_->sigma.integral_adjoint(
-          directional_orthogonal_coefficients, orthogonal_coefficients, spin_exchange_parity_);
-    }
-    orthogonal_one_gradient_direction.noalias() +=
-        2.0 * state_weight * directional_integral_gradient.one_electron;
-    orthogonal_pair_gradient_direction.noalias() +=
-        2.0 * state_weight * directional_integral_gradient.pair_kernel;
-    generator_gradient_direction.noalias() += 2.0 * state_weight *
-        (direct_ci_->sigma.one_body_generator_adjoint(
-             directional_residual,
-             orthogonal_coefficients) +
-         direct_ci_->sigma.one_body_generator_adjoint(
-             residual,
-             directional_orthogonal_coefficients));
   }
-
-  NonorthogonalActiveIntegralAdjoint result =
-      backpropagate_orthogonal_active_integral_adjoint_direction(
-          direct_ci_->integrals,
-          integral_direction,
-          state.one_electron_gradient,
-          state.pair_kernel_gradient,
-          state.generator_gradient,
-          orthogonal_one_gradient_direction,
-          orthogonal_pair_gradient_direction,
-          generator_gradient_direction);
-  return StructureActiveIntegralAdjoint{
-      std::move(result.overlap),
-      std::move(result.one_electron),
-      std::move(result.pair_kernel)};
+  if (coefficient_response && !coefficient_response->isZero(0.0)) {
+    const auto q=product_jet(state,coefficient_response,nullptr,nullptr,
+        direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,false);
+    sweep.one_electron+=q.one_electron; sweep.pair_kernel+=q.pair_kernel; sweep.generator+=q.generator;
+  }
+  if (directional_state_multipliers) add_response_gauge(state,*directional_state_multipliers,sweep.generator);
+  auto result=backpropagate_orthogonal_active_integral_adjoint_direction(
+      direct_ci_->integrals,integral_direction,state.one_electron_gradient,state.pair_kernel_gradient,
+      state.generator_gradient,sweep.one_electron,sweep.pair_kernel,sweep.generator);
+  return {std::move(result.overlap),std::move(result.one_electron),std::move(result.pair_kernel)};
 }
 
 StructureResponseSweep StructureAction::apply_response(
@@ -1911,35 +1574,15 @@ StructureResponseSweep StructureAction::contract_response(
     throw std::logic_error(
         "active-integral response adjoint requires orthogonal direct CI");
   }
-  const std::size_t n_states = state.weights.size();
-  if (n_states == 0 || state.energies.size() != n_states ||
-      state.structure_coefficients.rows() != n_structures_ ||
-      state.structure_coefficients.cols() != static_cast<Eigen::Index>(n_states) ||
-      state.orthogonal_coefficients.size() != n_states ||
-      state.residuals.size() != n_states) {
-    throw std::invalid_argument(
-        "selected-subspace response adjoint inputs have incompatible dimensions");
+  const Eigen::MatrixXd response=coefficients;
+  if (response.isZero(0.0)) {
+    const int n=direct_ci_->sigma.n_orbitals(),d=direct_ci_->sigma.channel_kernel().rows();
+    return {{Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,response.cols()),
+             Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,response.cols())},
+            Eigen::MatrixXd::Zero(n,n),Eigen::MatrixXd::Zero(d,d),Eigen::MatrixXd::Zero(n,n)};
   }
-
-  for (std::size_t state_index = 0;
-       state_index < n_states;
-       ++state_index) {
-    const double state_weight = state.weights[state_index];
-    if (!std::isfinite(state_weight) || state_weight < 0.0 ||
-        !std::isfinite(state.energies[state_index])) {
-      throw std::invalid_argument("invalid selected-subspace adjoint state");
-    }
-    if (state_weight == 0.0) continue;
-    const auto& accepted = state.orthogonal_coefficients[state_index];
-    if (accepted.rows() != n_unique_alpha_ ||
-        accepted.cols() != n_unique_beta_ ||
-        state.residuals[state_index].rows() != n_unique_alpha_ ||
-        state.residuals[state_index].cols() != n_unique_beta_) {
-      throw std::invalid_argument("invalid selected-subspace adjoint state");
-    }
-  }
-  return contract_product_tiles(coefficients,direct_ci_->alpha_transform,direct_ci_->beta_transform(),
-      direct_ci_->sigma,false,kStructureActionWorkspaceBytes,&state,collect_images);
+  return product_jet(state,&response,nullptr,nullptr,direct_ci_->alpha_transform,
+      direct_ci_->beta_transform(),direct_ci_->sigma,collect_images);
 }
 
 StructureActiveIntegralAdjoint StructureAction::finish_response(
@@ -1986,7 +1629,7 @@ StructureActionStorage StructureAction::storage() const noexcept {
     result.factor_bytes += tiled_pairs_->dynamic_bytes();
   }
   result.expansion_bytes =
-      spin_products_.size() * sizeof(int) +
+      spin_products_.size() * sizeof(mcscf::ProductIndex) +
       spin_term_offsets_.size() * sizeof(std::size_t) +
       spin_terms_.size() * sizeof(StructureTerm) +
       structure_term_offsets_.size() * sizeof(std::size_t) +

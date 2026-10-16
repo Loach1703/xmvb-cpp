@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "mcscf/ci/product_paths.hpp"
+#include "mcscf/ci/product_support.hpp"
 
 namespace {
 using Paths = xmvb::mcscf::ProductPaths;
@@ -169,6 +170,12 @@ void check_special_cases() {
 } // namespace
 
 int main() {
+  // Logical CAS(18,18) addresses must not overflow, without allocating U^2.
+  const auto large = strings(18,9);
+  const auto last = xmvb::mcscf::product_index(48619,48619,48620);
+  require(last == 2363904399LL,"wide product index overflow");
+  const xmvb::mcscf::ProductSupport support(18,large,large,{last});
+  require(support.full(),"wide product seed decoded incorrectly");
   check_random();
   check_special_cases();
   std::cout << "product_frontier_exact_support=PASS\n";

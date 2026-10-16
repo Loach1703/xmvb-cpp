@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include "mcscf/ci/product_index.hpp"
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
@@ -22,6 +23,7 @@ class FactorActionWorkspace;
 }
 
 namespace xmvb::vb {
+namespace detail { struct ProductImages; }
 
 class ExteriorOrbitalTransform;
 struct ExteriorTransformDirection;
@@ -77,12 +79,10 @@ struct StructureResponseSweep {
 struct StructureAdjointState {
   /** Accepted coefficients in the originating selected structure space. */
   Eigen::MatrixXd structure_coefficients;
-  /** Whether integral adjoints use bounded spin-factor rather than product order. */
-  bool factor_integrals = false;
   /** Exact source representation; accepted orthogonal/residual arrays are absent. */
   bool source_factors = false;
-  std::vector<Eigen::MatrixXd> orthogonal_coefficients;
-  std::vector<Eigen::MatrixXd> residuals;
+  /** Shared, bounded accepted panels; never a full-carrier mandate. */
+  std::shared_ptr<detail::ProductImages> product_images;
   std::vector<double> weights;
   std::vector<double> energies;
   Eigen::MatrixXd one_electron_gradient;
@@ -94,10 +94,12 @@ struct StructureAdjointState {
 
 /** @brief Direct-CI intermediates shared by structure and adjoint directions. */
 struct StructureIntegralDirection {
-  Eigen::MatrixXd coefficient_direction;
-  Eigen::MatrixXd sigma_direction;
+  /** Prepared once by the forward direction; borrowed by its reverse consumer. */
+  std::shared_ptr<const OrthogonalActiveIntegrals> integrals;
   /** Weighted generator-gradient direction accumulated before source images are released. */
   Eigen::MatrixXd generator_direction;
+  /** Integral cotangents from the same orbital-direction tile sweep. */
+  Eigen::MatrixXd one_electron_direction, pair_kernel_direction;
   /** Full-trace diagnostic request; never changes the physical action. */
   bool capture_connection = false;
   std::optional<StructureConnectionDirection> connection;
@@ -399,17 +401,9 @@ private:
   /** @brief Expand one structure vector only on original touched products. */
   Eigen::VectorXd expand_support(
       const Eigen::Ref<const Eigen::VectorXd>& coefficients) const;
-  /** @brief Exact integral-adjoint order, including the source-pair moment work. */
-  bool prefer_factor_adjoint(int left_sources, int right_sources) const;
-  /** @brief One-body transition work; distinct from Hamiltonian-channel work. */
-  bool prefer_factor_generator() const;
   /** @brief Oriented transition density from structure coefficients and spin factors. */
   Eigen::MatrixXd source_generator_adjoint(
       const StructureAdjointState& state, int left, int right) const;
-  /** @brief Contract orbital/structure tangents on bounded source panels. */
-  mcscf::DirectCiIntegralAdjoint source_integral_direction(
-      const StructureAdjointState& state, int index,
-      const Eigen::MatrixXd* orbital_direction, const Eigen::MatrixXd* coefficient_response) const;
   /** @brief Bounded resident panels through expansion, sigma and projection. */
   StructureActionResult apply_orthogonal_tiled(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
@@ -418,13 +412,20 @@ private:
       const mcscf::DirectCiSigmaAction& sigma,
       bool overlap_only = false,
       std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
-  /** @brief One generated product graph for H/M and optional response adjoints. */
+  /** @brief Generated accepted/tangent jet with immediate shared consumers. */
+  StructureResponseSweep product_jet(const StructureAdjointState& state,
+      const Eigen::MatrixXd* response, const Eigen::MatrixXd* delta_upper,
+      const mcscf::DirectCiSigmaAction* delta_sigma,
+      const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma,bool collect_images,
+      StructureIntegralDirection* diagnostic=nullptr) const;
+
+  /** @brief Shared generated product graph for structure H/M actions. */
   StructureResponseSweep contract_product_tiles(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
       const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,
-      std::size_t workspace_bytes,const StructureAdjointState* accepted = nullptr,
-      bool collect_images = true) const;
+      std::size_t workspace_bytes) const;
   StructureActionResult apply_source_tiles(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
       const ExteriorOrbitalTransform& alpha_transform,
@@ -499,7 +500,7 @@ private:
   bool source_contraction_ = false;
   std::unique_ptr<const SpinSources> sources_;
 
-  std::vector<int> spin_products_;
+  std::vector<mcscf::ProductIndex> spin_products_;
   std::vector<std::size_t> spin_term_offsets_;
   std::vector<StructureTerm> spin_terms_;
   /** Structure-major permutation of `spin_terms_` for race-free C^T actions. */

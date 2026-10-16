@@ -12,6 +12,9 @@
 
 namespace xmvb::vb::detail {
 
+/** @brief Existing structure-action workspace; panels share equal quarters. */
+inline constexpr std::size_t kStructureTileWorkspaceBytes=256ULL*1024*1024;
+
 /** @brief Exact generated support of beta columns, shared by primal/image tiles. */
 struct ColumnPattern {
   bool full=false;
@@ -43,6 +46,19 @@ struct ColumnTile {
     });
     return result;
   }
+};
+
+/** @brief Accepted Y/residual panels, retained only when a complete state fits the
+ * shared payload budget. Compact support and transform extent are immutable.
+ * Larger states use the same jet sweep without retained product data.
+ */
+struct ProductImages {
+  int extent=0;
+  std::size_t bytes=0;
+  std::size_t budget=kStructureTileWorkspaceBytes/4;
+  std::vector<std::vector<ColumnTile>> states;
+  /** Single-root density already contracted for the energy-multiplier term. */
+  Eigen::MatrixXd density;
 };
 
 /** @brief Pack structural coordinates, never an amplitude-thresholded sparse view. */

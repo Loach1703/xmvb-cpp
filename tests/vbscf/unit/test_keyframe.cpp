@@ -62,8 +62,7 @@ void benchmark_accepted_state16(bool check_hvp = false) {
       std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
   const auto& accepted = *gradient.second_order_context;
   const auto& state = *accepted.structure_adjoint_state;
-  require(accepted.selected_state_matrices.states.empty() && state.source_factors &&
-              state.orthogonal_coefficients.empty() && state.residuals.empty(),
+  require(accepted.selected_state_matrices.states.empty() && state.source_factors && !state.product_images,
           "accepted-gradient producer retained a full product state");
   std::size_t raw_doubles = 0;
   for (const auto& s : accepted.selected_state_matrices.states) raw_doubles += s.coefficient_matrix.size();

@@ -23,6 +23,7 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/analysis/spin.cpp
   vbscf/structures/assembly/action.cpp
   vbscf/structures/assembly/orthogonal_tiles.cpp
+  vbscf/structures/assembly/product_jet.cpp
   vbscf/structures/assembly/overlap_tiles.cpp
   vbscf/structures/assembly/source_tiles.cpp
   vbscf/structures/assembly/source_response.cpp

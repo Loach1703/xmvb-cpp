@@ -28,6 +28,41 @@ input/output and RHSs. Full support uses implicit indices, not a stored list
 of every row. Cache budgets limit residency, never access to a physical
 representation or the selected variational space.
 
+Logical product addresses use `ProductIndex` (signed64-bit), whereas each
+single-spin address remains int. Multiplication is widened before packing.
+CAS(18,18) already has2363904400 logical products; a selected-space tile
+cannot make a signed32-bit global address safe.
+
+## Accepted and tangent ownership
+
+`StructureAdjointState` retains structure coefficients and small integral,
+generator and state-gauge tensors. Product order uses the same compact column
+format for accepted gradients, orbital directions and their reverse consumers.
+No unbounded accepted Y/residual or directional Y/sigma field remains.
+
+Accepted wave-function/residual panels may stay resident under a single shared64 MiB payload
+cap across all roots (one quarter of the existing256 MiB structure workspace).
+A complete resident state avoids replaying its accepted sigma in later HVPs;
+coefficient-only responses also borrow its transformed coefficients directly.
+Otherwise its primal and tangent images are generated together and immediately
+consumed. The representation and numerical accuracy are identical; only data
+residency changes. This is not a claim that all accepted work can always be
+retained at fixed memory or that streaming has zero recomputation cost.
+
+Exterior rows and their derivatives are shared by input generation and left
+projection. A bounded one-body neighbor reader supplies generator cotangents,
+so a union of neighboring beta columns cannot silently become a full carrier.
+The upper generator cotangent is sufficient for the Cholesky pullback; it is
+not a replacement for an oriented transition density. The overlap derivative
+uses the exact transpose identity to avoid traversing both operand orders.
+The forward orbital direction retains its prepared integral tangent and small
+adjoints for the reverse consumer. None of these arrays is copied per worker.
+
+Compact payload caps are not whole-process RSS limits: immutable spin links,
+original incidences, active tensors, exterior-row residency and bounded
+temporary slabs also coexist. Original touched support can itself be complete.
+Complete-space inverse/preconditioner consumers remain a separate migration.
+
 The channel gather's small inverse-index map is a different object: it maps
 the current alpha halo and target groups. It is bounded by the batch planner
 and repeatedly queried in the hot loop. Replacing it mechanically with a

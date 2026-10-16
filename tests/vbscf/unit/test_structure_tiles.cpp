@@ -402,7 +402,7 @@ void check_ionic_sources() {
 /** @brief Exhaustive small graphs certify cover size and unique edge ownership. */
 void check_source_cover() {
   for (int mask = 1; mask < (1 << 9); ++mask) {
-    std::vector<int> products;
+    std::vector<xmvb::mcscf::ProductIndex> products;
     for (int edge = 0; edge < 9; ++edge)
       if (mask & (1 << edge)) products.push_back(edge);
     const xmvb::vb::SpinSources sources(products, 3, 3);
@@ -421,7 +421,7 @@ void check_source_cover() {
     std::vector<int> visits(products.size(), 0);
     for (int node = 0; node < static_cast<int>(sources.nodes.size()); ++node)
       for (int offset = sources.offsets[node]; offset < sources.offsets[node + 1]; ++offset) {
-        const int group = sources.groups[offset], edge = products[group];
+        const int group = sources.groups[offset]; const auto edge = products[group];
         const auto& source = sources.nodes[node];
         require((source.beta ? edge % 3 : edge / 3) == source.string,
                 "source factor owns an unrelated product");
@@ -462,7 +462,7 @@ void check_source_tangents() {
         for (int b = 1; b < nb; ++b) add(0,b);
         for (int a = 1; a < na; ++a) add(a,0);
       }
-      std::vector<int> products;
+      std::vector<xmvb::mcscf::ProductIndex> products;
       Eigen::VectorXd c(entries.size()),q(entries.size());
       int offset = 0;
       for (const auto& [edge,values] : entries) {
@@ -568,7 +568,7 @@ void check_mixed_source_images() {
         (fixture.alpha.size() + fixture.beta.size())), expected);
     require((action.apply_overlap(vectors) - expected.overlap).norm() < 1e-12,
             "mixed-source metric differs from full CI");
-    std::vector<int> support;
+    std::vector<xmvb::mcscf::ProductIndex> support;
     Eigen::VectorXd support_values(products.size());
     int group = 0;
     for (const auto& [product, coefficients] : products) {
@@ -594,10 +594,17 @@ void check_mixed_source_images() {
   }
 }
 
-/** @brief Independent small-system oracle; never called by production. */
-xmvb::vb::StructureAdjointState explicit_product_state(const Fixture& fixture,
+/** @brief Full carriers belong only to independent small-system test oracles. */
+struct ProductOracle : xmvb::vb::StructureAdjointState {
+  std::vector<Eigen::MatrixXd> orthogonal_coefficients,residuals;
+};
+
+ProductOracle explicit_product_state(const Fixture& fixture,
     const xmvb::vb::SameSpinPairCacheContext& cache,
-    const xmvb::vb::StructureAction& action, xmvb::vb::StructureAdjointState state) {
+    const xmvb::vb::StructureAction& action, xmvb::vb::StructureAdjointState accepted) {
+  ProductOracle state;
+  static_cast<xmvb::vb::StructureAdjointState&>(state)=std::move(accepted);
+  state.product_images.reset();
   const auto integrals = xmvb::vb::orthogonalize_active_integrals(
       fixture.overlap,fixture.one_electron,fixture.two_electron,fixture.n);
   const xmvb::mcscf::DirectCiSigmaAction sigma(cache.alpha_reuse_table.unique_determinants,
@@ -611,6 +618,36 @@ xmvb::vb::StructureAdjointState explicit_product_state(const Fixture& fixture,
         state.energies[i]*state.orthogonal_coefficients.back());
   }
   return state;
+}
+
+/** @brief Independent complete-carrier coefficient-response differential.
+ * Uses ordinary sigma/adjoint entry points, never the generated product jet.
+ * Full product arrays are restricted to this explicit small-system oracle.
+ */
+xmvb::vb::StructureActiveIntegralAdjoint explicit_response(const Fixture& fixture,
+    const xmvb::vb::SameSpinPairCacheContext& cache,const xmvb::vb::StructureAction& action,
+    const xmvb::vb::StructureAdjointState& accepted,const Eigen::MatrixXd& response,
+    const Eigen::MatrixXd& multipliers) {
+  const auto state=explicit_product_state(fixture,cache,action,accepted);
+  const auto integrals=xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap,fixture.one_electron,fixture.two_electron,fixture.n);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(cache.alpha_reuse_table.unique_determinants,
+      cache.beta_reuse_table.unique_determinants,integrals);
+  const Eigen::MatrixXd q=action.orthogonalize_structure_block(response);
+  const int nb=fixture.beta.size(),n=fixture.n,d=integrals.pair_kernel.rows();
+  xmvb::vb::StructureResponseSweep sweep{{},Eigen::MatrixXd::Zero(n,n),
+      Eigen::MatrixXd::Zero(d,d),Eigen::MatrixXd::Zero(n,n)};
+  for (int i=0;i<response.cols();++i) {
+    const auto qi=q.middleCols(i*nb,nb);
+    const auto& y=state.orthogonal_coefficients[i];
+    const Eigen::MatrixXd residual=sigma.apply(qi)-state.energies[i]*qi;
+    const auto adjoint=sigma.integral_adjoint(qi,y);
+    sweep.one_electron.noalias()+=2*state.weights[i]*adjoint.one_electron;
+    sweep.pair_kernel.noalias()+=2*state.weights[i]*adjoint.pair_kernel;
+    sweep.generator.noalias()+=2*state.weights[i]*(sigma.one_body_generator_adjoint(residual,y)+
+        sigma.one_body_generator_adjoint(state.residuals[i],qi));
+  }
+  return action.finish_response(accepted,std::move(sweep),multipliers);
 }
 
 /** @brief Sparse coupled responses retain both full-carrier residual terms. */
@@ -635,14 +672,12 @@ void check_factor_structure_response(int parity, bool unequal = false) {
   const Eigen::MatrixXd q = (Eigen::Matrix2d() << 0.02,-0.03,0.04,0.01).finished();
   const Eigen::MatrixXd mu = (Eigen::Matrix2d() << 0.01,0.02,-0.03,0.005).finished();
   const auto accepted = action.prepare_active_adjoint(c,{0.3,0.7},{-1.1,-0.7});
-  require(accepted.source_factors && accepted.orthogonal_coefficients.empty() && accepted.residuals.empty(),
+  require(accepted.source_factors && !accepted.product_images,
           "source accepted state retained a complete product array");
   const auto dense = explicit_product_state(fixture,cache,action,accepted);
-  const auto reference = action.active_integral_adjoint_direction(dense,
-      &q,&mu,{}, {}, {},nullptr,false);
+  const auto reference = explicit_response(fixture,cache,action,dense,q,mu);
   // No accepted product arrays may be needed by this consumer.
   auto sparse = accepted;
-  sparse.orthogonal_coefficients.clear(); sparse.residuals.clear();
   auto sweep = action.apply_response(sparse,q);
   require(sweep.images.tiles.source_columns > 0 &&
       sweep.images.tiles.source_workspace_bound <= xmvb::mcscf::kFactorWorkspaceBytes,
@@ -686,8 +721,7 @@ void check_factor_structure_response(int parity, bool unequal = false) {
   check_images(source_images,action.apply_integral_direction(dense,overlap,one,two,&product_cache));
   require(source_images.tiles.source_workspace_bound <= xmvb::mcscf::kFactorWorkspaceBytes,
           "source image/VJP exceeded the single shared numerical workspace");
-  require(source_cache.coefficient_direction.size() == 0 && source_cache.sigma_direction.size() == 0 &&
-      source_cache.connection.has_value(),"source direction retained a full product cache");
+  require(source_cache.connection.has_value(),"source direction lost its requested diagnostic");
   require((source_cache.connection->representation_forcing-product_cache.connection->representation_forcing).norm() < 2e-11 &&
       (source_cache.connection->integral_forcing-product_cache.connection->integral_forcing).norm() < 2e-11 &&
       (source_cache.connection->overlap-product_cache.connection->overlap).norm() < 2e-11 &&
@@ -705,7 +739,8 @@ void check_factor_structure_response(int parity, bool unequal = false) {
   const Eigen::MatrixXd single_mu = Eigen::MatrixXd::Constant(1,1,0.02);
   const auto single = action.prepare_active_adjoint(single_c,{1.0},{-1.1});
   const auto single_dense = explicit_product_state(fixture,cache,action,single);
-  for (const auto* state : {&single,&single_dense}) {
+  const xmvb::vb::StructureAdjointState* single_variants[] = {&single,&single_dense};
+  for (const auto* state : single_variants) {
     const auto base = action.active_integral_adjoint(*state);
     for (const bool integral_response : {false,true}) {
       const auto full = action.active_integral_adjoint_direction(*state,&scaling_q,&single_mu,
@@ -754,7 +789,15 @@ void check_product_response(int parity,bool unequal) {
             "product response bypassed the fused generated sigma/adjoint graph");
     check_images(sweep.images,reference_images(fixture,terms,alpha,beta,q));
     const auto actual=action.finish_response(state,std::move(sweep),multipliers);
-    const auto oracle=action.active_integral_adjoint_direction(state,&q,&multipliers,{},{},{},nullptr,false);
+    auto streamed=state;
+    streamed.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
+    streamed.product_images->budget=128;
+    const auto evicted=action.active_integral_response_adjoint(streamed,q,multipliers);
+    require((actual.overlap-evicted.overlap).norm()<3e-11 &&
+            (actual.one_electron-evicted.one_electron).norm()<3e-11 &&
+            (actual.pair_kernel-evicted.pair_kernel).norm()<3e-11,
+            "bounded replay/partial-image eviction changed a product response");
+    const auto oracle=explicit_response(fixture,cache,action,state,q,multipliers);
     require((actual.overlap-oracle.overlap).norm()<3e-11 &&
             (actual.one_electron-oracle.one_electron).norm()<3e-11 &&
             (actual.pair_kernel-oracle.pair_kernel).norm()<3e-11,
@@ -803,7 +846,8 @@ void check_factor_accepted_gradient(bool sparse = false) {
   const double energy = images.hamiltonian(0,0) / images.overlap(0,0);
   c /= std::sqrt(images.overlap(0,0));
   const auto state = action.prepare_active_adjoint(c, {1.0}, {energy});
-  require(state.factor_integrals, "accepted gradient did not select the cheaper factor adjoint");
+  require(state.source_factors || state.product_images,
+          "accepted gradient has no bounded contraction plan");
   require(state.structure_coefficients.rows() == 1 && state.structure_coefficients.cols() == 1,
           "accepted raw state was not retained in the selected structure space");
   const auto integrals = xmvb::vb::orthogonalize_active_integrals(
@@ -891,7 +935,8 @@ void check_factor_state_average() {
   const std::vector<double> energies{-1.1,-0.7};
   for (const std::vector<double>& weights : {std::vector<double>{0.5,0.5}, {0.3,0.7}}) {
     const auto state = action.prepare_active_adjoint(c, weights, energies);
-    require(state.factor_integrals, "sparse multistate case did not select factor integral order");
+    require(state.source_factors || state.product_images,
+            "multistate gradient has no bounded contraction plan");
     for (int i = 0; i < 2; ++i)
       for (int j = 0; j <= i; ++j)
         require((state.overlap_generators[i*(i+1)/2+j] -
@@ -1270,7 +1315,7 @@ bool dominates_seed(const std::vector<int>& target,
 }
 
 void check_product_support_oracle(
-    const Fixture& fixture, const std::vector<int>& products) {
+    const Fixture& fixture, const std::vector<xmvb::mcscf::ProductIndex>& products) {
   std::vector<std::uint64_t> alpha, beta;
   for (const auto& occupied : fixture.alpha) alpha.push_back(occupation_mask(occupied));
   for (const auto& occupied : fixture.beta) beta.push_back(occupation_mask(occupied));
@@ -1363,7 +1408,7 @@ void check_product_support_oracle(
 void check_generic_product_support() {
   const auto check = [](const Fixture& fixture,
                         const std::vector<std::pair<std::vector<int>, std::vector<int>>>& seeds) {
-    std::vector<int> products;
+    std::vector<xmvb::mcscf::ProductIndex> products;
     for (const auto& [alpha, beta] : seeds)
       products.push_back(string_index(fixture.alpha, alpha) * fixture.beta.size() +
                          string_index(fixture.beta, beta));
@@ -1408,7 +1453,7 @@ void check_generic_product_support() {
 }
 
 void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
-                           const std::vector<int>& products = {}) {
+                           const std::vector<xmvb::mcscf::ProductIndex>& products = {}) {
   const auto fixture = make_fixture(n, n_alpha, n_beta_electrons);
   const auto integrals = xmvb::vb::orthogonalize_active_integrals(
       fixture.overlap, fixture.one_electron, fixture.two_electron, n);
@@ -1656,7 +1701,7 @@ void benchmark_selected12(int selected_count, bool compare_reference,
     beta_index.emplace(mask, i);
     beta_masks.push_back(mask);
   }
-  std::vector<int> products;
+  std::vector<xmvb::mcscf::ProductIndex> products;
   products.reserve(expansion.terms.size());
   for (int i = 0; i < static_cast<int>(expansion.terms.size()); ++i)
     products.push_back(alpha_index.at(occupation_mask(expansion.product_alpha[i])) *
@@ -1852,8 +1897,7 @@ void benchmark_structure_response(int n,int selected_count,bool compare_referenc
     const auto product_state = explicit_product_state(fixture,cache,action,accepted);
     const auto start = Clock::now();
     // Independent complete-carrier differential, not the migrated tile sweep.
-    const auto reference = action.active_integral_adjoint_direction(product_state,
-        &q,&mu,{},{},{},nullptr,false);
+    const auto reference = explicit_response(fixture,cache,action,product_state,q,mu);
     reference_seconds = std::chrono::duration<double>(Clock::now()-start).count();
     adjoint_error = std::max({(gradient.overlap-reference.overlap).norm(),
         (gradient.one_electron-reference.one_electron).norm(),
@@ -1888,10 +1932,10 @@ void benchmark_structure_response(int n,int selected_count,bool compare_referenc
 }
 
 /** @brief Accepted gradient and complete orbital direction, with separate oracles. */
-void benchmark_source_state(int n, bool reference, bool accepted_only = false) {
+void benchmark_source_state(int n, bool reference, bool accepted_only = false, int selected = 0) {
   require(n == 12 || n == 14 || (n == 16 && accepted_only),"unsupported source-state benchmark");
   const auto fixture = make_fixture(n,n/2,n/2);
-  const int count = n == 14 ? 2 : 1;
+  const int count = selected ? selected : (n == 14 ? 2 : 1);
   const auto pairings = rumer_pairings(0,n);
   const auto expansion = covalent_rumer_terms(n,fixture.alpha,fixture.beta,
       std::vector<Pairing>(pairings.begin(),pairings.begin()+count));
@@ -1905,10 +1949,9 @@ void benchmark_source_state(int n, bool reference, bool accepted_only = false) {
   const auto gradient = action.active_integral_adjoint(state);
   const auto prepared = Clock::now();
   std::size_t accepted_product_doubles = 0;
-  for (const auto& block : state.orthogonal_coefficients) accepted_product_doubles += block.size();
-  for (const auto& block : state.residuals) accepted_product_doubles += block.size();
-  require(state.source_factors && state.orthogonal_coefficients.empty() && state.residuals.empty(),
-          "source accepted benchmark retained a full product state");
+  if (state.product_images)
+    for (const auto& panels:state.product_images->states)
+      for (const auto& panel:panels) accepted_product_doubles+=panel.values.size();
   Eigen::MatrixXd ds(n,n), dh(n,n);
   for (int j = 0; j < n; ++j)
     for (int i = 0; i <= j; ++i) {
@@ -1935,8 +1978,6 @@ void benchmark_source_state(int n, bool reference, bool accepted_only = false) {
     const auto end = Clock::now();
     image_seconds = std::chrono::duration<double>(b-a).count();
     hvp_seconds = std::chrono::duration<double>(end-b).count();
-    require(direction.coefficient_direction.size() == 0 && direction.sigma_direction.size() == 0,
-            "source orbital direction retained a product cache");
   }
   constexpr double step = 2e-5;
   const auto lagrangian = [&](double scale) {
@@ -1955,6 +1996,24 @@ void benchmark_source_state(int n, bool reference, bool accepted_only = false) {
       (gradient.pair_kernel.array()*dg_full.array()).sum();
   const double fd_error = std::abs(slope-(lagrangian(step)-lagrangian(-step))/(2*step));
   require(fd_error < 2e-7,"source accepted gradient violates the Lagrangian directional derivative");
+  double hvp_fd_error=0;
+  if (selected && !accepted_only) {
+    const auto moved_gradient=[&](double scale) {
+      auto moved=fixture;
+      for (std::size_t i=0;i<moved.overlap.size();++i) moved.overlap[i]+=scale*ds.data()[i];
+      moved.one_electron+=scale*dh;
+      for (std::size_t i=0;i<dg.size();++i)
+        moved.two_electron.packed_active_two_electron_integrals[i]+=scale*dg[i];
+      const xmvb::vb::StructureAction shifted(expansion.terms,count,cache,moved.overlap,
+          moved.one_electron,moved.two_electron,n,nullptr,xmvb::vb::StructureActionMode::ActionOnly);
+      return shifted.active_integral_adjoint(shifted.prepare_active_adjoint(c,{1.0},{energy}));
+    };
+    const auto plus=moved_gradient(step),minus=moved_gradient(-step);
+    hvp_fd_error=std::max({(hvp.overlap-(plus.overlap-minus.overlap)/(2*step)).norm(),
+        (hvp.one_electron-(plus.one_electron-minus.one_electron)/(2*step)).norm(),
+        (hvp.pair_kernel-(plus.pair_kernel-minus.pair_kernel)/(2*step)).norm()});
+    require(hvp_fd_error<2e-7,"product jet HVP violates the gradient directional derivative");
+  }
   rusage usage{};
   require(getrusage(RUSAGE_SELF,&usage) == 0,"getrusage failed");
   const auto native_rss = usage.ru_maxrss;
@@ -1989,11 +2048,13 @@ void benchmark_source_state(int n, bool reference, bool accepted_only = false) {
             "source accepted/orbital chain differs from the independent product oracle");
   }
   std::cout << std::setprecision(17) << "orbitals=" << n << "\nstructures=" << count << '\n'
+            << "source_order=" << state.source_factors << "\nhvp_fd_error=" << hvp_fd_error << '\n'
+            << "accepted_image_cache_bytes=" << (state.product_images ? state.product_images->bytes:0) << '\n'
             << "accepted_seconds=" << std::chrono::duration<double>(prepared-start).count() << '\n'
             << "direction_checked=" << !accepted_only << "\ndirection_seconds=" << image_seconds << '\n'
             << "hvp_seconds=" << hvp_seconds << "\nlagrangian_fd_error=" << fd_error << '\n'
             << "accepted_product_doubles=" << accepted_product_doubles << "\ndirection_product_doubles="
-            << direction.coefficient_direction.size()+direction.sigma_direction.size() << '\n'
+            << 0 << '\n'
             << "direction_workspace_bound=" << images.tiles.source_workspace_bound << '\n'
             << "direction_source_columns=" << images.tiles.source_columns << '\n'
             << "cached_generator_doubles=" << direction.generator_direction.size() << '\n'
@@ -2188,7 +2249,7 @@ void benchmark_factor_adjoint(int n, bool compare_reference, bool directional = 
   for (int a = 0; a < static_cast<int>(fixture.alpha.size()); ++a)
     index.emplace(occupation_mask(fixture.alpha[a]), a);
   const int na = fixture.alpha.size(), nb = fixture.beta.size(), parity = (n / 2) % 2 ? -1 : 1;
-  std::vector<int> products;
+  std::vector<xmvb::mcscf::ProductIndex> products;
   Eigen::VectorXd coefficients(expansion.terms.size());
   for (int group = 0; group < static_cast<int>(expansion.terms.size()); ++group) {
     products.push_back(index.at(occupation_mask(expansion.product_alpha[group])) * nb +
@@ -2258,7 +2319,7 @@ void benchmark_factor_generators(int n, bool compare_reference, bool check_direc
   for (int i = 0; i < static_cast<int>(fixture.alpha.size()); ++i)
     indices.emplace(occupation_mask(fixture.alpha[i]),i);
   const int na = fixture.alpha.size(), nb = fixture.beta.size(), parity = (n/2)%2 ? -1 : 1;
-  std::vector<int> products;
+  std::vector<xmvb::mcscf::ProductIndex> products;
   Eigen::VectorXd coefficients(expansion.terms.size());
   for (int i = 0; i < static_cast<int>(expansion.terms.size()); ++i) {
     products.push_back(indices.at(occupation_mask(expansion.product_alpha[i])) * nb +
@@ -2446,6 +2507,8 @@ int main(int argc, char** argv) {
       benchmark_structure_response(14,std::stoi(argv[2]),false);
     } else if (argc == 3 && std::string(argv[1]) == "--structure-response14-reference") {
       benchmark_structure_response(14,std::stoi(argv[2]),true);
+    } else if (argc == 3 && std::string(argv[1]) == "--product-jet12") {
+      benchmark_source_state(12,false,false,std::stoi(argv[2]));
     } else if (argc == 3 && std::string(argv[1]) == "--source-state") {
       benchmark_source_state(std::stoi(argv[2]),false);
     } else if (argc == 3 && std::string(argv[1]) == "--source-state-reference") {
