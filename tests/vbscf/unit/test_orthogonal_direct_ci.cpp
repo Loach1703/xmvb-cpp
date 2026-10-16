@@ -2596,6 +2596,17 @@ void check_tiled_integral_direction_case(
               close(without_forcing.one_electron, expected_adjoint.one_electron) &&
               close(without_forcing.pair_kernel, expected_adjoint.pair_kernel),
           "omitting the forcing writer changed the combined image or adjoint");
+  Eigen::MatrixXd forcing_only=Eigen::MatrixXd::Zero(n_alpha,width*n_beta);
+  const auto forcing_adjoint=action.apply_tiled_direction(width,response_reader,
+      state_reader,direction,{},writer(forcing_only),support,parity);
+  const auto adjoint_only=action.apply_tiled_direction(width,response_reader,
+      state_reader,direction,{},{},support,parity);
+  require(close(project(forcing_only),expected_forcing) &&
+              close(forcing_adjoint.one_electron,expected_adjoint.one_electron) &&
+              close(forcing_adjoint.pair_kernel,expected_adjoint.pair_kernel) &&
+              close(adjoint_only.one_electron,expected_adjoint.one_electron) &&
+              close(adjoint_only.pair_kernel,expected_adjoint.pair_kernel),
+          "forcing-only or adjoint-only direction changed the physical contraction");
   if (support) {
     double outside = 0.0;
     for (int b = 0; b < n_beta; ++b)
@@ -2640,6 +2651,16 @@ void check_tiled_integral_direction() {
       nullptr, true);
   check_tiled_integral_direction_case(equal_spin, equal_spin, 1, 1,
       nullptr, false, true);
+  // Tiny unequal-spin halos also need correct width and worker ownership.
+  for (int width:{1,2})
+    check_tiled_integral_direction_case(complete_space(4,0),complete_space(4,1),width,0);
+#ifdef _OPENMP
+#pragma omp parallel num_threads(2)
+  {
+#pragma omp single
+    check_tiled_integral_direction_case(unequal_alpha,unequal_beta,2,0);
+  }
+#endif
 }
 
 /** @brief Check the complete response image, not just a projected scalar. */

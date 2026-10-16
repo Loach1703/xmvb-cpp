@@ -63,9 +63,9 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   Eigen::MatrixXd kernel_adjoint = Eigen::MatrixXd::Zero(
       collect_integrals ? pairs : 0,collect_integrals ? pairs : 0);
   constexpr std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL;
-  // The ordinary path retains its two-slab limit. The direction path reserves
-  // room for a third shared channel slab under the same 64 MiB target.
-  const std::size_t slab_factor = direction ? 6ULL : 4ULL;
+  // Only these channel slabs coexist: response/state and, for a direction,
+  // its output. Response and state refill the same input halo sequentially.
+  const std::size_t slab_factor = direction ? 3ULL : 2ULL;
   const int row_limit = static_cast<int>(std::max<std::size_t>(1,
       std::min<std::size_t>(std::numeric_limits<int>::max() / width,
           workspace_bytes / (slab_factor * sizeof(double) * width * pairs))));
@@ -105,11 +105,11 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   int full_alpha_offset = 0;
   bool continued = false, finished = false;
   const std::size_t maximum_neighbors=alpha_->n_singles()+1;
-  // Retain the former two-panel bound for ordinary requests. Direction
-  // requests add only the third channel slab to this conservative estimate.
+  // One halo is live: the response scatter completes before state refills it.
+  // Reserve its union support plus channel slabs and the shared target map.
   const auto payload = [&](std::size_t rows, std::size_t h, std::size_t b, std::size_t g) {
     return sizeof(double) * width *
-        (2.0L * static_cast<long double>(h) * b +
+        (static_cast<long double>(h) * b +
          static_cast<long double>(direction ? 3 : 2) * rows * pairs) +
         sizeof(int) * static_cast<long double>(h) * g;
   };

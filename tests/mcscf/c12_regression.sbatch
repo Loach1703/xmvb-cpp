@@ -27,12 +27,13 @@ unset XMVB_PHASE_TIMING XMVB_CIAH_TRACE
 hostname > "$artifact/node.txt"
 lscpu > "$artifact/cpu.txt"
 module list > "$artifact/modules.txt" 2>&1
+cmake -S "$source_dir" -B "$source_dir/build" > "$artifact/configure.log" 2>&1
 cmake --build "$source_dir/build" --target xmvb test_structure_tiles \
  test_representation_overlap test_selected_metric test_ci_transport \
  test_selected_ci_transport test_coupled_structure test_keyframe \
  test_orthogonal_direct_ci test_ciah -j16 > "$artifact/build.log" 2>&1
 cp "$source_dir/build/CMakeCache.txt" "$artifact/"
-find "$source_dir/src" "$source_dir/tests/vbscf/unit" -type f \
+find "$source_dir/src" "$source_dir/tests/vbscf/unit" "$source_dir/tests/linalg/unit" -type f \
  \( -name '*.cpp' -o -name '*.hpp' \) -print0 | sort -z | xargs -0 sha256sum > "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" --output-on-failure \

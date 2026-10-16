@@ -1,7 +1,11 @@
 # Two-channel-slab directional sigma: next implementation target
 
-Status: a derived dataflow plan, not yet implemented or benchmark-qualified.
-The current production kernel still uses three channel slabs for a direction.
+Status: the single-direction prototype passed independent numerical tests but
+was not retained. Hanhai22 jobs 1264662/1264664 took 31.462584/31.070410 s
+end-to-end, versus the saved 30.863387 s baseline. Both retained 4 steps and
+36 physical HVPs. Temporal orbital/CI fusion below remains a design, not an
+implemented performance claim. The alternative production candidate is the
+[lifetime-exact halo bound](sigma_halo_budget.md), which keeps ordinary GEMM.
 
 ## Required operations
 
@@ -16,7 +20,7 @@ $$
 U=A K^T,\qquad V=B\dot K^T,\qquad C=U+V.
 $$
 
-The current kernel keeps A, B and C simultaneously, then reuses A for V.
+The previous kernel kept A, B and C simultaneously, then reused A for V.
 However each output row of either GEMM depends only on that input row. After
 both scatters have completed, the coefficient halo is dead until the next
 tile read. It can serve as shared micro-panel scratch:
@@ -27,6 +31,20 @@ tile read. It can serve as shared micro-panel scratch:
    compute B dot(K)^T into that halo and copy back into B.
 4. Add B into A. A is the combined image, B the optional forcing image.
 5. Consume both transpose gathers before the next halo read.
+
+For the usual request that consumes only C, materializing V is unnecessary.
+For each owned row block, accumulate both GEMMs directly into scratch,
+
+$$
+Q\leftarrow A_{\mathrm{block}}K^T,\qquad
+Q\leftarrow Q+B_{\mathrm{block}}\dot K^T,\qquad
+A_{\mathrm{block}}\leftarrow Q.
+$$
+
+This removes the separate B-to-V copyback and final A+=B traversal. If the
+caller actually requests V as an independent output, both overwritten slabs
+remain necessary. Adjoint-only requests need neither Hamiltonian GEMM. These
+are output-dependency decisions, not numerical or cost thresholds.
 
 No full third channel image or numerical transpose is needed. All permanent
 channel views remain row-major, retaining the established GEMM/gather layout.
