@@ -1882,6 +1882,67 @@ matrix-free generalized problem with the existing bounded preconditioner;
 the storage decision never changes the variational space or disables
 orthogonal CI.
 
+\subsection{Residual image fusion and one-column projections}
+\label{sec:scalar-source}
+
+The oriented generator bilinear $\mathcal D$ is linear in its first
+argument. A source sweep emitting Hamiltonian factors $H_t=A_tB_t\Tr$
+can therefore emit the identity factors with coefficient $-\epsilon$ in
+the same consumer:
+\begin{equation}
+ \mathcal D((\Ha-\epsilon)Y,Z)
+ =\sum_t\mathcal D(H_t,Z)-\epsilon\mathcal D(Y,Z).
+\end{equation}
+This changes neither the Hamiltonian image returned to the structure
+solver nor its overlap image. It removes the separate overlap-generator
+sweep used only by the orbital adjoint. In particular,
+\begin{align}
+ \delta\Gamma=2\bigl[\mathcal D(\delta\Ha Y,Y)
+  +\mathcal D((\Ha-\epsilon)\delta Y,Y)
+  +\mathcal D((\Ha-\epsilon)Y,\delta Y)\bigr]
+\end{align}
+is evaluated without separately generating
+$\mathcal D(Y,\delta Y)+\mathcal D(\delta Y,Y)$.
+The identity factor is consumed once per source panel, not once per
+Hamiltonian channel. Common spin-exchange projection is applied by the
+same consumer; unequal spin-string dimensions require no exchange argument.
+The state energy $\epsilon$ is held fixed in this derivative: its variation
+is supplied by the existing selected-frame multiplier, not omitted or
+counted twice.
+
+For one selected VB structure, let $c\ne0$ be its accepted coefficient,
+$Y=\Ta\Wa c$, and $h,m$ the scalar selected Hamiltonian and overlap.
+Let $K=\delta R R^{-1}$ and define
+\begin{equation}
+ \gamma=\mathcal D(Y,Y),\qquad
+ \Gamma=2\mathcal D((\Ha-\epsilon)Y,Y).
+\end{equation}
+The accepted integral adjoints $G_h,G_V$ differentiate
+$\langle Y,\Ha Y\rangle$ with respect to the orthogonal one-electron
+integrals and symmetric Coulomb kernel. With $c$ held fixed,
+\begin{align}
+ c^2\delta m&=2\ip{\gamma}{K},\\
+ c^2\delta h&=\ip{G_h}{\delta h_{\mathrm{orth}}}
+             +\ip{G_V}{\delta V_{\mathrm{orth}}}
+             +\ip{\Gamma}{K}+\epsilon c^2\delta m.
+\end{align}
+These identities do not require $c=1$, unit wave-function norm, or
+stationarity in a larger carrier space. The action interface returns
+$(\delta h)c$ and $(\delta m)c$, so the right-hand sides must be
+\emph{divided by $c$}, not returned as quadratic expectations.
+If the accepted adjoints include a nonzero state weight, remove that weight
+from their contraction first; $\gamma$ is unweighted.
+
+There is no independent CI tangent in a one-column space, but normalization
+transport and its orbital derivative remain necessary. Only the H/M image
+projections are replaced: directional integral and generator adjoints still
+receive their full physical contributions. Computing the two scalar images
+requires $O(n^4)$ small-integral arithmetic and no exterior adjoint,
+Slater--Condon traversal, product array, or structure projection. The ordinary
+nonclosed multicolumn formulas are unchanged. Optional connection diagnostics
+request the separate integral/representation images and retain their exact
+uncontracted evaluation; they are not required by the production HVP.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};

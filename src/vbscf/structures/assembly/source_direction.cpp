@@ -15,6 +15,7 @@ StructureActionResult StructureAction::source_integral_action(
     const StructureAdjointState& state, const Eigen::MatrixXd& generator,
     const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
     const mcscf::DirectCiSigmaAction& sigma, const mcscf::DirectCiSigmaAction& delta_sigma,
+    const OrthogonalActiveIntegrals& delta,
     StructureIntegralDirection* direction) const {
   const int states = state.structure_coefficients.cols();
   if (states <= 0 || state.structure_coefficients.rows() != n_structures_ ||
@@ -33,16 +34,34 @@ StructureActionResult StructureAction::source_integral_action(
   const Eigen::MatrixXd adjoint_generator = generator.transpose();
   const bool moving = !generator.isZero(0.0);
   const bool capture = direction && direction->capture_connection;
+  // For a one-column VB space the H/M images are scalars. Their derivatives
+  // follow from the accepted adjoints; no exterior adjoint or CI projection
+  // is needed. Connection diagnostics explicitly request the separate images.
+  const bool scalar = n_structures_ == 1 && states == 1 && state.weights[0] != 0 &&
+      state.structure_coefficients(0,0) != 0 && !capture;
   if (direction) {
     direction->generator_direction = Eigen::MatrixXd::Zero(sigma.n_orbitals(),sigma.n_orbitals());
     direction->connection.reset();
     if (capture) direction->connection = StructureConnectionDirection{
         result.hamiltonian,result.hamiltonian,result.hamiltonian,Eigen::VectorXd::Zero(states)};
   }
+  if (scalar) {
+    const double dm = 2*(state.overlap_generators[0].array()*generator.array()).sum();
+    const double de = ((state.one_electron_gradient.array()*delta.one_electron.array()).sum()+
+        (state.pair_kernel_gradient.array()*delta.pair_kernel.array()).sum()+
+        (state.generator_gradient.array()*generator.array()).sum())/state.weights[0];
+    // The adjoints differentiate <Y,H Y>, whereas the API returns delta H C,
+    // not C^T delta H C. Do not assume the accepted scalar coefficient is one.
+    const double coefficient = state.structure_coefficients(0,0);
+    result.overlap(0,0) = dm/coefficient;
+    result.hamiltonian(0,0) = (de+state.energies[0]*dm)/coefficient;
+    if (!direction) return result;
+  }
   const auto project = [&](const mcscf::SpinFactorSource& source,
       const mcscf::DirectCiSigmaAction& action, const Eigen::MatrixXd* output_generator,
-      const mcscf::SpinFactorSource* right) -> SourceImageAdjoint {
-    if (right) return project_source_adjoint(source,*right,alpha,beta,action,output_generator);
+      const mcscf::SpinFactorSource* right, double energy = 0.0) -> SourceImageAdjoint {
+    if (right) return project_source_adjoint(source,*right,alpha,beta,action,
+        scalar ? nullptr : output_generator,!scalar,energy);
     mcscf::FactorActionWorkspace workspace(source,action.channel_kernel().rows(),
         mcscf::kFactorWorkspaceBytes,false,output_generator ? 2 : 0);
     return {project_factor_source(source,workspace,alpha,beta,action,false,output_generator),
@@ -54,7 +73,7 @@ StructureActionResult StructureAction::source_integral_action(
     const bool collect = direction && state.weights[i] != 0;
     auto integrals = project(y,delta_sigma,nullptr,collect ? &y : nullptr);
     Eigen::MatrixXd gradient = std::move(integrals.generator);
-    result.hamiltonian.col(i) = integrals.images.hamiltonian.col(0);
+    if (!scalar) result.hamiltonian.col(i) = integrals.images.hamiltonian.col(0);
     add_work(integrals.images.tiles);
     if (capture) direction->connection->integral_forcing.col(i) = integrals.images.hamiltonian.col(0);
     if (!moving) {
@@ -62,16 +81,16 @@ StructureActionResult StructureAction::source_integral_action(
       continue;
     }
     const auto dy = mcscf::generator_factors(sigma,y,generator);
-    const auto right = project(dy,sigma,nullptr,collect ? &y : nullptr);
-    const auto left = project(y,sigma,&adjoint_generator,collect ? &dy : nullptr);
+    const double energy = collect ? state.energies[i] : 0.0;
+    const auto right = project(dy,sigma,nullptr,collect ? &y : nullptr,energy);
+    const auto left = project(y,sigma,&adjoint_generator,collect ? &dy : nullptr,energy);
     gradient += right.generator+left.generator;
-    result.hamiltonian.col(i) += right.images.hamiltonian.col(0)+left.images.hamiltonian.col(0);
-    result.overlap.col(i) = right.images.overlap.col(0)+left.images.overlap.col(0);
+    if (!scalar) {
+      result.hamiltonian.col(i) += right.images.hamiltonian.col(0)+left.images.hamiltonian.col(0);
+      result.overlap.col(i) = right.images.overlap.col(0)+left.images.overlap.col(0);
+    }
     add_work(right.images.tiles); add_work(left.images.tiles);
     if (collect) {
-      const auto physical = sources_->orthogonal_source(spin_products_,values,alpha,beta,true);
-      const auto overlap = mcscf::factor_generator_adjoint(sigma,physical,dy);
-      gradient.noalias() -= state.energies[i]*(overlap+overlap.transpose());
       direction->generator_direction.noalias() += 2*state.weights[i]*gradient;
     }
     if (capture) {

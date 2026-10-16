@@ -96,7 +96,7 @@ StructureActionResult StructureAction::project_factor_source(const mcscf::SpinFa
     const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
     const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
     const Eigen::MatrixXd* output_generator, const FactorImageConsumer& image_consumer,
-    bool project_output) const {
+    bool project_output, double residual_energy) const {
   profiling::ScopedPhase phase(profiling::Phase::CiSigma);
   using Clock = std::chrono::steady_clock;
   const bool timing = profiling::phase_totals().enabled;
@@ -153,6 +153,8 @@ StructureActionResult StructureAction::project_factor_source(const mcscf::SpinFa
       if (image_consumer && !overlap_only) {
         image_consumer(block.same_alpha,block.beta,1.0);
         image_consumer(block.alpha,block.same_beta,1.0);
+        if (residual_energy != 0.0)
+          image_consumer(block.alpha,block.beta,-residual_energy);
       }
       if (!project_output) return;
       auto da = ga.leftCols(output_generator ? block.width : 0);

@@ -999,6 +999,70 @@ void check_factor_accepted_gradient(bool sparse = false) {
   }
 }
 
+/** @brief One-column images reuse adjoints without assuming a normalized CI state. */
+void check_scalar_source_direction(int parity, bool unequal = false) {
+  const auto fixture = unequal ? make_fixture(5,2,1) : make_fixture(6,3,3);
+  Terms terms{{{0,0.7}}};
+  Strings a{fixture.alpha[0]}, b{fixture.beta[1]};
+  if (parity) {
+    terms.push_back({{0,parity*0.7}});
+    a.push_back(fixture.alpha[1]); b.push_back(fixture.beta[0]);
+  }
+  const auto cache = topology(fixture,a,b);
+  const xmvb::vb::StructureAction action(terms,1,cache,fixture.overlap,
+      fixture.one_electron,fixture.two_electron,fixture.n,nullptr,
+      xmvb::vb::StructureActionMode::ActionOnly);
+  const auto state = action.prepare_active_adjoint(Eigen::MatrixXd::Constant(1,1,1.3),{0.6},{-1.1});
+  require(state.source_factors,"single-column fixture missed source factors");
+  const auto dense = explicit_product_state(fixture,cache,action,state);
+  const Eigen::MatrixXd ds = 0.001*Eigen::MatrixXd::Ones(fixture.n,fixture.n);
+  const Eigen::MatrixXd dh = -0.002*Eigen::MatrixXd::Identity(fixture.n,fixture.n);
+  const std::vector<double> overlap(ds.data(),ds.data()+ds.size()), one(dh.data(),dh.data()+dh.size());
+  const std::vector<double> two(fixture.two_electron.packed_active_two_electron_integrals.size(),0.0001);
+  xmvb::vb::StructureIntegralDirection direction, reference;
+  reference.capture_connection = true;
+  const auto images = action.apply_integral_direction(state,overlap,one,two,&direction);
+  const auto expected = action.apply_integral_direction(dense,overlap,one,two,&reference);
+  check_images(images,expected);
+  check_images(action.apply_integral_direction(state,overlap,one,two,nullptr),expected);
+  require(images.tiles.structure_projections == 0 && images.tiles.source_columns > 0,
+          "scalar direction retained unnecessary exterior/structure projections");
+  const auto integrals=xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap,fixture.one_electron,fixture.two_electron,fixture.n);
+  const auto delta=xmvb::vb::orthogonalize_active_integral_direction(
+      integrals,overlap,dh,two,fixture.n);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(fixture.alpha,fixture.beta,integrals), delta_sigma(sigma,delta);
+  const Eigen::MatrixXd generator=integrals.orbital_transform.transpose().triangularView<Eigen::Lower>()
+      .solve(delta.orbital_transform.transpose()).transpose();
+  const Eigen::MatrixXd y=action.orthogonalize_structure_block(state.structure_coefficients);
+  const Eigen::MatrixXd dy=sigma.apply_one_body_generator(y,generator);
+  const Eigen::MatrixXd residual=sigma.apply(y)-state.energies[0]*y;
+  const Eigen::MatrixXd dr=sigma.apply(dy)-state.energies[0]*dy+delta_sigma.apply(y);
+  const Eigen::MatrixXd expected_generator=2*state.weights[0]*(sigma.one_body_generator_adjoint(dr,y)+
+      sigma.one_body_generator_adjoint(residual,dy));
+  require((direction.generator_direction-expected_generator).norm()<3e-11,
+          "fused residual source sweep changed the scalar generator derivative");
+  // The Cholesky direction is upper triangular. The product oracle may omit
+  // unused lower-triangular covector entries; compare its physical pullback.
+  const Eigen::MatrixXd product_error=reference.generator_direction-expected_generator;
+  require(product_error.triangularView<Eigen::Upper>().toDenseMatrix().norm()<3e-11,
+          "product oracle changed the Cholesky generator covector");
+  const Eigen::MatrixXd q=Eigen::MatrixXd::Constant(1,1,0.03), mu=Eigen::MatrixXd::Constant(1,1,-0.02);
+  const auto hvp=action.active_integral_adjoint_direction(state,&q,&mu,overlap,one,two,&direction,true);
+  const auto oracle=action.active_integral_adjoint_direction(dense,&q,&mu,overlap,one,two,&reference,true);
+  require((hvp.overlap-oracle.overlap).norm()<3e-11 &&
+          (hvp.one_electron-oracle.one_electron).norm()<3e-11 &&
+          (hvp.pair_kernel-oracle.pair_kernel).norm()<3e-11,
+          "scalar source shortcut changed the complete moving adjoint");
+  // No normalization or orbital motion in this direction; integral adjoints
+  // alone must recover delta H, and delta M must be exactly zero.
+  const std::vector<double> zero_overlap(overlap.size(),0.0);
+  xmvb::vb::StructureIntegralDirection fixed, fixed_reference;
+  const auto fixed_images=action.apply_integral_direction(state,zero_overlap,one,two,&fixed);
+  check_images(fixed_images,action.apply_integral_direction(dense,zero_overlap,one,two,&fixed_reference));
+  require(fixed_images.overlap.isZero(0),"fixed-overlap scalar direction changed M");
+}
+
 /** @brief Factor HVP keeps multistate weights and off-diagonal gauge terms. */
 void check_factor_state_average() {
   const auto fixture = make_fixture(5,2,1);
@@ -2671,6 +2735,8 @@ int main(int argc, char** argv) {
       check_broad_product_projection(true);
       check_factor_accepted_gradient();
       check_factor_accepted_gradient(true);
+      for (int parity : {0,1,-1}) check_scalar_source_direction(parity);
+      check_scalar_source_direction(0,true);
       check_factor_state_average();
       check_complete_unequal_spin_case();
       check_mixed_exchange_space();

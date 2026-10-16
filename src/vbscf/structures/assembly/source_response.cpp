@@ -67,7 +67,7 @@ StructureResponseSweep StructureAction::source_response(
     const auto factors = [&](const Eigen::VectorXd& values, bool physical) {
       return sources_->orthogonal_source(spin_products_,values,alpha,beta,physical);
     };
-    const auto y = factors(accepted,false), physical_y = factors(accepted,true);
+    const auto y = factors(accepted,false);
     const auto q = factors(response,false), physical_q = factors(response,true);
     if (weight == 0.0) {
       if (!collect_images) continue;
@@ -79,8 +79,8 @@ StructureResponseSweep StructureAction::source_response(
     }
     // H q is generated once: its raw factor images also supply D(H q,Y).
     // The second image needs only its VJP, never another structure projection.
-    auto response_image = project_source_adjoint(q,y,alpha,beta,sigma,nullptr,collect_images);
-    auto accepted_image = project_source_adjoint(y,q,alpha,beta,sigma,nullptr,false);
+    auto response_image = project_source_adjoint(q,y,alpha,beta,sigma,nullptr,collect_images,energy);
+    auto accepted_image = project_source_adjoint(y,q,alpha,beta,sigma,nullptr,false,energy);
     const auto& images = response_image.images;
     if (collect_images) {
       result.images.hamiltonian.col(i) = images.hamiltonian.col(0);
@@ -97,9 +97,7 @@ StructureResponseSweep StructureAction::source_response(
     const auto integral = mcscf::factor_integral_adjoint(sigma,physical_q,y);
     result.one_electron.noalias() += 2*weight*integral.one_electron;
     result.pair_kernel.noalias() += 2*weight*integral.pair_kernel;
-    const auto overlap = mcscf::factor_generator_adjoint(sigma,physical_y,q);
-    result.generator.noalias() += 2*weight*(response_image.generator+accepted_image.generator
-        -energy*(overlap+overlap.transpose()));
+    result.generator.noalias() += 2*weight*(response_image.generator+accepted_image.generator);
   }
   return result;
 }

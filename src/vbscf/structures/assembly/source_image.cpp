@@ -13,11 +13,11 @@ StructureAction::SourceImageAdjoint StructureAction::project_source_adjoint(
     const mcscf::SpinFactorSource& source, const mcscf::SpinFactorSource& right,
     const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
     const mcscf::DirectCiSigmaAction& sigma, const Eigen::MatrixXd* output_generator,
-    bool project_output) const {
+    bool project_output, double residual_energy) const {
   // Image and covector slabs coexist, so partition one budget, not two copies.
   constexpr std::size_t image_bytes = mcscf::kFactorWorkspaceBytes/2;
   mcscf::FactorActionWorkspace workspace(source,sigma.channel_kernel().rows(),
-      image_bytes,false,output_generator ? 2 : 0);
+      image_bytes,false,project_output && output_generator ? 2 : 0);
   const int columns = workspace.source_tile()*std::max(1,workspace.channel_tile());
   const std::size_t rows = static_cast<std::size_t>(n_unique_alpha_)+n_unique_beta_;
   const int n = sigma.n_orbitals();
@@ -55,7 +55,7 @@ StructureAction::SourceImageAdjoint StructureAction::project_source_adjoint(
     // A smaller RHS residency can replay source panels, but projection is done
     // only on the first pass. It is never repeated for the extra adjoint tiles.
     auto images = project_factor_source(source,workspace,alpha,beta,sigma,false,
-        output_generator,consume,project_output && first == 0);
+        output_generator,consume,project_output && first == 0,residual_energy);
     if (first == 0) result.images = std::move(images);
     else {
       result.images.tiles.source_tiles += images.tiles.source_tiles;

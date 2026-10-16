@@ -443,19 +443,21 @@ private:
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
       const Eigen::MatrixXd* output_generator = nullptr,
-      const FactorImageConsumer& image_consumer = {}, bool project_output = true) const;
-  /** @brief Shared H-image projection and generator VJP; right panels may replay the sweep. */
+      const FactorImageConsumer& image_consumer = {}, bool project_output = true,
+      double residual_energy = 0.0) const;
+  /** @brief Shared H projection and (H-E) generator VJP; no separate overlap sweep. */
   SourceImageAdjoint project_source_adjoint(const mcscf::SpinFactorSource& source,
       const mcscf::SpinFactorSource& right,
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma, const Eigen::MatrixXd* output_generator,
-      bool project_output = true) const;
+      bool project_output = true, double residual_energy = 0.0) const;
   /** @brief Direction H/M images without accepted or directional product arrays. */
   StructureActionResult source_integral_action(const StructureAdjointState& state,
       const Eigen::MatrixXd& generator,
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma,
       const mcscf::DirectCiSigmaAction& delta_sigma,
+      const OrthogonalActiveIntegrals& delta,
       StructureIntegralDirection* direction) const;
   /** @brief Complete source-factor gradient direction, including the moving pullback. */
   StructureActiveIntegralAdjoint source_adjoint_direction(const StructureAdjointState& state,

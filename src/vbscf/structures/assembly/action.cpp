@@ -1339,7 +1339,7 @@ StructureActionResult StructureAction::apply_integral_direction(
   if (state.source_factors)
     return source_integral_action(state,relative_orbital_direction,
         direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,
-        sigma_direction,direct_ci_direction);
+        sigma_direction,integral_direction,direct_ci_direction);
 
   auto sweep=product_jet(state,nullptr,&integral_direction.orbital_transform,&sigma_direction,
       direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,true,direct_ci_direction);
