@@ -40,6 +40,10 @@ public:
   public:
     Eigen::MatrixXd operator()(
         const Eigen::Ref<const Eigen::MatrixXd>& structure_coeff_block) const;
+    /** @brief Bounded selected Gram, empty when the operator is streamed. */
+    const Eigen::MatrixXd& selected_matrix() const noexcept { return selected_gram_; }
+    /** @brief Whether the selected matrix fits its existing workspace quarter. */
+    static bool fits_selected(int dimension) noexcept;
 
   private:
     friend class RepresentationOverlap;

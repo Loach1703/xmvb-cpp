@@ -57,10 +57,11 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
 StructureResponseSweep StructureAction::contract_product_tiles(
     const Eigen::Ref<const Eigen::MatrixXd>& vectors,
     const ExteriorOrbitalTransform& alpha_transform,const ExteriorOrbitalTransform& beta_transform,
-    const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,std::size_t workspace_bytes) const {
+    const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,std::size_t workspace_bytes,
+    bool collect_overlap) const {
   constexpr bool collect_images=true;
   StructureResponseSweep sweep{{Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,vectors.cols()),
-      Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,vectors.cols())},
+      Eigen::MatrixXd::Zero(collect_images && collect_overlap ? n_structures_:0,vectors.cols())},
       Eigen::MatrixXd{},
       Eigen::MatrixXd{},
       Eigen::MatrixXd{}};
@@ -153,7 +154,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
           coefficients(group, vector) += spin_terms_[term].coefficient *
               vectors(spin_terms_[term].structure, vector_begin + vector);
     Eigen::MatrixXd h_products = Eigen::MatrixXd::Zero(collect_images ? spin_products_.size():0, width);
-    Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(collect_images ? spin_products_.size():0, width);
+    Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(collect_images && collect_overlap ? spin_products_.size():0, width);
     const auto project = [&](int panel, const Eigen::MatrixXd& rows,
                              Eigen::MatrixXd& image, Eigen::MatrixXd& target) {
       // C^T (T_alpha^T image T_beta): only touched original spin products
@@ -183,15 +184,15 @@ StructureResponseSweep StructureAction::contract_product_tiles(
                offset < structure_term_offsets_[structure + 1]; ++offset) {
             const auto& term = spin_terms_[structure_term_indices_[offset]];
             h += term.coefficient * h_products(term.group, vector);
-            m += term.coefficient * m_products(term.group, vector);
+            if (collect_overlap) m += term.coefficient * m_products(term.group, vector);
           }
           result.hamiltonian(structure, vector_begin + vector) = h;
-          result.overlap(structure, vector_begin + vector) = m;
+          if (collect_overlap) result.overlap(structure, vector_begin + vector) = m;
         }
       }
     };
 
-    std::vector<bool> overlap_consumed(count, false);
+    std::vector<bool> overlap_consumed(count, !collect_overlap);
     ColumnPanels input(cache_bytes, [&](int panel) -> ColumnTile {
       ++result.tiles.input_panels;
       const auto row_tile = beta_rows(panel);

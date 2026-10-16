@@ -16,6 +16,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/orbitals/preparation/cholesky.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
@@ -25,6 +26,7 @@
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
+#include "vbscf/structures/overlap/representation.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
 
 namespace xmvb::vb {
@@ -276,6 +278,42 @@ core::DavidsonResult solve_complete_structure_roots(
   return result;
 }
 
+/** @brief Riesz map for a bounded selected space, without a carrier projection.
+ * The residual r is a covector; M^-1 r is its physical tangent representative.
+ * This metric preconditioner is positive and invariant to basis congruences.
+ */
+struct SelectedCiMetric {
+  Eigen::MatrixXd overlap;
+  Eigen::LLT<Eigen::MatrixXd> factor;
+};
+
+std::shared_ptr<SelectedCiMetric> selected_ci_metric(const StructureAction& action,
+    const SameSpinPairCacheContext& topology,const std::vector<double>& overlap,int n) {
+  if (!RepresentationOverlap::PreparedMetric::fits_selected(action.n_structures())) return {};
+  const auto& alpha=topology.alpha_reuse_table.unique_determinants;
+  const auto& beta=topology.beta_reuse_table.unique_determinants;
+  const auto upper=overlap_upper(Eigen::Map<const Eigen::MatrixXd>(overlap.data(),n,n));
+  const auto metric=RepresentationOverlap(action,alpha,beta,n).prepare_metric(upper);
+  if (!metric.selected_matrix().size()) return {};
+  auto result=std::make_shared<SelectedCiMetric>();
+  result->overlap=metric.selected_matrix();
+  result->factor.compute(result->overlap);
+  if (result->factor.info()!=Eigen::Success)
+    throw std::runtime_error("selected CI metric is not positive definite");
+  if (diagnostics::neo_event_trace_enabled()) {
+    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(metric.selected_matrix(),Eigen::EigenvaluesOnly);
+    const Eigen::VectorXd scale=action.preconditioner_diagonal().overlap.array().rsqrt();
+    const Eigen::MatrixXd scaled=scale.asDiagonal()*metric.selected_matrix()*scale.asDiagonal();
+    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> normalized(scaled,Eigen::EigenvaluesOnly);
+    diagnostics::neo_trace("ciah_ci_selected_metric",
+        "dimension=%d,condition=%.17g,diagonal_scaled_condition=%.17g,factor_bytes=%zu",
+        action.n_structures(),spectrum.eigenvalues().tail(1)[0]/spectrum.eigenvalues()[0],
+        normalized.eigenvalues().tail(1)[0]/normalized.eigenvalues()[0],
+        sizeof(double)*static_cast<std::size_t>(action.n_structures())*action.n_structures());
+  }
+  return result;
+}
+
 void select_structure_states(
     int n_structures,
     const std::vector<int>& selected_state_indices,
@@ -458,9 +496,25 @@ void solve_structure_problem(
           *context->structure_metric_inverse,n_roots,structure_solve_accuracy,
           initial_eigenvectors,generalized_eigensolver),context);
     } else {
+      auto metric=structure_action.storage().orthogonal_direct_ci
+          ? selected_ci_metric(structure_action,context->same_spin_pair_cache,
+              prepared.orbital_result.active_orbital_overlap_matrix,
+              input.orbital_preparation_input.n_active_orbitals)
+          : std::shared_ptr<SelectedCiMetric>{};
+      auto selected_action=action;
+      std::function<Eigen::VectorXd(const Eigen::VectorXd&,double)> preconditioner;
+      if (metric) {
+        selected_action=[&structure_action,metric](const Eigen::Ref<const Eigen::MatrixXd>& v) {
+          return core::GeneralizedEigenActionResult{
+              structure_action.apply_hamiltonian(v),metric->overlap*v};
+        };
+        preconditioner=[metric](const Eigen::VectorXd& r,double) {
+          return Eigen::VectorXd(metric->factor.solve(r));
+        };
+      }
       retain_davidson_result(
         solve_selected_structure_roots(
-            action,
+            selected_action,
             structure_action.preconditioner_diagonal().hamiltonian,
             structure_action.preconditioner_diagonal().overlap,
             n_structures,
@@ -468,7 +522,7 @@ void solve_structure_problem(
             structure_solve_accuracy,
             initial_eigenvectors,
             generalized_eigensolver,
-            std::move(physical_residual)),
+            std::move(physical_residual),std::move(preconditioner)),
         context);
     }
   }

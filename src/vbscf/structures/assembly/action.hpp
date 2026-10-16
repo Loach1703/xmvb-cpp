@@ -166,6 +166,12 @@ public:
   StructureActionResult apply(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
 
+  /** @brief Hamiltonian image when the caller already owns the selected metric.
+   * Product tiles omit the redundant overlap back-projection.
+   */
+  Eigen::MatrixXd apply_hamiltonian(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
+
   /** @brief Exact overlap image; direct-CI needs only forward/adjoint transforms.
    * Shares the accepted-point representation and the existing block budget.
    * Pair-based representations retain their exact combined action.
@@ -418,7 +424,7 @@ private:
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
       const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,
-      std::size_t workspace_bytes) const;
+      std::size_t workspace_bytes,bool collect_overlap=true) const;
   StructureActionResult apply_source_tiles(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
       const ExteriorOrbitalTransform& alpha_transform,

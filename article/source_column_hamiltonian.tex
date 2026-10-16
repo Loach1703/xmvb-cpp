@@ -1824,6 +1824,64 @@ The implementation partitions the existing metric workspace into one half
 for construction and one quarter each for the selected identity and result;
 it introduces no string-pair storage and no larger memory allowance.
 
+\subsection{Metric-aware Davidson corrections in a selected space}
+\label{sec:selected-ci-metric}
+
+The dimensions of the selected CI problem and the orthogonal contraction
+carrier are distinct. Davidson solves
+\begin{equation}
+ H\vv C=E M\vv C,\qquad \vv C\Tr M\vv C=1,
+\end{equation}
+in the original selected structure space, not in the string-product space.
+Let $F=\Ta\Wa$, so $H=F^*\Ha F$ and $M=F^*F$. A Ritz residual
+$\vv r=H\vv C-E M\vv C$ is a covector on that coefficient space.
+The metric representative of this covector is
+\begin{equation}\label{eq:selected-riesz}
+ \vv z=M^{-1}\vv r.
+\end{equation}
+If the current Davidson basis is $V$, the Galerkin condition
+$V\Tr\vv r=0$ immediately gives
+\begin{equation}
+ V\Tr M\vv z=V\Tr\vv r=0.
+\end{equation}
+Thus this correction lies outside the current subspace in the correct
+metric, up to the linear-solve and Ritz residual errors. Applying a raw
+coordinate diagonal to $\vv r$ does not have this property in general.
+In particular, diagonal normalization cannot remove correlations between
+nearly dependent Rumer columns.
+
+For an invertible selected-basis change $\vv C=P\vv x$, the transformed
+residual and metric obey
+\begin{equation}
+ \vv r_x=P\Tr\vv r,\qquad M_x=P\Tr M P,\qquad
+ M_x^{-1}\vv r_x=P^{-1}M^{-1}\vv r.
+\end{equation}
+The physical correction is unchanged. This covariance concerns the
+preconditioner; it does not assert that a coordinate-dependent finite
+stopping rule becomes invariant under every basis change.
+
+Equation~\eqref{eq:selected-riesz} is a metric preconditioner, not an exact
+inverse of $H-E M$. It removes the coefficient-space geometry but does not
+model every physical excitation gap. For a selected metric retained within
+the existing budget, factor $M=L L\Tr$ once and use two triangular solves.
+The selected inverse is essential: for a nonclosed selection it cannot be
+replaced by the selected principal block of a complete-space inverse.
+No Hessian, structure Hamiltonian, full string-pair Gram or carrier-vector
+preconditioner is assembled. The original structure coefficients remain the
+Davidson variables, and all accuracy budgets are retained.
+
+Once this fixed selected $M$ is available, repeating its exterior
+back-projection during every Hamiltonian action is also unnecessary.
+For an input block $V$, evaluate only $H V$ through generated product tiles
+and return $M V$ from the small selected matrix. This removes the overlap
+image's alpha adjoint, beta sampling and structure projection from the
+product sweep. The Hamiltonian projection, its exact support and its
+Slater--Condon links are unchanged. The ordinary factor sweep retains its
+joint H/M contraction. Larger selected metrics continue to use the same
+matrix-free generalized problem with the existing bounded preconditioner;
+the storage decision never changes the variational space or disables
+orthogonal CI.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};

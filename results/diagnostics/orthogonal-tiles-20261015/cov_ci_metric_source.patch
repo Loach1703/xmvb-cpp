@@ -1,0 +1,393 @@
+diff --git a/article/source_column_hamiltonian.tex b/article/source_column_hamiltonian.tex
+index 775620f4..bf3ade5c 100644
+--- a/article/source_column_hamiltonian.tex
++++ b/article/source_column_hamiltonian.tex
+@@ -1824,6 +1824,64 @@ The implementation partitions the existing metric workspace into one half
+ for construction and one quarter each for the selected identity and result;
+ it introduces no string-pair storage and no larger memory allowance.
+ 
++\subsection{Metric-aware Davidson corrections in a selected space}
++\label{sec:selected-ci-metric}
++
++The dimensions of the selected CI problem and the orthogonal contraction
++carrier are distinct. Davidson solves
++\begin{equation}
++ H\vv C=E M\vv C,\qquad \vv C\Tr M\vv C=1,
++\end{equation}
++in the original selected structure space, not in the string-product space.
++Let $F=\Ta\Wa$, so $H=F^*\Ha F$ and $M=F^*F$. A Ritz residual
++$\vv r=H\vv C-E M\vv C$ is a covector on that coefficient space.
++The metric representative of this covector is
++\begin{equation}\label{eq:selected-riesz}
++ \vv z=M^{-1}\vv r.
++\end{equation}
++If the current Davidson basis is $V$, the Galerkin condition
++$V\Tr\vv r=0$ immediately gives
++\begin{equation}
++ V\Tr M\vv z=V\Tr\vv r=0.
++\end{equation}
++Thus this correction lies outside the current subspace in the correct
++metric, up to the linear-solve and Ritz residual errors. Applying a raw
++coordinate diagonal to $\vv r$ does not have this property in general.
++In particular, diagonal normalization cannot remove correlations between
++nearly dependent Rumer columns.
++
++For an invertible selected-basis change $\vv C=P\vv x$, the transformed
++residual and metric obey
++\begin{equation}
++ \vv r_x=P\Tr\vv r,\qquad M_x=P\Tr M P,\qquad
++ M_x^{-1}\vv r_x=P^{-1}M^{-1}\vv r.
++\end{equation}
++The physical correction is unchanged. This covariance concerns the
++preconditioner; it does not assert that a coordinate-dependent finite
++stopping rule becomes invariant under every basis change.
++
++Equation~\eqref{eq:selected-riesz} is a metric preconditioner, not an exact
++inverse of $H-E M$. It removes the coefficient-space geometry but does not
++model every physical excitation gap. For a selected metric retained within
++the existing budget, factor $M=L L\Tr$ once and use two triangular solves.
++The selected inverse is essential: for a nonclosed selection it cannot be
++replaced by the selected principal block of a complete-space inverse.
++No Hessian, structure Hamiltonian, full string-pair Gram or carrier-vector
++preconditioner is assembled. The original structure coefficients remain the
++Davidson variables, and all accuracy budgets are retained.
++
++Once this fixed selected $M$ is available, repeating its exterior
++back-projection during every Hamiltonian action is also unnecessary.
++For an input block $V$, evaluate only $H V$ through generated product tiles
++and return $M V$ from the small selected matrix. This removes the overlap
++image's alpha adjoint, beta sampling and structure projection from the
++product sweep. The Hamiltonian projection, its exact support and its
++Slater--Condon links are unchanged. The ordinary factor sweep retains its
++joint H/M contraction. Larger selected metrics continue to use the same
++matrix-free generalized problem with the existing bounded preconditioner;
++the storage decision never changes the variational space or disables
++orthogonal CI.
++
+ \section{Correspondence with the current implementation}
+ 
+ The original column contraction corresponds to revision \texttt{a5004add};
+diff --git a/src/vbscf/derivatives/gradient/active_space/evaluator.cpp b/src/vbscf/derivatives/gradient/active_space/evaluator.cpp
+index c4d56c51..276d57a2 100644
+--- a/src/vbscf/derivatives/gradient/active_space/evaluator.cpp
++++ b/src/vbscf/derivatives/gradient/active_space/evaluator.cpp
+@@ -16,6 +16,7 @@
+ #include <Eigen/Eigenvalues>
+ 
+ #include "vbscf/integrals/active/preparation/space.hpp"
++#include "vbscf/orbitals/preparation/cholesky.hpp"
+ #include "vbscf/determinants/pairs/same_spin_cache.hpp"
+ #include "core/pair_index.hpp"
+ #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
+@@ -25,6 +26,7 @@
+ #include "vbscf/structures/assembly/selected_coefficients.hpp"
+ #include "vbscf/structures/assembly/action.hpp"
+ #include "vbscf/structures/orthogonal_ci/metric.hpp"
++#include "vbscf/structures/overlap/representation.hpp"
+ #include "vbscf/diagnostics/performance/neo_trace.hpp"
+ 
+ namespace xmvb::vb {
+@@ -276,6 +278,42 @@ core::DavidsonResult solve_complete_structure_roots(
+   return result;
+ }
+ 
++/** @brief Riesz map for a bounded selected space, without a carrier projection.
++ * The residual r is a covector; M^-1 r is its physical tangent representative.
++ * This metric preconditioner is positive and invariant to basis congruences.
++ */
++struct SelectedCiMetric {
++  Eigen::MatrixXd overlap;
++  Eigen::LLT<Eigen::MatrixXd> factor;
++};
++
++std::shared_ptr<SelectedCiMetric> selected_ci_metric(const StructureAction& action,
++    const SameSpinPairCacheContext& topology,const std::vector<double>& overlap,int n) {
++  if (!RepresentationOverlap::PreparedMetric::fits_selected(action.n_structures())) return {};
++  const auto& alpha=topology.alpha_reuse_table.unique_determinants;
++  const auto& beta=topology.beta_reuse_table.unique_determinants;
++  const auto upper=overlap_upper(Eigen::Map<const Eigen::MatrixXd>(overlap.data(),n,n));
++  const auto metric=RepresentationOverlap(action,alpha,beta,n).prepare_metric(upper);
++  if (!metric.selected_matrix().size()) return {};
++  auto result=std::make_shared<SelectedCiMetric>();
++  result->overlap=metric.selected_matrix();
++  result->factor.compute(result->overlap);
++  if (result->factor.info()!=Eigen::Success)
++    throw std::runtime_error("selected CI metric is not positive definite");
++  if (diagnostics::neo_event_trace_enabled()) {
++    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(metric.selected_matrix(),Eigen::EigenvaluesOnly);
++    const Eigen::VectorXd scale=action.preconditioner_diagonal().overlap.array().rsqrt();
++    const Eigen::MatrixXd scaled=scale.asDiagonal()*metric.selected_matrix()*scale.asDiagonal();
++    const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> normalized(scaled,Eigen::EigenvaluesOnly);
++    diagnostics::neo_trace("ciah_ci_selected_metric",
++        "dimension=%d,condition=%.17g,diagonal_scaled_condition=%.17g,factor_bytes=%zu",
++        action.n_structures(),spectrum.eigenvalues().tail(1)[0]/spectrum.eigenvalues()[0],
++        normalized.eigenvalues().tail(1)[0]/normalized.eigenvalues()[0],
++        sizeof(double)*static_cast<std::size_t>(action.n_structures())*action.n_structures());
++  }
++  return result;
++}
++
+ void select_structure_states(
+     int n_structures,
+     const std::vector<int>& selected_state_indices,
+@@ -458,9 +496,25 @@ void solve_structure_problem(
+           *context->structure_metric_inverse,n_roots,structure_solve_accuracy,
+           initial_eigenvectors,generalized_eigensolver),context);
+     } else {
++      auto metric=structure_action.storage().orthogonal_direct_ci
++          ? selected_ci_metric(structure_action,context->same_spin_pair_cache,
++              prepared.orbital_result.active_orbital_overlap_matrix,
++              input.orbital_preparation_input.n_active_orbitals)
++          : std::shared_ptr<SelectedCiMetric>{};
++      auto selected_action=action;
++      std::function<Eigen::VectorXd(const Eigen::VectorXd&,double)> preconditioner;
++      if (metric) {
++        selected_action=[&structure_action,metric](const Eigen::Ref<const Eigen::MatrixXd>& v) {
++          return core::GeneralizedEigenActionResult{
++              structure_action.apply_hamiltonian(v),metric->overlap*v};
++        };
++        preconditioner=[metric](const Eigen::VectorXd& r,double) {
++          return Eigen::VectorXd(metric->factor.solve(r));
++        };
++      }
+       retain_davidson_result(
+         solve_selected_structure_roots(
+-            action,
++            selected_action,
+             structure_action.preconditioner_diagonal().hamiltonian,
+             structure_action.preconditioner_diagonal().overlap,
+             n_structures,
+@@ -468,7 +522,7 @@ void solve_structure_problem(
+             structure_solve_accuracy,
+             initial_eigenvectors,
+             generalized_eigensolver,
+-            std::move(physical_residual)),
++            std::move(physical_residual),std::move(preconditioner)),
+         context);
+     }
+   }
+diff --git a/src/vbscf/structures/assembly/action.cpp b/src/vbscf/structures/assembly/action.cpp
+index a7c70998..a92f5bb0 100644
+--- a/src/vbscf/structures/assembly/action.cpp
++++ b/src/vbscf/structures/assembly/action.cpp
+@@ -1180,6 +1180,16 @@ void StructureAction::inverse_adjoint_orbital_transform(Eigen::MatrixXd* spin_pr
+         spin_products->middleCols(first, n_unique_beta_));
+ }
+ 
++Eigen::MatrixXd StructureAction::apply_hamiltonian(
++    const Eigen::Ref<const Eigen::MatrixXd>& vectors) const {
++  if (vectors.rows()!=n_structures_ || vectors.cols()<=0)
++    throw std::invalid_argument("invalid Hamiltonian input block");
++  if (!direct_ci_ || source_contraction_) return apply(vectors).hamiltonian;
++  return contract_product_tiles(vectors,direct_ci_->alpha_transform,
++      direct_ci_->beta_transform(),direct_ci_->sigma,false,
++      detail::kStructureTileWorkspaceBytes,false).images.hamiltonian;
++}
++
+ Eigen::MatrixXd StructureAction::apply_overlap(
+     const Eigen::Ref<const Eigen::MatrixXd>& vectors) const {
+   if (vectors.rows() != n_structures_ || vectors.cols() <= 0 || !vectors.allFinite())
+diff --git a/src/vbscf/structures/assembly/action.hpp b/src/vbscf/structures/assembly/action.hpp
+index ec9c50bd..57737d52 100644
+--- a/src/vbscf/structures/assembly/action.hpp
++++ b/src/vbscf/structures/assembly/action.hpp
+@@ -166,6 +166,12 @@ public:
+   StructureActionResult apply(
+       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
+ 
++  /** @brief Hamiltonian image when the caller already owns the selected metric.
++   * Product tiles omit the redundant overlap back-projection.
++   */
++  Eigen::MatrixXd apply_hamiltonian(
++      const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
++
+   /** @brief Exact overlap image; direct-CI needs only forward/adjoint transforms.
+    * Shares the accepted-point representation and the existing block budget.
+    * Pair-based representations retain their exact combined action.
+@@ -418,7 +424,7 @@ private:
+       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+       const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
+       const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,
+-      std::size_t workspace_bytes) const;
++      std::size_t workspace_bytes,bool collect_overlap=true) const;
+   StructureActionResult apply_source_tiles(
+       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+       const ExteriorOrbitalTransform& alpha_transform,
+diff --git a/src/vbscf/structures/assembly/orthogonal_tiles.cpp b/src/vbscf/structures/assembly/orthogonal_tiles.cpp
+index bd4aa186..e72e9efd 100644
+--- a/src/vbscf/structures/assembly/orthogonal_tiles.cpp
++++ b/src/vbscf/structures/assembly/orthogonal_tiles.cpp
+@@ -57,10 +57,11 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
+ StructureResponseSweep StructureAction::contract_product_tiles(
+     const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+     const ExteriorOrbitalTransform& alpha_transform,const ExteriorOrbitalTransform& beta_transform,
+-    const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,std::size_t workspace_bytes) const {
++    const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,std::size_t workspace_bytes,
++    bool collect_overlap) const {
+   constexpr bool collect_images=true;
+   StructureResponseSweep sweep{{Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,vectors.cols()),
+-      Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,vectors.cols())},
++      Eigen::MatrixXd::Zero(collect_images && collect_overlap ? n_structures_:0,vectors.cols())},
+       Eigen::MatrixXd{},
+       Eigen::MatrixXd{},
+       Eigen::MatrixXd{}};
+@@ -153,7 +154,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
+           coefficients(group, vector) += spin_terms_[term].coefficient *
+               vectors(spin_terms_[term].structure, vector_begin + vector);
+     Eigen::MatrixXd h_products = Eigen::MatrixXd::Zero(collect_images ? spin_products_.size():0, width);
+-    Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(collect_images ? spin_products_.size():0, width);
++    Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(collect_images && collect_overlap ? spin_products_.size():0, width);
+     const auto project = [&](int panel, const Eigen::MatrixXd& rows,
+                              Eigen::MatrixXd& image, Eigen::MatrixXd& target) {
+       // C^T (T_alpha^T image T_beta): only touched original spin products
+@@ -183,15 +184,15 @@ StructureResponseSweep StructureAction::contract_product_tiles(
+                offset < structure_term_offsets_[structure + 1]; ++offset) {
+             const auto& term = spin_terms_[structure_term_indices_[offset]];
+             h += term.coefficient * h_products(term.group, vector);
+-            m += term.coefficient * m_products(term.group, vector);
++            if (collect_overlap) m += term.coefficient * m_products(term.group, vector);
+           }
+           result.hamiltonian(structure, vector_begin + vector) = h;
+-          result.overlap(structure, vector_begin + vector) = m;
++          if (collect_overlap) result.overlap(structure, vector_begin + vector) = m;
+         }
+       }
+     };
+ 
+-    std::vector<bool> overlap_consumed(count, false);
++    std::vector<bool> overlap_consumed(count, !collect_overlap);
+     ColumnPanels input(cache_bytes, [&](int panel) -> ColumnTile {
+       ++result.tiles.input_panels;
+       const auto row_tile = beta_rows(panel);
+diff --git a/src/vbscf/structures/overlap/representation.cpp b/src/vbscf/structures/overlap/representation.cpp
+index af89c99b..3a1e8355 100644
+--- a/src/vbscf/structures/overlap/representation.cpp
++++ b/src/vbscf/structures/overlap/representation.cpp
+@@ -206,6 +206,11 @@ RepresentationOverlap::RepresentationOverlap(
+     throw std::invalid_argument("spin strings do not match action carrier");
+ }
+ 
++bool RepresentationOverlap::PreparedMetric::fits_selected(int dimension) noexcept {
++  const std::size_t n=dimension>0 ? static_cast<std::size_t>(dimension):0;
++  return n && n<=kRowWorkspaceBytes/(4*sizeof(double))/n;
++}
++
+ RepresentationOverlap::PreparedMetric::PreparedMetric(
+     const StructureAction& action, const Strings& alpha, const Strings& beta,
+     bool complete_carrier, const Eigen::Ref<const Eigen::MatrixXd>& upper)
+@@ -224,7 +229,7 @@ RepresentationOverlap::PreparedMetric::PreparedMetric(
+     // iteration is unnecessary for a small selected space. Reserve half the
+     // existing budget for construction and quarters for identity/result.
+     const std::size_t n=action.n_structures();
+-    if (n && n<=kRowWorkspaceBytes/(4*sizeof(double))/n) {
++    if (fits_selected(action.n_structures())) {
+       selected_gram_=action.cross_overlap(Eigen::MatrixXd::Identity(n,n),
+           *alpha_transform_,*beta_transform_,*alpha_transform_,*beta_transform_,
+           nullptr,nullptr,nullptr,nullptr,kRowWorkspaceBytes/2);
+diff --git a/src/vbscf/structures/overlap/representation.hpp b/src/vbscf/structures/overlap/representation.hpp
+index c8effc50..7ce4e275 100644
+--- a/src/vbscf/structures/overlap/representation.hpp
++++ b/src/vbscf/structures/overlap/representation.hpp
+@@ -40,6 +40,10 @@ public:
+   public:
+     Eigen::MatrixXd operator()(
+         const Eigen::Ref<const Eigen::MatrixXd>& structure_coeff_block) const;
++    /** @brief Bounded selected Gram, empty when the operator is streamed. */
++    const Eigen::MatrixXd& selected_matrix() const noexcept { return selected_gram_; }
++    /** @brief Whether the selected matrix fits its existing workspace quarter. */
++    static bool fits_selected(int dimension) noexcept;
+ 
+   private:
+     friend class RepresentationOverlap;
+diff --git a/tests/mcscf/github_scf_step.sbatch b/tests/mcscf/github_scf_step.sbatch
+index ad2e956b..405e5c17 100644
+--- a/tests/mcscf/github_scf_step.sbatch
++++ b/tests/mcscf/github_scf_step.sbatch
+@@ -30,7 +30,7 @@ baseline=$(realpath "$2")
+ current=$(realpath "$3")
+ artifact="$source_dir/github-scf-step-$SLURM_JOB_ID"
+ mode=${4:-paired}
+-[[ $mode == paired || $mode == native || $mode == phases || $mode == vtune ]] || exit 64
++[[ $mode == paired || $mode == native || $mode == phases || $mode == vtune || $mode == converge ]] || exit 64
+ mkdir -p "$artifact"
+ export LC_ALL=C OMP_NUM_THREADS=8 OMP_PLACES=cores OMP_PROC_BIND=close
+ export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
+@@ -59,6 +59,8 @@ for variant in "${variants[@]}"; do
+   cd "$run_dir"
+   sha256sum input.xmi cc-pvdz.gbs xmvb-cpp.exe > hashes.sha256
+   launcher=()
++  iterations=(--max-iterations 1)
++  [[ $mode == converge ]] && iterations=()
+   if [[ $mode == phases || $mode == vtune ]]; then
+    export XMVB_PHASE_TIMING=1 XMVB_NEO_TRACE=scalar
+   fi
+@@ -74,7 +76,7 @@ for variant in "${variants[@]}"; do
+    python3 "$source_dir/tests/mcscf/pin_ci.py" 8 "$artifact/affinity.jsonl" \
+    "${launcher[@]}" "$run_dir/xmvb-cpp.exe" input.xmi --optimizer-backend neo --eigensolver davidson \
+    --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 \
+-   --energy-tolerance 1e-7 --max-iterations 1 --neo-trace neo.tsv > output.out 2> run.err
++   --energy-tolerance 1e-7 "${iterations[@]}" --neo-trace neo.tsv > output.out 2> run.err
+   status=$?
+   set -e
+   printf '%s\n' "$status" > run.exit
+diff --git a/tests/vbscf/unit/test_selected_metric.cpp b/tests/vbscf/unit/test_selected_metric.cpp
+index dbc52a1e..ae6ca643 100644
+--- a/tests/vbscf/unit/test_selected_metric.cpp
++++ b/tests/vbscf/unit/test_selected_metric.cpp
+@@ -7,6 +7,7 @@
+ #include <vector>
+ 
+ #include <Eigen/Core>
++#include <Eigen/Cholesky>
+ #include <Eigen/LU>
+ 
+ #include "core/metric_solve.hpp"
+@@ -122,10 +123,25 @@ void compare_dense(Fixture& fixture) {
+   const Eigen::MatrixXd metric = carrier.transpose() * carrier;
+   require((prepared_metric(identity) - metric).norm() < 2.0e-11,
+           "selected metric action disagrees with explicit exterior minors");
++  const Eigen::LLT<Eigen::MatrixXd> inverse(prepared_metric.selected_matrix());
++  require(inverse.info()==Eigen::Success,"selected CI metric factorization failed");
++  Eigen::MatrixXd change=Eigen::MatrixXd::Identity(identity.rows(),identity.cols());
++  for (int j=0;j<change.cols();++j) {
++    change(j,j)=0.8+0.1*j;
++    for (int i=0;i<j;++i) change(i,j)=0.13*std::sin(i+2*j+1);
++  }
++  const Eigen::MatrixXd transformed_metric=change.transpose()*metric*change;
++  const Eigen::LLT<Eigen::MatrixXd> transformed_inverse(transformed_metric);
+   Eigen::MatrixXd rhs(fixture.selected.cols(), 11);
+   for (int col = 0; col < rhs.cols(); ++col)
+     for (int row = 0; row < rhs.rows(); ++row)
+       rhs(row, col) = std::sin(0.21 * (row + 1) * (col + 2));
++  const Eigen::MatrixXd tangent=inverse.solve(rhs);
++  const Eigen::MatrixXd transformed_rhs=change.transpose()*rhs;
++  const Eigen::MatrixXd recovered=change*transformed_inverse.solve(transformed_rhs);
++  require((metric*tangent-rhs).norm()<2e-10*std::max(1.0,rhs.norm()) &&
++      (tangent-recovered).norm()<2e-10*std::max(1.0,tangent.norm()),
++      "selected CI Riesz preconditioner is not invariant under basis congruence");
+   const Eigen::VectorXd diagonal = metric.diagonal();
+   Eigen::MatrixXd solution(rhs.rows(), rhs.cols());
+   for (int col = 0; col < rhs.cols(); ++col) {
+diff --git a/tests/vbscf/unit/test_structure_tiles.cpp b/tests/vbscf/unit/test_structure_tiles.cpp
+index 305a6b89..b9799285 100644
+--- a/tests/vbscf/unit/test_structure_tiles.cpp
++++ b/tests/vbscf/unit/test_structure_tiles.cpp
+@@ -329,6 +329,9 @@ void check_rumer_case(int n) {
+           "complete spin strings failed to select direct CI");
+   const Eigen::MatrixXd vectors = test_vectors(expected, 3);
+   const auto actual = action.apply(vectors);
++  require((action.apply_hamiltonian(vectors)-actual.hamiltonian).norm()<
++      2e-11*std::max(1.0,actual.hamiltonian.norm()),
++      "Hamiltonian-only projection differs from the combined H/M action");
+   // Force one-column panels and eviction/recomputation in both caches.
+   // The resource choice must not change the operator or selected subspace.
+   check_images(action.apply_streamed(vectors, 512), actual);
+@@ -371,6 +374,8 @@ void check_selected_unequal_spin_case() {
+   require(action.storage().orthogonal_direct_ci,
+           "selected spin strings did not select completed direct CI");
+   const Eigen::MatrixXd vectors = test_vectors(n_structures, 4);
++  require((action.apply_hamiltonian(vectors)-action.apply(vectors).hamiltonian).norm()<2e-11,
++      "unequal-spin Hamiltonian-only projection lost selected products");
+   check_images(action.apply(vectors), reference_images(
+       fixture, terms, product_alpha, product_beta, vectors));
+   check_images(action.apply_streamed(vectors, 512), reference_images(

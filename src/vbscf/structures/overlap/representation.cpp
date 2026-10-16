@@ -206,6 +206,11 @@ RepresentationOverlap::RepresentationOverlap(
     throw std::invalid_argument("spin strings do not match action carrier");
 }
 
+bool RepresentationOverlap::PreparedMetric::fits_selected(int dimension) noexcept {
+  const std::size_t n=dimension>0 ? static_cast<std::size_t>(dimension):0;
+  return n && n<=kRowWorkspaceBytes/(4*sizeof(double))/n;
+}
+
 RepresentationOverlap::PreparedMetric::PreparedMetric(
     const StructureAction& action, const Strings& alpha, const Strings& beta,
     bool complete_carrier, const Eigen::Ref<const Eigen::MatrixXd>& upper)
@@ -224,7 +229,7 @@ RepresentationOverlap::PreparedMetric::PreparedMetric(
     // iteration is unnecessary for a small selected space. Reserve half the
     // existing budget for construction and quarters for identity/result.
     const std::size_t n=action.n_structures();
-    if (n && n<=kRowWorkspaceBytes/(4*sizeof(double))/n) {
+    if (fits_selected(action.n_structures())) {
       selected_gram_=action.cross_overlap(Eigen::MatrixXd::Identity(n,n),
           *alpha_transform_,*beta_transform_,*alpha_transform_,*beta_transform_,
           nullptr,nullptr,nullptr,nullptr,kRowWorkspaceBytes/2);

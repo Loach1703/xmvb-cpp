@@ -1180,6 +1180,16 @@ void StructureAction::inverse_adjoint_orbital_transform(Eigen::MatrixXd* spin_pr
         spin_products->middleCols(first, n_unique_beta_));
 }
 
+Eigen::MatrixXd StructureAction::apply_hamiltonian(
+    const Eigen::Ref<const Eigen::MatrixXd>& vectors) const {
+  if (vectors.rows()!=n_structures_ || vectors.cols()<=0)
+    throw std::invalid_argument("invalid Hamiltonian input block");
+  if (!direct_ci_ || source_contraction_) return apply(vectors).hamiltonian;
+  return contract_product_tiles(vectors,direct_ci_->alpha_transform,
+      direct_ci_->beta_transform(),direct_ci_->sigma,false,
+      detail::kStructureTileWorkspaceBytes,false).images.hamiltonian;
+}
+
 Eigen::MatrixXd StructureAction::apply_overlap(
     const Eigen::Ref<const Eigen::MatrixXd>& vectors) const {
   if (vectors.rows() != n_structures_ || vectors.cols() <= 0 || !vectors.allFinite())

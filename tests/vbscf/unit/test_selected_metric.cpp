@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include <Eigen/Cholesky>
 #include <Eigen/LU>
 
 #include "core/metric_solve.hpp"
@@ -122,10 +123,25 @@ void compare_dense(Fixture& fixture) {
   const Eigen::MatrixXd metric = carrier.transpose() * carrier;
   require((prepared_metric(identity) - metric).norm() < 2.0e-11,
           "selected metric action disagrees with explicit exterior minors");
+  const Eigen::LLT<Eigen::MatrixXd> inverse(prepared_metric.selected_matrix());
+  require(inverse.info()==Eigen::Success,"selected CI metric factorization failed");
+  Eigen::MatrixXd change=Eigen::MatrixXd::Identity(identity.rows(),identity.cols());
+  for (int j=0;j<change.cols();++j) {
+    change(j,j)=0.8+0.1*j;
+    for (int i=0;i<j;++i) change(i,j)=0.13*std::sin(i+2*j+1);
+  }
+  const Eigen::MatrixXd transformed_metric=change.transpose()*metric*change;
+  const Eigen::LLT<Eigen::MatrixXd> transformed_inverse(transformed_metric);
   Eigen::MatrixXd rhs(fixture.selected.cols(), 11);
   for (int col = 0; col < rhs.cols(); ++col)
     for (int row = 0; row < rhs.rows(); ++row)
       rhs(row, col) = std::sin(0.21 * (row + 1) * (col + 2));
+  const Eigen::MatrixXd tangent=inverse.solve(rhs);
+  const Eigen::MatrixXd transformed_rhs=change.transpose()*rhs;
+  const Eigen::MatrixXd recovered=change*transformed_inverse.solve(transformed_rhs);
+  require((metric*tangent-rhs).norm()<2e-10*std::max(1.0,rhs.norm()) &&
+      (tangent-recovered).norm()<2e-10*std::max(1.0,tangent.norm()),
+      "selected CI Riesz preconditioner is not invariant under basis congruence");
   const Eigen::VectorXd diagonal = metric.diagonal();
   Eigen::MatrixXd solution(rhs.rows(), rhs.cols());
   for (int col = 0; col < rhs.cols(); ++col) {

@@ -329,6 +329,9 @@ void check_rumer_case(int n) {
           "complete spin strings failed to select direct CI");
   const Eigen::MatrixXd vectors = test_vectors(expected, 3);
   const auto actual = action.apply(vectors);
+  require((action.apply_hamiltonian(vectors)-actual.hamiltonian).norm()<
+      2e-11*std::max(1.0,actual.hamiltonian.norm()),
+      "Hamiltonian-only projection differs from the combined H/M action");
   // Force one-column panels and eviction/recomputation in both caches.
   // The resource choice must not change the operator or selected subspace.
   check_images(action.apply_streamed(vectors, 512), actual);
@@ -371,6 +374,8 @@ void check_selected_unequal_spin_case() {
   require(action.storage().orthogonal_direct_ci,
           "selected spin strings did not select completed direct CI");
   const Eigen::MatrixXd vectors = test_vectors(n_structures, 4);
+  require((action.apply_hamiltonian(vectors)-action.apply(vectors).hamiltonian).norm()<2e-11,
+      "unequal-spin Hamiltonian-only projection lost selected products");
   check_images(action.apply(vectors), reference_images(
       fixture, terms, product_alpha, product_beta, vectors));
   check_images(action.apply_streamed(vectors, 512), reference_images(

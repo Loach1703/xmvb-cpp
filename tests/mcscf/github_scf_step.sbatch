@@ -30,7 +30,7 @@ baseline=$(realpath "$2")
 current=$(realpath "$3")
 artifact="$source_dir/github-scf-step-$SLURM_JOB_ID"
 mode=${4:-paired}
-[[ $mode == paired || $mode == native || $mode == phases || $mode == vtune ]] || exit 64
+[[ $mode == paired || $mode == native || $mode == phases || $mode == vtune || $mode == converge ]] || exit 64
 mkdir -p "$artifact"
 export LC_ALL=C OMP_NUM_THREADS=8 OMP_PLACES=cores OMP_PROC_BIND=close
 export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
@@ -59,6 +59,8 @@ for variant in "${variants[@]}"; do
   cd "$run_dir"
   sha256sum input.xmi cc-pvdz.gbs xmvb-cpp.exe > hashes.sha256
   launcher=()
+  iterations=(--max-iterations 1)
+  [[ $mode == converge ]] && iterations=()
   if [[ $mode == phases || $mode == vtune ]]; then
    export XMVB_PHASE_TIMING=1 XMVB_NEO_TRACE=scalar
   fi
@@ -74,7 +76,7 @@ for variant in "${variants[@]}"; do
    python3 "$source_dir/tests/mcscf/pin_ci.py" 8 "$artifact/affinity.jsonl" \
    "${launcher[@]}" "$run_dir/xmvb-cpp.exe" input.xmi --optimizer-backend neo --eigensolver davidson \
    --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 \
-   --energy-tolerance 1e-7 --max-iterations 1 --neo-trace neo.tsv > output.out 2> run.err
+   --energy-tolerance 1e-7 "${iterations[@]}" --neo-trace neo.tsv > output.out 2> run.err
   status=$?
   set -e
   printf '%s\n' "$status" > run.exit
