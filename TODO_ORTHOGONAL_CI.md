@@ -5,6 +5,27 @@ while evaluating the complete forward/backward chain by Slater--Condon spin
 operations and bounded workspaces. No selected-space closure, amplitude cutoff,
 or memory-based admission to a different physical representation is allowed.
 
+## Historical performance gate
+
+Every optimization report must compare the current run with both an excellent
+saved historical baseline and the immediate parent. Do not replace the former
+by a slower recent revision. Never rerun historical executables.
+
+For 240 FULL, use saved Hanhai22 job1259844 as the equal-energy reference:
+32 cores,4 accepted steps,30 orbital HVP,3.397351 s SCF,4.968763 s application,
+1641.074 MiB process RSS. Its input and basis hashes equal current run1262006.
+The historical32-core1.478615 s SCF/2.398208 s application result in
+`results/history/neo_optimized_20261011.csv` remains an additional speed target;
+its final energy differs from the current endpoint by about2e-7 Eh and its
+optimizer trajectory differs. State that difference rather than discarding it
+or calling it an equal-energy measurement.
+
+Compare equal thread counts, physical spaces, tolerances and timing scopes;
+record cluster/node/CPU and hashes. Report energy, steps, HVP, native SCF and
+end-to-end time, peak RSS and phase costs. An8-core regression probe cannot
+establish improvement over a32-core historical baseline. Nested phase totals
+are not additive; sampling profiles are not native timing results.
+
 ## Current audit
 
 - Data formats are specified in `src/mcscf/ci/README.md`: shared CSR incidence

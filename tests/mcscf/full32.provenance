@@ -1,0 +1,14 @@
+commit 5618682f08e03f387821eb61f4d27b64714a8273
+Author:     Tao Xia <147692407+Tao-Xia@users.noreply.github.com>
+AuthorDate: Fri Oct 16 10:11:52 2026 +0800
+Commit:     Tao Xia <147692407+Tao-Xia@users.noreply.github.com>
+CommitDate: Fri Oct 16 10:11:52 2026 +0800
+
+    Keep restricted CI transport solves in the selected structure space
+
+    Delete completed-sector principal-inverse preconditioning and its full-product metadata/workspaces. Seed finite transport with its known coefficient representative while retaining the original selected normal equation and true-residual tolerance. Replace completion tests with independent selected-Gram oracles, and record Hanhai22 correctness, action counts, native timing and RSS including remaining regressions.
+
+    Co-authored-by: Codex <noreply@openai.com>
+ M .gitignore
+ M src/vbscf/integrals/ao/one_electron/ri_operator.cpp
+ M tests/vbscf/unit/test_ri_ao_h1e_hvp.cpp
