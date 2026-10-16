@@ -19,7 +19,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/local_tile_accumulator_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_response_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_tile_stream_internal.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "core/pair_index.hpp"
 
 namespace {
@@ -86,13 +86,13 @@ int main() {
       }
     }
 
-    xmvb::vb::ActiveSpaceTwoElectronResult direct_ri;
+    xmvb::integrals::ActiveSpaceTwoElectronResult direct_ri;
     direct_ri.representation =
-        xmvb::vb::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
+        xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
     direct_ri.n_auxiliary_functions = n_auxiliary;
     direct_ri.ri_active_pair_factors.resize(
         n_auxiliary,
-        xmvb::vb::packed_active_pair_count(n_active));
+        xmvb::integrals::packed_active_pair_count(n_active));
     for (int pair = 0; pair < direct_ri.ri_active_pair_factors.cols(); ++pair) {
       for (int auxiliary = 0; auxiliary < n_auxiliary; ++auxiliary) {
         direct_ri.ri_active_pair_factors(auxiliary, pair) =
@@ -101,10 +101,10 @@ int main() {
       }
     }
 
-    xmvb::vb::ActiveSpaceTwoElectronResult packed_ri = direct_ri;
+    xmvb::integrals::ActiveSpaceTwoElectronResult packed_ri = direct_ri;
     packed_ri.packed_active_two_electron_integrals =
-        xmvb::vb::reconstruct_packed_active_two_electron_integrals(
-            xmvb::vb::make_active_space_two_electron_view(direct_ri),
+        xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
+            xmvb::integrals::make_active_space_two_electron_view(direct_ri),
             n_active);
 
     xmvb::vb::DeterminantHamiltonianResolver hamiltonian_resolver;
@@ -205,7 +205,7 @@ int main() {
     auto displaced_data = [&](double scale) {
       const auto displaced_overlap = overlap_resolver.resolve_matrix(
           overlap_block + scale * delta_overlap);
-      xmvb::vb::ActiveSpaceTwoElectronResult displaced_ri = direct_ri;
+      xmvb::integrals::ActiveSpaceTwoElectronResult displaced_ri = direct_ri;
       displaced_ri.ri_active_pair_factors =
           direct_ri.ri_active_pair_factors + scale * delta_factors;
       Eigen::MatrixXd inverse_gradient;
@@ -358,11 +358,11 @@ int main() {
     const auto& tile_projection = opposite_tile.pair(0, 0)
                                       .delta_first_order_cofactor_projection;
 
-    xmvb::vb::ActiveSpaceTwoElectronResult exact_integrals = packed_ri;
+    xmvb::integrals::ActiveSpaceTwoElectronResult exact_integrals = packed_ri;
     exact_integrals.representation =
-        xmvb::vb::ActiveSpaceTwoElectronRepresentation::PackedExact;
+        xmvb::integrals::ActiveSpaceTwoElectronRepresentation::PackedExact;
     const int n_packed_pairs =
-        xmvb::vb::packed_active_pair_count(n_active);
+        xmvb::integrals::packed_active_pair_count(n_active);
     std::vector<double> exact_two_electron_direction(
         static_cast<std::size_t>(n_packed_pairs) *
             (n_packed_pairs + 1) / 2,
@@ -654,7 +654,7 @@ int main() {
       packed_total[index] +=
           packed_opposite.packed_active_two_electron_gradient[index];
     }
-    const int n_pairs = xmvb::vb::packed_active_pair_count(n_active);
+    const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active);
     Eigen::MatrixXd pair_adjoint(n_pairs, n_pairs);
     for (int row = 0; row < n_pairs; ++row) {
       for (int column = 0; column < n_pairs; ++column) {

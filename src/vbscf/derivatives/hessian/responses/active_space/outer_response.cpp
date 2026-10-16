@@ -12,10 +12,10 @@
 #include <Eigen/SparseCore>
 
 #include "vbscf/derivatives/hessian/responses/opposite_spin/backward.hpp"
-#include "vbscf/integrals/active/matrix/backpropagator.hpp"
-#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
+#include "integrals/active/matrix_adjoint.hpp"
+#include "integrals/response/adjoint.hpp"
 #include "vbscf/integrals/active/two_electron/response/backpropagator.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
 
@@ -82,7 +82,7 @@ ActiveSpaceGradientDirection make_zero_active_space_gradient_direction(
       n_active_orbitals * n_active_orbitals,
       0.0);
   direction.packed_active_two_electron_gradient.assign(
-      packed_active_two_electron_integral_count(n_active_orbitals),
+      xmvb::integrals::packed_active_two_electron_integral_count(n_active_orbitals),
       0.0);
   return direction;
 }
@@ -378,9 +378,9 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
     const AcceptedPointContext& accepted_point_context,
     const ActiveSpaceGradientDirection& active_space_gradient_direction,
     const AcceptedOrbitalPreparationCache& orbital_preparation_cache,
-    const ExactPackedActiveTwoElectronAdjointCache* exact_two_electron_cache,
-    const RiActiveTwoElectronResponseCache* ri_two_electron_cache,
-    const RiAoFactorization* ri_factorization,
+    const xmvb::integrals::ExactPackedActiveTwoElectronAdjointCache* exact_two_electron_cache,
+    const xmvb::integrals::RiActiveTwoElectronResponseCache* ri_two_electron_cache,
+    const xmvb::integrals::RiAoFactorization* ri_factorization,
     std::vector<double>* symmetric_active_overlap_gradient_workspace,
     std::vector<double>* symmetric_active_one_electron_gradient_workspace) {
   const int n_inactive_doubly_occupied_orbitals =
@@ -419,7 +419,7 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
       n_active_orbitals,
       &symmetric_active_one_electron_gradient);
 
-  ActiveSpaceMatrixBackpropagator matrix_backpropagator;
+  xmvb::integrals::ActiveSpaceMatrixBackpropagator matrix_backpropagator;
   const auto active_space_matrix_backpropagation_result =
       matrix_backpropagator.backpropagate(
           symmetric_active_overlap_gradient,
@@ -444,13 +444,13 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
   if (exact_two_electron_cache != nullptr &&
       exact_two_electron_cache->n_basis_functions > 0) {
     active_two_electron_auxiliary_gradient =
-        backpropagate_exact_packed_active_two_electron_gradient(
+        xmvb::integrals::backpropagate_exact_packed_active_two_electron_gradient(
             active_space_gradient_direction
                 .packed_active_two_electron_gradient,
             *exact_two_electron_cache);
   } else if (ri_two_electron_cache != nullptr) {
     active_two_electron_auxiliary_gradient =
-        backpropagate_ri_packed_active_two_electron_gradient(
+        xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
             active_space_gradient_direction
                 .packed_active_two_electron_gradient,
             *ri_two_electron_cache);
@@ -462,7 +462,7 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
   std::vector<double> total_inactive_density_gradient;
   if (exact_two_electron_cache != nullptr &&
       exact_two_electron_cache->exchange_integrals.size() != 0) {
-    total_inactive_density_gradient = backpropagate_exact_active_h1e_gradient(
+    total_inactive_density_gradient = xmvb::integrals::backpropagate_exact_active_h1e_gradient(
         symmetric_active_one_electron_gradient, *exact_two_electron_cache);
   } else if (ri_factorization != nullptr) {
     total_inactive_density_gradient =
@@ -507,7 +507,7 @@ bool has_active_matrix_gradient(
   return context.active_orbital_overlap_gradient.size() == active_matrix_size &&
       context.active_one_electron_gradient.size() == active_matrix_size &&
       context.packed_active_two_electron_gradient.size() ==
-      packed_active_two_electron_integral_count(n_active_orbitals);
+      xmvb::integrals::packed_active_two_electron_integral_count(n_active_orbitals);
 }
 
 }  // namespace xmvb::vb

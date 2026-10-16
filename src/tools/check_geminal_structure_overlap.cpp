@@ -14,7 +14,7 @@
 #include <Eigen/LU>
 
 #include "input/loading/loader.hpp"
-#include "vbscf/core/storage/eigen.hpp"
+#include "linalg/storage.hpp"
 #include "vbscf/determinants/algebra/overlap.hpp"
 #include "vbscf/structures/expansion/expander.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
@@ -834,7 +834,7 @@ int main(int argc, char** argv) {
     const auto load_result = xmvb::vb::load_vbscf_input_with_timings(options.input_path);
     const auto& raw_structure_data = load_result.raw_structure_data;
     const auto active_overlap_matrix =
-        xmvb::vb::flatten_matrix_column_major(
+        xmvb::linalg::flatten_matrix_column_major(
             load_result.input.orbital_preparation_input.ao_overlap_matrix);
     const int n_active_orbitals =
         load_result.input.orbital_preparation_input.n_active_orbitals;

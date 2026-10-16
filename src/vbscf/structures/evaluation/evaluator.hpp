@@ -5,7 +5,7 @@
 #include "vbscf/integrals/active/preparation/space.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "vbscf/structures/expansion/types.hpp"
-#include "vbscf/integrals/active/one_electron/builder.hpp"
+#include "integrals/active/one_electron.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
 #include "vbscf/integrals/active/two_electron/construction/builder.hpp"
 #include "vbscf/integrals/ao/one_electron/builder.hpp"
@@ -35,7 +35,7 @@ public:
   StructureMatrixEvaluator(
       ActiveSpaceOrbitalPreparer orbital_preparer,
       AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
-      ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
+      xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
       ActiveSpaceTwoElectronBuilder active_space_two_electron_builder,
       FullDeterminantStructureHamiltonianOverlapBuilder structure_builder);
 
@@ -61,7 +61,7 @@ public:
 private:
   ActiveSpaceOrbitalPreparer orbital_preparer_;
   AoEffectiveOneElectronBuilder ao_effective_one_electron_builder_;
-  ActiveSpaceOneElectronBuilder active_space_one_electron_builder_;
+  xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder_;
   ActiveSpaceTwoElectronBuilder active_space_two_electron_builder_;
   FullDeterminantStructureHamiltonianOverlapBuilder structure_builder_;
 };

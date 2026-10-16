@@ -153,7 +153,7 @@ void add_tiled_opposite_spin_action(
     const std::vector<std::vector<int>>& beta_strings,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     int n_active,
     int n_unique_alpha,
     int n_unique_beta,
@@ -161,7 +161,7 @@ void add_tiled_opposite_spin_action(
     Eigen::MatrixXd* spin_hamiltonians) {
   const int block_width =
       static_cast<int>(spin_vectors.cols()) / n_unique_beta;
-  const int n_pairs = packed_active_pair_count(n_active);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active);
   const int alpha_electrons = alpha_strings.empty()
       ? 0
       : static_cast<int>(alpha_strings.front().size());
@@ -230,7 +230,7 @@ void add_tiled_opposite_spin_action(
           const Eigen::MatrixXd beta_raw =
               build_pair_channel_block(beta_tile, n_pairs);
           const Eigen::MatrixXd beta_projected =
-              apply_active_space_two_electron_kernel_block(
+              xmvb::integrals::apply_active_space_two_electron_kernel_block(
                   two_electron, n_active, beta_raw.transpose()).transpose();
 
           for (int vector = 0; vector < block_width; ++vector) {
@@ -261,7 +261,7 @@ void add_tiled_opposite_spin_action(
 double contract_opposite_spin(
     const OppositeSpinPackedPairProjection& alpha,
     const OppositeSpinPackedPairProjection& beta,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     int n_active_orbitals,
     int n_packed_pairs) {
   if (alpha.packed_pair_indices.empty() ||
@@ -298,7 +298,7 @@ double contract_opposite_spin(
            ++beta_entry) {
         value +=
             alpha.packed_pair_values[alpha_entry] *
-            lookup_active_space_two_electron_kernel_value(
+            xmvb::integrals::lookup_active_space_two_electron_kernel_value(
                 two_electron_view,
                 alpha.packed_pair_indices[alpha_entry],
                 beta.packed_pair_indices[beta_entry],
@@ -341,7 +341,7 @@ DeterminantPairScalars evaluate_spin_product_pair(
     mcscf::ProductIndex left_spin_product,
     mcscf::ProductIndex right_spin_product,
     int n_unique_beta,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     int n_active_orbitals,
     int n_packed_pairs) {
   const int alpha_left = left_spin_product / n_unique_beta;
@@ -392,7 +392,7 @@ struct StructureAction::OrthogonalDirectCiData {
       const std::vector<std::vector<int>>& beta_determinants,
       const std::vector<double>& active_overlap,
       const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-      const ActiveSpaceTwoElectronResult& active_two_electron,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron,
       int n_active_orbitals)
       : integrals(orthogonalize_active_integrals(
             active_overlap,
@@ -440,14 +440,14 @@ struct StructureAction::TiledPairData {
   std::vector<std::vector<int>> beta_strings;
   std::vector<double> active_overlap;
   Eigen::MatrixXd one_electron;
-  ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   int n_active = 0;
 
   TiledPairData(
       const SameSpinPairCacheContext& cache,
       const std::vector<double>& overlap,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-      const ActiveSpaceTwoElectronResult& active_two_electron,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron,
       int n_active_orbitals)
       : alpha_provider(cache.alpha_pair_provider),
         beta_provider(cache.beta_pair_provider),
@@ -493,7 +493,7 @@ StructureAction::StructureAction(
     const SameSpinPairCacheContext& same_spin_pair_cache,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_active_orbitals,
     const StructureDiagonal* precomputed_preconditioner,
     StructureActionMode mode)
@@ -545,7 +545,7 @@ StructureAction::StructureAction(
         "topology-only structure action requires a diagonal preconditioner");
   }
 
-  const int n_packed_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_packed_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   const auto validate_pair_cache = [n_packed_pairs](
       const std::vector<SpinDeterminantPairEvaluation>& pair_cache,
       int n_unique) {
@@ -736,8 +736,8 @@ StructureAction::StructureAction(
   preconditioner_diagonal_.hamiltonian =
       Eigen::VectorXd::Zero(n_structures_);
   preconditioner_diagonal_.overlap = Eigen::VectorXd::Zero(n_structures_);
-  const ActiveSpaceTwoElectronView two_electron_view =
-      make_active_space_two_electron_view(active_space_two_electron_result);
+  const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
+      xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result);
   const int n_threads = std::max(
       1,
       std::min(xmvb::effective_openmp_thread_count(), n_structures_));
@@ -971,7 +971,7 @@ StructureActionResult StructureAction::apply_streamed(
     throw std::logic_error("tiled structure action has no pair providers");
   }
   const int block_width = static_cast<int>(vectors.cols());
-  const int n_pairs = packed_active_pair_count(tiled_pairs_->n_active);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(tiled_pairs_->n_active);
   const int alpha_electrons = tiled_pairs_->alpha_strings.empty()
       ? 0
       : static_cast<int>(tiled_pairs_->alpha_strings.front().size());
@@ -1056,7 +1056,7 @@ StructureActionResult StructureAction::apply_streamed(
           const Eigen::MatrixXd beta_raw =
               build_pair_channel_block(beta_pair, n_pairs);
           const Eigen::MatrixXd beta_projected =
-              apply_active_space_two_electron_kernel_block(
+              xmvb::integrals::apply_active_space_two_electron_kernel_block(
                   tiled_pairs_->two_electron,
                   tiled_pairs_->n_active,
                   beta_raw.transpose()).transpose();
@@ -1386,7 +1386,7 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
 
   const int n_orbitals =
       static_cast<int>(direct_ci_->integrals.one_electron.rows());
-  const int n_pairs = packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   StructureAdjointState result;
   result.structure_coefficients = structure_coefficients;
   result.weights = state_weights;
@@ -1507,7 +1507,7 @@ StructureAction::active_integral_adjoint_direction(
 
   const int n_orbitals =
       static_cast<int>(direct_ci_->integrals.one_electron.rows());
-  const int n_pairs = packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   OrthogonalActiveIntegrals computed_direction;
   const auto* prepared=include_integral_response && direct_ci_direction ?
       direct_ci_direction->integrals.get():nullptr;

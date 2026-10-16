@@ -154,7 +154,7 @@ struct Fixture {
   Strings beta;
   std::vector<double> overlap;
   Eigen::MatrixXd one_electron;
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
 };
 
 Fixture make_fixture(int n, int n_alpha, int n_beta) {
@@ -177,14 +177,14 @@ Fixture make_fixture(int n, int n_alpha, int n_beta) {
       fixture.one_electron(j, i) = value;
     }
   }
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n);
   Eigen::MatrixXd factor(4, n_pairs);
   for (int j = 0; j < n_pairs; ++j)
     for (int i = 0; i < factor.rows(); ++i)
       factor(i, j) = 0.018 * std::cos(0.13 * (i + 2) * (j + 1));
   const Eigen::MatrixXd kernel = factor.transpose() * factor;
   auto& packed = fixture.two_electron.packed_active_two_electron_integrals;
-  packed.resize(xmvb::vb::packed_active_two_electron_integral_count(n));
+  packed.resize(xmvb::integrals::packed_active_two_electron_integral_count(n));
   for (int j = 0; j < n_pairs; ++j)
     for (int i = 0; i <= j; ++i)
       packed[xmvb::core::PairIndex::packed_pair_of_pairs_index(i, j)] =
@@ -2174,7 +2174,7 @@ void benchmark_source_state(int n, bool reference, bool accepted_only = false, i
       ds(i,j) = ds(j,i) = 0.0004*std::cos(0.13*(i+2)*(j+1));
       dh(i,j) = dh(j,i) = 0.0007*std::sin(0.17*(i+1)*(j+3));
     }
-  const int pairs = xmvb::vb::packed_active_pair_count(n);
+  const int pairs = xmvb::integrals::packed_active_pair_count(n);
   std::vector<double> dg(fixture.two_electron.packed_active_two_electron_integrals.size());
   for (int i = 0; i < static_cast<int>(dg.size()); ++i) dg[i] = 0.00001*std::cos(0.19*(i+1));
   Eigen::MatrixXd dg_full(pairs,pairs);

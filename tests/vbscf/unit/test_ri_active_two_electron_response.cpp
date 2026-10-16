@@ -6,8 +6,8 @@
 #include <Eigen/Core>
 
 #include "core/pair_index.hpp"
-#include "vbscf/integrals/active/two_electron/response/ri.hpp"
-#include "vbscf/integrals/active/two_electron/transformation/packed_pair_map.hpp"
+#include "integrals/response/ri.hpp"
+#include "integrals/active/pair_map.hpp"
 
 namespace {
 
@@ -60,12 +60,12 @@ Eigen::MatrixXd build_pair_map(
   return pair_map;
 }
 
-xmvb::vb::ActiveSpaceTwoElectronResult make_result(
+xmvb::integrals::ActiveSpaceTwoElectronResult make_result(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
-    const xmvb::vb::RiAoFactorization& factorization) {
-  xmvb::vb::ActiveSpaceTwoElectronResult result;
+    const xmvb::integrals::RiAoFactorization& factorization) {
+  xmvb::integrals::ActiveSpaceTwoElectronResult result;
   result.representation =
-      xmvb::vb::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
   result.n_auxiliary_functions = factorization.n_auxiliary_functions;
   result.dense_active_coefficients = coefficients;
   result.ri_active_pair_factors =
@@ -107,7 +107,7 @@ void check_direct_factor_direction() {
   constexpr int n_auxiliary = 7;
   constexpr int n_ao_pairs = n_bf * (n_bf + 1) / 2;
 
-  xmvb::vb::RiAoFactorization factorization;
+  xmvb::integrals::RiAoFactorization factorization;
   factorization.n_basis_functions = n_bf;
   factorization.n_auxiliary_functions = n_auxiliary;
   factorization.n_packed_ao_pairs = n_ao_pairs;
@@ -131,13 +131,13 @@ void check_direct_factor_direction() {
 
   const auto accepted_result = make_result(coefficients, factorization);
   const auto cache =
-      xmvb::vb::build_ri_active_two_electron_response_cache(
+      xmvb::integrals::build_ri_active_two_electron_response_cache(
           factorization, accepted_result, n_active);
   const Eigen::MatrixXd actual =
-      xmvb::vb::compute_ri_active_pair_factor_directional_derivative(
+      xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
           cache, direction);
-  xmvb::vb::PackedOrbitalPairMapMatrix pair_direction;
-  xmvb::vb::build_packed_orbital_pair_map_directional_derivative(
+  xmvb::integrals::PackedOrbitalPairMapMatrix pair_direction;
+  xmvb::integrals::build_packed_orbital_pair_map_directional_derivative(
       coefficients, direction, &pair_direction);
   const Eigen::MatrixXd expected =
       factorization.metric_whitened_ao_pair_factors * pair_direction;
@@ -147,14 +147,14 @@ void check_direct_factor_direction() {
   const Eigen::MatrixXd second_direction =
       -0.37 * direction + 0.11 * coefficients;
   const auto batch =
-      xmvb::vb::compute_ri_active_pair_factor_directional_derivative_batch(
+      xmvb::integrals::compute_ri_active_pair_factor_directional_derivative_batch(
           cache, {direction, second_direction});
   require(batch.size() == 2 && is_close(batch[0], actual, 2.0e-13),
           "direct RI active-pair batch changed its first direction");
   require(
       is_close(
           batch[1],
-          xmvb::vb::compute_ri_active_pair_factor_directional_derivative(
+          xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
               cache, second_direction),
           2.0e-13),
       "direct RI active-pair batch changed its second direction");
@@ -169,7 +169,7 @@ int main() {
   constexpr int n_auxiliary = 4;
   constexpr int n_ao_pairs = n_bf * (n_bf + 1) / 2;
 
-  xmvb::vb::RiAoFactorization factorization;
+  xmvb::integrals::RiAoFactorization factorization;
   factorization.n_basis_functions = n_bf;
   factorization.n_auxiliary_functions = n_auxiliary;
   factorization.n_packed_ao_pairs = n_ao_pairs;
@@ -193,8 +193,8 @@ int main() {
       0.7, -0.1,
       0.3, 0.6;
 
-  xmvb::vb::PackedOrbitalPairMapMatrix common_pair_map;
-  xmvb::vb::build_packed_orbital_pair_map(
+  xmvb::integrals::PackedOrbitalPairMapMatrix common_pair_map;
+  xmvb::integrals::build_packed_orbital_pair_map(
       coefficients,
       &common_pair_map);
   require(
@@ -203,25 +203,25 @@ int main() {
 
   const auto accepted_result = make_result(coefficients, factorization);
   const auto cache =
-      xmvb::vb::build_ri_active_two_electron_response_cache(
+      xmvb::integrals::build_ri_active_two_electron_response_cache(
           factorization,
           accepted_result,
           n_active);
   const Eigen::MatrixXd factor_direction =
-      xmvb::vb::compute_ri_active_pair_factor_directional_derivative(
+      xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
           cache,
           direction);
   const Eigen::MatrixXd second_direction =
       0.43 * direction - 0.08 * coefficients;
   const auto factor_direction_batch =
-      xmvb::vb::compute_ri_active_pair_factor_directional_derivative_batch(
+      xmvb::integrals::compute_ri_active_pair_factor_directional_derivative_batch(
           cache, {direction, second_direction});
   require(
       factor_direction_batch.size() == 2 &&
           is_close(factor_direction_batch[0], factor_direction, 1.0e-13) &&
           is_close(
               factor_direction_batch[1],
-              xmvb::vb::compute_ri_active_pair_factor_directional_derivative(
+              xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
                   cache, second_direction),
               1.0e-13),
       "packed RI active-pair factor block disagrees with scalar actions");
@@ -240,17 +240,14 @@ int main() {
       "RI active-pair factor direction failed finite difference");
 
   const std::vector<double> packed_integral_direction =
-      xmvb::vb::
-          compute_ri_packed_active_two_electron_integral_directional_derivative(
+      xmvb::integrals::compute_ri_packed_active_two_electron_integral_directional_derivative(
               cache,
               factor_direction);
   const Eigen::MatrixXd packed_integral_direction_batch =
-      xmvb::vb::
-          compute_ri_packed_active_two_electron_integral_directional_derivative_batch(
+      xmvb::integrals::compute_ri_packed_active_two_electron_integral_directional_derivative_batch(
               cache, factor_direction_batch);
   const std::vector<double> second_packed_integral_direction =
-      xmvb::vb::
-          compute_ri_packed_active_two_electron_integral_directional_derivative(
+      xmvb::integrals::compute_ri_packed_active_two_electron_integral_directional_derivative(
               cache, factor_direction_batch[1]);
   require(
       packed_integral_direction_batch.rows() ==
@@ -297,7 +294,7 @@ int main() {
         0.03 * static_cast<double>(index * index);
   }
   const Eigen::MatrixXd pullback =
-      xmvb::vb::backpropagate_ri_packed_active_two_electron_gradient(
+      xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
           packed_adjoint,
           cache);
   const double directional_duality =
@@ -315,7 +312,7 @@ int main() {
     std::vector<double> coordinate_adjoint(packed_adjoint.size(), 0.0);
     coordinate_adjoint[packed_index] = 1.0;
     const Eigen::MatrixXd coordinate_pullback =
-        xmvb::vb::backpropagate_ri_packed_active_two_electron_gradient(
+        xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
             coordinate_adjoint,
             cache);
     require(
@@ -327,26 +324,25 @@ int main() {
   }
 
   const auto plus_cache =
-      xmvb::vb::build_ri_active_two_electron_response_cache(
+      xmvb::integrals::build_ri_active_two_electron_response_cache(
           factorization,
           plus_result,
           n_active);
   const auto minus_cache =
-      xmvb::vb::build_ri_active_two_electron_response_cache(
+      xmvb::integrals::build_ri_active_two_electron_response_cache(
           factorization,
           minus_result,
           n_active);
   const Eigen::MatrixXd finite_difference_pullback_direction =
-      (xmvb::vb::backpropagate_ri_packed_active_two_electron_gradient(
+      (xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
            packed_adjoint,
            plus_cache) -
-       xmvb::vb::backpropagate_ri_packed_active_two_electron_gradient(
+       xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
            packed_adjoint,
            minus_cache)) /
       (2.0 * step);
   const Eigen::MatrixXd fixed_adjoint_direction =
-      xmvb::vb::
-          apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+      xmvb::integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
               packed_adjoint,
               cache,
               direction,
@@ -359,8 +355,7 @@ int main() {
       "RI fixed-adjoint orbital HVP failed finite difference");
 
   const Eigen::MatrixXd internally_built_factor_direction =
-      xmvb::vb::
-          apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+      xmvb::integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
               packed_adjoint,
               cache,
               direction);
@@ -376,21 +371,21 @@ int main() {
   tiled_cache.accepted_one_index_factors.resize(0, 0);
   tiled_cache.auxiliary_tile_size = 3;
   require(is_close(
-      xmvb::vb::compute_ri_active_pair_factor_directional_derivative(
+      xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
           tiled_cache, direction), factor_direction, 1.0e-13),
       "streamed RI factor direction changed at an auxiliary tile boundary");
   const auto tiled_batch =
-      xmvb::vb::compute_ri_active_pair_factor_directional_derivative_batch(
+      xmvb::integrals::compute_ri_active_pair_factor_directional_derivative_batch(
           tiled_cache, {direction, second_direction});
   require(is_close(tiled_batch[0], factor_direction_batch[0], 1.0e-13) &&
           is_close(tiled_batch[1], factor_direction_batch[1], 1.0e-13),
           "streamed RI direction block changed the operator");
   require(is_close(
-      xmvb::vb::backpropagate_ri_packed_active_two_electron_gradient(
+      xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
           packed_adjoint, tiled_cache), pullback, 1.0e-13),
       "streamed RI gradient changed the operator");
   require(is_close(
-      xmvb::vb::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+      xmvb::integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
           packed_adjoint, tiled_cache, direction, &factor_direction),
       fixed_adjoint_direction, 1.0e-13),
       "streamed RI HVP changed the operator");
@@ -398,7 +393,7 @@ int main() {
   auto cached_tile = cache;
   cached_tile.auxiliary_tile_size = 1;
   require(is_close(
-      xmvb::vb::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+      xmvb::integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
           packed_adjoint, cached_tile, direction, &factor_direction),
       fixed_adjoint_direction, 1.0e-13),
       "retained accepted RI factors changed the tiled HVP");

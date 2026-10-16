@@ -12,7 +12,7 @@
 
 #include "linalg/metric_solve.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
 
@@ -50,7 +50,7 @@ struct Fixture {
   std::vector<std::vector<int>> product_alpha, product_beta;
   std::vector<std::vector<xmvb::vb::StructureExpansionTerm>> terms;
   xmvb::vb::SameSpinPairCacheContext topology;
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   Eigen::MatrixXd one_electron;
   std::vector<double> overlap;
 
@@ -78,7 +78,7 @@ struct Fixture {
     topology = xmvb::vb::build_same_spin_pair_topology(
         product_alpha, product_beta, n);
     two_electron.packed_active_two_electron_integrals.assign(
-        xmvb::vb::packed_active_two_electron_integral_count(n), 0.0);
+        xmvb::integrals::packed_active_two_electron_integral_count(n), 0.0);
   }
 
   xmvb::vb::StructureAction action() const {

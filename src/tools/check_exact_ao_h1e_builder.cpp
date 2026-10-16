@@ -9,7 +9,7 @@
 #include <Eigen/Core>
 
 #include "input/loading/loader.hpp"
-#include "vbscf/integrals/active/one_electron/builder.hpp"
+#include "integrals/active/one_electron.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
 #include "vbscf/integrals/ao/one_electron/builder.hpp"
 
@@ -83,7 +83,7 @@ double compute_one_electron_reference_energy(
 
 xmvb::vb::AoEffectiveOneElectronResult build_reference_ao_effective_one_electron(
     const Eigen::Ref<const Matrix>& inactive_density,
-    const xmvb::vb::AoIntegralInput& ao_integral_input) {
+    const xmvb::integrals::AoIntegralInput& ao_integral_input) {
   const int n_basis_functions = ao_integral_input.n_basis_functions;
   if (n_basis_functions <= 0) {
     throw std::invalid_argument("n_basis_functions must be positive");
@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
             orbital_result.inactive_density_matrix,
             input.ao_integral_input);
 
-    xmvb::vb::ActiveSpaceOneElectronBuilder active_h1e_builder;
+    xmvb::integrals::ActiveSpaceOneElectronBuilder active_h1e_builder;
     const auto current_active_h1e_result =
         active_h1e_builder.build(
             current_ao_result.ao_effective_h1e,

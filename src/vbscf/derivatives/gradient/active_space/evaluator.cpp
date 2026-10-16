@@ -525,7 +525,7 @@ ActiveSpaceGradientForwardContext build_active_space_gradient_forward_context(
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors,
     const ActiveSpaceOrbitalPreparer& orbital_preparer,
     const AoEffectiveOneElectronBuilder& ao_effective_one_electron_builder,
-    const ActiveSpaceOneElectronBuilder& active_space_one_electron_builder,
+    const xmvb::integrals::ActiveSpaceOneElectronBuilder& active_space_one_electron_builder,
     const ActiveSpaceTwoElectronBuilder& active_space_two_electron_builder,
     const FullDeterminantStructureHamiltonianOverlapBuilder& structure_builder,
     const xmvb::linalg::GeneralizedEigensolver& generalized_eigensolver) {
@@ -788,7 +788,7 @@ void initialize_active_space_derivatives(
       prepared_active_space.active_space_one_electron_result.h1e_act.size(),
       0.0);
   result->packed_active_two_electron_gradient.assign(
-      packed_active_two_electron_integral_count(
+      xmvb::integrals::packed_active_two_electron_integral_count(
           input.orbital_preparation_input.n_active_orbitals),
       0.0);
 }
@@ -822,7 +822,7 @@ void write_direct_ci_active_gradient(
     const StructureActiveIntegralAdjoint& adjoint,
     int n_active_orbitals,
     ActiveSpaceGradientResult* result) {
-  const int n_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   if (adjoint.overlap.rows() != n_active_orbitals ||
       adjoint.overlap.cols() != n_active_orbitals ||
       adjoint.one_electron.rows() != n_active_orbitals ||
@@ -977,7 +977,7 @@ ActiveSpaceGradientEvaluator::ActiveSpaceGradientEvaluator()
 ActiveSpaceGradientEvaluator::ActiveSpaceGradientEvaluator(
     ActiveSpaceOrbitalPreparer orbital_preparer,
     AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
-    ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
+    xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
     ActiveSpaceTwoElectronBuilder active_space_two_electron_builder,
     FullDeterminantStructureHamiltonianOverlapBuilder structure_builder,
     xmvb::linalg::GeneralizedEigensolver generalized_eigensolver)

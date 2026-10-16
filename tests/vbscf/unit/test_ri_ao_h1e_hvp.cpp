@@ -15,14 +15,14 @@
 #include "parallel/openmp.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
 #include "vbscf/integrals/ao/one_electron/builder.hpp"
-#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
-#include "vbscf/integrals/ao/pairs/two_electron_index.hpp"
+#include "integrals/ao/exact.hpp"
+#include "integrals/ao/ri_operator.hpp"
+#include "integrals/ao/graph.hpp"
 
 namespace {
 
 using Matrix = Eigen::MatrixXd;
-using xmvb::vb::RiAoFactorization;
+using xmvb::integrals::RiAoFactorization;
 
 void require(bool condition, const std::string& message) {
   if (!condition) throw std::runtime_error(message);
@@ -39,8 +39,8 @@ void require_close(
   require(error <= tolerance, message + ": max error = " + std::to_string(error));
 }
 
-RiAoFactorization make_ri_factorization() {
-  RiAoFactorization ri;
+xmvb::integrals::RiAoFactorization make_ri_factorization() {
+  xmvb::integrals::RiAoFactorization ri;
   ri.n_basis_functions = 3;
   ri.n_auxiliary_functions = 2;
   ri.n_packed_ao_pairs = 6;
@@ -51,7 +51,7 @@ RiAoFactorization make_ri_factorization() {
   return ri;
 }
 
-Matrix unpack_factor(const RiAoFactorization& ri, int auxiliary_index) {
+Matrix unpack_factor(const xmvb::integrals::RiAoFactorization& ri, int auxiliary_index) {
   Matrix factor = Matrix::Zero(
       ri.n_basis_functions, ri.n_basis_functions);
   int packed_index = 0;
@@ -68,7 +68,7 @@ Matrix unpack_factor(const RiAoFactorization& ri, int auxiliary_index) {
 
 Matrix reference_ri_action(
     const Eigen::Ref<const Matrix>& input,
-    const RiAoFactorization& ri) {
+    const xmvb::integrals::RiAoFactorization& ri) {
   Matrix result = Matrix::Zero(input.rows(), input.cols());
   for (int auxiliary = 0;
        auxiliary < ri.n_auxiliary_functions;
@@ -88,7 +88,7 @@ Matrix map_square(const std::vector<double>& storage, int n) {
 }
 
 void check_raw_and_fused_operator() {
-  const RiAoFactorization ri = make_ri_factorization();
+  const xmvb::integrals::RiAoFactorization ri = make_ri_factorization();
   Matrix source(3, 3);
   source <<
       0.9, -0.3, 0.2,
@@ -105,7 +105,7 @@ void check_raw_and_fused_operator() {
   const std::vector<double> source_storage(
       source.data(), source.data() + source.size());
   const Matrix raw = map_square(
-      xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+      xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
           source_storage,
           ri,
           3,
@@ -114,10 +114,10 @@ void check_raw_and_fused_operator() {
   require_close(raw, reference_source, 2.0e-13,
                 "raw RI operator is not the complete physical matrix");
 
-  xmvb::vb::AoEffectiveOneElectronRiFusedWorkspace workspace;
+  xmvb::integrals::AoEffectiveOneElectronRiFusedWorkspace workspace;
   Matrix forward;
   Matrix transpose;
-  xmvb::vb::apply_ao_effective_one_electron_ri_operator_fused(
+  xmvb::integrals::apply_ao_effective_one_electron_ri_operator_fused(
       source, adjoint, ri, &workspace, &forward, &transpose);
   require_close(forward, reference_source, 2.0e-13,
                 "fused RI forward action mismatch");
@@ -134,16 +134,16 @@ void check_raw_and_fused_operator() {
 
   const Matrix second_source = -0.4 * source + 0.2 * adjoint;
   const Matrix second_adjoint = source - 0.7 * adjoint;
-  xmvb::vb::apply_ao_effective_one_electron_ri_operator_fused(
+  xmvb::integrals::apply_ao_effective_one_electron_ri_operator_fused(
       second_source, second_adjoint, ri, &workspace, &forward, &transpose);
   require_close(forward, reference_ri_action(second_source, ri), 2.0e-13,
                 "reused fused RI workspace retained forward data");
   require_close(transpose, reference_ri_action(second_adjoint, ri), 2.0e-13,
                 "reused fused RI workspace retained adjoint data");
 
-  xmvb::vb::AoEffectiveOneElectronRiStrategy strategy =
-      xmvb::vb::AoEffectiveOneElectronRiStrategy::Uncalibrated;
-  xmvb::vb::apply_ao_effective_one_electron_ri_operator_adaptive(
+  xmvb::integrals::AoEffectiveOneElectronRiStrategy strategy =
+      xmvb::integrals::AoEffectiveOneElectronRiStrategy::Uncalibrated;
+  xmvb::integrals::apply_ao_effective_one_electron_ri_operator_adaptive(
       source,
       adjoint,
       ri,
@@ -152,7 +152,7 @@ void check_raw_and_fused_operator() {
       &forward,
       &transpose);
   require(
-      strategy != xmvb::vb::AoEffectiveOneElectronRiStrategy::Uncalibrated,
+      strategy != xmvb::integrals::AoEffectiveOneElectronRiStrategy::Uncalibrated,
       "adaptive RI operator did not retain a calibrated strategy");
   require_close(forward, reference_source, 3.0e-13,
                 "adaptive RI forward action mismatch");
@@ -161,7 +161,7 @@ void check_raw_and_fused_operator() {
 }
 
 void check_ri_builder_and_directional_action() {
-  const RiAoFactorization ri = make_ri_factorization();
+  const xmvb::integrals::RiAoFactorization ri = make_ri_factorization();
   Matrix density(3, 3);
   density <<
       0.8, 0.2, -0.1,
@@ -200,7 +200,7 @@ void check_ri_builder_and_directional_action() {
 /** @brief Checks signed exchange panel ownership against explicit L X L. */
 void check_signed_factor_panels(int n_bf = 13, int n_aux = 7,
                                int n_positive = 3, int n_negative = 2) {
-  RiAoFactorization ri;
+  xmvb::integrals::RiAoFactorization ri;
   ri.n_basis_functions = n_bf;
   ri.n_auxiliary_functions = n_aux;
   ri.n_packed_ao_pairs = n_bf * (n_bf + 1) / 2;
@@ -220,7 +220,7 @@ void check_signed_factor_panels(int n_bf = 13, int n_aux = 7,
                               std::pair{0, n_negative},
                               std::pair{n_positive, n_negative},
                               std::pair{0, 0}}) {
-      xmvb::vb::AoEffectiveOneElectronRiLowRankFactors factors;
+      xmvb::integrals::AoEffectiveOneElectronRiLowRankFactors factors;
       factors.n_positive_components = counts.first;
       factors.n_negative_components = counts.second;
       factors.scaled_factor_matrix.resize(n_bf, counts.first + counts.second);
@@ -236,7 +236,7 @@ void check_signed_factor_panels(int n_bf = 13, int n_aux = 7,
       }
       const Matrix reference = reference_ri_action(density, ri);
       require_close(map_square(
-          xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+          xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
               factors, ri, n_bf), n_bf),
           reference, 2.0e-12 * std::max(1.0, reference.cwiseAbs().maxCoeff()),
           "signed RI panels changed a physical matrix element");
@@ -248,7 +248,7 @@ void check_signed_factor_panels(int n_bf = 13, int n_aux = 7,
 }
 
 void check_ri_backpropagation_adjoint_identity() {
-  const RiAoFactorization ri = make_ri_factorization();
+  const xmvb::integrals::RiAoFactorization ri = make_ri_factorization();
   Matrix direction(3, 3);
   direction <<
       0.4, -0.2, 0.5,
@@ -273,11 +273,11 @@ void check_ri_backpropagation_adjoint_identity() {
 }
 
 void check_exact_builder_triangular_regression() {
-  xmvb::vb::AoIntegralInput ao;
+  xmvb::integrals::AoIntegralInput ao;
   ao.n_basis_functions = 2;
   ao.ao_core_hamiltonian_matrix.resize(2, 2);
   ao.ao_core_hamiltonian_matrix << -1.0, 0.15, 0.15, -0.6;
-  ao.pair_graph = xmvb::vb::build_ao_pair_graph(
+  ao.pair_graph = xmvb::integrals::build_ao_pair_graph(
       {0, 0, 0, 1, 1, 2},
       {0, 1, 2, 1, 2, 2},
       {0.7, -0.2, 0.1, 0.5, 0.3, 0.9},
@@ -286,7 +286,7 @@ void check_exact_builder_triangular_regression() {
   density << 0.8, -0.3, -0.3, 0.4;
 
   const std::vector<double> raw =
-      xmvb::vb::apply_ao_h1e(density.data(), ao, 1);
+      xmvb::integrals::apply_ao_h1e(density.data(), ao, 1);
   Matrix expected = Eigen::Map<const Matrix>(raw.data(), 2, 2);
   for (int row = 0; row < 2; ++row) {
     for (int column = 0; column <= row; ++column) {
@@ -337,7 +337,7 @@ void check_large_work_count_thread_bound() {
 
 /** @brief Checks exact scalar/fused/block actions against a dense stencil. */
 void check_exact_parallel_actions(int n_bf = 2) {
-  xmvb::vb::AoIntegralInput ao;
+  xmvb::integrals::AoIntegralInput ao;
   ao.n_basis_functions = n_bf;
   std::vector<int> left, right;
   std::vector<double> values;
@@ -350,7 +350,7 @@ void check_exact_parallel_actions(int n_bf = 2) {
       values.push_back(std::sin(0.7 * (a + 1) * (b + 2)));
     }
   }
-  ao.pair_graph = xmvb::vb::build_ao_pair_graph(left, right, values, n_bf);
+  ao.pair_graph = xmvb::integrals::build_ao_pair_graph(left, right, values, n_bf);
   const int size = n_bf * n_bf;
   Matrix stencil = Matrix::Zero(size, size);
   for (std::size_t edge = 0; edge < values.size(); ++edge) {
@@ -376,8 +376,8 @@ void check_exact_parallel_actions(int n_bf = 2) {
   adjoints = 0.3 * sources.array().cos().matrix();
   const Matrix expected_forward = stencil * sources;
   const Matrix expected_transpose = stencil.transpose() * adjoints;
-  xmvb::vb::AoH1eSymmetricWorkspace symmetric_workspace;
-  xmvb::vb::AoH1eBatchWorkspace batch_workspace;
+  xmvb::integrals::AoH1eSymmetricWorkspace symmetric_workspace;
+  xmvb::integrals::AoH1eBatchWorkspace batch_workspace;
   Matrix symmetric_sources(size, 8), symmetric_adjoints(size, 8);
   Matrix expected_block_forward(size, 8), expected_block_transpose(size, 8);
   for (Eigen::Index column = 0; column < 8; ++column) {
@@ -399,9 +399,9 @@ void check_exact_parallel_actions(int n_bf = 2) {
   const auto check = [&]() {
     for (int threads : {1, 2, 4, 32}) {
       for (Eigen::Index column = 0; column < sources.cols(); ++column) {
-        const auto forward = xmvb::vb::apply_ao_h1e(
+        const auto forward = xmvb::integrals::apply_ao_h1e(
             sources.col(column).data(), ao, threads);
-        const auto transpose = xmvb::vb::apply_ao_h1e_transpose(
+        const auto transpose = xmvb::integrals::apply_ao_h1e_transpose(
             adjoints.col(column).data(), ao, threads);
         require_close(Eigen::Map<const Matrix>(forward.data(), size, 1),
                       expected_forward.col(column), 2.0e-13,
@@ -420,7 +420,7 @@ void check_exact_parallel_actions(int n_bf = 2) {
         const Eigen::VectorXd raw_transpose = stencil.transpose() * adjoint_vector;
         const Eigen::Map<const Matrix> reference_forward(raw_forward.data(), n_bf, n_bf);
         const Eigen::Map<const Matrix> reference_transpose(raw_transpose.data(), n_bf, n_bf);
-        xmvb::vb::apply_symmetric_ao_h1e_fused(
+        xmvb::integrals::apply_symmetric_ao_h1e_fused(
             symmetric_source.data(), symmetric_adjoint.data(), ao, threads,
             &symmetric_workspace, &fused_forward, &fused_transpose);
         const Eigen::Map<const Matrix> symmetric_forward(fused_forward.data(), n_bf, n_bf);
@@ -434,7 +434,7 @@ void check_exact_parallel_actions(int n_bf = 2) {
       }
       for (Eigen::Index width : {1, 2, 3, 4, 8}) {
         Matrix forward, transpose;
-        xmvb::vb::apply_symmetric_ao_h1e_fused_batch(
+        xmvb::integrals::apply_symmetric_ao_h1e_fused_batch(
             symmetric_sources.leftCols(width), symmetric_adjoints.leftCols(width),
             ao, threads, &batch_workspace, &forward, &transpose);
         require_close(forward, expected_block_forward.leftCols(width), 2.0e-13,
@@ -470,19 +470,19 @@ void check_exact_parallel_actions(int n_bf = 2) {
   ao.pair_graph.integral_values.clear();
   ao.pair_graph.row_offsets.assign(n_pairs + 1, 0);
   std::vector<double> forward, transpose;
-  xmvb::vb::apply_symmetric_ao_h1e_fused(
+  xmvb::integrals::apply_symmetric_ao_h1e_fused(
       sources.col(0).data(), adjoints.col(0).data(), ao, 32,
       &symmetric_workspace, &forward, &transpose);
   require(Eigen::Map<const Matrix>(forward.data(), size, 1).isZero(0.0) &&
               Eigen::Map<const Matrix>(transpose.data(), size, 1).isZero(0.0),
           "empty exact action retained stale workspace values");
   Matrix block_forward, block_transpose;
-  xmvb::vb::apply_symmetric_ao_h1e_fused_batch(
+  xmvb::integrals::apply_symmetric_ao_h1e_fused_batch(
       symmetric_sources, symmetric_adjoints, ao, 32, &batch_workspace,
       &block_forward, &block_transpose);
   require(block_forward.isZero(0.0) && block_transpose.isZero(0.0),
           "empty exact block retained stale workspace values");
-  xmvb::vb::apply_symmetric_ao_h1e_fused_batch(
+  xmvb::integrals::apply_symmetric_ao_h1e_fused_batch(
       symmetric_sources.leftCols(0), symmetric_adjoints.leftCols(0), ao, 32,
       &batch_workspace, &block_forward, &block_transpose);
   require(block_forward.rows() == size && block_forward.cols() == 0 &&

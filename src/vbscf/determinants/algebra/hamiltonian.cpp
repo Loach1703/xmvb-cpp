@@ -8,7 +8,7 @@
 
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "core/pair_index.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb {
 
@@ -46,7 +46,7 @@ DeterminantHamiltonianResult calc_regular_ri_same_spin_hamiltonian(
   const int n_electrons = static_cast<int>(occ_L.size());
   if (static_cast<int>(occ_R.size()) != n_electrons ||
       overlap.nullity != 0 || overlap.overlap_determinant == 0.0 ||
-      ri_factors.cols() != packed_active_pair_count(n_active_orbitals)) {
+      ri_factors.cols() != xmvb::integrals::packed_active_pair_count(n_active_orbitals)) {
     throw std::invalid_argument("invalid regular RI same-spin contraction input");
   }
 
@@ -347,9 +347,9 @@ DeterminantHamiltonianResult calc_same_spin_hamiltonian(
     const DeterminantOverlapResult& det_ovlp_result,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orb_act,
-    const ActiveSpaceTwoElectronView& two_electron_view) {
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view) {
   if (two_electron_view.representation ==
-          ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity &&
+          xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity &&
       (two_electron_view.packed_active_two_electron_integrals == nullptr ||
        two_electron_view.packed_active_two_electron_integrals->empty()) &&
       two_electron_view.ri_active_pair_factors != nullptr &&
@@ -376,7 +376,7 @@ DeterminantHamiltonianResult calc_same_spin_hamiltonian(
       [&two_electron_view, n_orb_act](
           int row_packed_pair_index,
           int column_packed_pair_index) {
-        return lookup_active_space_two_electron_kernel_value(
+        return xmvb::integrals::lookup_active_space_two_electron_kernel_value(
             two_electron_view,
             row_packed_pair_index,
             column_packed_pair_index,
@@ -422,7 +422,7 @@ DeterminantHamiltonianResult DeterminantHamiltonianResolver::resolve(
     const Eigen::Ref<const Eigen::MatrixXd>& det_ovlp_mat,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result) const {
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result) const {
   if (occ_L.size() != occ_R.size()) {
     throw std::invalid_argument("left and right determinants must have the same electron count");
   }
@@ -462,14 +462,14 @@ DeterminantHamiltonianResult DeterminantHamiltonianResolver::resolve(
     const DeterminantOverlapResult& det_ovlp_result,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result) const {
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result) const {
   return xmvb::vb::calc_same_spin_hamiltonian(
       occ_L,
       occ_R,
       det_ovlp_result,
       h1e_act,
       n_orbitals,
-      make_active_space_two_electron_view(active_space_two_electron_result));
+      xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result));
 }
 
 }  // namespace xmvb::vb

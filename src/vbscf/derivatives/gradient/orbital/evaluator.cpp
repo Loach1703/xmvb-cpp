@@ -8,9 +8,9 @@
 #include <Eigen/Core>
 
 #include "vbscf/integrals/ao/ri/cache.hpp"
-#include "vbscf/core/storage/eigen.hpp"
+#include "linalg/storage.hpp"
 #include "core/pair_index.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 
 namespace xmvb::vb {
@@ -136,10 +136,10 @@ Eigen::MatrixXd build_active_pair_gradient_matrix(
 
 std::vector<double> build_ri_active_pair_factor_gradient(
     const std::vector<double>& packed_active_two_electron_gradient,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_active_orbitals) {
   if (active_space_two_electron_result.representation !=
-      ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
     throw std::invalid_argument("RI active-pair-factor gradient requires an RI forward result");
   }
   const std::size_t n_active_pairs =
@@ -163,7 +163,7 @@ std::vector<double> build_ri_active_pair_factor_gradient(
   const Eigen::MatrixXd ri_active_pair_factor_gradient =
       active_space_two_electron_result.ri_active_pair_factors *
       active_pair_gradient_matrix;
-  return flatten_matrix_column_major(ri_active_pair_factor_gradient);
+  return xmvb::linalg::flatten_matrix_column_major(ri_active_pair_factor_gradient);
 }
 
 std::vector<double> build_reference_energy_orbital_gradient(
@@ -207,7 +207,7 @@ OrbitalGradientEvaluator::OrbitalGradientEvaluator(
     ActiveSpaceOrbitalPreparer orbital_preparer,
     AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
     AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator,
-    ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator,
+    xmvb::integrals::ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator,
     ActiveSpaceTwoElectronBackpropagator active_space_two_electron_backpropagator,
     ActiveSpaceOrbitalBackpropagator active_space_orbital_backpropagator)
     : active_space_gradient_evaluator_(std::move(active_space_gradient_evaluator)),
@@ -449,7 +449,7 @@ OrbitalGradientResult OrbitalGradientEvaluator::evaluate_from_active_space_gradi
   stage_start_time = std::chrono::steady_clock::now();
   const auto active_space_two_electron_backpropagation_result =
       active_space_gradient_result.active_space_two_electron_result.representation ==
-              ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity
+              xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity
           ? active_space_two_electron_backpropagator_.backpropagate(
                 build_ri_active_pair_factor_gradient(
                     active_space_gradient_result.packed_active_two_electron_gradient,
@@ -615,7 +615,7 @@ OrbitalGradientEvaluator::evaluate_sparse_orbital_gradient_with_fixed_active_spa
       accepted_point_context.active_one_electron_gradient.size() !=
           prepared_active_space.active_space_one_electron_result.h1e_act.size() ||
       accepted_point_context.packed_active_two_electron_gradient.size() !=
-          packed_active_two_electron_integral_count(
+          xmvb::integrals::packed_active_two_electron_integral_count(
               input.orbital_preparation_input.n_active_orbitals)) {
     throw std::invalid_argument(
         "accepted-point active-space adjoint dimensions do not match the trial orbital space");
@@ -652,7 +652,7 @@ OrbitalGradientEvaluator::evaluate_sparse_orbital_gradient_with_fixed_active_spa
           input.orbital_preparation_input.n_active_orbitals);
   const auto active_space_two_electron_backpropagation_result =
       active_space_two_electron_result.representation ==
-              ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity
+              xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity
           ? active_space_two_electron_backpropagator_.backpropagate(
                 build_ri_active_pair_factor_gradient(
                     accepted_point_context.packed_active_two_electron_gradient,

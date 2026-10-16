@@ -1,7 +1,7 @@
 #pragma once
 
-#include "vbscf/integrals/ao/contracts/input.hpp"
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
+#include "integrals/ao/input.hpp"
+#include "integrals/active/two_electron_result.hpp"
 #include "vbscf/orbitals/preparation/result.hpp"
 
 namespace xmvb::vb {
@@ -23,8 +23,8 @@ public:
    * @param n_active_orbitals Number of active orbitals.
    * @return Packed active-space two-electron integrals.
    */
-  ActiveSpaceTwoElectronResult build(
-      const AoIntegralInput& ao_integral_input,
+  xmvb::integrals::ActiveSpaceTwoElectronResult build(
+      const xmvb::integrals::AoIntegralInput& ao_integral_input,
       const OrbitalPreparationResult& orbital_preparation_result,
       int n_active_orbitals) const;
 };

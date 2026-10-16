@@ -44,12 +44,12 @@ TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
     const VbScfInput& input,
     const ActiveSpaceOrbitalPreparer& orbital_preparer,
     const AoEffectiveOneElectronBuilder& ao_effective_one_electron_builder,
-    const ActiveSpaceOneElectronBuilder& active_space_one_electron_builder,
+    const xmvb::integrals::ActiveSpaceOneElectronBuilder& active_space_one_electron_builder,
     const ActiveSpaceTwoElectronBuilder& active_space_two_electron_builder) {
   TimedPreparedActiveSpaceContext timed_context;
   auto& context = timed_context.prepared_active_space;
   const bool use_ri_active_space = use_standard_ri_active_space_path(input);
-  const RiAoFactorization* ao_ri_result = nullptr;
+  const xmvb::integrals::RiAoFactorization* ao_ri_result = nullptr;
   if (use_ri_active_space) {
     ao_ri_result = &ensure_vbscf_input_ri_cache(input);
   }

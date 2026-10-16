@@ -13,7 +13,7 @@
 #endif
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
@@ -98,9 +98,9 @@ StructureAction make_action(
   const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(n_orbitals,n_orbitals);
   const std::vector<double> packed_overlap(identity.data(),
                                             identity.data() + identity.size());
-  ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   two_electron.packed_active_two_electron_integrals.assign(
-      packed_active_two_electron_integral_count(n_orbitals), 0.0);
+      xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals), 0.0);
   return StructureAction(
       terms, 3, topology, packed_overlap, Eigen::MatrixXd::Zero(n_orbitals,n_orbitals),
       two_electron, n_orbitals, nullptr, StructureActionMode::ActionOnly);

@@ -3,14 +3,16 @@
 #include <memory>
 
 #include "vbscf/structures/expansion/types.hpp"
-#include "vbscf/integrals/ao/contracts/input.hpp"
-#include "vbscf/integrals/ao/libcint/input.hpp"
+#include "integrals/ao/input.hpp"
+#include "integrals/ao/libcint_input.hpp"
 #include "vbscf/orbitals/preparation/input.hpp"
 
-namespace xmvb::vb {
-
+namespace xmvb::integrals {
 class RiAoFactorizationProvider;
 struct RiAoFactorization;
+}
+
+namespace xmvb::vb {
 
 enum class StandardTwoElectronMode {
   Auto,
@@ -46,12 +48,12 @@ struct VbScfInput {
   /**
    * @brief AO Hamiltonian and AO two-electron integrals.
    */
-  AoIntegralInput ao_integral_input;
+  xmvb::integrals::AoIntegralInput ao_integral_input;
 
   /**
    * @brief Primary-basis libcint input used by AO integral providers.
    */
-  LibcintInput libcint_input;
+  xmvb::integrals::LibcintInput libcint_input;
 
   /**
    * @brief Optional explicit RI auxiliary basis parsed from the input deck.
@@ -59,7 +61,7 @@ struct VbScfInput {
    * RI calculations require this basis. The input loader resolves an explicit
    * `AUXBASIS` keyword or the `${BASIS}-jkfit` default before factorization.
    */
-  LibcintInput auxiliary_libcint_input;
+  xmvb::integrals::LibcintInput auxiliary_libcint_input;
 
   /**
    * @brief Requested standard-VB two-electron representation.
@@ -74,7 +76,7 @@ struct VbScfInput {
   /**
    * @brief Provider for lazily building AO-side RI factors.
    */
-  std::shared_ptr<const RiAoFactorizationProvider> ri_factorization_provider;
+  std::shared_ptr<const xmvb::integrals::RiAoFactorizationProvider> ri_factorization_provider;
 
   /**
    * @brief Optional molecule-static AO-side RI factorization shared across copies.
@@ -82,7 +84,7 @@ struct VbScfInput {
    * This numerical cache is populated through `ri_factorization_provider` and
    * reused across repeated SCF objective/gradient evaluations.
    */
-  mutable std::shared_ptr<const RiAoFactorization> ri_factorization;
+  mutable std::shared_ptr<const xmvb::integrals::RiAoFactorization> ri_factorization;
 };
 
 }  // namespace xmvb::vb

@@ -9,8 +9,8 @@
 #include <Eigen/Core>
 
 #include "vbscf/structures/assembly/coefficient_blocks.hpp"
-#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
-#include "vbscf/integrals/active/two_electron/response/ri.hpp"
+#include "integrals/response/adjoint.hpp"
+#include "integrals/response/ri.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "vbscf/derivatives/hessian/responses/active_space/outer_response.hpp"
 #include "vbscf/derivatives/hessian/responses/orbital/preparation.hpp"
@@ -161,13 +161,13 @@ ExactHvpOperator::State::State(
       accepted_ri_factorization_ =
           &ensure_vbscf_input_ri_cache(*current_input_);
       accepted_ri_two_electron_cache_.emplace(
-          build_ri_active_two_electron_response_cache(
+          xmvb::integrals::build_ri_active_two_electron_response_cache(
               *accepted_ri_factorization_,
               accepted_two_electron_result,
               n_active_orbitals));
     } else {
       accepted_exact_two_electron_cache_ =
-          build_exact_packed_active_two_electron_adjoint_cache(
+          xmvb::integrals::build_exact_packed_active_two_electron_adjoint_cache(
               accepted_point_context_->packed_active_two_electron_gradient,
               accepted_two_electron_result.dense_active_coefficients,
               current_input_->ao_integral_input,

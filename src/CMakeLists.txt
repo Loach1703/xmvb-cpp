@@ -31,6 +31,26 @@ find_path(EIGEN3_INCLUDE_DIR Eigen/Core
 
 include(vbscf/sources.cmake)
 
+set(XMVB_INTEGRAL_SOURCES
+  integrals/ao/graph.cpp
+  integrals/ao/libcint.cpp
+  integrals/ao/exact.cpp
+  integrals/ao/exact_rows.cpp
+  integrals/ao/ri_operator.cpp
+  integrals/active/one_electron.cpp
+  integrals/active/exact.cpp
+  integrals/active/ri.cpp
+  integrals/active/matrix_adjoint.cpp
+  integrals/active/two_electron.cpp
+  integrals/active/pair_map.cpp
+  integrals/response/adjoint.cpp
+  integrals/response/directional.cpp
+  integrals/response/ri.cpp
+  integrals/response/exchange.cpp
+  integrals/response/pair_transforms.cpp
+  integrals/response/ao_pair_operator.cpp
+  integrals/response/generated_rows.cpp)
+
 set(XMVB_LINALG_SOURCES
   linalg/eigensolver.cpp
   linalg/eigen_response.cpp
@@ -107,6 +127,7 @@ file(
   "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/output/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/integrals/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/casscf/*.cpp")
 set(_xmvb_declared_component_sources
@@ -116,6 +137,7 @@ set(_xmvb_declared_component_sources
   ${XMVB_INPUT_SOURCES}
   ${XMVB_OUTPUT_SOURCES}
   ${XMVB_LINALG_SOURCES}
+  ${XMVB_INTEGRAL_SOURCES}
   ${XMVB_MCSCF_SOURCES}
   ${XMVB_CASSCF_SOURCES})
 list(SORT _xmvb_declared_component_sources)
@@ -184,11 +206,15 @@ if (XMVB_ENABLE_EIGEN_BLAS_BACKEND)
 endif()
 target_link_libraries(xmvb_linalg PUBLIC ${LAPACKE_LIB} ${LAPACK_LIB} xmvb_openmp m)
 
-xmvb_add_component(xmvb_mcscf
+xmvb_add_component(xmvb_integrals
   core/pair_index.cpp
-  ${XMVB_MCSCF_SOURCES})
+  ${XMVB_INTEGRAL_SOURCES})
+target_link_libraries(xmvb_integrals PUBLIC xmvb_linalg ${CINT_LIB})
+
+xmvb_add_component(xmvb_mcscf ${XMVB_MCSCF_SOURCES})
 target_link_libraries(xmvb_mcscf PUBLIC xmvb_linalg)
-target_link_libraries(xmvb_vbscf PUBLIC xmvb_mcscf)
+target_link_libraries(xmvb_mcscf PUBLIC xmvb_integrals)
+target_link_libraries(xmvb_vbscf PUBLIC xmvb_mcscf xmvb_integrals)
 
 xmvb_add_component(xmvb_casscf ${XMVB_CASSCF_SOURCES})
 target_link_libraries(xmvb_casscf PUBLIC xmvb_mcscf)
@@ -197,6 +223,8 @@ target_link_libraries(xmvb_casscf PUBLIC xmvb_mcscf)
 file(GLOB_RECURSE _xmvb_common_headers CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/parallel/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/integrals/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/integrals/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/casscf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/casscf/*.cpp")
 foreach(_xmvb_common_file IN LISTS _xmvb_common_headers)
@@ -212,11 +240,20 @@ foreach(_xmvb_common_file IN LISTS _xmvb_common_headers)
       message(FATAL_ERROR "Numerical utility depends on an electronic model: ${_xmvb_common_file}")
     endif()
   endif()
+  if (_xmvb_common_file MATCHES "/integrals/" AND NOT
+      _xmvb_common_file MATCHES "/casscf/integrals/")
+    file(STRINGS "${_xmvb_common_file}" _xmvb_integral_model_includes
+      REGEX "^[ \t]*#[ \t]*include[ \t]*\"(mcscf|casscf|input|guess|libcint|output)/")
+    if (_xmvb_integral_model_includes)
+      message(FATAL_ERROR "Integral kernel depends on a model or I/O: ${_xmvb_common_file}")
+    endif()
+  endif()
 endforeach()
 unset(_xmvb_common_headers)
 unset(_xmvb_common_file)
 unset(_xmvb_vb_includes)
 unset(_xmvb_model_includes)
+unset(_xmvb_integral_model_includes)
 
 if (XMVB_BUILD_DEV_TARGETS)
   include(${CMAKE_SOURCE_DIR}/tests/linalg/targets.cmake)
@@ -231,16 +268,20 @@ if (XMVB_BUILD_DEV_TARGETS)
   target_link_libraries(test_ci_factors PRIVATE xmvb_mcscf)
   add_executable(test_casci ${CMAKE_SOURCE_DIR}/tests/mcscf/test_casci.cpp)
   target_link_libraries(test_casci PRIVATE xmvb_casscf)
+  add_executable(test_integrals ${CMAKE_SOURCE_DIR}/tests/mcscf/test_integrals.cpp)
+  target_link_libraries(test_integrals PRIVATE xmvb_integrals)
   if (BUILD_TESTING)
     add_test(NAME ci_factors COMMAND test_ci_factors)
     set_tests_properties(ci_factors PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
     add_test(NAME casci COMMAND test_casci)
+    add_test(NAME integrals COMMAND test_integrals)
+    set_tests_properties(integrals PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
     set_tests_properties(casci PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
   endif()
 endif()
 
 xmvb_add_component(xmvb_libcint ${XMVB_LIBCINT_SOURCES})
-target_link_libraries(xmvb_libcint PUBLIC xmvb_vbscf)
+target_link_libraries(xmvb_libcint PUBLIC xmvb_integrals)
 
 xmvb_add_component(xmvb_input_deck ${XMVB_INPUT_DECK_SOURCES})
 target_link_libraries(xmvb_input_deck PUBLIC xmvb_libcint xmvb_vbscf)

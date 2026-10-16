@@ -53,7 +53,7 @@ AcceptedSpinPairActionResult build_partner_action_panel(
     int panel_size,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     std::size_t workspace_bytes) {
   return apply_accepted_spin_pair_action(
       target_alpha ? cache.beta_provider() : cache.alpha_provider(),
@@ -166,7 +166,7 @@ void refresh_partner_panel(
     int panel_size,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     std::size_t workspace_bytes,
     SameSpinPartnerActionPanel* panel,
     std::size_t* build_count) {
@@ -197,7 +197,7 @@ LocalSameSpinTileAccumulator::LocalSameSpinTileAccumulator(
     int n_active_orbitals,
     const std::vector<double>& active_overlap,
     const Eigen::MatrixXd& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron,
     const ActiveSpaceIntegralDirectionView& direction,
     std::size_t workspace_bytes)
     : accepted_pair_cache_(accepted_pair_cache),

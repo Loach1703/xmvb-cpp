@@ -4,11 +4,13 @@
 
 #include <Eigen/Core>
 
-namespace xmvb::vb {
-
+namespace xmvb::integrals {
 struct AoIntegralInput;
 struct AoH1eBatchWorkspace;
 struct ExactPackedActiveTwoElectronAdjointCache;
+}
+
+namespace xmvb::vb {
 
 namespace detail {
 
@@ -23,9 +25,9 @@ void apply_exact_ao_response(
     const Eigen::Ref<const Eigen::MatrixXd>& density_sources,
     const Eigen::Ref<const Eigen::MatrixXd>& pullback_sources,
     const Eigen::Ref<const Eigen::MatrixXd>& weighted_directions,
-    const ExactPackedActiveTwoElectronAdjointCache& cache,
-    const AoIntegralInput& ao_integral_input,
-    AoH1eBatchWorkspace* workspace,
+    const xmvb::integrals::ExactPackedActiveTwoElectronAdjointCache& cache,
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
+    xmvb::integrals::AoH1eBatchWorkspace* workspace,
     Eigen::MatrixXd* combined_response,
     Eigen::MatrixXd* active_projection);
 

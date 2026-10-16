@@ -1,9 +1,9 @@
 #pragma once
 
 #include "libcint/materialized_input.hpp"
-#include "vbscf/integrals/ao/libcint/input.hpp"
+#include "integrals/ao/libcint_input.hpp"
 
-namespace xmvb::vb {
+namespace xmvb::libcint {
 
 struct LibcintMaterializedIntegralProviderOptions {
   /** @brief Absolute discard threshold in unit-normalized AO integrals. */
@@ -20,8 +20,8 @@ struct LibcintMaterializedIntegralProviderOptions {
 class LibcintMaterializedIntegralProvider {
 public:
   MaterializedAoIntegralBuffers build(
-      const LibcintInput& input,
+      const xmvb::integrals::LibcintInput& input,
       const LibcintMaterializedIntegralProviderOptions& options = {}) const;
 };
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::libcint

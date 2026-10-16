@@ -7,7 +7,7 @@
 
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/core/contracts/eigensolver.hpp"
-#include "vbscf/integrals/active/matrix/backpropagator.hpp"
+#include "integrals/active/matrix_adjoint.hpp"
 #include "vbscf/orbitals/pullback/operator.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
 #include "vbscf/integrals/active/two_electron/response/backpropagator.hpp"
@@ -51,7 +51,7 @@ public:
       ActiveSpaceOrbitalPreparer orbital_preparer,
       AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
       AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator,
-      ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator,
+      xmvb::integrals::ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator,
       ActiveSpaceTwoElectronBackpropagator active_space_two_electron_backpropagator,
       ActiveSpaceOrbitalBackpropagator active_space_orbital_backpropagator);
 
@@ -189,7 +189,7 @@ private:
   ActiveSpaceOrbitalPreparer orbital_preparer_;
   AoEffectiveOneElectronBuilder ao_effective_one_electron_builder_;
   AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator_;
-  ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator_;
+  xmvb::integrals::ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator_;
   ActiveSpaceTwoElectronBackpropagator active_space_two_electron_backpropagator_;
   ActiveSpaceOrbitalBackpropagator active_space_orbital_backpropagator_;
   OrbitalGradientResult evaluate_from_active_space_gradient_result(

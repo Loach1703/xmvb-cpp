@@ -20,7 +20,7 @@
 
 #include "linalg/eigen_response.hpp"
 #include "vbscf/derivatives/hessian/coupled/coupling.hpp"
-#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
+#include "integrals/response/adjoint.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/derivatives/hessian/responses/active_space/integral_direction.hpp"
 #include "vbscf/derivatives/hessian/responses/active_space/local_tile_accumulator_internal.hpp"
@@ -85,7 +85,7 @@ void throw_if_nonfinite(
 ActiveSpaceGradientDirection make_active_gradient_direction(
     const StructureActiveIntegralAdjoint& adjoint,
     int n_active_orbitals) {
-  const int n_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   if (adjoint.overlap.rows() != n_active_orbitals ||
       adjoint.overlap.cols() != n_active_orbitals ||
       adjoint.one_electron.rows() != n_active_orbitals ||
@@ -325,7 +325,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     const Eigen::MatrixXd* precomputed_active_projection,
     const Eigen::VectorXd* precomputed_delta_packed_active_two_electron,
     const Eigen::MatrixXd* precomputed_ri_active_pair_factor_direction,
-    const ExactCtxPairMatrix* precomputed_directional_pair_products,
+    const xmvb::integrals::ExactCtxPairMatrix* precomputed_directional_pair_products,
     const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
     const PrecomputedDirection* precomputed_direction,
     OrbitalCouplingAction* coupling_output,
@@ -446,7 +446,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     if (accepted_ri_factorization_ != nullptr) {
       const auto& delta_inactive_density =
           orbital_preparation_directional_result.delta_inactive_density;
-      apply_ao_effective_one_electron_ri_operator_adaptive(
+      xmvb::integrals::apply_ao_effective_one_electron_ri_operator_adaptive(
           delta_inactive_density,
           ao_h1e_symmetrized_gradient_workspace_,
           *accepted_ri_factorization_,
@@ -513,13 +513,13 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           *precomputed_ri_active_pair_factor_direction;
     } else {
       ri_directional_active_pair_factors.emplace(
-          compute_ri_active_pair_factor_directional_derivative(
+          xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
               *accepted_ri_two_electron_cache_,
               delta_dense_active_coefficients));
     }
     if (compute_outer_response && packed_outer_two_electron_required) {
       const std::vector<double> packed_direction =
-          compute_ri_packed_active_two_electron_integral_directional_derivative(
+          xmvb::integrals::compute_ri_packed_active_two_electron_integral_directional_derivative(
               *accepted_ri_two_electron_cache_,
               *ri_directional_active_pair_factors);
       ri_delta_packed_active_two_electron = Eigen::Map<const Eigen::VectorXd>(
@@ -945,7 +945,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     if (accepted_ri_two_electron_cache_.has_value()) {
       accepted_exact_two_electron_apply_workspace_
           .dense_active_gradient_direction =
-          apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+          xmvb::integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
               accepted_point_context_->packed_active_two_electron_gradient,
               *accepted_ri_two_electron_cache_,
               delta_dense_active_coefficients,
@@ -973,7 +973,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
              ? precomputed_directional_pair_products
              : &outer_response_integral_direction_workspace_.two_electron
                     .directional_pair_products)->size() > 0) {
-      apply_exact_packed_active_two_electron_adjoint_hessian_vector_fused(
+      xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector_fused(
           accepted_exact_two_electron_cache_,
           delta_dense_active_coefficients,
           current_input_->ao_integral_input,
@@ -985,7 +985,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           &accepted_exact_two_electron_apply_workspace_
                .dense_active_gradient_direction);
     } else {
-      apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+      xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
           accepted_exact_two_electron_cache_,
           delta_dense_active_coefficients,
           current_input_->ao_integral_input,

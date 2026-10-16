@@ -10,12 +10,12 @@
 #include "input/loading/loader.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
-#include "vbscf/integrals/active/one_electron/builder.hpp"
+#include "integrals/active/one_electron.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
 #include "vbscf/integrals/active/two_electron/construction/builder.hpp"
 #include "vbscf/integrals/ao/one_electron/builder.hpp"
 #include "vbscf/integrals/active/two_electron/construction/ri_builder.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace {
 
@@ -135,7 +135,7 @@ EnergyBreakdown build_exact_breakdown(
       orbital_result.inactive_density_matrix,
       input.ao_integral_input);
 
-  xmvb::vb::ActiveSpaceOneElectronBuilder active_h1e_builder;
+  xmvb::integrals::ActiveSpaceOneElectronBuilder active_h1e_builder;
   const auto active_h1e_result = active_h1e_builder.build(
       ao_result.ao_effective_h1e,
       orbital_result.auxiliary_orbital_matrix,
@@ -206,7 +206,7 @@ EnergyBreakdown build_ri_breakdown(
         n_basis_functions);
   }
 
-  xmvb::vb::ActiveSpaceOneElectronBuilder active_h1e_builder;
+  xmvb::integrals::ActiveSpaceOneElectronBuilder active_h1e_builder;
   const auto active_h1e_result = active_h1e_builder.build(
       ao_result.ao_effective_h1e,
       orbital_result.auxiliary_orbital_matrix,
@@ -221,8 +221,8 @@ EnergyBreakdown build_ri_breakdown(
       n_basis_functions,
       n_active_orbitals);
   ri_eri_result.packed_active_two_electron_integrals =
-      xmvb::vb::reconstruct_packed_active_two_electron_integrals(
-          xmvb::vb::make_active_space_two_electron_view(ri_eri_result),
+      xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
+          xmvb::integrals::make_active_space_two_electron_view(ri_eri_result),
           n_active_orbitals);
 
   EnergyBreakdown breakdown;
@@ -319,7 +319,7 @@ int main(int argc, char** argv) {
         input.ao_integral_input.ao_core_hamiltonian_matrix,
         xmvb::vb::ensure_vbscf_input_ri_cache(input),
         n_basis_functions);
-    xmvb::vb::ActiveSpaceOneElectronBuilder active_h1e_builder;
+    xmvb::integrals::ActiveSpaceOneElectronBuilder active_h1e_builder;
     const auto exact_active_h1e = active_h1e_builder.build(
         exact_ao_result.ao_effective_h1e,
         orbital_result.auxiliary_orbital_matrix,
@@ -344,8 +344,8 @@ int main(int argc, char** argv) {
         n_basis_functions,
         n_active_orbitals);
     ri_eri.packed_active_two_electron_integrals =
-        xmvb::vb::reconstruct_packed_active_two_electron_integrals(
-            xmvb::vb::make_active_space_two_electron_view(ri_eri),
+        xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
+            xmvb::integrals::make_active_space_two_electron_view(ri_eri),
             n_active_orbitals);
 
     const double active_eigen_exact_h1e_exact_eri = evaluate_active_eigenvalue(

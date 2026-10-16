@@ -6,7 +6,7 @@
 
 #include "vbscf/determinants/contracts/types.hpp"
 #include "vbscf/determinants/algebra/overlap.hpp"
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
+#include "integrals/active/two_electron_result.hpp"
 
 namespace xmvb::vb {
 
@@ -65,7 +65,7 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& det_ovlp_mat,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result) const;
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result) const;
 
   /**
    * @brief Evaluates determinant Hamiltonian using a precomputed overlap result.
@@ -105,7 +105,7 @@ public:
       const DeterminantOverlapResult& det_ovlp_result,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result) const;
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result) const;
 
 private:
   DeterminantOverlapResolver overlap_resolver_;

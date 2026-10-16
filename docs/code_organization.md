@@ -11,6 +11,7 @@ src/
   core/     Pair indexing and lightweight timing
   linalg/   Method-independent linear algebra
   parallel/ Shared OpenMP execution and work partitioning
+  integrals/ Method-independent AO/active transforms and their derivatives
   mcscf/    Method-independent CI, optimization, and state contracts
   casscf/   Orthogonal CASCI model and active-integral preparation
   vbscf/    VB structures, nonorthogonal orbitals, derivatives, and workflows
@@ -32,6 +33,8 @@ The method libraries depend on a common numerical library:
 
 ```text
 xmvb_vbscf ----> xmvb_mcscf <---- xmvb_casscf
+     |               |               |
+     +--------> xmvb_integrals <-------+
                      |
                      v
                 xmvb_linalg
@@ -46,8 +49,9 @@ VB includes in the common layers or `casscf/`; public solver tests link only
 Linear-algebra tests link only `xmvb_linalg`. OpenMP tools live in
 `parallel/openmp.hpp`, use caller-owned storage and avoid nested teams.
 
-The I/O components depend toward the VB model: `xmvb_libcint`,
-`xmvb_input_deck`, `xmvb_guess`, `xmvb_input`, and `xmvb_output` form an acyclic
+`xmvb_libcint` depends only on the public integral library, not the VB model;
+its APIs use `xmvb::libcint`. The I/O components `xmvb_input_deck`,
+`xmvb_guess`, `xmvb_input`, and `xmvb_output` form an acyclic
 graph. `xmvb_input_deck` is separate because guess construction consumes parsed
 deck data, while complete input loading consumes the guess builder.
 
@@ -86,9 +90,45 @@ There are no forwarding headers or namespace aliases at the old solver paths.
 Callers include the owning module directly. Shared state weights have one
 implementation; workflow and derivative code must not normalize independently.
 
-The common integral layer is the next extraction step. AO/active-space kernels
-still under `vbscf/integrals/` are not yet method-independent APIs. Likewise,
-`casscf/` currently exposes CASCI, not a complete CASSCF orbital optimizer.
+## Common Integral Boundary
+
+```text
+integrals/
+  ao/       Exact AO-pair graph, Coulomb/exchange actions, libcint/RI contracts
+  active/   Exact/RI transforms, packed kernels, one-electron projection/adjoint
+  response/ Integral directions, fixed-adjoint HVPs and accepted-point workspaces
+```
+
+These APIs use `xmvb::integrals` and are compiled once in `xmvb_integrals`.
+They consume AO operators and numerical orbital coefficients, not VB inputs,
+structures, orbital charts or preparation results. Exact forward transforms
+borrow AO-row sparse support through `std::span`; RI transforms borrow an
+AO-by-active Eigen matrix. Neither assumes orthonormal active orbitals.
+Forward, gradient and HVP consumers share the same data and implementations.
+Accepted-point caches explicitly borrow their source matrices; callers own the
+data and must keep it alive. This extraction does not change tiling, memory
+budgets, threading, screening or numerical tolerances.
+
+`vbscf/integrals/` retains orbital-preparation adapters, inactive-density
+assembly and lazy RI acquisition from `VbScfInput`. Its exact and RI active
+builders pass numerical coefficients to the common transforms; they do not
+own another implementation of either transform. The remaining VB backward
+adapter converts integral adjoints into the layout required by orbital
+preparation. Further adapter simplification is separate from this extraction.
+
+The AO-to-CASCI entry in `casscf/integrals/active.*` uses the same AO response,
+active one-electron projection and exact two-electron transform, including the
+inactive/nuclear energy. It does not build VB structures or transform virtual
+four-index integrals. `casscf/` still exposes CASCI, not a complete CASSCF
+orbital optimizer.
+
+CMake rejects model/I/O includes inside the integral layer. The standalone
+`test_integrals` links only `xmvb_integrals`; it checks exact/RI agreement,
+directional derivatives, adjoint duality and fixed-adjoint HVPs. `test_casci`
+checks the shared AO preparation against an independently transformed MO
+reference with a nontrivial orthonormal frame. No old-path forwarding headers
+or namespace aliases remain. Generic matrix-buffer conversion lives in
+`linalg/storage.hpp`; optional per-worker timing lives in `parallel/workers.hpp`.
 
 ## Language and Optimizer Names
 

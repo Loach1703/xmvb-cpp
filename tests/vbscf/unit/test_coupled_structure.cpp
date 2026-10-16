@@ -15,7 +15,7 @@
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "core/pair_index.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/optimization/neo/coordinates.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
@@ -137,15 +137,15 @@ StructureFixture make_fixture() {
   one_electron << -1.1, 0.16,
                    0.16, -0.45;
 
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   Eigen::MatrixXd pair_factor(3, n_pairs);
   pair_factor << 0.31, 0.07, -0.02,
                  0.04, 0.26,  0.08,
                 -0.03, 0.05,  0.22;
   const Eigen::MatrixXd pair_kernel = pair_factor.transpose() * pair_factor;
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   two_electron.packed_active_two_electron_integrals.resize(
-      xmvb::vb::packed_active_two_electron_integral_count(n_orbitals));
+      xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row <= column; ++row) {
       two_electron.packed_active_two_electron_integrals[
@@ -565,7 +565,7 @@ void check_connection(const StructureFixture& fixture) {
   one_direction << 0.11, 0.02, 0.02, -0.07;
   const std::vector<double> overlap(overlap_direction.data(), overlap_direction.data()+4);
   const std::vector<double> one(one_direction.data(), one_direction.data()+4);
-  std::vector<double> two(xmvb::vb::packed_active_two_electron_integral_count(2), 0.0);
+  std::vector<double> two(xmvb::integrals::packed_active_two_electron_integral_count(2), 0.0);
   for (const bool stationary : {true, false}) {
     Eigen::VectorXd coefficients = fixture.eigenvectors.col(0);
     if (!stationary) coefficients += 0.4 * fixture.eigenvectors.col(1);

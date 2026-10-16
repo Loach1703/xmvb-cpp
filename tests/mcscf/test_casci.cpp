@@ -8,6 +8,7 @@
 #include "mcscf/ci/sigma.hpp"
 #include "mcscf/ci/spin.hpp"
 #include "core/pair_index.hpp"
+#include "integrals/ao/graph.hpp"
 
 namespace {
 
@@ -96,6 +97,40 @@ void check_inactive_energy() {
   close(cas.active.one_electron(0,0),0.2,"inactive potential is missing");
   const auto doublet=xmvb::casscf::solve_casci(cas,1,1);
   close(doublet.energy(),-1.8,"inactive CASCI total energy is wrong");
+
+  xmvb::integrals::AoIntegralInput ao;
+  ao.n_basis_functions=3;
+  ao.ao_core_hamiltonian_matrix=mo.one_electron;
+  std::vector<int> left,right;
+  std::vector<double> values;
+  for (int p=0; p<6; ++p)
+    for (int q=0; q<=p; ++q) {
+      left.push_back(p); right.push_back(q); values.push_back(mo.pair_kernel(p,q));
+    }
+  ao.pair_graph=xmvb::integrals::build_ao_pair_graph(left,right,values,3);
+  Eigen::MatrixXd orbitals=Eigen::Matrix3d::Identity();
+  orbitals(0,0)=orbitals(1,1)=std::cos(0.37);
+  orbitals(0,1)=-std::sin(0.37);
+  orbitals(1,0)=std::sin(0.37);
+  const Eigen::MatrixXd h=orbitals.transpose()*mo.one_electron*orbitals;
+  const auto rotated=[&](int p,int q,int r,int s) {
+    double value=0;
+    for (int i=0; i<3; ++i)
+      for (int j=0; j<3; ++j)
+        for (int k=0; k<3; ++k)
+          for (int l=0; l<3; ++l)
+            value+=orbitals(i,p)*orbitals(j,q)*orbitals(k,r)*orbitals(l,s)*eri(i,j,k,l);
+    return value;
+  };
+  const auto reference=xmvb::casscf::make_active_integrals(h,rotated,1,2,1.2);
+  const auto shared=xmvb::casscf::make_active_integrals(ao,orbitals,1,2,1.2);
+  close(shared.core_energy,reference.core_energy,"AO preparation changed inactive energy");
+  require((shared.active.one_electron-reference.active.one_electron).norm()<1e-12,
+      "shared AO preparation changed the active one-electron operator");
+  require((shared.active.pair_kernel-reference.active.pair_kernel).norm()<1e-12,
+      "shared AO preparation changed active Coulomb integrals");
+  close(xmvb::casscf::solve_casci(shared,1,1).energy(),
+      xmvb::casscf::solve_casci(reference,1,1).energy(),"AO-to-CASCI energy changed");
 }
 
 }  // namespace

@@ -8,7 +8,7 @@
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "core/pair_index.hpp"
 
 namespace xmvb::vb::detail {
@@ -26,7 +26,7 @@ OppositeSpinPackedPairProjection build_sparse_packed_pair_projection(
     return projection;
   }
 
-  const int n_packed_active_pairs = packed_active_pair_count(n_orbitals);
+  const int n_packed_active_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   std::vector<double> dense_pair_values(n_packed_active_pairs, 0.0);
   std::vector<unsigned char> touched_mask(n_packed_active_pairs, 0);
   std::vector<int> touched_indices;
@@ -184,7 +184,7 @@ DirectionalOppositeSpinPairTile build_directional_opposite_spin_pair_tile_impl(
     const AcceptedSpinPairTile* accepted_pair_tile,
     int n_unique_determinants,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const ActiveSpaceIntegralDirectionView& direction,
     const SameSpinDirectionalPairTileView& same_spin_tile,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors,
@@ -217,7 +217,7 @@ DirectionalOppositeSpinPairTile build_directional_opposite_spin_pair_tile_impl(
         "opposite-spin RI tile requires accepted and directional factors");
   }
 
-  const int n_packed_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_packed_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   if (accepted_ri_active_pair_factors != nullptr &&
       (accepted_ri_active_pair_factors->cols() != n_packed_pairs ||
        accepted_ri_active_pair_factors->rows() !=
@@ -351,7 +351,7 @@ DirectionalOppositeSpinPairTile build_directional_opposite_spin_pair_tile_impl(
       active_space_two_electron_result.packed_active_two_electron_integrals;
   const auto& directional_kernel = direction.packed_two_electron;
   const std::size_t expected_kernel_size =
-      packed_active_two_electron_integral_count(n_active_orbitals);
+      xmvb::integrals::packed_active_two_electron_integral_count(n_active_orbitals);
   if (accepted_kernel.size() != expected_kernel_size ||
       (!directional_kernel.empty() &&
        directional_kernel.size() != expected_kernel_size)) {
@@ -436,7 +436,7 @@ DirectionalOppositeSpinPairTile build_directional_opposite_spin_pair_tile(
     const std::vector<SpinDeterminantPairEvaluation>& ordered_pair_cache,
     int n_unique_determinants,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const ActiveSpaceIntegralDirectionView& direction,
     const SameSpinDirectionalPairTileView& same_spin_tile,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors,
@@ -458,7 +458,7 @@ DirectionalOppositeSpinPairTile build_directional_opposite_spin_pair_tile(
     const std::vector<std::vector<int>>& unique_determinants,
     const AcceptedSpinPairTile& accepted_pair_tile,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const ActiveSpaceIntegralDirectionView& direction,
     const SameSpinDirectionalPairTileView& same_spin_tile,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors,

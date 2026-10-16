@@ -13,7 +13,7 @@ StructureMatrixEvaluator::
     StructureMatrixEvaluator(
         ActiveSpaceOrbitalPreparer orbital_preparer,
         AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
-        ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
+        xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
         ActiveSpaceTwoElectronBuilder active_space_two_electron_builder,
         FullDeterminantStructureHamiltonianOverlapBuilder structure_builder)
     : orbital_preparer_(std::move(orbital_preparer)),

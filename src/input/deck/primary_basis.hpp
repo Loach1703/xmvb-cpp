@@ -4,7 +4,7 @@
 #include <string>
 
 #include "input/deck/model.hpp"
-#include "vbscf/integrals/ao/libcint/input.hpp"
+#include "integrals/ao/libcint_input.hpp"
 
 namespace xmvb::vb {
 
@@ -19,7 +19,7 @@ namespace xmvb::vb {
 struct InputDeckBasisBuildResult {
   std::filesystem::path basis_file_path;
   std::string basis_display_name;
-  LibcintInput libcint_input;
+  xmvb::integrals::LibcintInput libcint_input;
 };
 
 /**

@@ -11,7 +11,7 @@
 #include "input/loading/loader.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
+#include "integrals/ao/ri_operator.hpp"
 
 namespace {
 
@@ -80,13 +80,13 @@ int main(int argc, char** argv) {
         0.5 * (inactive_density + inactive_density.transpose()).eval();
 
     const auto ri_from_original =
-        xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+        xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
             flatten_matrix(orbital_result.inactive_density_matrix),
             ri_cache,
             n_basis_functions,
             {.attempt_spectral_factorization = true});
     const auto ri_from_symmetrized =
-        xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+        xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
             flatten_matrix(symmetrized_inactive_density),
             ri_cache,
             n_basis_functions,

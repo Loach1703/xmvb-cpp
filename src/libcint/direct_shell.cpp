@@ -61,9 +61,9 @@ void cint3c2e_cart_optimizer(
     double* env);
 }
 
-#include "vbscf/integrals/ao/libcint/validation.hpp"
+#include "integrals/ao/libcint.hpp"
 
-namespace xmvb::vb {
+namespace xmvb::libcint {
 
 namespace {
 
@@ -99,8 +99,8 @@ enum class OneElectronIntegralKind {
 };
 
 void validate_shared_atom_tables(
-    const LibcintInput& primary_input,
-    const LibcintInput& auxiliary_input) {
+    const xmvb::integrals::LibcintInput& primary_input,
+    const xmvb::integrals::LibcintInput& auxiliary_input) {
   if (auxiliary_input.n_atoms != primary_input.n_atoms) {
     throw std::invalid_argument("primary and auxiliary LibcintInput atom counts differ");
   }
@@ -127,8 +127,8 @@ void validate_shared_atom_tables(
 }
 
 std::vector<double> build_combined_env(
-    const LibcintInput& primary_input,
-    const LibcintInput& auxiliary_input) {
+    const xmvb::integrals::LibcintInput& primary_input,
+    const xmvb::integrals::LibcintInput& auxiliary_input) {
   std::vector<double> combined_env;
   combined_env.reserve(
       primary_input.env.size() + auxiliary_input.env.size());
@@ -144,8 +144,8 @@ std::vector<double> build_combined_env(
 }
 
 std::vector<int> build_combined_basis(
-    const LibcintInput& primary_input,
-    const LibcintInput& auxiliary_input) {
+    const xmvb::integrals::LibcintInput& primary_input,
+    const xmvb::integrals::LibcintInput& auxiliary_input) {
   std::vector<int> combined_bas;
   combined_bas.reserve(primary_input.bas.size() + auxiliary_input.bas.size());
   combined_bas.insert(combined_bas.end(), primary_input.bas.begin(), primary_input.bas.end());
@@ -166,11 +166,11 @@ std::vector<int> build_combined_basis(
 
 }  // namespace
 
-LibcintDirectShellEvaluator::LibcintDirectShellEvaluator(const LibcintInput& input)
+LibcintDirectShellEvaluator::LibcintDirectShellEvaluator(const xmvb::integrals::LibcintInput& input)
     : input_(input),
-      n_basis_functions_(infer_n_basis_functions(input)) {
-  validate_libcint_input_shape(input_);
-  ao_normalization_ = build_cartesian_ao_normalization(input_);
+      n_basis_functions_(xmvb::integrals::infer_n_basis_functions(input)) {
+  xmvb::integrals::validate_libcint_input_shape(input_);
+  ao_normalization_ = xmvb::integrals::build_cartesian_ao_normalization(input_);
 
   cint2e_cart_optimizer(
       reinterpret_cast<CINTOpt**>(&two_electron_optimizer_),
@@ -182,24 +182,24 @@ LibcintDirectShellEvaluator::LibcintDirectShellEvaluator(const LibcintInput& inp
 }
 
 LibcintDirectShellEvaluator::LibcintDirectShellEvaluator(
-    const LibcintInput& primary_input,
-    const LibcintInput& auxiliary_input)
+    const xmvb::integrals::LibcintInput& primary_input,
+    const xmvb::integrals::LibcintInput& auxiliary_input)
     : input_(primary_input),
       auxiliary_input_(&auxiliary_input),
-      n_basis_functions_(infer_n_basis_functions(primary_input)),
-      n_auxiliary_basis_functions_(infer_n_basis_functions(auxiliary_input)) {
-  validate_libcint_input_shape(input_);
-  validate_libcint_input_shape(*auxiliary_input_);
+      n_basis_functions_(xmvb::integrals::infer_n_basis_functions(primary_input)),
+      n_auxiliary_basis_functions_(xmvb::integrals::infer_n_basis_functions(auxiliary_input)) {
+  xmvb::integrals::validate_libcint_input_shape(input_);
+  xmvb::integrals::validate_libcint_input_shape(*auxiliary_input_);
   validate_shared_atom_tables(input_, *auxiliary_input_);
 
-  ao_normalization_ = build_cartesian_ao_normalization(input_);
-  auxiliary_ao_normalization_ = build_cartesian_ao_normalization(*auxiliary_input_);
+  ao_normalization_ = xmvb::integrals::build_cartesian_ao_normalization(input_);
+  auxiliary_ao_normalization_ = xmvb::integrals::build_cartesian_ao_normalization(*auxiliary_input_);
   // Auxiliary metric truncation is defined in unit-radial Cartesian AOs,
   // matching PySCF. Primary orbitals remain component-wise unit normalized.
   for (int shell = 0; shell < auxiliary_input_->n_shells; ++shell) {
     const int l = auxiliary_input_->bas[shell * BAS_SLOTS + ANG_OF];
     const int n_cart = cartesian_ao_count(l);
-    const int offset = shell_ao_offset(*auxiliary_input_, shell);
+    const int offset = xmvb::integrals::shell_ao_offset(*auxiliary_input_, shell);
     const int n_contractions = auxiliary_input_->bas[shell * BAS_SLOTS + NCTR_OF];
     for (int contraction = 0; contraction < n_contractions; ++contraction) {
       int component = 0;
@@ -266,10 +266,10 @@ LibcintShellBlock LibcintDirectShellEvaluator::evaluate_one_electron_shell_pair(
   validate_shell_index(left_shell);
   validate_shell_index(right_shell);
 
-  const int left_ao_offset = shell_ao_offset(input_, left_shell);
-  const int right_ao_offset = shell_ao_offset(input_, right_shell);
-  const int left_ao_count = shell_ao_count(input_, left_shell);
-  const int right_ao_count = shell_ao_count(input_, right_shell);
+  const int left_ao_offset = xmvb::integrals::shell_ao_offset(input_, left_shell);
+  const int right_ao_offset = xmvb::integrals::shell_ao_offset(input_, right_shell);
+  const int left_ao_count = xmvb::integrals::shell_ao_count(input_, left_shell);
+  const int right_ao_count = xmvb::integrals::shell_ao_count(input_, right_shell);
   std::vector<double> buffer(
       left_ao_count * right_ao_count,
       0.0);
@@ -404,10 +404,10 @@ LibcintVectorShellBlock LibcintDirectShellEvaluator::evaluate_position_shell_pai
   validate_shell_index(left_shell);
   validate_shell_index(right_shell);
 
-  const int left_ao_offset = shell_ao_offset(input_, left_shell);
-  const int right_ao_offset = shell_ao_offset(input_, right_shell);
-  const int left_ao_count = shell_ao_count(input_, left_shell);
-  const int right_ao_count = shell_ao_count(input_, right_shell);
+  const int left_ao_offset = xmvb::integrals::shell_ao_offset(input_, left_shell);
+  const int right_ao_offset = xmvb::integrals::shell_ao_offset(input_, right_shell);
+  const int left_ao_count = xmvb::integrals::shell_ao_count(input_, left_shell);
+  const int right_ao_count = xmvb::integrals::shell_ao_count(input_, right_shell);
   const std::size_t component_size = left_ao_count * right_ao_count;
   std::vector<double> buffer(3 * component_size, 0.0);
   FINT shell_pair[2] = {left_shell, right_shell};
@@ -453,14 +453,14 @@ const LibcintShellQuartet& LibcintDirectShellEvaluator::evaluate_two_electron_sh
   validate_shell_index(shell_k);
   validate_shell_index(shell_l);
 
-  const int ao_offset_i = shell_ao_offset(input_, shell_i);
-  const int ao_offset_j = shell_ao_offset(input_, shell_j);
-  const int ao_offset_k = shell_ao_offset(input_, shell_k);
-  const int ao_offset_l = shell_ao_offset(input_, shell_l);
-  const int ao_count_i = shell_ao_count(input_, shell_i);
-  const int ao_count_j = shell_ao_count(input_, shell_j);
-  const int ao_count_k = shell_ao_count(input_, shell_k);
-  const int ao_count_l = shell_ao_count(input_, shell_l);
+  const int ao_offset_i = xmvb::integrals::shell_ao_offset(input_, shell_i);
+  const int ao_offset_j = xmvb::integrals::shell_ao_offset(input_, shell_j);
+  const int ao_offset_k = xmvb::integrals::shell_ao_offset(input_, shell_k);
+  const int ao_offset_l = xmvb::integrals::shell_ao_offset(input_, shell_l);
+  const int ao_count_i = xmvb::integrals::shell_ao_count(input_, shell_i);
+  const int ao_count_j = xmvb::integrals::shell_ao_count(input_, shell_j);
+  const int ao_count_k = xmvb::integrals::shell_ao_count(input_, shell_k);
+  const int ao_count_l = xmvb::integrals::shell_ao_count(input_, shell_l);
 
   auto& result = workspace.quartet;
   auto& buffer = result.values;
@@ -523,10 +523,10 @@ const LibcintShellBlock& LibcintDirectShellEvaluator::evaluate_auxiliary_metric_
   validate_auxiliary_shell_index(left_auxiliary_shell);
   validate_auxiliary_shell_index(right_auxiliary_shell);
 
-  const int left_ao_offset = shell_ao_offset(*auxiliary_input_, left_auxiliary_shell);
-  const int right_ao_offset = shell_ao_offset(*auxiliary_input_, right_auxiliary_shell);
-  const int left_ao_count = shell_ao_count(*auxiliary_input_, left_auxiliary_shell);
-  const int right_ao_count = shell_ao_count(*auxiliary_input_, right_auxiliary_shell);
+  const int left_ao_offset = xmvb::integrals::shell_ao_offset(*auxiliary_input_, left_auxiliary_shell);
+  const int right_ao_offset = xmvb::integrals::shell_ao_offset(*auxiliary_input_, right_auxiliary_shell);
+  const int left_ao_count = xmvb::integrals::shell_ao_count(*auxiliary_input_, left_auxiliary_shell);
+  const int right_ao_count = xmvb::integrals::shell_ao_count(*auxiliary_input_, right_auxiliary_shell);
 
   auto& result = workspace.metric;
   auto& buffer = result.values;
@@ -574,12 +574,12 @@ const LibcintThreeCenterShellBlock& LibcintDirectShellEvaluator::evaluate_three_
   validate_auxiliary_shell_index(auxiliary_shell);
 
   const int combined_auxiliary_shell = input_.n_shells + auxiliary_shell;
-  const int primary_left_ao_offset = shell_ao_offset(input_, primary_left_shell);
-  const int primary_right_ao_offset = shell_ao_offset(input_, primary_right_shell);
-  const int auxiliary_ao_offset = shell_ao_offset(*auxiliary_input_, auxiliary_shell);
-  const int primary_left_ao_count = shell_ao_count(input_, primary_left_shell);
-  const int primary_right_ao_count = shell_ao_count(input_, primary_right_shell);
-  const int auxiliary_ao_count = shell_ao_count(*auxiliary_input_, auxiliary_shell);
+  const int primary_left_ao_offset = xmvb::integrals::shell_ao_offset(input_, primary_left_shell);
+  const int primary_right_ao_offset = xmvb::integrals::shell_ao_offset(input_, primary_right_shell);
+  const int auxiliary_ao_offset = xmvb::integrals::shell_ao_offset(*auxiliary_input_, auxiliary_shell);
+  const int primary_left_ao_count = xmvb::integrals::shell_ao_count(input_, primary_left_shell);
+  const int primary_right_ao_count = xmvb::integrals::shell_ao_count(input_, primary_right_shell);
+  const int auxiliary_ao_count = xmvb::integrals::shell_ao_count(*auxiliary_input_, auxiliary_shell);
 
   auto& result = workspace.three_center;
   auto& buffer = result.values;
@@ -638,10 +638,10 @@ double LibcintDirectShellEvaluator::evaluate_two_electron_shell_pair_bound(
   validate_shell_index(shell_i);
   validate_shell_index(shell_j);
 
-  const int ao_count_i = shell_ao_count(input_, shell_i);
-  const int ao_count_j = shell_ao_count(input_, shell_j);
-  const int offset_i = shell_ao_offset(input_, shell_i);
-  const int offset_j = shell_ao_offset(input_, shell_j);
+  const int ao_count_i = xmvb::integrals::shell_ao_count(input_, shell_i);
+  const int ao_count_j = xmvb::integrals::shell_ao_count(input_, shell_j);
+  const int offset_i = xmvb::integrals::shell_ao_offset(input_, shell_i);
+  const int offset_j = xmvb::integrals::shell_ao_offset(input_, shell_j);
   auto& buffer = workspace.quartet.values;
   buffer.resize(static_cast<std::size_t>(ao_count_i) *
                 ao_count_j * ao_count_i * ao_count_j);
@@ -669,4 +669,4 @@ double LibcintDirectShellEvaluator::evaluate_two_electron_shell_pair_bound(
   return bound;
 }
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::libcint

@@ -6,7 +6,7 @@
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/derivatives/hessian/responses/active_space/integral_direction.hpp"
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
+#include "integrals/active/two_electron_result.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 
 namespace xmvb::vb {
@@ -62,7 +62,7 @@ SameSpinMatrixBackwardContribution build_same_spin_matrix_backward_contribution(
     int n_active_orbitals,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_two_electron);
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron);
 
 /**
  * @brief Builds the directional same-spin backward contribution.
@@ -88,6 +88,6 @@ build_directional_same_spin_matrix_backward_contribution(
     int n_active_orbitals,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_two_electron);
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron);
 
 }  // namespace xmvb::vb

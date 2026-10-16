@@ -11,18 +11,19 @@ src/
   core/            Pair indexing and lightweight timing
   linalg/          Eigensolvers, eigen response, metric solves, and Krylov algebra
   parallel/        Shared OpenMP execution and work partitioning
+  integrals/       Shared exact/RI AO operators, active transforms and derivatives
   mcscf/           Shared direct-CI, state contracts, and CIAH/NEO solvers
   casscf/          Orthogonal CASCI model (orbital optimization not yet exposed)
   vbscf/           Canonical VBSCF implementation
     orbitals/      Sparse/full-AO charts, gauges, and pullbacks
-    integrals/     AO and active-space integral operators
+    integrals/     VB orbital-preparation and integral-adjoint adapters
     determinants/  Determinant-pair algebra and caches
     structures/    VB structure expansion and state matrices
     derivatives/   Gradient and matrix-free Hessian-vector products
     optimization/  VB coordinates, physical preconditioners, and solver adapters
     workflow/      End-to-end VBSCF evaluation
   input/           XMI deck contracts and VBSCF input loading
-  libcint/         libcint providers and AO integral preparation
+  libcint/         Method-independent libcint providers (no VB dependency)
   guess/           Initial orbitals and restricted-HF construction
   output/          Molden and accepted-iteration output
   cli/             Command-line entry point and reporting
@@ -30,7 +31,7 @@ src/
 basis/             Standard basis set library (Pople, Dunning, etc.)
 testdata/vbscf/    Versioned VBSCF regression decks
 tests/vbscf/       Unit and numerical-regression tests
-tests/mcscf/       Independent CI, CASCI, and common-solver tests
+tests/mcscf/       Independent integrals, CI, CASCI, and common-solver tests
 tests/linalg/      Linear-algebra tests with no electronic-model dependency
 tests/parallel/    Shared-buffer and nested-team execution tests
 ```

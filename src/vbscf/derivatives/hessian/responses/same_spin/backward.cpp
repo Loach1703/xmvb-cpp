@@ -214,7 +214,7 @@ AcceptedSpinPairActionResult apply_partner_action_panel(
     int panel_size,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     std::size_t workspace_bytes) {
   const Eigen::MatrixXd vectors = pack_partner_vectors(
       accepted_states,
@@ -345,7 +345,7 @@ void consume_spin_panels(
     int n_active,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     Eigen::MatrixXd* h1e_gradient,
     SameSpinMatrixBackwardContribution* result) {
   const int n_unique = target_size(states, target_spin);
@@ -454,7 +454,7 @@ SameSpinMatrixBackwardContribution build_same_spin_matrix_backward_contribution(
     int n_active,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron) {
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron) {
   validate_backward_inputs(
       cache, states, energies, n_active, active_overlap, h1e);
 
@@ -516,7 +516,7 @@ build_directional_same_spin_matrix_backward_contribution(
     int n_active,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron) {
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron) {
   validate_backward_inputs(
       cache, states, energies, n_active, active_overlap, h1e);
   validate_directional_inputs(

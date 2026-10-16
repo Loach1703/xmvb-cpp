@@ -2,8 +2,8 @@
 
 #include <Eigen/Core>
 
-#include "vbscf/integrals/ao/contracts/input.hpp"
-#include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "integrals/ao/input.hpp"
+#include "integrals/ao/ri.hpp"
 
 namespace xmvb::vb {
 
@@ -17,12 +17,12 @@ class ClosedShellFockBuilder {
 public:
   Eigen::MatrixXd build(
       const Eigen::Ref<const Eigen::MatrixXd>& density_projector,
-      const AoIntegralInput& ao_integral_input) const;
+      const xmvb::integrals::AoIntegralInput& ao_integral_input) const;
 
   Eigen::MatrixXd build(
       const Eigen::Ref<const Eigen::MatrixXd>& density_projector,
       const Eigen::Ref<const Eigen::MatrixXd>& core_hamiltonian_matrix,
-      const RiAoFactorization& ri_factorization) const;
+      const xmvb::integrals::RiAoFactorization& ri_factorization) const;
 };
 
 }  // namespace xmvb::vb

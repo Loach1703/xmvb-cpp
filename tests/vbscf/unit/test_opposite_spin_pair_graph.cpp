@@ -351,7 +351,7 @@ int main() {
   Eigen::Matrix2d active_one_electron;
   active_one_electron << -0.7, 0.1,
                           0.1, -0.4;
-  xmvb::vb::ActiveSpaceTwoElectronResult cache_two_electron_result;
+  xmvb::integrals::ActiveSpaceTwoElectronResult cache_two_electron_result;
   cache_two_electron_result.packed_active_two_electron_integrals = {
       0.8, 0.1, 0.6, 0.2, 0.15, 0.5};
   xmvb::vb::DeterminantPairEvaluator pair_evaluator;
@@ -446,9 +446,9 @@ int main() {
         "lazy derivative cache disagrees with eager construction");
   }
 
-  xmvb::vb::ActiveSpaceTwoElectronResult ri_pair_result;
+  xmvb::integrals::ActiveSpaceTwoElectronResult ri_pair_result;
   ri_pair_result.representation =
-      xmvb::vb::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
   ri_pair_result.n_auxiliary_functions = 2;
   ri_pair_result.ri_active_pair_factors.resize(2, n_channels);
   ri_pair_result.ri_active_pair_factors <<
@@ -464,9 +464,9 @@ int main() {
   const Eigen::MatrixXd ri_kernel =
       ri_pair_result.ri_active_pair_factors.transpose() *
       ri_pair_result.ri_active_pair_factors;
-  xmvb::vb::ActiveSpaceTwoElectronResult packed_ri_result = ri_pair_result;
+  xmvb::integrals::ActiveSpaceTwoElectronResult packed_ri_result = ri_pair_result;
   packed_ri_result.representation =
-      xmvb::vb::ActiveSpaceTwoElectronRepresentation::PackedExact;
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::PackedExact;
   packed_ri_result.packed_active_two_electron_integrals.assign(
       static_cast<std::size_t>(n_channels) * (n_channels + 1) / 2,
       0.0);
@@ -605,7 +605,7 @@ int main() {
       max_error <= 1.0e-12 * reference_scale,
       "pair-major opposite-spin contraction disagrees with direct sum");
 
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron_result;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron_result;
   two_electron_result.packed_active_two_electron_integrals.resize(packed_size);
   for (int row = 0; row < n_channels; ++row) {
     for (int column = 0; column <= row; ++column) {

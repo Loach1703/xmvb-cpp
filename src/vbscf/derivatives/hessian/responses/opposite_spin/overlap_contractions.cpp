@@ -10,7 +10,7 @@
 #include "parallel/openmp.hpp"
 #include "vbscf/determinants/algebra/cofactor_differential.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/derivatives/hessian/responses/opposite_spin/selected_state_pair_graph_internal.hpp"
 
@@ -196,14 +196,14 @@ void accumulate_overlap_gradient_by_pair_graph(
     int n_unique_partner,
     const SelectedStatePairGraph& pair_graph,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     std::vector<double>* active_orbital_overlap_gradient) {
   // For each primary-spin string pair, contract the accepted/directional
   // coefficient rows directly with compatible partner-spin pairs.  This first
   // forms the sparse raw partner projection y, then evaluates only the entries
   // of G y required by the inverse-overlap pullback.  The former P-channel
   // sweep repeated the coefficient contraction once for every active pair.
-  const int n_packed_active_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_packed_active_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   const int n_threads = std::min(
       xmvb::effective_openmp_thread_count(),
       n_unique_primary);
@@ -282,7 +282,7 @@ void accumulate_overlap_gradient_by_pair_graph(
         }
       }
       const Eigen::VectorXd projected_targets =
-          apply_active_space_two_electron_kernel_to_sparse_projection_subset(
+          xmvb::integrals::apply_active_space_two_electron_kernel_to_sparse_projection_subset(
               two_electron_view,
               n_active_orbitals,
               touched_channels,
@@ -496,7 +496,7 @@ void accumulate_alpha_overlap_gradient_by_pair_graph(
     const SameSpinPairCacheContext& same_spin_pair_cache,
     const SelectedStateDeterminantMatrices& selected_states,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     std::vector<double>* active_orbital_overlap_gradient) {
   if (active_orbital_overlap_gradient == nullptr) {
     throw std::invalid_argument("active_orbital_overlap_gradient must not be null");
@@ -512,7 +512,7 @@ void accumulate_alpha_overlap_gradient_by_pair_graph(
       selected_states.n_unique_beta,
       pair_graph,
       n_active_orbitals,
-      make_active_space_two_electron_view(active_space_two_electron_result),
+      xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result),
       active_orbital_overlap_gradient);
 }
 
@@ -520,7 +520,7 @@ void accumulate_beta_overlap_gradient_by_pair_graph(
     const SameSpinPairCacheContext& same_spin_pair_cache,
     const SelectedStateDeterminantMatrices& selected_states,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     std::vector<double>* active_orbital_overlap_gradient) {
   if (active_orbital_overlap_gradient == nullptr) {
     throw std::invalid_argument("active_orbital_overlap_gradient must not be null");
@@ -536,7 +536,7 @@ void accumulate_beta_overlap_gradient_by_pair_graph(
       selected_states.n_unique_alpha,
       pair_graph,
       n_active_orbitals,
-      make_active_space_two_electron_view(active_space_two_electron_result),
+      xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result),
       active_orbital_overlap_gradient);
 }
 
@@ -545,7 +545,7 @@ void accumulate_directional_alpha_overlap_gradient(
     const SelectedStateDeterminantMatrices& selected_states,
     const SelectedStateDeterminantMatrices& directional_selected_states,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     std::vector<double>* active_orbital_overlap_gradient) {
   if (active_orbital_overlap_gradient == nullptr) {
     throw std::invalid_argument("active_orbital_overlap_gradient must not be null");
@@ -562,7 +562,7 @@ void accumulate_directional_alpha_overlap_gradient(
       selected_states.n_unique_beta,
       pair_graph,
       n_active_orbitals,
-      make_active_space_two_electron_view(active_space_two_electron_result),
+      xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result),
       active_orbital_overlap_gradient);
 }
 
@@ -571,7 +571,7 @@ void accumulate_directional_beta_overlap_gradient(
     const SelectedStateDeterminantMatrices& selected_states,
     const SelectedStateDeterminantMatrices& directional_selected_states,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     std::vector<double>* active_orbital_overlap_gradient) {
   if (active_orbital_overlap_gradient == nullptr) {
     throw std::invalid_argument("active_orbital_overlap_gradient must not be null");
@@ -588,7 +588,7 @@ void accumulate_directional_beta_overlap_gradient(
       selected_states.n_unique_alpha,
       pair_graph,
       n_active_orbitals,
-      make_active_space_two_electron_view(active_space_two_electron_result),
+      xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result),
       active_orbital_overlap_gradient);
 }
 

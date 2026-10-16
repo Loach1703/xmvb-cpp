@@ -140,7 +140,7 @@ struct Fixture {
   Strings alpha, beta;
   std::vector<double> overlap;
   Eigen::MatrixXd one_electron;
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
 };
 
 Fixture make_fixture() {
@@ -162,14 +162,14 @@ Fixture make_fixture() {
       f.one_electron(j, i) = value;
     }
   }
-  const int n_pairs = xmvb::vb::packed_active_pair_count(f.n);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(f.n);
   Eigen::MatrixXd factor(4, n_pairs);
   for (int j = 0; j < n_pairs; ++j)
     for (int i = 0; i < factor.rows(); ++i)
       factor(i, j) = 0.018 * std::cos(0.13 * (i + 2) * (j + 1));
   const Eigen::MatrixXd kernel = factor.transpose() * factor;
   auto& packed = f.two_electron.packed_active_two_electron_integrals;
-  packed.resize(xmvb::vb::packed_active_two_electron_integral_count(f.n));
+  packed.resize(xmvb::integrals::packed_active_two_electron_integral_count(f.n));
   for (int j = 0; j < n_pairs; ++j)
     for (int i = 0; i <= j; ++i)
       packed[j * (j + 1) / 2 + i] =
@@ -287,7 +287,7 @@ void run(int count, const std::string& binary_path) {
       ds(i, j) = ds(j, i) = 0.0004 * std::cos(0.13 * (i + 2) * (j + 1));
       dh(i, j) = dh(j, i) = 0.0007 * std::sin(0.17 * (i + 1) * (j + 3));
     }
-  const int pairs = xmvb::vb::packed_active_pair_count(fixture.n);
+  const int pairs = xmvb::integrals::packed_active_pair_count(fixture.n);
   std::vector<double> dg(
       fixture.two_electron.packed_active_two_electron_integrals.size());
   for (int i = 0; i < static_cast<int>(dg.size()); ++i)

@@ -25,7 +25,7 @@
 #include "guess/initial.hpp"
 #include "vbscf/structures/expansion/expander.hpp"
 #include "vbscf/structures/selection/subspace/selector.hpp"
-#include "vbscf/integrals/ao/libcint/validation.hpp"
+#include "integrals/ao/libcint.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/orbitals/gauge/support_preserving.hpp"
@@ -58,8 +58,8 @@ struct StaticMoleculeTopology {
 };
 
 Eigen::MatrixXd build_full_ao_overlap_matrix(
-    const LibcintInput& libcint_input) {
-  LibcintDirectShellEvaluator evaluator(libcint_input);
+    const xmvb::integrals::LibcintInput& libcint_input) {
+  xmvb::libcint::LibcintDirectShellEvaluator evaluator(libcint_input);
   const int n_basis_functions = evaluator.n_basis_functions();
   Eigen::MatrixXd overlap_matrix =
       Eigen::MatrixXd::Zero(n_basis_functions, n_basis_functions);
@@ -69,7 +69,7 @@ Eigen::MatrixXd build_full_ao_overlap_matrix(
   // fields that still store column-major buffers.
   for (int right_shell = 0; right_shell < libcint_input.n_shells; ++right_shell) {
     for (int left_shell = 0; left_shell <= right_shell; ++left_shell) {
-      const LibcintShellBlock shell_block =
+      const xmvb::libcint::LibcintShellBlock shell_block =
           evaluator.evaluate_overlap_shell_pair(left_shell, right_shell);
       for (int local_column = 0;
            local_column < shell_block.right_ao_count;
@@ -92,8 +92,8 @@ Eigen::MatrixXd build_full_ao_overlap_matrix(
 }
 
 Eigen::MatrixXd build_full_ao_core_hamiltonian_matrix(
-    const LibcintInput& libcint_input) {
-  LibcintDirectShellEvaluator evaluator(libcint_input);
+    const xmvb::integrals::LibcintInput& libcint_input) {
+  xmvb::libcint::LibcintDirectShellEvaluator evaluator(libcint_input);
   const int n_basis_functions = evaluator.n_basis_functions();
   Eigen::MatrixXd core_hamiltonian_matrix =
       Eigen::MatrixXd::Zero(n_basis_functions, n_basis_functions);
@@ -103,7 +103,7 @@ Eigen::MatrixXd build_full_ao_core_hamiltonian_matrix(
   // C++ integral source.
   for (int right_shell = 0; right_shell < libcint_input.n_shells; ++right_shell) {
     for (int left_shell = 0; left_shell <= right_shell; ++left_shell) {
-      const LibcintShellBlock shell_block =
+      const xmvb::libcint::LibcintShellBlock shell_block =
           evaluator.evaluate_core_hamiltonian_shell_pair(
               left_shell,
               right_shell);
@@ -417,12 +417,12 @@ std::optional<StandardTwoElectronMode> sniff_standard_two_electron_mode_from_inp
 }
 
 StaticMoleculeTopology build_static_molecule_topology(
-    const LibcintInput& libcint_input) {
+    const xmvb::integrals::LibcintInput& libcint_input) {
   StaticMoleculeTopology topology;
-  validate_libcint_input_shape(libcint_input);
+  xmvb::integrals::validate_libcint_input_shape(libcint_input);
   topology.n_atoms = libcint_input.n_atoms;
   topology.n_shells = libcint_input.n_shells;
-  topology.n_basis_functions = infer_n_basis_functions(libcint_input);
+  topology.n_basis_functions = xmvb::integrals::infer_n_basis_functions(libcint_input);
   topology.shell_to_atom.reserve(topology.n_shells);
   topology.shell_angular_momenta.reserve(topology.n_shells);
   topology.shell_n_primitives.reserve(topology.n_shells);
@@ -441,8 +441,8 @@ StaticMoleculeTopology build_static_molecule_topology(
     const int atom_index = libcint_input.bas[shell_offset + ATOM_OF];
     const int angular_momentum = libcint_input.bas[shell_offset + ANG_OF];
     const int n_primitives = libcint_input.bas[shell_offset + NPRIM_OF];
-    const int ao_start = shell_ao_offset(libcint_input, shell_index);
-    const int ao_count = shell_ao_count(libcint_input, shell_index);
+    const int ao_start = xmvb::integrals::shell_ao_offset(libcint_input, shell_index);
+    const int ao_count = xmvb::integrals::shell_ao_count(libcint_input, shell_index);
     topology.shell_to_atom.push_back(atom_index);
     topology.shell_angular_momenta.push_back(angular_momentum);
     topology.shell_n_primitives.push_back(n_primitives);
@@ -518,7 +518,7 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
   const InputDeckMetadata& input_deck_metadata = input_deck.metadata;
   const InputDeckBasisBuildResult primary_basis_build_result =
       build_input_deck_basis(input_deck, input_deck_metadata.basis_name);
-  const LibcintInput& primary_libcint_input =
+  const xmvb::integrals::LibcintInput& primary_libcint_input =
       primary_basis_build_result.libcint_input;
   const StaticMoleculeTopology static_topology =
       build_static_molecule_topology(primary_libcint_input);
@@ -646,7 +646,7 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
   }
   result.libcint_input = primary_libcint_input;
   result.ri_factorization_provider =
-      std::make_shared<const LibcintRiIntegralProvider>();
+      std::make_shared<const xmvb::libcint::LibcintRiIntegralProvider>();
   if (use_standard_ri_two_electron_mode) {
     std::string auxiliary_basis_name =
         input_deck_metadata.auxiliary_basis_name;
@@ -664,9 +664,9 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
   }
 
   const auto ao_integral_provider_start_time = std::chrono::steady_clock::now();
-  MaterializedAoIntegralBuffers ao_integral_buffers;
+  xmvb::libcint::MaterializedAoIntegralBuffers ao_integral_buffers;
   if (!use_standard_ri_two_electron_mode) {
-    LibcintMaterializedIntegralProvider provider;
+    xmvb::libcint::LibcintMaterializedIntegralProvider provider;
     ao_integral_buffers = provider.build(result.libcint_input);
   }
   load_result.ao_integral_provider_seconds =
@@ -677,11 +677,11 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
   if (use_standard_ri_two_electron_mode) {
     const Eigen::MatrixXd core_hamiltonian_matrix =
         build_full_ao_core_hamiltonian_matrix(result.libcint_input);
-    result.ao_integral_input = build_core_hamiltonian_only_ao_integral_input(
+    result.ao_integral_input = xmvb::libcint::build_core_hamiltonian_only_ao_integral_input(
         static_topology.n_basis_functions,
         core_hamiltonian_matrix);
   } else {
-    result.ao_integral_input = build_materialized_ao_integral_input(
+    result.ao_integral_input = xmvb::libcint::build_materialized_ao_integral_input(
         std::move(ao_integral_buffers));
   }
   load_result.ao_integral_input_build_seconds =
@@ -690,7 +690,7 @@ VbScfInputLoadResult load_vbscf_input_with_timings(
           .count();
   if (!options.skip_orbital_guess) {
     const auto orbital_guess_start_time = std::chrono::steady_clock::now();
-    const RiAoFactorization* ri_guess_factorization = nullptr;
+    const xmvb::integrals::RiAoFactorization* ri_guess_factorization = nullptr;
     if (use_standard_ri_two_electron_mode) {
       ri_guess_factorization = &ensure_vbscf_input_ri_cache(result);
     }

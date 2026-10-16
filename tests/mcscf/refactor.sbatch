@@ -28,6 +28,9 @@ find "$source_dir/src" "$source_dir/tests/mcscf/unit" "$source_dir/tests/linalg/
  "$source_dir/tests/vbscf/unit" -type f \( -name '*.cpp' -o -name '*.hpp' \) \
  -print0 | sort -z | xargs -0 sha256sum > "$artifact/sources.sha256"
 cmake --build "$source_dir/build" --target xmvb test_ci_factors test_casci \
+ test_integrals test_active_two_electron_sparse test_ri_ao_h1e_hvp \
+ test_libcint_ri test_libcint_shell_screening \
+ test_ri_pair_contractions test_ri_active_two_electron_response \
  test_ciah test_neo test_neo_globalization test_minres test_block_inverse_bfgs \
  test_orthonormal_hvp_basis test_positive_ritz_secants test_shifted_metric_preconditioner \
  test_state_weights test_representation_overlap test_ci_transport test_selected_ci_transport \
@@ -41,12 +44,12 @@ sha256sum "$source_dir/build/src/xmvb-cpp.exe" "$source_dir/build/src/test_ciah"
  "$source_dir/build/src/test_casci" > "$artifact/binaries.sha256"
 cp "$source_dir/build/src/xmvb-cpp.exe" "$artifact/xmvb-cpp.exe"
 # These executables must contain no definitions from the VB model library.
-for target in test_ciah test_neo test_minres test_casci test_davidson test_eigen_response; do
+for target in test_integrals test_libcint_ri test_libcint_shell_screening test_ciah test_neo test_minres test_casci test_davidson test_eigen_response; do
   nm -C "$source_dir/build/src/$target" > "$artifact/$target.symbols"
   if grep -E ' [TW] xmvb::vb::' "$artifact/$target.symbols"; then exit 65; fi
 done
 srun --exact --ntasks=1 --cpus-per-task=4 --cpu-bind=cores \
  ctest --test-dir "$source_dir/build" --output-on-failure \
- -R '^(ci_factors|casci|ciah|neo|neo_globalization|minres|block_inverse_bfgs|orthonormal_hvp_basis|positive_ritz_secants|shifted_metric_preconditioner|state_weights|representation_overlap|ci_transport|selected_ci_transport|keyframe|structure_tiles|sparse_orbital_quotient|coupled_structure|davidson|eigen_response|spectral_trust_region|ciah_hessian_diagonal_f2_hao|ciah_hessian_diagonal_f2_oeo|cli_options|dense_span|openmp|input_guess_selection|output_orbitals|state_average_f2|text_report_f2|tnhvp_trace_f2|ciah_f2|ciah_pyscf_reference_f2|plbfgs_f2)$' \
+ -R '^(ci_factors|casci|integrals|libcint_ri|libcint_shell_screening|active_two_electron_sparse|ri_ao_h1e_hvp|ri_pair_contractions|ri_active_two_electron_response|ciah|neo|neo_globalization|minres|block_inverse_bfgs|orthonormal_hvp_basis|positive_ritz_secants|shifted_metric_preconditioner|state_weights|representation_overlap|ci_transport|selected_ci_transport|keyframe|structure_tiles|sparse_orbital_quotient|coupled_structure|davidson|eigen_response|spectral_trust_region|ciah_hessian_diagonal_f2_hao|ciah_hessian_diagonal_f2_oeo|cli_options|dense_span|openmp|input_guess_selection|output_orbitals|state_average_f2|text_report_f2|tnhvp_trace_f2|ciah_f2|ciah_pyscf_reference_f2|plbfgs_f2)$' \
  > "$artifact/ctest.out" 2>&1
 cp "$source_dir/build/Testing/Temporary/LastTest.log" "$artifact/test-details.log"

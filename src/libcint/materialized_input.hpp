@@ -4,9 +4,9 @@
 
 #include <vector>
 
-#include "vbscf/integrals/ao/contracts/input.hpp"
+#include "integrals/ao/input.hpp"
 
-namespace xmvb::vb {
+namespace xmvb::libcint {
 
 /**
  * @brief Materialized AO integral buffers produced by some integral backend.
@@ -23,11 +23,11 @@ struct MaterializedAoIntegralBuffers {
   std::vector<double> two_electron_values;
 };
 
-AoIntegralInput build_core_hamiltonian_only_ao_integral_input(
+xmvb::integrals::AoIntegralInput build_core_hamiltonian_only_ao_integral_input(
     int n_basis_functions,
     Eigen::MatrixXd ao_core_hamiltonian_matrix);
 
-AoIntegralInput build_materialized_ao_integral_input(
+xmvb::integrals::AoIntegralInput build_materialized_ao_integral_input(
     MaterializedAoIntegralBuffers buffers);
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::libcint

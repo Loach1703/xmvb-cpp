@@ -3,6 +3,11 @@
 #include <cmath>
 #include <stdexcept>
 #include "core/pair_index.hpp"
+#include "integrals/ao/exact.hpp"
+#include "integrals/active/exact.hpp"
+#include "integrals/active/one_electron.hpp"
+#include "integrals/active/two_electron.hpp"
+#include "parallel/openmp.hpp"
 
 namespace xmvb::casscf {
 
@@ -34,6 +39,56 @@ CasIntegrals make_active_integrals(
         for (int d=0; d<=c; ++d)
           result.active.pair_kernel(core::PairIndex::packed_pair_index(a,b),
               core::PairIndex::packed_pair_index(c,d))=eri(core+a,core+b,core+c,core+d);
+  return result;
+}
+
+CasIntegrals make_active_integrals(
+    const integrals::AoIntegralInput& ao,
+    const Eigen::Ref<const Eigen::MatrixXd>& orbitals,
+    int core, int active, double nuclear) {
+  const int n_bf=ao.n_basis_functions;
+  if (n_bf<1 || core<0 || active<1 || core+active>n_bf ||
+      orbitals.rows()!=n_bf || orbitals.cols()!=n_bf ||
+      ao.ao_core_hamiltonian_matrix.rows()!=n_bf ||
+      ao.ao_core_hamiltonian_matrix.cols()!=n_bf ||
+      !orbitals.allFinite() || !std::isfinite(nuclear))
+    throw std::invalid_argument("invalid AO integrals, MO frame or CAS partition");
+
+  const Eigen::MatrixXd density=orbitals.leftCols(core)*orbitals.leftCols(core).transpose();
+  const Eigen::Map<const Eigen::MatrixXd> source(density.data(),density.size(),1);
+  integrals::AoH1eBatchWorkspace workspace;
+  Eigen::MatrixXd response;
+  integrals::apply_symmetric_ao_h1e_batch(
+      source,ao,effective_openmp_thread_count(),&workspace,&response);
+  const Eigen::Map<const Eigen::MatrixXd> potential(response.data(),n_bf,n_bf);
+  const Eigen::MatrixXd fock=ao.ao_core_hamiltonian_matrix+potential;
+  CasIntegrals result;
+  result.core_energy=nuclear+
+      (density.array()*(2*ao.ao_core_hamiltonian_matrix+potential).array()).sum();
+  result.active.one_electron=integrals::ActiveSpaceOneElectronBuilder{}.build(
+      fock,orbitals,n_bf,core,active).h1e_act;
+
+  // Borrow sparse orbital support in the same numerical transform as VBSCF.
+  std::vector<int> offsets(1,0),indices;
+  std::vector<double> coefficients;
+  for (int mu=0; mu<n_bf; ++mu) {
+    for (int a=0; a<active; ++a) {
+      const double value=orbitals(mu,core+a);
+      if (value==0) continue;
+      indices.push_back(a);
+      coefficients.push_back(value);
+    }
+    offsets.push_back(static_cast<int>(indices.size()));
+  }
+  const auto transformed=integrals::transform_exact_active_integrals(
+      ao,offsets,indices,coefficients,active);
+  const auto view=integrals::make_active_space_two_electron_view(transformed);
+  const int pairs=integrals::packed_active_pair_count(active);
+  result.active.pair_kernel.resize(pairs,pairs);
+  for (int p=0; p<pairs; ++p)
+    for (int q=0; q<pairs; ++q)
+      result.active.pair_kernel(p,q)=
+          integrals::lookup_active_space_two_electron_kernel_value(view,p,q,active);
   return result;
 }
 

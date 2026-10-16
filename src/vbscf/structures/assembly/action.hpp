@@ -10,7 +10,7 @@
 #include "mcscf/ci/product_index.hpp"
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/structures/assembly/connection.hpp"
 #include "vbscf/structures/expansion/types.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
@@ -146,7 +146,7 @@ public:
       const SameSpinPairCacheContext& same_spin_pair_cache,
       const std::vector<double>& active_overlap,
       const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_active_orbitals,
       const StructureDiagonal* precomputed_preconditioner = nullptr,
       StructureActionMode mode = StructureActionMode::Davidson);

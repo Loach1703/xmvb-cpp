@@ -88,7 +88,7 @@ public:
       const std::vector<double>& ovlp_act,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_structures) const;
 
   /**
@@ -125,7 +125,7 @@ public:
       const std::vector<double>& ovlp_act,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_structures,
       const SameSpinPairCacheContext& same_spin_pair_cache) const;
 
@@ -146,7 +146,7 @@ public:
       const std::vector<double>& ovlp_act,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_structures,
       const SameSpinPairCacheContext& same_spin_pair_cache) const;
 
@@ -177,7 +177,7 @@ public:
       const std::vector<double>& ovlp_act,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_structures,
       const SameSpinPairCacheContext& same_spin_pair_cache) const;
 
@@ -221,7 +221,7 @@ private:
       const std::vector<double>& ovlp_act,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_structures,
       const SameSpinPairCacheContext* same_spin_pair_cache,
       bool store_pair_evaluations) const;

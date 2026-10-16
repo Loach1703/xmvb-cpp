@@ -13,7 +13,7 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/optimization/coupled/ci_transport.hpp"
 #include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
@@ -162,9 +162,9 @@ StructureAction make_action(const Eigen::MatrixXd& w,
   *topology_out = build_same_spin_pair_topology(alpha, beta, 3);
   const std::vector<double> packed_overlap(
       overlap_matrix.data(), overlap_matrix.data() + overlap_matrix.size());
-  ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   two_electron.packed_active_two_electron_integrals.assign(
-      packed_active_two_electron_integral_count(3), 0.0);
+      xmvb::integrals::packed_active_two_electron_integral_count(3), 0.0);
   return StructureAction(
       terms, 3, *topology_out, packed_overlap, Eigen::Matrix3d::Zero(),
       two_electron, 3, &diagonal, StructureActionMode::Davidson);

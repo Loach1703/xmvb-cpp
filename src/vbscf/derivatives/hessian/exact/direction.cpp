@@ -9,7 +9,7 @@
 
 #include "vbscf/derivatives/hessian/responses/active_space/integral_direction.hpp"
 #include "vbscf/derivatives/hessian/responses/orbital/preparation.hpp"
-#include "vbscf/integrals/active/two_electron/response/ri.hpp"
+#include "integrals/response/ri.hpp"
 
 namespace xmvb::vb {
 
@@ -55,11 +55,11 @@ ExactHvpOperator::State::build_active_integral_direction(
           "RI active-integral direction requires an output workspace");
     }
     const Eigen::MatrixXd delta_factors =
-        compute_ri_active_pair_factor_directional_derivative(
+        xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
             *accepted_ri_two_electron_cache_,
             orbital_direction.delta_active_auxiliary_orbitals);
     const std::vector<double> packed =
-        compute_ri_packed_active_two_electron_integral_directional_derivative(
+        xmvb::integrals::compute_ri_packed_active_two_electron_integral_directional_derivative(
             *accepted_ri_two_electron_cache_,
             delta_factors);
     *ri_delta_packed_two_electron = Eigen::Map<const Eigen::VectorXd>(

@@ -6,7 +6,7 @@
 
 #include "mcscf/ci/integrals.hpp"
 
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
+#include "integrals/active/two_electron_result.hpp"
 
 namespace xmvb::vb {
 
@@ -18,7 +18,7 @@ namespace xmvb::vb {
 struct OrthogonalActiveIntegrals : mcscf::ActiveIntegrals {
   /** Upper factor in `S_active = R^T R`. */
   Eigen::MatrixXd orbital_transform;
-  ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
 };
 
 /** @brief Active-integral adjoint in the original nonorthogonal orbital basis. */
@@ -34,7 +34,7 @@ struct NonorthogonalActiveIntegralAdjoint {
 OrthogonalActiveIntegrals orthogonalize_active_integrals(
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& one_electron,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     int n_active_orbitals);
 
 /**

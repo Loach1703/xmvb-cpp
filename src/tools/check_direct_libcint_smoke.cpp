@@ -98,7 +98,7 @@ CanonicalIntegralIndex canonicalize_integral_index(int i, int j, int k, int l) {
 }
 
 std::unordered_map<std::uint64_t, double> build_two_electron_lookup(
-    const xmvb::vb::AoIntegralInput& ao_integral_input) {
+    const xmvb::integrals::AoIntegralInput& ao_integral_input) {
   std::unordered_map<std::uint64_t, double> lookup;
   lookup.reserve(ao_integral_input.pair_graph.integral_count());
   ao_integral_input.pair_graph.for_each_integral(
@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
     const Options options = parse_arguments(argc, argv);
     const auto load_result = xmvb::vb::load_vbscf_input_with_timings(options.input_path);
     const auto& input = load_result.input;
-    xmvb::vb::LibcintDirectShellEvaluator evaluator(input.libcint_input);
+    xmvb::libcint::LibcintDirectShellEvaluator evaluator(input.libcint_input);
 
     const auto core_h_block = evaluator.evaluate_core_hamiltonian_shell_pair(
         options.one_shell_left,
@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
 
     const auto two_electron_lookup =
         build_two_electron_lookup(input.ao_integral_input);
-    xmvb::vb::LibcintShellWorkspace workspace;
+    xmvb::libcint::LibcintShellWorkspace workspace;
     const auto& quartet = evaluator.evaluate_two_electron_shell_quartet(
         options.two_shell_i,
         options.two_shell_j,

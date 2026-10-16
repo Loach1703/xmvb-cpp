@@ -10,13 +10,13 @@
 #include <vector>
 
 #include "input/loading/loader.hpp"
-#include "vbscf/core/storage/eigen.hpp"
+#include "linalg/storage.hpp"
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
 #include "vbscf/integrals/active/two_electron/response/backpropagator.hpp"
-#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
-#include "vbscf/integrals/active/two_electron/response/directional.hpp"
+#include "integrals/response/adjoint.hpp"
+#include "integrals/response/directional.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
-#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
+#include "integrals/ao/exact.hpp"
 #include "vbscf/derivatives/hessian/exact/ao_one_electron_internal.hpp"
 
 namespace {
@@ -155,25 +155,25 @@ int main(int argc, char** argv) {
         build_dense_active_direction(
             n_basis_functions,
             n_active_orbitals);
-    auto accepted_cache = xmvb::vb::build_exact_packed_active_two_electron_adjoint_cache(
+    auto accepted_cache = xmvb::integrals::build_exact_packed_active_two_electron_adjoint_cache(
         gradient_result.packed_active_two_electron_gradient,
         gradient_result.active_space_two_electron_result.dense_active_coefficients,
         input.ao_integral_input, n_active_orbitals,
         gradient_result.active_space_two_electron_result);
-    const auto contracted_gradient = xmvb::vb::backpropagate_exact_packed_active_two_electron_gradient(
+    const auto contracted_gradient = xmvb::integrals::backpropagate_exact_packed_active_two_electron_gradient(
         gradient_result.packed_active_two_electron_gradient, accepted_cache);
     const auto contracted_direction =
-        xmvb::vb::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+        xmvb::integrals::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
             accepted_cache, {dense_active_direction}, input.ao_integral_input);
     const auto measure = [&](const char* name) {
       constexpr int repeats = 20;
       const auto start = std::chrono::steady_clock::now();
       double checksum = 0.0;
       for (int repeat = 0; repeat < repeats; ++repeat) {
-        const auto gradient = xmvb::vb::backpropagate_exact_packed_active_two_electron_gradient(
+        const auto gradient = xmvb::integrals::backpropagate_exact_packed_active_two_electron_gradient(
             gradient_result.packed_active_two_electron_gradient, accepted_cache);
         const auto integrals =
-            xmvb::vb::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+            xmvb::integrals::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
                 accepted_cache, {dense_active_direction}, input.ao_integral_input);
         checksum += gradient.squaredNorm() + integrals.squaredNorm();
       }
@@ -185,10 +185,10 @@ int main(int argc, char** argv) {
     // Independent AO-pair contraction reference; move, never duplicate, the image.
     auto orbital_products = std::move(accepted_cache.orbital_pair_products);
     measure("ao_pair_kernel");
-    const auto pair_gradient = xmvb::vb::backpropagate_exact_packed_active_two_electron_gradient(
+    const auto pair_gradient = xmvb::integrals::backpropagate_exact_packed_active_two_electron_gradient(
         gradient_result.packed_active_two_electron_gradient, accepted_cache);
     const auto pair_direction =
-        xmvb::vb::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+        xmvb::integrals::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
             accepted_cache, {dense_active_direction}, input.ao_integral_input);
     const double contracted_gradient_error = max_abs_difference(contracted_gradient, pair_gradient);
     const double contracted_direction_error = max_abs_difference(contracted_direction, pair_direction);
@@ -197,7 +197,7 @@ int main(int argc, char** argv) {
       throw std::runtime_error("one-orbital integral contractions disagree with AO-pair reference");
     }
     const auto analytic_dense_active_gradient_direction =
-        xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+        xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
             gradient_result.packed_active_two_electron_gradient,
             gradient_result.active_space_two_electron_result
                 .dense_active_coefficients,
@@ -206,10 +206,10 @@ int main(int argc, char** argv) {
             n_active_orbitals,
             gradient_result.active_space_two_electron_result);
     auto exchange_image = std::move(accepted_cache.exchange_integrals);
-    const auto pair_hvp = xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+    const auto pair_hvp = xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
         accepted_cache, dense_active_direction, input.ao_integral_input);
     accepted_cache.exchange_integrals = std::move(exchange_image);
-    const auto exchange_hvp = xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+    const auto exchange_hvp = xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
         accepted_cache, dense_active_direction, input.ao_integral_input);
     const double exchange_error = max_abs_difference(exchange_hvp, pair_hvp);
     std::cout << "exchange_integral_bytes = " << accepted_cache.exchange_integrals.size() * sizeof(double)
@@ -225,8 +225,8 @@ int main(int argc, char** argv) {
       const Eigen::MatrixXd ao_gradient = coefficients * active.transpose() * coefficients.transpose();
       const auto reference = xmvb::vb::AoEffectiveOneElectronBackpropagator().backpropagate(
           ao_gradient, input.ao_integral_input).inactive_density_gradient;
-      const auto contracted = xmvb::vb::backpropagate_exact_active_h1e_gradient(
-          xmvb::vb::flatten_matrix_column_major(active), accepted_cache);
+      const auto contracted = xmvb::integrals::backpropagate_exact_active_h1e_gradient(
+          xmvb::linalg::flatten_matrix_column_major(active), accepted_cache);
       const int n_bf = accepted_cache.n_basis_functions;
       const Eigen::Map<const Eigen::MatrixXd> r(reference.data(), n_bf, n_bf);
       const Eigen::Map<const Eigen::MatrixXd> c(contracted.data(), n_bf, n_bf);
@@ -258,7 +258,7 @@ int main(int argc, char** argv) {
         pullback_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(pullback.data(), pullback.size());
         weights_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(weights.data(), weights.size());
       }
-      xmvb::vb::AoH1eBatchWorkspace response_workspace;
+      xmvb::integrals::AoH1eBatchWorkspace response_workspace;
       Eigen::MatrixXd combined, projection, reference_combined, reference_projection;
       xmvb::vb::detail::apply_exact_ao_response(density_columns, pullback_columns,
           weights_columns, accepted_cache, input.ao_integral_input,
@@ -277,13 +277,13 @@ int main(int argc, char** argv) {
         throw std::runtime_error("shared AO response disagrees with unique-ERI reference");
     }
     const auto measure_hvp = [&](const char* label) {
-      xmvb::vb::ExactPackedActiveTwoElectronApplyWorkspace workspace;
+      xmvb::integrals::ExactPackedActiveTwoElectronApplyWorkspace workspace;
       Eigen::MatrixXd result;
       constexpr int repeats = 10;
       double checksum = 0.0;
       const auto start = std::chrono::steady_clock::now();
       for (int repeat = 0; repeat < repeats; ++repeat) {
-        xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+        xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
             accepted_cache, dense_active_direction, input.ao_integral_input,
             &workspace, &result);
         checksum += result.squaredNorm();
@@ -306,10 +306,10 @@ int main(int argc, char** argv) {
         accepted_cache.active_pair_gradient_matrix(q, p) = value;
       }
     }
-    const auto arbitrary_exchange = xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+    const auto arbitrary_exchange = xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
         accepted_cache, dense_active_direction, input.ao_integral_input);
     exchange_image = std::move(accepted_cache.exchange_integrals);
-    const auto arbitrary_pair = xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+    const auto arbitrary_pair = xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
         accepted_cache, dense_active_direction, input.ao_integral_input);
     accepted_cache.exchange_integrals = std::move(exchange_image);
     accepted_cache.active_pair_gradient_matrix = std::move(physical_adjoint);
@@ -321,7 +321,7 @@ int main(int argc, char** argv) {
         gradient_result.active_space_two_electron_result;
     streamed_active_space_result.dense_ao_pair_products.resize(0, 0);
     const auto streamed_dense_active_gradient_direction =
-        xmvb::vb::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+        xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
             gradient_result.packed_active_two_electron_gradient,
             streamed_active_space_result.dense_active_coefficients,
             dense_active_direction,
@@ -338,7 +338,7 @@ int main(int argc, char** argv) {
     }
 
     std::vector<double> plus_auxiliary_matrix =
-        xmvb::vb::flatten_matrix_column_major(
+        xmvb::linalg::flatten_matrix_column_major(
             gradient_result.orbital_preparation_result.auxiliary_orbital_matrix);
     std::vector<double> minus_auxiliary_matrix =
         plus_auxiliary_matrix;

@@ -12,7 +12,7 @@
 #include "input/loading/loader.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
+#include "integrals/ao/ri_operator.hpp"
 
 namespace {
 
@@ -103,13 +103,13 @@ int main(int argc, char** argv) {
         flatten_matrix(orbital_result.inactive_density_matrix);
 
     const auto dense_p =
-        xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+        xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
             inactive_density,
             ri_cache,
             n_basis_functions,
             {.attempt_spectral_factorization = false});
     const auto low_rank_p =
-        xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+        xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
             inactive_density,
             ri_cache,
             n_basis_functions,
@@ -120,13 +120,13 @@ int main(int argc, char** argv) {
         random_symmetric_matrix(n_basis_functions, &generator);
     const auto random_gradient_storage = flatten_matrix(random_gradient);
     const auto dense_g =
-        xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+        xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
             random_gradient_storage,
             ri_cache,
             n_basis_functions,
             {.attempt_spectral_factorization = false});
     const auto low_rank_g =
-        xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+        xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
             random_gradient_storage,
             ri_cache,
             n_basis_functions,

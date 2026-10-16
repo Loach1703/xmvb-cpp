@@ -8,7 +8,7 @@
 #include "vbscf/derivatives/hessian/responses/opposite_spin/backward.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/backward.hpp"
 #include "core/pair_index.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb {
 
@@ -20,16 +20,16 @@ Eigen::MatrixXd apply_regular_ri_pair_space_adjoint(
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
     const Eigen::Ref<const Eigen::MatrixXd>& factors) {
-  const int n_pairs = packed_active_pair_count(n_active);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active);
   if (!cache.has_pair_providers() ||
       states.states.size() != energies.size() ||
       factors.rows() <= 0 || factors.cols() != n_pairs) {
     throw std::invalid_argument("RI factor adjoint dimensions are inconsistent");
   }
 
-  ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   two_electron.representation =
-      ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
   two_electron.n_auxiliary_functions = static_cast<int>(factors.rows());
   two_electron.ri_active_pair_factors = factors;
 

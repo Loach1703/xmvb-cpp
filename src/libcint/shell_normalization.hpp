@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace xmvb::vb {
+namespace xmvb::libcint {
 
 /**
  * Shell-level normalization shared by Gaussian basis input and Molden output.
@@ -56,4 +56,4 @@ inline double shell_normalization(
   return normalization;
 }
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::libcint

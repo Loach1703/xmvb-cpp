@@ -9,6 +9,8 @@ headers. The initial scope is real, state-specific, full-CAS, exact integrals.
 - `mcscf/ci`: physical active integrals, spin strings, sigma/adjoint and spin.
 - `linalg`: eigensolvers, eigen response, metric solves and Krylov algebra.
 - `parallel`: shared-buffer OpenMP execution and work partitioning.
+- `integrals`: common AO operators, exact/RI active transforms, integral
+  directions and adjoint/HVP kernels, without VB input dependencies.
 - `mcscf/optimization`: shared CIAH and norm-extended subspace solvers and algebraic
   preconditioners; vector actions and dual norms are supplied by each model.
 - `mcscf/states`: one implementation of state-weight normalization.
@@ -34,6 +36,12 @@ must not require a full four-index MO integral array.
    - Pure-spin projection/idempotence, multiple roots, inactive/nuclear energy,
      alpha/beta imbalance and pre-allocation resource rejection are covered.
 2. Orthogonal rotations, analytic gradient, fixed-CI HVP and analytic diagonal.
+   - Integral prerequisites extracted: exact/RI AO actions, forward active
+     transforms, matrix pullbacks and integral-response actions now live in
+     `xmvb_integrals`; VB preparation is an adapter. The AO-to-CASCI entry
+     consumes these same kernels, with an independent rotated-MO reference.
+   - This does not yet implement orthogonal orbital-coordinate derivatives or
+     a complete CASSCF macro driver.
    - Use inactive/active/virtual cross-sector rotations only for full CAS.
    - Verify directional derivatives, HVPs and bilinear symmetry.
 3. Joint orbital/CI action and CI tangent.

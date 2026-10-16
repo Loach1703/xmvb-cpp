@@ -7,9 +7,9 @@
 #include "parallel/openmp.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "mcscf/optimization/trace.hpp"
-#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
-#include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "integrals/ao/exact.hpp"
+#include "integrals/ao/ri_operator.hpp"
+#include "integrals/ao/ri.hpp"
 #include "core/pair_index.hpp"
 
 namespace xmvb::vb {
@@ -30,7 +30,7 @@ Eigen::VectorXd ri_density_operator_diagonal(
   if (!input.ri_factorization) {
     throw std::invalid_argument("RI diagonal requires accepted AO factors");
   }
-  AoEffectiveOneElectronRiLowRankFactors factors;
+  xmvb::integrals::AoEffectiveOneElectronRiLowRankFactors factors;
   const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(weights);
   if (spectrum.info() != Eigen::Success || !spectrum.eigenvalues().allFinite()) {
     throw std::runtime_error("failed to factor active diagonal density source");
@@ -48,7 +48,7 @@ Eigen::VectorXd ri_density_operator_diagonal(
     factors.scaled_factor_matrix.col(column).noalias() =
         std::sqrt(std::abs(eigenvalue)) * coefficients * spectrum.eigenvectors().col(j);
   }
-  const auto storage = apply_ao_effective_one_electron_ri_operator(
+  const auto storage = xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
       factors, *input.ri_factorization, n_bf);
   image = Eigen::Map<const Eigen::MatrixXd>(storage.data(), n_bf, n_bf);
   const Eigen::MatrixXd products = image * mo;
@@ -129,8 +129,8 @@ DensityDiagonals density_diagonal_channels(const VbScfInput& input,
         "row_width=%d,stream_width=%d,row_records=%.0Lf,stream_records=%.0Lf,row_workspace_bytes=%zu,row_selected=%d",
         width,stream_width,row_reads,stream_reads,base+width*per_channel,static_cast<int>(row_selected));
     if (row_selected) {
-    AoH1eBatchWorkspace::Channels sources;
-    AoDensityDiagonalWorkspace workspace;
+    xmvb::integrals::AoH1eBatchWorkspace::Channels sources;
+    xmvb::integrals::AoDensityDiagonalWorkspace workspace;
     Eigen::MatrixXd scratch(n_bf,n_bf);
     Eigen::MatrixXd exchange,coulomb;
     Eigen::MatrixXd core_coulomb(n_bf,n_core);
@@ -152,7 +152,7 @@ DensityDiagonals density_diagonal_channels(const VbScfInput& input,
         for (Eigen::Index row=0; row<scratch.size(); ++row)
           sources(row,j)=scratch.data()[row];
       }
-      apply_ao_density_diagonals(input.ao_integral_input,sources,mo,core_count,
+      xmvb::integrals::apply_ao_density_diagonals(input.ao_integral_input,sources,mo,core_count,
           workers,&workspace,&exchange,&coulomb);
       if (core_count) {
         core_coulomb.middleCols(begin,core_count)=coulomb;
@@ -176,7 +176,7 @@ DensityDiagonals density_diagonal_channels(const VbScfInput& input,
   // working set is the lower bound; the budget never enables further replicas.
   const auto budget=stream_budget, channel_bytes=stream_channel;
   const int workers=stream_workers, width=stream_width;
-  AoH1eBatchWorkspace workspace;
+  xmvb::integrals::AoH1eBatchWorkspace workspace;
   Eigen::MatrixXd response,scratch(n_bf,n_bf);
   for (int begin=0;begin<channels;begin+=width) {
     const int count=std::min(width,channels-begin);
@@ -192,7 +192,7 @@ DensityDiagonals density_diagonal_channels(const VbScfInput& input,
       for (Eigen::Index row=0;row<scratch.size();++row)
         workspace.sources(row,j)=scratch.data()[row];
     }
-    apply_symmetric_ao_h1e_channels(input.ao_integral_input,workers,&workspace,&response);
+    xmvb::integrals::apply_symmetric_ao_h1e_channels(input.ao_integral_input,workers,&workspace,&response);
     for (int j=0;j<count;++j) {
       const Eigen::Map<const Eigen::MatrixXd> image(response.col(j).data(),n_bf,n_bf);
       scratch.noalias()=image*mo;

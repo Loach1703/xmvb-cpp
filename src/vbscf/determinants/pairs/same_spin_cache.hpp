@@ -51,7 +51,7 @@ void complete_same_spin_pair_evaluation(
     const std::vector<int>& occ_R,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     bool populate_opposite_spin_projection,
     bool materialize_projected_pair_values,
     bool populate_response_payload,
@@ -227,7 +227,7 @@ SameSpinPairCacheContext build_same_spin_pair_cache_context(
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result);
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result);
 
 SameSpinPairCacheContext build_same_spin_pair_cache_context(
     const std::vector<std::vector<int>>& alpha_det,
@@ -236,7 +236,7 @@ SameSpinPairCacheContext build_same_spin_pair_cache_context(
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     SameSpinPairCacheBuildOptions build_options);
 
 /**
@@ -257,7 +257,7 @@ void populate_same_spin_phi_cache(
     SameSpinPairCacheContext* same_spin_pair_cache,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result);
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result);
 
 /**
  * @brief Evaluates one full determinant pair, optionally via cached same-spin kernels.
@@ -288,7 +288,7 @@ DeterminantPairEvaluation evaluate_full_determinant_pair_with_optional_same_spin
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     bool retain_spin_pair_evaluations = true);
 
 }  // namespace xmvb::vb

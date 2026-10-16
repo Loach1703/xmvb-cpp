@@ -13,10 +13,10 @@
 #include "vbscf/derivatives/hessian/responses/active_space/integral_direction.hpp"
 #include "vbscf/derivatives/hessian/context/response_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/orbital/preparation.hpp"
-#include "vbscf/integrals/active/two_electron/response/types.hpp"
-#include "vbscf/integrals/active/two_electron/response/ri.hpp"
-#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
+#include "integrals/response/types.hpp"
+#include "integrals/response/ri.hpp"
+#include "integrals/ao/exact.hpp"
+#include "integrals/ao/ri_operator.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/assembly/coefficient_blocks.hpp"
@@ -97,7 +97,7 @@ private:
       const Eigen::MatrixXd* precomputed_active_projection,
       const Eigen::VectorXd* precomputed_delta_packed_active_two_electron,
       const Eigen::MatrixXd* precomputed_ri_active_pair_factor_direction,
-      const ExactCtxPairMatrix* precomputed_directional_pair_products,
+      const xmvb::integrals::ExactCtxPairMatrix* precomputed_directional_pair_products,
       const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
       const PrecomputedDirection* precomputed_direction,
       OrbitalCouplingAction* coupling_output,
@@ -159,19 +159,19 @@ private:
   Eigen::MatrixXd accepted_sso_gradient_symmetric_;
   Eigen::MatrixXd accepted_hho_gradient_symmetric_;
   mutable Eigen::MatrixXd ao_h1e_symmetrized_gradient_workspace_;
-  mutable AoH1eBatchWorkspace ao_h1e_batch_workspace_;
-  mutable AoEffectiveOneElectronRiFusedWorkspace ri_ao_h1e_fused_workspace_;
+  mutable xmvb::integrals::AoH1eBatchWorkspace ao_h1e_batch_workspace_;
+  mutable xmvb::integrals::AoEffectiveOneElectronRiFusedWorkspace ri_ao_h1e_fused_workspace_;
   mutable Eigen::MatrixXd ri_ao_h1e_forward_workspace_;
   mutable Eigen::MatrixXd ri_ao_h1e_adjoint_workspace_;
-  mutable AoEffectiveOneElectronRiStrategy ri_ao_h1e_strategy_ =
-      AoEffectiveOneElectronRiStrategy::Uncalibrated;
+  mutable xmvb::integrals::AoEffectiveOneElectronRiStrategy ri_ao_h1e_strategy_ =
+      xmvb::integrals::AoEffectiveOneElectronRiStrategy::Uncalibrated;
   Eigen::MatrixXd zero_core_hamiltonian_;
   mutable std::vector<double> ao_h1e_inactive_density_gradient_workspace_;
-  ExactPackedActiveTwoElectronAdjointCache accepted_exact_two_electron_cache_;
-  std::optional<RiActiveTwoElectronResponseCache>
+  xmvb::integrals::ExactPackedActiveTwoElectronAdjointCache accepted_exact_two_electron_cache_;
+  std::optional<xmvb::integrals::RiActiveTwoElectronResponseCache>
       accepted_ri_two_electron_cache_;
-  const RiAoFactorization* accepted_ri_factorization_ = nullptr;
-  mutable ExactPackedActiveTwoElectronApplyWorkspace
+  const xmvb::integrals::RiAoFactorization* accepted_ri_factorization_ = nullptr;
+  mutable xmvb::integrals::ExactPackedActiveTwoElectronApplyWorkspace
       accepted_exact_two_electron_apply_workspace_;
   mutable ActiveSpaceIntegralDirectionWorkspace
       outer_response_integral_direction_workspace_;

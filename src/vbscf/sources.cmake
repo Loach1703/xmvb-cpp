@@ -67,28 +67,12 @@ set(XMVB_VBSCF_ORBITAL_SOURCES
 set(XMVB_VBSCF_AO_INTEGRAL_SOURCES
   vbscf/integrals/ao/one_electron/backpropagator.cpp
   vbscf/integrals/ao/one_electron/builder.cpp
-  vbscf/integrals/ao/one_electron/direct_operator.cpp
-  vbscf/integrals/ao/one_electron/rows.cpp
-  vbscf/integrals/ao/one_electron/ri_operator.cpp
-  vbscf/integrals/ao/libcint/validation.cpp
   vbscf/integrals/ao/ri/cache.cpp
-  vbscf/integrals/ao/pairs/two_electron_index.cpp
 )
 
 set(XMVB_VBSCF_ACTIVE_INTEGRAL_SOURCES
-  vbscf/integrals/active/matrix/backpropagator.cpp
-  vbscf/integrals/active/one_electron/builder.cpp
   vbscf/integrals/active/two_electron/response/backpropagator.cpp
   vbscf/integrals/active/two_electron/construction/builder.cpp
-  vbscf/integrals/active/two_electron/construction/kernel.cpp
-  vbscf/integrals/active/two_electron/response/adjoint.cpp
-  vbscf/integrals/active/two_electron/response/exchange.cpp
-  vbscf/integrals/active/two_electron/response/directional.cpp
-  vbscf/integrals/active/two_electron/response/ri.cpp
-  vbscf/integrals/active/two_electron/transformation/pair_transforms.cpp
-  vbscf/integrals/active/two_electron/transformation/packed_pair_map.cpp
-  vbscf/integrals/active/two_electron/transformation/ao_pair_operator.cpp
-  vbscf/integrals/active/two_electron/transformation/generated_rows.cpp
   vbscf/integrals/active/two_electron/construction/ri_builder.cpp
   vbscf/integrals/active/preparation/space.cpp
 )

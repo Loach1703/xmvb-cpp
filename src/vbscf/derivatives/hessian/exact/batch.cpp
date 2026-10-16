@@ -19,10 +19,10 @@
 #include "vbscf/derivatives/hessian/responses/active_space/local_tile_accumulator_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/orbital/preparation.hpp"
 #include "vbscf/derivatives/hessian/responses/structure/directional.hpp"
-#include "vbscf/integrals/active/two_electron/response/directional.hpp"
-#include "vbscf/integrals/active/two_electron/response/ri.hpp"
-#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
+#include "integrals/response/directional.hpp"
+#include "integrals/response/ri.hpp"
+#include "integrals/ao/exact.hpp"
+#include "integrals/ao/ri_operator.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -244,7 +244,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
       const Eigen::Map<const Eigen::MatrixXd> adjoint(
           symmetrized_pullback_columns.col(column).data(),
           n_basis_functions, n_basis_functions);
-      apply_ao_effective_one_electron_ri_operator_adaptive(
+      xmvb::integrals::apply_ao_effective_one_electron_ri_operator_adaptive(
           source, adjoint, *accepted_ri_factorization_,
           &ri_ao_h1e_fused_workspace_, &ri_ao_h1e_strategy_,
           &ri_ao_h1e_forward_workspace_, &ri_ao_h1e_adjoint_workspace_);
@@ -277,7 +277,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
   apply_timing_totals_.total_apply_wall_time_seconds += batch_h1e_seconds;
 
   Eigen::MatrixXd delta_packed_active_two_electron_columns;
-  std::vector<ExactCtxPairMatrix> directional_pair_products;
+  std::vector<xmvb::integrals::ExactCtxPairMatrix> directional_pair_products;
   std::vector<Eigen::MatrixXd> two_electron_fixed_adjoint_directions;
   std::vector<Eigen::MatrixXd> ri_active_pair_factor_directions;
   const bool build_orbital_coupling = coupling_output != nullptr;
@@ -296,7 +296,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
     const auto batch_active_two_electron_start_time =
         std::chrono::steady_clock::now();
     ri_active_pair_factor_directions =
-        compute_ri_active_pair_factor_directional_derivative_batch(
+        xmvb::integrals::compute_ri_active_pair_factor_directional_derivative_batch(
             *accepted_ri_two_electron_cache_, dense_active_directions);
     const double batch_active_two_electron_seconds =
         detail::exact_hvp_elapsed_seconds(batch_active_two_electron_start_time);
@@ -308,7 +308,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
     const auto batch_active_two_electron_start_time =
         std::chrono::steady_clock::now();
     delta_packed_active_two_electron_columns =
-        compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
+        xmvb::integrals::compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
             accepted_exact_two_electron_cache_,
             dense_active_directions,
             current_input_->ao_integral_input,
@@ -357,7 +357,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
       if (accepted_ri_two_electron_cache_.has_value() &&
           packed_outer_two_electron_required) {
         const std::vector<double> packed =
-            compute_ri_packed_active_two_electron_integral_directional_derivative(
+            xmvb::integrals::compute_ri_packed_active_two_electron_integral_directional_derivative(
                 *accepted_ri_two_electron_cache_,
                 ri_active_pair_factor_directions[
                     static_cast<std::size_t>(column)]);
@@ -550,7 +550,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
       if (accepted_ri_two_electron_cache_.has_value() &&
           packed_outer_two_electron_required) {
         const std::vector<double> packed =
-            compute_ri_packed_active_two_electron_integral_directional_derivative(
+            xmvb::integrals::compute_ri_packed_active_two_electron_integral_directional_derivative(
                 *accepted_ri_two_electron_cache_,
                 ri_active_pair_factor_directions[
                     static_cast<std::size_t>(column)]);

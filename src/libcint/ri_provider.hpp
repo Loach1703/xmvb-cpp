@@ -1,8 +1,8 @@
 #pragma once
 
-#include "vbscf/integrals/ao/ri/provider.hpp"
+#include "integrals/ao/ri_provider.hpp"
 
-namespace xmvb::vb {
+namespace xmvb::libcint {
 
 struct LibcintRiIntegralProviderOptions {
   /** Absolute eigenvalue cutoff in unit-radial Cartesian auxiliary AOs.
@@ -19,16 +19,16 @@ struct LibcintRiIntegralProviderOptions {
  * materializes the auxiliary metric and three-center tensors through libcint,
  * and returns metric-whitened AO-pair factors.
  */
-class LibcintRiIntegralProvider final : public RiAoFactorizationProvider {
+class LibcintRiIntegralProvider final : public xmvb::integrals::RiAoFactorizationProvider {
 public:
-  RiAoFactorization build(
-      const LibcintInput& primary_input,
-      const LibcintInput& auxiliary_input,
+  xmvb::integrals::RiAoFactorization build(
+      const xmvb::integrals::LibcintInput& primary_input,
+      const xmvb::integrals::LibcintInput& auxiliary_input,
       const LibcintRiIntegralProviderOptions& options = {}) const;
 
-  RiAoFactorization build(
-      const LibcintInput& primary_input,
-      const LibcintInput& auxiliary_input) const override;
+  xmvb::integrals::RiAoFactorization build(
+      const xmvb::integrals::LibcintInput& primary_input,
+      const xmvb::integrals::LibcintInput& auxiliary_input) const override;
 };
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::libcint

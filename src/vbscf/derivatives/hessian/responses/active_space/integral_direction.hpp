@@ -4,7 +4,7 @@
 
 #include <Eigen/Core>
 
-#include "vbscf/integrals/active/two_electron/response/types.hpp"
+#include "integrals/response/types.hpp"
 
 namespace xmvb::vb {
 
@@ -35,7 +35,7 @@ struct ActiveSpaceIntegralDirectionContext {
    * direction through `ActiveSpaceIntegralTangent::precomputed_packed_two_electron`
    * and therefore do not carry an exact AO-pair cache.
    */
-  const ExactPackedActiveTwoElectronAdjointCache* exact_two_electron_cache = nullptr;
+  const xmvb::integrals::ExactPackedActiveTwoElectronAdjointCache* exact_two_electron_cache = nullptr;
   const Eigen::MatrixXd& active_auxiliary_orbitals;
   const Eigen::MatrixXd& overlap_times_active_auxiliary_orbitals;
   const Eigen::MatrixXd& effective_h1e_times_active_auxiliary_orbitals;
@@ -59,7 +59,7 @@ struct ActiveSpaceIntegralDirectionWorkspace {
   std::vector<double> overlap;
   std::vector<double> one_electron;
   std::vector<double> packed_two_electron;
-  ExactPackedActiveTwoElectronDirectionalDerivativeWorkspace two_electron;
+  xmvb::integrals::ExactPackedActiveTwoElectronDirectionalDerivativeWorkspace two_electron;
 };
 
 ActiveSpaceIntegralDirectionView build_active_space_integral_direction(

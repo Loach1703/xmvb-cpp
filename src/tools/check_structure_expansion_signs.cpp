@@ -413,7 +413,7 @@ int main(int argc, char** argv) {
 
     xmvb::vb::ActiveSpaceOrbitalPreparer orbital_preparer;
     xmvb::vb::AoEffectiveOneElectronBuilder ao_effective_one_electron_builder;
-    xmvb::vb::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
+    xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
     xmvb::vb::ActiveSpaceTwoElectronBuilder active_space_two_electron_builder;
     const auto prepared_active_space =
         xmvb::vb::prepare_timed_active_space_context(

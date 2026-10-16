@@ -10,7 +10,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "core/pair_index.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb::detail {
 namespace {
@@ -137,11 +137,11 @@ LocalOppositeSpinTileAccumulator::LocalOppositeSpinTileAccumulator(
     int n_active_orbitals,
     const std::vector<double>& active_overlap,
     const Eigen::MatrixXd& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_two_electron)
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron)
     : accepted_pair_cache_(accepted_pair_cache),
       selected_states_(selected_states),
       n_active_orbitals_(n_active_orbitals),
-      n_packed_pairs_(packed_active_pair_count(n_active_orbitals)),
+      n_packed_pairs_(xmvb::integrals::packed_active_pair_count(n_active_orbitals)),
       active_overlap_(active_overlap),
       active_one_electron_(active_one_electron),
       active_two_electron_(active_two_electron),
@@ -153,7 +153,7 @@ LocalOppositeSpinTileAccumulator::LocalOppositeSpinTileAccumulator(
       static_cast<std::size_t>(n_active_orbitals) * n_active_orbitals,
       0.0);
   result_.packed_active_two_electron_gradient.assign(
-      packed_active_two_electron_integral_count(n_active_orbitals),
+      xmvb::integrals::packed_active_two_electron_integral_count(n_active_orbitals),
       0.0);
 }
 
@@ -228,7 +228,7 @@ void LocalOppositeSpinTileAccumulator::accumulate_primary(
     }
   }
   const Eigen::MatrixXd projected =
-      apply_active_space_two_electron_kernel_block(
+      xmvb::integrals::apply_active_space_two_electron_kernel_block(
           active_two_electron_, n_active_orbitals_, raw_projection);
   Eigen::MatrixXd accepted_weight(n_electrons, n_electrons);
   const Eigen::MatrixXd zero = Eigen::MatrixXd::Zero(

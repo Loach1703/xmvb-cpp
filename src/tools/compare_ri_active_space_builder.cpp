@@ -12,7 +12,7 @@
 #include "vbscf/orbitals/preparation/preparer.hpp"
 #include "vbscf/integrals/active/two_electron/construction/builder.hpp"
 #include "vbscf/integrals/active/two_electron/construction/ri_builder.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace {
 
@@ -74,8 +74,8 @@ int main(int argc, char** argv) {
         orbital_result,
         input.orbital_preparation_input.n_active_orbitals);
 
-    xmvb::vb::LibcintRiIntegralProvider provider;
-    xmvb::vb::LibcintRiIntegralProviderOptions provider_options;
+    xmvb::libcint::LibcintRiIntegralProvider provider;
+    xmvb::libcint::LibcintRiIntegralProviderOptions provider_options;
     provider_options.metric_eigenvalue_cutoff = options.metric_eigenvalue_cutoff;
     const xmvb::vb::InputDeck input_deck =
         xmvb::vb::parse_input_deck_model(options.input_path);
@@ -107,8 +107,8 @@ int main(int argc, char** argv) {
         input.orbital_preparation_input.n_basis_functions,
         input.orbital_preparation_input.n_active_orbitals);
     ri_result.packed_active_two_electron_integrals =
-        xmvb::vb::reconstruct_packed_active_two_electron_integrals(
-            xmvb::vb::make_active_space_two_electron_view(ri_result),
+        xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
+            xmvb::integrals::make_active_space_two_electron_view(ri_result),
             input.orbital_preparation_input.n_active_orbitals);
 
     if (exact_result.packed_active_two_electron_integrals.size() !=

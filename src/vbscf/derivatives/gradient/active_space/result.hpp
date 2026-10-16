@@ -3,8 +3,8 @@
 #include <memory>
 #include <vector>
 
-#include "vbscf/integrals/active/one_electron/result.hpp"
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
+#include "integrals/active/one_electron_result.hpp"
+#include "integrals/active/two_electron_result.hpp"
 #include "vbscf/integrals/ao/one_electron/result.hpp"
 #include "vbscf/orbitals/preparation/result.hpp"
 #include "vbscf/core/contracts/result.hpp"
@@ -84,12 +84,12 @@ struct ActiveSpaceGradientResult {
   /**
    * @brief Baseline active-space one-electron input.
    */
-  ActiveSpaceOneElectronResult active_space_one_electron_result;
+  xmvb::integrals::ActiveSpaceOneElectronResult active_space_one_electron_result;
 
   /**
    * @brief Baseline active-space two-electron input.
    */
-  ActiveSpaceTwoElectronResult active_space_two_electron_result;
+  xmvb::integrals::ActiveSpaceTwoElectronResult active_space_two_electron_result;
 
   /**
    * @brief Experimental column-major gradient with respect to `SSO`.

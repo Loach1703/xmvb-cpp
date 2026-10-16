@@ -3,7 +3,7 @@
 #include <vector>
 
 #include "vbscf/core/contracts/input.hpp"
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
+#include "integrals/active/two_electron_result.hpp"
 #include "vbscf/orbitals/preparation/result.hpp"
 #include "vbscf/integrals/active/two_electron/response/backpropagation_result.hpp"
 
@@ -31,7 +31,7 @@ public:
    */
   ActiveSpaceTwoElectronBackpropagationResult backpropagate(
       const std::vector<double>& packed_active_two_electron_gradient,
-      const AoPairGraph& pair_graph,
+      const xmvb::integrals::AoPairGraph& pair_graph,
       const std::vector<double>& auxiliary_orbital_matrix,
       int n_basis_functions,
       int n_inactive_doubly_occupied_orbitals,
@@ -42,8 +42,8 @@ public:
    */
   ActiveSpaceTwoElectronBackpropagationResult backpropagate(
       const std::vector<double>& packed_active_two_electron_gradient,
-      const AoPairGraph& pair_graph,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::AoPairGraph& pair_graph,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_basis_functions,
       int n_inactive_doubly_occupied_orbitals,
       int n_active_orbitals) const;
@@ -55,7 +55,7 @@ public:
   ActiveSpaceTwoElectronBackpropagationResult backpropagate(
       const std::vector<double>& ri_active_pair_factor_gradient,
       const VbScfInput& input,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_basis_functions,
       int n_inactive_doubly_occupied_orbitals,
       int n_active_orbitals) const;
@@ -65,7 +65,7 @@ public:
    */
   ActiveSpaceTwoElectronBackpropagationResult backpropagate(
       const std::vector<double>& packed_active_two_electron_gradient,
-      const AoPairGraph& pair_graph,
+      const xmvb::integrals::AoPairGraph& pair_graph,
       const OrbitalPreparationResult& orbital_preparation_result,
       int n_basis_functions,
       int n_inactive_doubly_occupied_orbitals,

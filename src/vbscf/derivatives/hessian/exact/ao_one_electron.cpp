@@ -4,9 +4,9 @@
 #include <vector>
 
 #include "parallel/openmp.hpp"
-#include "vbscf/integrals/ao/contracts/input.hpp"
-#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
-#include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
+#include "integrals/ao/input.hpp"
+#include "integrals/ao/exact.hpp"
+#include "integrals/response/adjoint.hpp"
 
 namespace xmvb::vb::detail {
 
@@ -14,9 +14,9 @@ void apply_exact_ao_response(
     const Eigen::Ref<const Eigen::MatrixXd>& density,
     const Eigen::Ref<const Eigen::MatrixXd>& pullback,
     const Eigen::Ref<const Eigen::MatrixXd>& weighted_directions,
-    const ExactPackedActiveTwoElectronAdjointCache& cache,
-    const AoIntegralInput& ao,
-    AoH1eBatchWorkspace* workspace,
+    const xmvb::integrals::ExactPackedActiveTwoElectronAdjointCache& cache,
+    const xmvb::integrals::AoIntegralInput& ao,
+    xmvb::integrals::AoH1eBatchWorkspace* workspace,
     Eigen::MatrixXd* combined_response,
     Eigen::MatrixXd* active_projection) {
   const int n_bf = ao.n_basis_functions;
@@ -36,7 +36,7 @@ void apply_exact_ao_response(
     // Only R traverses the AO integral graph; the correction uses accepted
     // half-transformed images in O(n_bf^2*n_active^2) arithmetic.
     const Eigen::MatrixXd source = density + 0.5 * pullback;
-    apply_symmetric_ao_h1e_batch(source, ao, effective_openmp_thread_count(),
+    xmvb::integrals::apply_symmetric_ao_h1e_batch(source, ao, effective_openmp_thread_count(),
                                workspace, combined_response);
     for (Eigen::Index column = 0; column < density.cols(); ++column) {
       const Eigen::Map<const Eigen::MatrixXd> response(
@@ -46,13 +46,13 @@ void apply_exact_ao_response(
       Eigen::Map<Eigen::MatrixXd> projection(
           active_projection->col(column).data(), n_bf, n);
       projection.noalias() = 0.5 * response * coefficients;
-      projection -= 0.25 * project_exact_active_density_response(cache, weights);
+      projection -= 0.25 * xmvb::integrals::project_exact_active_density_response(cache, weights);
     }
   } else {
     // When the bounded accepted image is not admitted, keep the streamed
     // integral representation. Consumers still share a single projection.
     Eigen::MatrixXd forward, adjoint;
-    apply_symmetric_ao_h1e_fused_batch(density, pullback, ao,
+    xmvb::integrals::apply_symmetric_ao_h1e_fused_batch(density, pullback, ao,
         effective_openmp_thread_count(), workspace, &forward, &adjoint);
     *combined_response = forward + adjoint;
     for (Eigen::Index column = 0; column < density.cols(); ++column) {

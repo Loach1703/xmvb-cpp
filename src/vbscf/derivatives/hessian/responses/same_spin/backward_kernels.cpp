@@ -15,7 +15,7 @@
 #include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/determinants/algebra/cofactor_differential.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb {
 
@@ -37,7 +37,7 @@ SameSpinMatrixBackwardContribution make_zero_backward_contribution(
       square_storage_size(n_active_orbitals),
       0.0);
   result.packed_active_two_electron_gradient.assign(
-      packed_active_two_electron_integral_count(n_active_orbitals),
+      xmvb::integrals::packed_active_two_electron_integral_count(n_active_orbitals),
       0.0);
   return result;
 }
@@ -442,7 +442,7 @@ void accumulate_spin_local_matrix_backward_tile(
     int right_begin,
     int n_active_orbitals,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron_matrix,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const std::vector<double>& delta_ao_overlap_matrix,
     Eigen::MatrixXd* active_one_electron_gradient,
     std::vector<double>* active_orbital_overlap_gradient,
@@ -574,7 +574,7 @@ void accumulate_spin_local_matrix_backward(
     int n_unique_determinants,
     int n_active_orbitals,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron_matrix,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const std::vector<double>& delta_ao_overlap_matrix,
     Eigen::MatrixXd* active_one_electron_gradient,
     std::vector<double>* active_orbital_overlap_gradient,
@@ -778,7 +778,7 @@ build_support_sparse_same_spin_backward_contribution_by_tiles(
   const PairTileExtents tile_extents = plan_pair_tile_extents(
       same_spin_pair_cache,
       n_active_orbitals,
-      ActiveSpaceTwoElectronResult{},
+      xmvb::integrals::ActiveSpaceTwoElectronResult{},
       false);
   SameSpinAcceptedTileWeights tile_weights;
 
@@ -908,7 +908,7 @@ build_support_sparse_directional_same_spin_backward_contribution_by_tiles(
   const PairTileExtents tile_extents = plan_pair_tile_extents(
       same_spin_pair_cache,
       n_active_orbitals,
-      ActiveSpaceTwoElectronResult{},
+      xmvb::integrals::ActiveSpaceTwoElectronResult{},
       false);
   SameSpinAcceptedTileWeights tile_weights;
 
@@ -1026,7 +1026,7 @@ void accumulate_local_primary_pair_tile(
     const SameSpinAcceptedTileWeights& accepted_weights,
     int n_active_orbitals,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron_matrix,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const std::vector<double>& delta_overlap,
     Eigen::MatrixXd* active_one_electron_gradient,
     std::vector<double>* active_orbital_overlap_gradient,

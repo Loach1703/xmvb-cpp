@@ -27,7 +27,7 @@
 #include "vbscf/determinants/pairs/evaluator.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "core/pair_index.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
@@ -379,7 +379,7 @@ void check_sigma_action() {
       one_electron(column, row) = value;
     }
   }
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   Eigen::MatrixXd pair_factor(7, n_pairs);
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row < pair_factor.rows(); ++row) {
@@ -388,9 +388,9 @@ void check_sigma_action() {
     }
   }
   const Eigen::MatrixXd pair_kernel = pair_factor.transpose() * pair_factor;
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   two_electron.packed_active_two_electron_integrals.resize(
-      xmvb::vb::packed_active_two_electron_integral_count(n_orbitals));
+      xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row <= column; ++row) {
       two_electron.packed_active_two_electron_integrals[
@@ -576,9 +576,9 @@ void check_sigma_action() {
       "direct-CI integral adjoint fails the bilinear directional identity");
   const auto pack_pair_kernel = [n_orbitals](
       const Eigen::MatrixXd& kernel,
-      xmvb::vb::ActiveSpaceTwoElectronResult* result) {
+      xmvb::integrals::ActiveSpaceTwoElectronResult* result) {
     result->packed_active_two_electron_integrals.resize(
-        xmvb::vb::packed_active_two_electron_integral_count(n_orbitals));
+        xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
     for (int column = 0; column < kernel.cols(); ++column) {
       for (int row = 0; row <= column; ++row) {
         result->packed_active_two_electron_integrals[
@@ -1685,7 +1685,7 @@ void check_sigma_tile_boundary() {
   integrals.one_electron = Eigen::MatrixXd::Zero(n_orbitals, n_orbitals);
   for (int i = 0; i < n_orbitals; ++i)
     integrals.one_electron(i, i) = 0.17 * (i + 1);
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   integrals.pair_kernel = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
   const xmvb::mcscf::DirectCiSigmaAction action(spin, spin, integrals);
   const int n_strings = static_cast<int>(spin.size());
@@ -1764,7 +1764,7 @@ void check_distinct_spin_sigma_action() {
       one_electron(column, row) = value;
     }
   }
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   Eigen::MatrixXd factor(6, n_pairs);
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row < factor.rows(); ++row) {
@@ -1775,9 +1775,9 @@ void check_distinct_spin_sigma_action() {
   const Eigen::MatrixXd pair_kernel = factor.transpose() * factor;
   const auto pack_kernel = [n_orbitals](
       const Eigen::MatrixXd& kernel) {
-    xmvb::vb::ActiveSpaceTwoElectronResult result;
+    xmvb::integrals::ActiveSpaceTwoElectronResult result;
     result.packed_active_two_electron_integrals.resize(
-        xmvb::vb::packed_active_two_electron_integral_count(n_orbitals));
+        xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
     for (int column = 0; column < kernel.cols(); ++column) {
       for (int row = 0; row <= column; ++row) {
         result.packed_active_two_electron_integrals[
@@ -1787,7 +1787,7 @@ void check_distinct_spin_sigma_action() {
     }
     return result;
   };
-  const xmvb::vb::ActiveSpaceTwoElectronResult two_electron =
+  const xmvb::integrals::ActiveSpaceTwoElectronResult two_electron =
       pack_kernel(pair_kernel);
   xmvb::vb::OrthogonalActiveIntegrals integrals;
   integrals.orbital_transform=Eigen::MatrixXd::Identity(n_orbitals,n_orbitals);
@@ -1885,7 +1885,7 @@ void check_streamed_generator_adjoint_requests() {
   constexpr int count = 3;
   xmvb::vb::OrthogonalActiveIntegrals integrals;
   integrals.one_electron = Eigen::MatrixXd::Zero(n_orbitals, n_orbitals);
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   integrals.pair_kernel = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
   const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
 
@@ -2059,9 +2059,9 @@ void check_demand_driven_structure_diagonal() {
       one_electron(column, row) = value;
     }
   }
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   two_electron.packed_active_two_electron_integrals.assign(
-      xmvb::vb::packed_active_two_electron_integral_count(n_orbitals),
+      xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals),
       0.0);
 
   const auto large_topology = xmvb::vb::build_same_spin_pair_topology(
@@ -2195,7 +2195,7 @@ void check_fused_spin_sectors() {
     const int n_orbitals = sector[0];
     const auto alpha = complete_space(n_orbitals, sector[1]);
     const auto beta = complete_space(n_orbitals, sector[2]);
-    const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+    const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
     xmvb::vb::OrthogonalActiveIntegrals integrals;
     integrals.one_electron = Eigen::MatrixXd::Identity(n_orbitals, n_orbitals);
     Eigen::MatrixXd factors(5, n_pairs);
@@ -2243,10 +2243,10 @@ void benchmark_structure_response() {
     const Eigen::MatrixXd overlap = r.transpose()*r;
     const std::vector<double> packed_overlap(overlap.data(), overlap.data()+overlap.size());
     const Eigen::MatrixXd h = -Eigen::MatrixXd::Identity(n,n);
-    const int pairs = xmvb::vb::packed_active_pair_count(n);
-    xmvb::vb::ActiveSpaceTwoElectronResult eri;
+    const int pairs = xmvb::integrals::packed_active_pair_count(n);
+    xmvb::integrals::ActiveSpaceTwoElectronResult eri;
     eri.packed_active_two_electron_integrals.resize(
-        xmvb::vb::packed_active_two_electron_integral_count(n));
+        xmvb::integrals::packed_active_two_electron_integral_count(n));
     for (int j = 0; j < pairs; ++j)
       for (int i = 0; i <= j; ++i)
         eri.packed_active_two_electron_integrals[
@@ -2311,8 +2311,8 @@ void check_spin_sector_carrier_inverse() {
   const Eigen::Matrix3d s=r.transpose()*r;
   const std::vector<double> overlap(s.data(),s.data()+s.size());
   const Eigen::Matrix3d h=Eigen::Vector3d(-0.8,-0.3,0.2).asDiagonal();
-  xmvb::vb::ActiveSpaceTwoElectronResult eri;
-  eri.packed_active_two_electron_integrals.resize(xmvb::vb::packed_active_two_electron_integral_count(3),0.0);
+  xmvb::integrals::ActiveSpaceTwoElectronResult eri;
+  eri.packed_active_two_electron_integrals.resize(xmvb::integrals::packed_active_two_electron_integral_count(3),0.0);
   const auto orth=xmvb::vb::orthogonalize_active_integrals(overlap,h,eri,3);
   const xmvb::mcscf::DirectCiSigmaAction sigma(spin,spin,orth);
   const Eigen::MatrixXd diagonal=sigma.diagonal(orth.one_electron);
@@ -2367,7 +2367,7 @@ void check_tiled_integral_direction_case(
   constexpr int n_orbitals = 4;
   const int n_alpha = static_cast<int>(alpha.size());
   const int n_beta = static_cast<int>(beta.size());
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   xmvb::mcscf::ActiveIntegrals integrals, direction_integrals;
   integrals.one_electron.resize(n_orbitals, n_orbitals);
   direction_integrals.one_electron.resize(n_orbitals, n_orbitals);
@@ -2552,7 +2552,7 @@ void check_exchange_adjoint(bool benchmark = false) {
   for (int n : (benchmark ? std::vector<int>{6, 10, 12} : std::vector<int>{4, 10})) {
     const auto spin = complete_space(n, n / 2);
     const int count = static_cast<int>(spin.size());
-    const int pairs = xmvb::vb::packed_active_pair_count(n);
+    const int pairs = xmvb::integrals::packed_active_pair_count(n);
     xmvb::vb::OrthogonalActiveIntegrals integrals;
     integrals.one_electron = Eigen::MatrixXd::Identity(n, n);
     integrals.one_electron(0, 1) = integrals.one_electron(1, 0) = 0.13;
@@ -2637,7 +2637,7 @@ void benchmark_sigma() {
     const auto beta = complete_space(n_orbitals, sector[2]);
     const int n_alpha = static_cast<int>(alpha.size());
     const int n_beta = static_cast<int>(beta.size());
-    const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+    const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
     xmvb::vb::OrthogonalActiveIntegrals integrals;
     integrals.one_electron = Eigen::MatrixXd::Identity(n_orbitals, n_orbitals);
     Eigen::MatrixXd factors(7, n_pairs);

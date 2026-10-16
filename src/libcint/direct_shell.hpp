@@ -2,9 +2,9 @@
 
 #include <vector>
 
-#include "vbscf/integrals/ao/libcint/input.hpp"
+#include "integrals/ao/libcint_input.hpp"
 
-namespace xmvb::vb {
+namespace xmvb::libcint {
 
 struct LibcintShellBlock {
   int left_shell = 0;
@@ -82,10 +82,10 @@ struct LibcintShellWorkspace {
 
 class LibcintDirectShellEvaluator {
 public:
-  explicit LibcintDirectShellEvaluator(const LibcintInput& input);
+  explicit LibcintDirectShellEvaluator(const xmvb::integrals::LibcintInput& input);
   LibcintDirectShellEvaluator(
-      const LibcintInput& primary_input,
-      const LibcintInput& auxiliary_input);
+      const xmvb::integrals::LibcintInput& primary_input,
+      const xmvb::integrals::LibcintInput& auxiliary_input);
   ~LibcintDirectShellEvaluator();
 
   LibcintDirectShellEvaluator(const LibcintDirectShellEvaluator&) = delete;
@@ -155,8 +155,8 @@ private:
       int right_shell,
       int integral_kind) const;
 
-  const LibcintInput& input_;
-  const LibcintInput* auxiliary_input_ = nullptr;
+  const xmvb::integrals::LibcintInput& input_;
+  const xmvb::integrals::LibcintInput* auxiliary_input_ = nullptr;
   int n_basis_functions_ = 0;
   int n_auxiliary_basis_functions_ = 0;
   std::vector<double> ao_normalization_;
@@ -169,4 +169,4 @@ private:
   void* three_center_optimizer_ = nullptr;
 };
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::libcint

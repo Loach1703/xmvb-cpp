@@ -378,13 +378,13 @@ bool supports_rhf_auto_guess(
 }
 
 bool has_materialized_ao_two_electron_integrals(
-    const AoIntegralInput& ao_integral_input) {
+    const xmvb::integrals::AoIntegralInput& ao_integral_input) {
   return !ao_integral_input.pair_graph.empty();
 }
 
 void build_hcore_block_guess(
-    const LibcintInput& libcint_input,
-    const AoIntegralInput& ao_integral_input,
+    const xmvb::integrals::LibcintInput& libcint_input,
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
     const OrbitalPreparationInput& orbital_preparation_input,
     std::vector<double>* orbital_value_table) {
   build_block_matrix_guess(
@@ -395,9 +395,9 @@ void build_hcore_block_guess(
 }
 
 RestrictedHartreeFockResult solve_rhf_guess(
-    const LibcintInput& libcint_input,
-    const AoIntegralInput& ao_integral_input,
-    const RiAoFactorization* ri_factorization,
+    const xmvb::integrals::LibcintInput& libcint_input,
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
+    const xmvb::integrals::RiAoFactorization* ri_factorization,
     const OrbitalPreparationInput& orbital_preparation_input) {
   const int n_basis_functions = orbital_preparation_input.n_basis_functions;
   std::vector<std::vector<int>> atom_ao_indices(
@@ -514,9 +514,9 @@ RestrictedHartreeFockResult solve_rhf_guess(
 }
 
 void build_rhf_block_guess(
-    const LibcintInput& libcint_input,
-    const AoIntegralInput& ao_integral_input,
-    const RiAoFactorization* ri_factorization,
+    const xmvb::integrals::LibcintInput& libcint_input,
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
+    const xmvb::integrals::RiAoFactorization* ri_factorization,
     const OrbitalPreparationInput& orbital_preparation_input,
     std::vector<double>* orbital_value_table) {
   const auto rhf_result = solve_rhf_guess(
@@ -597,8 +597,8 @@ std::vector<int> read_mo_indices(
 
 void build_hcore_mo_guess(
     const std::string& input_file_path,
-    const LibcintInput& libcint_input,
-    const AoIntegralInput& ao_integral_input,
+    const xmvb::integrals::LibcintInput& libcint_input,
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
     const OrbitalPreparationInput& orbital_preparation_input,
     std::vector<double>* orbital_value_table) {
   if (orbital_value_table == nullptr) {
@@ -665,9 +665,9 @@ void build_hcore_mo_guess(
 
 void build_rhf_mo_guess(
     const std::string& input_file_path,
-    const LibcintInput& libcint_input,
-    const AoIntegralInput& ao_integral_input,
-    const RiAoFactorization* ri_factorization,
+    const xmvb::integrals::LibcintInput& libcint_input,
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
+    const xmvb::integrals::RiAoFactorization* ri_factorization,
     const OrbitalPreparationInput& orbital_preparation_input,
     std::vector<double>* orbital_value_table) {
   if (orbital_value_table == nullptr) {
@@ -764,9 +764,9 @@ bool initial_orbital_guess_supported(int guess_type) noexcept {
 void build_initial_orbital_guess(
     const std::string& input_file_path,
     int guess_type,
-    const LibcintInput& libcint_input,
-    const AoIntegralInput& ao_integral_input,
-    const RiAoFactorization* ri_factorization,
+    const xmvb::integrals::LibcintInput& libcint_input,
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
+    const xmvb::integrals::RiAoFactorization* ri_factorization,
     const std::vector<std::string>* read_guess_lines,
     OrbitalPreparationInput* orbital_preparation_input) {
   if (orbital_preparation_input == nullptr) {

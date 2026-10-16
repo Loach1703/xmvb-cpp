@@ -10,7 +10,7 @@
 
 #include "vbscf/core/contracts/input.hpp"
 #include "mcscf/optimization/trace.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_tile_stream_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
@@ -130,7 +130,7 @@ build_selected_structure_direction(
 
   const int n_active_orbitals =
       input.orbital_preparation_input.n_active_orbitals;
-  const int n_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   const int n_alpha = static_cast<int>(
       same_spin.alpha_reuse_table.unique_determinants.size());
   const int n_beta = static_cast<int>(
@@ -223,7 +223,7 @@ build_selected_structure_direction_from_pair_tiles(
   const auto& selected_states = accepted.structure_state->selected_states;
   const int n_active_orbitals =
       input.orbital_preparation_input.n_active_orbitals;
-  const int n_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   const int n_alpha = selected_states.n_unique_alpha;
   const int n_beta = selected_states.n_unique_beta;
   const int n_states = static_cast<int>(selected_states.states.size());

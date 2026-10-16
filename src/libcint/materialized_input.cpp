@@ -2,11 +2,11 @@
 
 #include <stdexcept>
 
-#include "vbscf/integrals/ao/pairs/two_electron_index.hpp"
+#include "integrals/ao/graph.hpp"
 
-namespace xmvb::vb {
+namespace xmvb::libcint {
 
-AoIntegralInput build_core_hamiltonian_only_ao_integral_input(
+xmvb::integrals::AoIntegralInput build_core_hamiltonian_only_ao_integral_input(
     int n_basis_functions,
     Eigen::MatrixXd ao_core_hamiltonian_matrix) {
   if (n_basis_functions <= 0) {
@@ -19,14 +19,14 @@ AoIntegralInput build_core_hamiltonian_only_ao_integral_input(
         "AO core Hamiltonian shape does not match n_basis_functions");
   }
 
-  AoIntegralInput ao_integral_input;
+  xmvb::integrals::AoIntegralInput ao_integral_input;
   ao_integral_input.n_basis_functions = n_basis_functions;
   ao_integral_input.ao_core_hamiltonian_matrix =
       std::move(ao_core_hamiltonian_matrix);
   return ao_integral_input;
 }
 
-AoIntegralInput build_materialized_ao_integral_input(
+xmvb::integrals::AoIntegralInput build_materialized_ao_integral_input(
     MaterializedAoIntegralBuffers buffers) {
   if (buffers.n_basis_functions <= 0) {
     throw std::invalid_argument("n_basis_functions must be positive");
@@ -42,11 +42,11 @@ AoIntegralInput build_materialized_ao_integral_input(
     throw std::invalid_argument("AO-pair index/value sizes are inconsistent");
   }
 
-  AoIntegralInput ao_integral_input;
+  xmvb::integrals::AoIntegralInput ao_integral_input;
   ao_integral_input.n_basis_functions = buffers.n_basis_functions;
   ao_integral_input.ao_core_hamiltonian_matrix =
       std::move(buffers.ao_core_hamiltonian_matrix);
-  ao_integral_input.pair_graph = build_ao_pair_graph(
+  ao_integral_input.pair_graph = xmvb::integrals::build_ao_pair_graph(
       std::move(buffers.left_pair_indices),
       std::move(buffers.right_pair_indices),
       std::move(buffers.two_electron_values),
@@ -54,4 +54,4 @@ AoIntegralInput build_materialized_ao_integral_input(
   return ao_integral_input;
 }
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::libcint

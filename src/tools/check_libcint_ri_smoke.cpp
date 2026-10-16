@@ -83,7 +83,7 @@ Options parse_arguments(int argc, char** argv) {
   return options;
 }
 
-double shell_block_max_abs_value(const xmvb::vb::LibcintShellBlock& block) {
+double shell_block_max_abs_value(const xmvb::libcint::LibcintShellBlock& block) {
   double max_abs_value = 0.0;
   for (double value : block.values) {
     max_abs_value = std::max(max_abs_value, std::abs(value));
@@ -91,7 +91,7 @@ double shell_block_max_abs_value(const xmvb::vb::LibcintShellBlock& block) {
   return max_abs_value;
 }
 
-double three_center_max_abs_value(const xmvb::vb::LibcintThreeCenterShellBlock& block) {
+double three_center_max_abs_value(const xmvb::libcint::LibcintThreeCenterShellBlock& block) {
   double max_abs_value = 0.0;
   for (double value : block.values) {
     max_abs_value = std::max(max_abs_value, std::abs(value));
@@ -100,8 +100,8 @@ double three_center_max_abs_value(const xmvb::vb::LibcintThreeCenterShellBlock& 
 }
 
 double metric_transpose_max_abs_diff(
-    const xmvb::vb::LibcintShellBlock& left_right,
-    const xmvb::vb::LibcintShellBlock& right_left) {
+    const xmvb::libcint::LibcintShellBlock& left_right,
+    const xmvb::libcint::LibcintShellBlock& right_left) {
   if (left_right.left_ao_count != right_left.right_ao_count ||
       left_right.right_ao_count != right_left.left_ao_count) {
     throw std::invalid_argument("metric transpose block dimensions do not match");
@@ -125,8 +125,8 @@ double metric_transpose_max_abs_diff(
 }
 
 double three_center_transpose_max_abs_diff(
-    const xmvb::vb::LibcintThreeCenterShellBlock& left_right_auxiliary,
-    const xmvb::vb::LibcintThreeCenterShellBlock& right_left_auxiliary) {
+    const xmvb::libcint::LibcintThreeCenterShellBlock& left_right_auxiliary,
+    const xmvb::libcint::LibcintThreeCenterShellBlock& right_left_auxiliary) {
   if (left_right_auxiliary.primary_left_ao_count !=
           right_left_auxiliary.primary_right_ao_count ||
       left_right_auxiliary.primary_right_ao_count !=
@@ -203,11 +203,11 @@ int main(int argc, char** argv) {
     const auto auxiliary_input = xmvb::vb::build_input_deck_basis(
         auxiliary_deck,
         auxiliary_basis_name).libcint_input;
-    xmvb::vb::LibcintDirectShellEvaluator evaluator(
+    xmvb::libcint::LibcintDirectShellEvaluator evaluator(
         input.libcint_input,
         auxiliary_input);
 
-    xmvb::vb::LibcintShellWorkspace workspace;
+    xmvb::libcint::LibcintShellWorkspace workspace;
     // These comparisons intentionally retain independent snapshots.
     const auto metric_block = evaluator.evaluate_auxiliary_metric_shell_pair(
         options.auxiliary_left_shell,
@@ -223,11 +223,11 @@ int main(int argc, char** argv) {
         options.three_center_primary_right_shell,
         options.three_center_primary_left_shell,
         options.three_center_auxiliary_shell, workspace);
-    xmvb::vb::LibcintRiIntegralProvider ri_provider;
+    xmvb::libcint::LibcintRiIntegralProvider ri_provider;
     const auto ri = ri_provider.build(
         input.libcint_input,
         auxiliary_input,
-        xmvb::vb::LibcintRiIntegralProviderOptions{});
+        xmvb::libcint::LibcintRiIntegralProviderOptions{});
     const Eigen::MatrixXd ri_pair_kernel =
         ri.metric_whitened_ao_pair_factors.transpose() *
         ri.metric_whitened_ao_pair_factors;

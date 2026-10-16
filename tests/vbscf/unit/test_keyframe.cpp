@@ -10,7 +10,7 @@
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
-#include "vbscf/integrals/ao/pairs/two_electron_index.hpp"
+#include "integrals/ao/graph.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/expansion/expander.hpp"
@@ -91,7 +91,7 @@ void benchmark_accepted_state16(bool check_hvp = false) {
       values.push_back(0.02*std::cos(0.1*p)*std::cos(0.1*q)+
                        0.01*std::sin(0.07*p)*std::sin(0.07*q));
     }
-  ao.pair_graph = xmvb::vb::build_ao_pair_graph(left,right,values,n);
+  ao.pair_graph = xmvb::integrals::build_ao_pair_graph(left,right,values,n);
   xmvb::vb::RawStructureData raw;
   raw.n_structures = 1;
   raw.n_total_electrons = raw.n_active_electrons = n;
@@ -252,7 +252,7 @@ void check_keyframe(bool complete_carrier) {
       values.push_back(0.07 * std::cos(0.2 * (p - q)));
     }
   }
-  ao.pair_graph = xmvb::vb::build_ao_pair_graph(left, right, values, 3);
+  ao.pair_graph = xmvb::integrals::build_ao_pair_graph(left, right, values, 3);
   auto& data = input.structure_data;
   for (int a = 0; a < (complete_carrier ? 2 : 1); ++a) {
     for (int b = 0; b < 2; ++b) {

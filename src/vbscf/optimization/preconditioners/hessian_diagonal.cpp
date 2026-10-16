@@ -15,10 +15,10 @@
 #include "mcscf/optimization/trace.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "core/pair_index.hpp"
-#include "vbscf/integrals/active/two_electron/response/types.hpp"
-#include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
-#include "vbscf/integrals/active/two_electron/transformation/packed_pair_map.hpp"
-#include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "integrals/response/types.hpp"
+#include "integrals/response/ao_pair_operator.hpp"
+#include "integrals/active/pair_map.hpp"
+#include "integrals/ao/ri.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -200,10 +200,10 @@ Eigen::MatrixXd build_pair_transform(
   return result;
 }
 
-ExactCtxPairMatrix apply_ao_pair_operator(
+xmvb::integrals::ExactCtxPairMatrix apply_ao_pair_operator(
     const VbScfInput& input,
-    const Eigen::Ref<const ExactCtxPairMatrix>& coefficients) {
-  ExactCtxPairMatrix result;
+    const Eigen::Ref<const xmvb::integrals::ExactCtxPairMatrix>& coefficients) {
+  xmvb::integrals::ExactCtxPairMatrix result;
   const int n_bf = input.orbital_preparation_input.n_basis_functions;
   if (input.standard_two_electron_mode ==
       StandardTwoElectronMode::ResolutionOfIdentity) {
@@ -213,7 +213,7 @@ ExactCtxPairMatrix apply_ao_pair_operator(
     const auto& factors = input.ri_factorization->metric_whitened_ao_pair_factors;
     result.noalias() = factors.transpose() * (factors * coefficients);
   } else {
-    detail::apply_exact_ao_pair_kernel(
+    xmvb::integrals::detail::apply_exact_ao_pair_kernel(
         input.ao_integral_input,
         coefficients,
         n_bf,
@@ -433,9 +433,9 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
   const auto& active_two_electron = prepared.active_space_two_electron_result;
   const Eigen::MatrixXd active_pair_transform =
       build_pair_transform(inverse_active_transform);
-  ExactCtxPairMatrix active_pair_products;
+  xmvb::integrals::ExactCtxPairMatrix active_pair_products;
   if (active_two_electron.representation ==
-      ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
     if (active_two_electron.ri_active_pair_factors.size() == 0 ||
         !input.ri_factorization) {
       throw std::invalid_argument(
@@ -452,8 +452,8 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
   } else {
     // The memory-bounded exact forward path deliberately does not retain
     // G*Q_active. Rebuild only that absent accepted tensor from the AO graph.
-    ExactCtxPairMatrix active_pair_map;
-    build_packed_orbital_pair_map(
+    xmvb::integrals::ExactCtxPairMatrix active_pair_map;
+    xmvb::integrals::build_packed_orbital_pair_map(
         mo.middleCols(n_core, n_active), &active_pair_map);
     active_pair_products = apply_ao_pair_operator(input, active_pair_map);
   }
@@ -476,8 +476,8 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
         x.j_active[slice_index(p, a, b, n_active)] =
             contraction[xmvb::core::PairIndex::packed_pair_index(a, b)];
   }
-  ExactCtxPairMatrix active_pair_map;
-  build_packed_orbital_pair_map(
+  xmvb::integrals::ExactCtxPairMatrix active_pair_map;
+  xmvb::integrals::build_packed_orbital_pair_map(
       mo.middleCols(n_core, n_active), &active_pair_map);
   const Eigen::MatrixXd active_pairs =
       active_pair_map.transpose() * active_pair_products;
@@ -534,8 +534,8 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
   if (densities.core_coulomb.rows()==n_bf) {
     x.j_pc=densities.core_coulomb;
   } else {
-    const ExactCtxPairMatrix core_diagonal_products = [&] {
-      ExactCtxPairMatrix map(n_ao_pairs,n_core);
+    const xmvb::integrals::ExactCtxPairMatrix core_diagonal_products = [&] {
+      xmvb::integrals::ExactCtxPairMatrix map(n_ao_pairs,n_core);
       Eigen::Index pair=0;
       for (int mu=0;mu<n_bf;++mu)
         for (int nu=0;nu<=mu;++nu,++pair)

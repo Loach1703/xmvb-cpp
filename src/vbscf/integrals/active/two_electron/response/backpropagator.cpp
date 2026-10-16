@@ -10,10 +10,10 @@
 #endif
 
 #include "parallel/openmp.hpp"
-#include "vbscf/core/storage/eigen.hpp"
+#include "linalg/storage.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "core/pair_index.hpp"
-#include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
+#include "integrals/response/ao_pair_operator.hpp"
 
 namespace xmvb::vb {
 
@@ -239,7 +239,7 @@ std::vector<double> multiply_pair_coefficients_by_gradient_matrix(
 }
 
 std::vector<double> apply_sparse_ao_integral_matrix(
-    const AoPairGraph& graph,
+    const xmvb::integrals::AoPairGraph& graph,
     const std::vector<double>& transformed_pair_coefficients,
     int n_basis_functions,
     std::size_t n_active_pairs) {
@@ -247,10 +247,10 @@ std::vector<double> apply_sparse_ao_integral_matrix(
       n_basis_functions * (n_basis_functions + 1) / 2;
   if (transformed_pair_coefficients.size() != n_ao_pairs * n_active_pairs)
     throw std::invalid_argument("pair adjoint shape mismatch");
-  const Eigen::Map<const ExactCtxPairMatrix> source(
+  const Eigen::Map<const xmvb::integrals::ExactCtxPairMatrix> source(
       transformed_pair_coefficients.data(), n_ao_pairs, n_active_pairs);
-  ExactCtxPairMatrix result;
-  detail::apply_exact_ao_pair_graph(graph, source, n_basis_functions, n_active_pairs, &result);
+  xmvb::integrals::ExactCtxPairMatrix result;
+  xmvb::integrals::detail::apply_exact_ao_pair_graph(graph, source, n_basis_functions, n_active_pairs, &result);
   if (result.size() == 0) return {};
   return std::vector<double>(result.data(), result.data() + result.size());
 }
@@ -346,7 +346,7 @@ Eigen::MatrixXd build_active_auxiliary_gradient_matrix(
 
 ActiveSpaceTwoElectronBackpropagationResult backpropagate_packed_active_two_electron_integrals(
     const std::vector<double>& packed_active_two_electron_gradient,
-    const AoPairGraph& pair_graph,
+    const xmvb::integrals::AoPairGraph& pair_graph,
     const std::vector<double>& dense_active_coefficients,
     const double* cached_dense_ao_pair_products,
     std::size_t cached_dense_ao_pair_product_count,
@@ -414,7 +414,7 @@ ActiveSpaceTwoElectronBackpropagationResult backpropagate_packed_active_two_elec
 ActiveSpaceTwoElectronBackpropagationResult
 backpropagate_ri_active_pair_factors(
     const std::vector<double>& ri_active_pair_factor_gradient,
-    const RiAoFactorization& ao_ri_result,
+    const xmvb::integrals::RiAoFactorization& ao_ri_result,
     const std::vector<double>& dense_active_coefficients,
     int n_basis_functions,
     int n_inactive_doubly_occupied_orbitals,
@@ -450,7 +450,7 @@ backpropagate_ri_active_pair_factors(
       ao_ri_result.metric_whitened_ao_pair_factors.transpose() *
       active_pair_factor_gradient_matrix;
   const std::vector<double> pair_gradients =
-      copy_matrix_to_row_major_buffer(ao_pair_transform_gradient);
+      xmvb::linalg::copy_matrix_to_row_major_buffer(ao_pair_transform_gradient);
 
   const auto active_pairs =
       build_active_pair_list(n_active_orbitals);
@@ -477,7 +477,7 @@ ActiveSpaceTwoElectronBackpropagationResult
 ActiveSpaceTwoElectronBackpropagator::backpropagate(
     const std::vector<double>& ri_active_pair_factor_gradient,
     const VbScfInput& input,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_basis_functions,
     int n_inactive_doubly_occupied_orbitals,
     int n_active_orbitals) const {
@@ -485,7 +485,7 @@ ActiveSpaceTwoElectronBackpropagator::backpropagate(
     throw std::invalid_argument("active-space RI backprop dimensions must be positive");
   }
   if (active_space_two_electron_result.representation !=
-      ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
     throw std::invalid_argument("RI backpropagate() requires an RI active-space result");
   }
   if (n_inactive_doubly_occupied_orbitals < 0 ||
@@ -498,7 +498,7 @@ ActiveSpaceTwoElectronBackpropagator::backpropagate(
         "RI active-space result is missing dense active coefficients");
   }
   const std::vector<double> dense_active_coefficients =
-      copy_matrix_to_row_major_buffer(
+      xmvb::linalg::copy_matrix_to_row_major_buffer(
           active_space_two_electron_result.dense_active_coefficients);
 
   const auto& ao_ri_result = ensure_vbscf_input_ri_cache(input);
@@ -514,7 +514,7 @@ ActiveSpaceTwoElectronBackpropagator::backpropagate(
 ActiveSpaceTwoElectronBackpropagationResult
 ActiveSpaceTwoElectronBackpropagator::backpropagate(
     const std::vector<double>& packed_active_two_electron_gradient,
-    const AoPairGraph& pair_graph,
+    const xmvb::integrals::AoPairGraph& pair_graph,
     const std::vector<double>& auxiliary_orbital_matrix,
     int n_basis_functions,
     int n_inactive_doubly_occupied_orbitals,
@@ -562,8 +562,8 @@ ActiveSpaceTwoElectronBackpropagator::backpropagate(
 ActiveSpaceTwoElectronBackpropagationResult
 ActiveSpaceTwoElectronBackpropagator::backpropagate(
     const std::vector<double>& packed_active_two_electron_gradient,
-    const AoPairGraph& pair_graph,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::AoPairGraph& pair_graph,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_basis_functions,
     int n_inactive_doubly_occupied_orbitals,
     int n_active_orbitals) const {
@@ -583,7 +583,7 @@ ActiveSpaceTwoElectronBackpropagator::backpropagate(
         "active-space result is missing dense active coefficients");
   }
   const std::vector<double> dense_active_coefficients =
-      copy_matrix_to_row_major_buffer(
+      xmvb::linalg::copy_matrix_to_row_major_buffer(
           active_space_two_electron_result.dense_active_coefficients);
   const double* cached_dense_ao_pair_products = nullptr;
   std::size_t cached_dense_ao_pair_product_count = 0;
@@ -607,7 +607,7 @@ ActiveSpaceTwoElectronBackpropagator::backpropagate(
 ActiveSpaceTwoElectronBackpropagationResult
 ActiveSpaceTwoElectronBackpropagator::backpropagate(
     const std::vector<double>& packed_active_two_electron_gradient,
-    const AoPairGraph& pair_graph,
+    const xmvb::integrals::AoPairGraph& pair_graph,
     const OrbitalPreparationResult& orbital_preparation_result,
     int n_basis_functions,
     int n_inactive_doubly_occupied_orbitals,

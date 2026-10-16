@@ -12,7 +12,7 @@
 #include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
 
 namespace {
@@ -212,8 +212,8 @@ int main(int argc, char** argv) {
     const auto& gradient = component_gradient(result, options.component);
     const std::vector<double> baseline_packed_two =
         result.active_space_two_electron_result.packed_active_two_electron_integrals.empty()
-            ? xmvb::vb::reconstruct_packed_active_two_electron_integrals(
-                  xmvb::vb::make_active_space_two_electron_view(
+            ? xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
+                  xmvb::integrals::make_active_space_two_electron_view(
                       result.active_space_two_electron_result),
                   load_result.input.orbital_preparation_input.n_active_orbitals)
             : result.active_space_two_electron_result.packed_active_two_electron_integrals;

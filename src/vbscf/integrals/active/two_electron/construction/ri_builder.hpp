@@ -1,7 +1,7 @@
 #pragma once
 
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
-#include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "integrals/active/two_electron_result.hpp"
+#include "integrals/ao/ri.hpp"
 #include "vbscf/orbitals/preparation/result.hpp"
 
 namespace xmvb::vb {
@@ -17,8 +17,8 @@ namespace xmvb::vb {
  */
 class RiActiveSpaceTwoElectronBuilder {
 public:
-  ActiveSpaceTwoElectronResult build(
-      const RiAoFactorization& ao_ri_result,
+  xmvb::integrals::ActiveSpaceTwoElectronResult build(
+      const xmvb::integrals::RiAoFactorization& ao_ri_result,
       const OrbitalPreparationResult& orbital_preparation_result,
       int n_basis_functions,
       int n_active_orbitals) const;

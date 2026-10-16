@@ -3,11 +3,11 @@
 #include <memory>
 #include <stdexcept>
 
-#include "vbscf/integrals/ao/ri/provider.hpp"
+#include "integrals/ao/ri_provider.hpp"
 
 namespace xmvb::vb {
 
-const RiAoFactorization& ensure_vbscf_input_ri_cache(
+const xmvb::integrals::RiAoFactorization& ensure_vbscf_input_ri_cache(
     const VbScfInput& input) {
   if (input.ri_factorization == nullptr) {
     if (input.libcint_input.n_atoms <= 0 || input.libcint_input.n_shells <= 0) {
@@ -21,7 +21,7 @@ const RiAoFactorization& ensure_vbscf_input_ri_cache(
       throw std::invalid_argument(
           "VbScfInput does not contain an RI auxiliary basis");
     }
-    input.ri_factorization = std::make_shared<const RiAoFactorization>(
+    input.ri_factorization = std::make_shared<const xmvb::integrals::RiAoFactorization>(
         input.ri_factorization_provider->build(
             input.libcint_input,
             input.auxiliary_libcint_input));
