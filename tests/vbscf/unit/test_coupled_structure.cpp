@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -13,9 +14,12 @@
 
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
+#include "vbscf/derivatives/hessian/exact/operator.hpp"
+#include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "core/pair_index.hpp"
 #include "integrals/active/two_electron.hpp"
+#include "integrals/ao/graph.hpp"
 #include "vbscf/optimization/neo/coordinates.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
@@ -610,6 +614,97 @@ void check_connection(const StructureFixture& fixture) {
   }
 }
 
+/** Compare the complete orbital/CI coupling action with its separate calls. */
+void check_joint_coupling_action() {
+  xmvb::vb::VbScfInput input;
+  input.standard_two_electron_mode = xmvb::vb::StandardTwoElectronMode::Exact;
+  auto& orbitals = input.orbital_preparation_input;
+  orbitals.n_basis_functions = 3;
+  orbitals.n_orbitals = orbitals.n_active_orbitals = 2;
+  orbitals.n_total_electrons = orbitals.n_active_electrons = 2;
+  orbitals.orbital_value_table = {1.0, 0.13, -0.17, 0.21, 0.94, 0.12};
+  orbitals.orbital_basis_index_table = {1, 2, 3, 1, 2, 3};
+  orbitals.orbital_basis_counts = {3, 3};
+  orbitals.ao_overlap_matrix = Eigen::Matrix3d::Identity();
+  orbitals.ao_overlap_matrix(0, 1) = orbitals.ao_overlap_matrix(1, 0) = 0.1;
+  auto& ao = input.ao_integral_input;
+  ao.n_basis_functions = 3;
+  ao.ao_core_hamiltonian_matrix.resize(3, 3);
+  ao.ao_core_hamiltonian_matrix << -1.1, 0.13, 0.04,
+                                    0.13, -0.6, -0.08,
+                                    0.04, -0.08, 0.2;
+  std::vector<int> left, right;
+  std::vector<double> values;
+  for (int p = 0; p < 6; ++p) {
+    for (int q = 0; q <= p; ++q) {
+      left.push_back(p);
+      right.push_back(q);
+      values.push_back(0.07 * std::cos(0.2 * (p - q)));
+    }
+  }
+  ao.pair_graph = xmvb::integrals::build_ao_pair_graph(left, right, values, 3);
+  auto& data = input.structure_data;
+  for (int a = 0; a < 2; ++a) {
+    for (int b = 0; b < 2; ++b) {
+      data.alpha_det.push_back({a});
+      data.beta_det.push_back({b});
+      data.determinant_to_structure_terms.push_back({{data.n_structures++, 1.0}});
+    }
+  }
+
+  const auto accepted = xmvb::vb::OrbitalGradientEvaluator().evaluate(
+      input, {0, 3}, {0.5, 0.5}, 0.4);
+  const xmvb::vb::SparseParameterLayout layout(orbitals);
+  const auto& prepared = accepted.orbital_preparation_result;
+  const xmvb::vb::OrbitalChart chart(
+      orbitals, layout,
+      prepared.auxiliary_orbital_matrix.leftCols(orbitals.n_orbitals),
+      prepared.physical_orbital_frame.normalized_orbital_matrix,
+      nullptr, false, false, nullptr,
+      xmvb::vb::OrbitalChart::Coordinates::Unwhitened);
+  const xmvb::vb::ExactHvpOperator hessian(
+      accepted.second_order_context, &input, layout, &chart);
+  const xmvb::vb::StructureTangentOperator structure(
+      accepted.second_order_context, hessian.structure_action());
+  require(hessian.structure_action().supports_integral_direction() &&
+          chart.reduced_size() > 0 && structure.tangent_size() > 0,
+          "joint coupling fixture lacks orbital or direct-CI directions");
+  Eigen::VectorXd orbital = Eigen::VectorXd::LinSpaced(
+      chart.reduced_size(), 0.23, 0.57);
+  orbital.normalize();
+  const Eigen::VectorXd ci = Eigen::VectorXd::LinSpaced(
+      structure.tangent_size(), -0.31, 0.42);
+  const auto close = [](const auto& actual, const auto& expected) {
+    return (actual - expected).norm() <= 3e-11 * std::max(1.0, expected.norm());
+  };
+  for (const int direction : {0, 1, 2}) {
+    Eigen::VectorXd p = orbital;
+    Eigen::VectorXd q = ci;
+    if (direction == 1) p.setZero();
+    if (direction == 2) q.setZero();
+    const auto separate_p = hessian.apply_orbital_coupling(p);
+    xmvb::vb::StructureActiveIntegralAdjoint separate_adjoint;
+    const auto separate_ci = structure.apply_coupling_coordinates(q, &separate_adjoint);
+    const Eigen::MatrixXd raw = structure.coefficient_response_coordinates(q);
+    xmvb::vb::StructureResponseRequest request{raw};
+    const auto joint_p = hessian.apply_orbital_coupling(p, &request);
+    xmvb::vb::StructureActiveIntegralAdjoint joint_adjoint;
+    const auto joint_ci = structure.finish_coupling_coordinates(
+        raw, std::move(request.result), &joint_adjoint);
+    require(close(joint_p.orbital_hessian, separate_p.orbital_hessian) &&
+            close(joint_p.scaled_structure_forcing, separate_p.scaled_structure_forcing),
+            "joint coupling changed orbital Hessian or structure forcing");
+    require(close(joint_ci.hessian_coordinates, separate_ci.hessian_coordinates) &&
+            close(joint_ci.metric_coordinates, separate_ci.metric_coordinates) &&
+            close(joint_ci.coefficient_response, separate_ci.coefficient_response) &&
+            close(joint_ci.adjoint_multipliers, separate_ci.adjoint_multipliers),
+            "joint coupling changed CI Hessian, metric, response, or multipliers");
+    require(close(hessian.apply_structure_coupling_adjoint(joint_adjoint),
+                  hessian.apply_structure_coupling_adjoint(separate_adjoint)),
+            "joint coupling changed the orbital image of the CI adjoint");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -622,6 +717,7 @@ int main() {
     check_connection(fixture);
     check_carrier_diagonal(fixture);
     check_metric_factorization(fixture);
+    check_joint_coupling_action();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

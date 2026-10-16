@@ -13,6 +13,8 @@ namespace xmvb::vb {
 struct AcceptedPointContext;
 class StructureAction;
 struct StructureActiveIntegralAdjoint;
+struct StructureResponseSweep;
+struct StructureActionResult;
 class StructureMetricInverse;
 
 /**
@@ -156,6 +158,14 @@ public:
       const Eigen::VectorXd& coordinates,
       StructureActiveIntegralAdjoint* adjoint = nullptr) const;
 
+  /** @brief Finish a coupling from images/cotangents already formed with HVP.
+   * Raw coefficients use coefficient_response_coordinates(); no second sigma
+   * or exterior transform is needed to obtain the structure Hessian or metric.
+   */
+  StructureCoordinateCouplingAction finish_coupling_coordinates(
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients,StructureResponseSweep sweep,
+      StructureActiveIntegralAdjoint* adjoint) const;
+
   /** @brief Applies several coordinate directions in one H/S block action. */
   StructureCoordinateCouplingBlock apply_coupling_coordinate_block(
       const Eigen::Ref<const Eigen::MatrixXd>& coordinates,
@@ -231,6 +241,9 @@ public:
   double squared_norm(const StructureTangent& tangent) const;
 
 private:
+  StructureCoordinateCouplingBlock finish_coupling_block(
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients,StructureActionResult images,
+      StructureResponseSweep* sweep,StructureActiveIntegralAdjoint* adjoint) const;
   void validate_shape(const Eigen::MatrixXd& coefficients) const;
   void project_in_place(Eigen::MatrixXd* coefficients) const;
 

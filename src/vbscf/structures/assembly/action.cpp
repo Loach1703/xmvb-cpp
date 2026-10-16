@@ -1298,7 +1298,8 @@ StructureActionResult StructureAction::apply_integral_direction(
     const std::vector<double>& overlap_direction,
     const std::vector<double>& one_electron_direction,
     const std::vector<double>& packed_two_electron_direction,
-    StructureIntegralDirection* direct_ci_direction) const {
+    StructureIntegralDirection* direct_ci_direction,
+    StructureResponseRequest* ci_response) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiIntegralDirection);
   if (!direct_ci_) {
     throw std::logic_error(
@@ -1328,6 +1329,7 @@ StructureActionResult StructureAction::apply_integral_direction(
       direct_ci_->sigma,
       integral_direction);
   if (state.source_factors) {
+    if (ci_response) ci_response->result=apply_response(state,ci_response->coefficients);
     const Eigen::MatrixXd relative_orbital_direction =
         direct_ci_->integrals.orbital_transform.transpose().triangularView<Eigen::Lower>()
             .solve(integral_direction.orbital_transform.transpose()).transpose();
@@ -1336,8 +1338,15 @@ StructureActionResult StructureAction::apply_integral_direction(
         sigma_direction,integral_direction,direct_ci_direction);
   }
 
-  auto sweep=product_jet(state,nullptr,&integral_direction.orbital_transform,&sigma_direction,
-      direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,true,direct_ci_direction);
+  // Preserve the cheaper spin-factor contraction when its existing FLOP plan
+  // selects it. Only two product-jet consumers share the product tile sweep.
+  const bool joint=ci_response && !ci_response->coefficients.isZero(0.0) &&
+      !prefer_factor_response(direct_ci_->sigma);
+  if (ci_response && !joint) ci_response->result=apply_response(state,ci_response->coefficients);
+  auto sweep=product_jet(state,joint ? &ci_response->coefficients:nullptr,
+      &integral_direction.orbital_transform,&sigma_direction,
+      direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,true,
+      direct_ci_direction,joint ? &ci_response->result:nullptr);
   if (direct_ci_direction) {
     direct_ci_direction->generator_direction=std::move(sweep.generator);
     direct_ci_direction->one_electron_direction=std::move(sweep.one_electron);

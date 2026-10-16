@@ -10,6 +10,8 @@
 
 namespace xmvb::vb {
 
+struct StructureResponseRequest;
+
 std::shared_ptr<const AcceptedStructureResponseState>
 build_accepted_structure_response_state(
     const VbScfInput& input,
@@ -21,7 +23,8 @@ build_selected_structure_direction(
     const AcceptedOuterResponseContext& accepted,
     const ActiveSpaceIntegralDirectionView& direction,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors = nullptr,
-    const Eigen::MatrixXd* directional_ri_active_pair_factors = nullptr);
+    const Eigen::MatrixXd* directional_ri_active_pair_factors = nullptr,
+    StructureResponseRequest* ci_response=nullptr);
 
 /** Builds factorized structure images without a directional `U x U` cache. */
 SelectedStateDirectionalStructureImages
@@ -30,6 +33,7 @@ build_selected_structure_direction_from_pair_tiles(
     const ActiveSpaceIntegralDirectionView& direction,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors = nullptr,
     const Eigen::MatrixXd* directional_ri_active_pair_factors = nullptr,
-    const detail::DirectionalPairTileConsumer& additional_consumer = {});
+    const detail::DirectionalPairTileConsumer& additional_consumer = {},
+    StructureResponseRequest* ci_response=nullptr);
 
 }  // namespace xmvb::vb

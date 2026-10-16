@@ -44,7 +44,7 @@ struct ExactHvpOperator::State {
       HvpComponents components) const;
 
   OrbitalCouplingAction apply_orbital_coupling(
-      const Eigen::VectorXd& reduced_direction) const;
+      const Eigen::VectorXd& reduced_direction,StructureResponseRequest* ci_response) const;
 
   Eigen::VectorXd apply_orbital(
       const Eigen::VectorXd& reduced_direction) const;
@@ -101,7 +101,7 @@ private:
       const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
       const PrecomputedDirection* precomputed_direction,
       OrbitalCouplingAction* coupling_output,
-      bool horizontal_forcing = true) const;
+      bool horizontal_forcing = true,StructureResponseRequest* ci_response=nullptr) const;
 
   Eigen::VectorXd apply_structure_response_adjoint(
       const Eigen::Ref<const Eigen::MatrixXd>& coefficient_response,

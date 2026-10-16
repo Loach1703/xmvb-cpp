@@ -5,6 +5,7 @@
 #include <functional>
 #include <initializer_list>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include <Eigen/Core>
@@ -15,6 +16,7 @@
 namespace xmvb::mcscf {
 
 class ProductSupport;
+class DirectCiSigmaAction;
 
 /** @brief Add one adjoint column range directly to a caller-owned spin column.
  * Arguments are local beta, RHS, first/last indices into alpha_rows, and a
@@ -31,6 +33,18 @@ using DirectCiTileReader = std::function<void(const std::vector<int>&,
     const std::vector<int>&, Eigen::Ref<Eigen::MatrixXd>)>;
 using DirectCiTileWriter = std::function<void(const std::vector<int>&,
     const std::vector<int>&, const DirectCiColumnAccumulator&)>;
+
+/** @brief One temporal response on a common accepted state and generated graph.
+ * Image receives H*response, plus direction*state when direction is supplied.
+ * Forcing optionally receives only direction*state. All views are borrowed;
+ * writers must consume a tile before the next request reuses its storage.
+ */
+struct DirectCiTileRequest {
+  DirectCiTileReader response;
+  DirectCiTileWriter image;
+  const DirectCiSigmaAction* direction=nullptr;
+  DirectCiTileWriter forcing{};
+};
 
 /** @brief Borrowed Eigen column payload, valid until the next column read.
  * A null rows pointer denotes all alpha rows; otherwise rows is sorted and
@@ -224,6 +238,17 @@ public:
       const DirectCiTileWriter& add_forcing = {},
       const ProductSupport* support = nullptr, int exchange_parity = 0) const;
 
+  /** @brief Independent responses sharing one accepted scatter per tile.
+   * Each returned integral adjoint is <request.response,H*state>, without
+   * combining directions. All inputs share width, exact support and parity.
+   * Requests reuse the same halo and at most three channel slabs under the
+   * existing 64 MiB bound. Carrier storage does not grow with the request
+   * count; the small orbital-space integral cotangents remain separate.
+   */
+  std::vector<DirectCiIntegralAdjoint> apply_tiled_responses(int block_width,
+      std::span<const DirectCiTileRequest> requests,const DirectCiTileReader& state,
+      const ProductSupport* support=nullptr,int exchange_parity=0) const;
+
   /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
    * Uses occupation lists and the retained two-electron kernel, not sigma
    * probes. The one-electron integrals must belong to this immutable action.
@@ -353,12 +378,9 @@ private:
       Eigen::MatrixXd* sigma, int exchange_parity, bool collect_integrals) const;
 
   /** @brief Generated channel graph shared by tiled sigma and its integral VJP. */
-  DirectCiIntegralAdjoint contract_tiled(
-      int block_width, const DirectCiTileReader& response,
-      const DirectCiTileWriter& add_columns, const DirectCiTileReader& state,
-      bool collect_integrals, const ProductSupport* support, int exchange_parity,
-      const DirectCiSigmaAction* direction = nullptr,
-      const DirectCiTileWriter& add_forcing = {}) const;
+  std::vector<DirectCiIntegralAdjoint> contract_tiled(int block_width,
+      std::span<const DirectCiTileRequest> requests,const DirectCiTileReader& state,
+      bool collect_integrals,const ProductSupport* support,int exchange_parity) const;
 
   /** @brief Cooperative sigma contraction inside the current OpenMP team.
    * Each output beta column has one owner. All workers must call this method.

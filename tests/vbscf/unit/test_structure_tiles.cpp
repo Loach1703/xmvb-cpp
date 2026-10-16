@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -19,6 +20,7 @@
 #include "mcscf/ci/sigma.hpp"
 #include "mcscf/ci/factors.hpp"
 #include "mcscf/ci/product_support.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/assembly/states.hpp"
@@ -805,6 +807,49 @@ void check_factor_structure_response(int parity, bool unequal = false) {
   }
 }
 
+/** @brief Joint orbital/CI product jet agrees with the two separate actions. */
+void check_joint_product_jet(const xmvb::vb::StructureAction& action,
+    const xmvb::vb::StructureAdjointState& state,const Eigen::MatrixXd& q,
+    const std::vector<double>& overlap,const std::vector<double>& one,
+    const std::vector<double>& two) {
+  require(!state.source_factors,"joint product-jet fixture selected source factors");
+  xmvb::vb::StructureIntegralDirection separate_direction,joint_direction;
+  separate_direction.capture_connection=joint_direction.capture_connection=q.rows()<16;
+  const auto separate_p=action.apply_integral_direction(state,overlap,one,two,&separate_direction);
+  const auto separate_q=action.apply_response(state,q);
+  xmvb::vb::StructureResponseRequest request{q,{}};
+  const auto joint_p=action.apply_integral_direction(state,overlap,one,two,&joint_direction,&request);
+  const auto close=[](const Eigen::MatrixXd& actual,const Eigen::MatrixXd& expected) {
+    return (actual-expected).norm()<3e-11*std::max(1.0,expected.norm());
+  };
+  require(close(joint_p.hamiltonian,separate_p.hamiltonian) &&
+          close(joint_p.overlap,separate_p.overlap),
+          "joint product jet changed the orbital-direction H/S images");
+  require(close(request.result.images.hamiltonian,separate_q.images.hamiltonian) &&
+          close(request.result.images.overlap,separate_q.images.overlap),
+          "joint product jet changed the CI-response H/S images");
+  check_images(joint_p,separate_p);
+  check_images(request.result.images,separate_q.images);
+  require(close(request.result.one_electron,separate_q.one_electron) &&
+          close(request.result.pair_kernel,separate_q.pair_kernel) &&
+          close(request.result.generator,separate_q.generator),
+          "joint product jet mixed the CI-response active cotangents");
+  require(close(joint_direction.one_electron_direction,separate_direction.one_electron_direction) &&
+          close(joint_direction.pair_kernel_direction,separate_direction.pair_kernel_direction) &&
+          close(joint_direction.generator_direction,separate_direction.generator_direction),
+          "joint product jet mixed the orbital-direction active cotangents");
+  if (separate_direction.capture_connection) {
+    require(separate_direction.connection.has_value() && joint_direction.connection.has_value(),
+            "joint product jet lost the orbital connection diagnostic");
+    const auto& a=*joint_direction.connection;
+    const auto& b=*separate_direction.connection;
+    require(close(a.representation_forcing,b.representation_forcing) &&
+            close(a.integral_forcing,b.integral_forcing) && close(a.overlap,b.overlap) &&
+            close(a.squared_norm,b.squared_norm),
+            "joint product jet changed orbital connection components");
+  }
+}
+
 /** @brief Product response: selected nonclosed spaces, two roots and zero weights. */
 void check_product_response(int parity,bool unequal) {
   const auto fixture=make_fixture(unequal ? 5:4,2,unequal ? 1:2);
@@ -829,12 +874,23 @@ void check_product_response(int parity,bool unequal) {
   check_fixed_states(action);
   const Eigen::MatrixXd c=test_vectors(ns,2),q=0.02*c.array().cos().matrix();
   const Eigen::MatrixXd mu=(Eigen::Matrix2d()<<0.01,0.02,-0.03,0.005).finished();
+  const Eigen::MatrixXd ds=0.001*Eigen::MatrixXd::Ones(fixture.n,fixture.n);
+  const Eigen::MatrixXd dh=-0.002*Eigen::MatrixXd::Identity(fixture.n,fixture.n);
+  const std::vector<double> overlap(ds.data(),ds.data()+ds.size());
+  const std::vector<double> one(dh.data(),dh.data()+dh.size());
+  const std::vector<double> two(
+      fixture.two_electron.packed_active_two_electron_integrals.size(),0.0001);
   for (const auto& weights:{std::vector<double>{0.3,0.7},std::vector<double>{1.0,0.0}}) {
     const auto state=action.prepare_active_adjoint(c,weights,{-1.1,-0.7});
     Eigen::MatrixXd multipliers=mu;
     // The zero-weight test requests no gauge coupling to its unprepared root.
     if (weights.back()==0.0) multipliers.setZero();
     require(!state.source_factors,"product-response fixture selected source factors");
+    check_joint_product_jet(action,state,q,overlap,one,two);
+    check_joint_product_jet(action,state,Eigen::MatrixXd::Zero(q.rows(),q.cols()),overlap,one,two);
+    auto nonresident=state;
+    nonresident.product_images.reset();
+    check_joint_product_jet(action,nonresident,q,overlap,one,two);
     auto sweep=action.apply_response(state,q);
     require(sweep.images.tiles.input_panels>0 && sweep.images.tiles.integral_adjoint_sweeps>0,
             "product response bypassed the fused generated sigma/adjoint graph");
@@ -2295,6 +2351,12 @@ void benchmark_source_state(int n, bool reference, bool accepted_only = false, i
     const auto end = Clock::now();
     image_seconds = std::chrono::duration<double>(b-a).count();
     hvp_seconds = std::chrono::duration<double>(end-b).count();
+    if (n==12 && selected==132) {
+      require(!state.source_factors,"CAS12 COV132 missed the product-jet route");
+      const Eigen::MatrixXd q=0.03*c.array().cos().matrix();
+      require(q.norm()>0.0,"CAS12 COV132 joint CI response is zero");
+      check_joint_product_jet(action,state,q,overlap,one,dg);
+    }
   }
   constexpr double step = 2e-5;
   const auto lagrangian = [&](double scale) {
@@ -2797,12 +2859,160 @@ void benchmark12(bool compare_reference) {
               << (actual.overlap - reference.overlap).norm() << '\n';
 }
 
+/** @brief Test-only dense carrier oracle for temporal direct-CI tile reuse. */
+void benchmark_temporal12() {
+  const auto fixture = make_fixture(12, 6, 6);
+  const auto integrals = xmvb::vb::orthogonalize_active_integrals(
+      fixture.overlap, fixture.one_electron, fixture.two_electron, 12);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(fixture.alpha, fixture.beta, integrals);
+  auto delta_integrals = integrals;
+  delta_integrals.one_electron *= 0.07;
+  delta_integrals.pair_kernel *= -0.03;
+  const xmvb::mcscf::DirectCiSigmaAction delta_sigma(sigma, delta_integrals);
+  std::vector<std::uint64_t> masks;
+  for (const auto& occupied : fixture.alpha) masks.push_back(occupation_mask(occupied));
+  const xmvb::mcscf::ProductSupport support(12, masks, masks);
+  const int count = static_cast<int>(masks.size());
+  require(count == 924, "temporal12 requires the CAS(12,12) spin strings");
+  std::size_t supported = 0, closure = 0;
+  for (int b = 0; b < count; ++b)
+    for (int a = 0; a < count; ++a) {
+      supported += support.contains(a, b);
+      closure += support.contains(a, b, 1);
+    }
+  require(supported == 226512 && closure == 608751,
+          "temporal12 covalent support counts changed");
+
+  // Complete carriers are reproducible test/oracle data only; production
+  // direct-CI readers generate bounded panels instead of storing these arrays.
+  Eigen::MatrixXd state = Eigen::MatrixXd::Zero(count, count);
+  Eigen::MatrixXd ci = state, orbital = state;
+  const double scale = 1.0 / std::sqrt(static_cast<double>(supported));
+  for (int b = 0; b < count; ++b)
+    for (int a = 0; a <= b; ++a) {
+      if (!support.contains(a, b)) continue;
+      const double s = scale * std::cos(0.013 * (a + 1) * (b + 2));
+      const double q = scale * std::sin(0.017 * (a + 2) * (b + 1));
+      const double p = scale * std::cos(0.019 * (a + 3) * (b + 1));
+      state(a, b) = state(b, a) = s;
+      ci(a, b) = ci(b, a) = q;
+      orbital(a, b) = orbital(b, a) = p;
+    }
+  struct Counts { int state = 0, ci = 0, orbital = 0; } separate, shared;
+  const auto read = [&](const Eigen::MatrixXd& source, int& calls)
+      -> xmvb::mcscf::DirectCiTileReader {
+    return [&, source_ptr = &source, calls_ptr = &calls](
+        const std::vector<int>& betas, const std::vector<int>& rows,
+        Eigen::Ref<Eigen::MatrixXd> values) {
+      ++*calls_ptr;
+      const int workers = xmvb::coarse_openmp_thread_count(
+          xmvb::cooperative_openmp_thread_count(), rows.size() * betas.size());
+      xmvb::cooperative_openmp_for(betas.size(), workers, [&](std::ptrdiff_t j) {
+        for (int i = 0; i < static_cast<int>(rows.size()); ++i)
+          values(i, j) = (*source_ptr)(rows[i], betas[j]);
+      });
+    };
+  };
+  const auto write = [&](Eigen::MatrixXd& target)
+      -> xmvb::mcscf::DirectCiTileWriter {
+    return [target_ptr = &target](const std::vector<int>& betas,
+        const std::vector<int>& rows,
+        const xmvb::mcscf::DirectCiColumnAccumulator& add) {
+      const int workers = xmvb::coarse_openmp_thread_count(
+          xmvb::cooperative_openmp_thread_count(), rows.size() * betas.size());
+      xmvb::cooperative_openmp_for(betas.size(), workers, [&](std::ptrdiff_t j) {
+        add(j, 0, 0, static_cast<int>(rows.size()),
+            target_ptr->col(betas[j]).data(), nullptr, 0);
+      });
+    };
+  };
+  // Dense outputs are retained solely for full-image test comparisons.
+  Eigen::MatrixXd old_ci = Eigen::MatrixXd::Zero(count, count), old_orb = old_ci,
+                  old_force = old_ci, new_ci = old_ci, new_orb = old_ci,
+                  new_force = old_ci;
+  const std::array<xmvb::mcscf::DirectCiTileRequest, 2> requests{{
+      {read(ci, shared.ci), write(new_ci), nullptr, {}},
+      {read(orbital, shared.orbital), write(new_orb), &delta_sigma, write(new_force)}}};
+  // Prime both current APIs; do not compare a cold separate path to warm reuse.
+  sigma.apply_tiled_with_adjoint(1,read(ci,separate.ci),write(old_ci),
+      read(state,separate.state),&support,1);
+  sigma.apply_tiled_direction(1,read(orbital,separate.orbital),
+      read(state,separate.state),delta_sigma,write(old_orb),write(old_force),&support,1);
+  sigma.apply_tiled_responses(1,requests,read(state,shared.state),&support,1);
+  old_ci.setZero(); old_orb.setZero(); old_force.setZero();
+  new_ci.setZero(); new_orb.setZero(); new_force.setZero();
+  separate={}; shared={};
+  const auto start = Clock::now();
+  const auto old_ci_adjoint = sigma.apply_tiled_with_adjoint(1,
+      read(ci, separate.ci), write(old_ci), read(state, separate.state), &support, 1);
+  const auto ci_done = Clock::now();
+  const auto old_orb_adjoint = sigma.apply_tiled_direction(1,
+      read(orbital, separate.orbital), read(state, separate.state), delta_sigma,
+      write(old_orb), write(old_force), &support, 1);
+  const auto separate_done = Clock::now();
+  const auto joint = sigma.apply_tiled_responses(1, requests,
+      read(state, shared.state), &support, 1);
+  const auto shared_done = Clock::now();
+  require(joint.size() == requests.size() && separate.ci > 0 &&
+              separate.orbital > 0 &&
+              separate.state == separate.ci + separate.orbital &&
+              shared.state > 0 && shared.state == shared.ci &&
+              shared.state == shared.orbital,
+          "temporal12 did not share one accepted-state read per generated tile");
+  const auto relative = [](const Eigen::MatrixXd& value,
+                           const Eigen::MatrixXd& reference) {
+    return (value - reference).norm() / std::max(1.0, reference.norm());
+  };
+  const std::array<double, 7> errors{{
+      relative(new_ci, old_ci), relative(new_orb, old_orb),
+      relative(new_force, old_force),
+      relative(joint[0].one_electron, old_ci_adjoint.one_electron),
+      relative(joint[0].pair_kernel, old_ci_adjoint.pair_kernel),
+      relative(joint[1].one_electron, old_orb_adjoint.one_electron),
+      relative(joint[1].pair_kernel, old_orb_adjoint.pair_kernel)}};
+  require(std::all_of(errors.begin(), errors.end(),
+          [](double error) { return error < 3e-11; }),
+          "temporal12 images or integral adjoints differ from separate actions");
+  rusage usage{};
+  require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
+  const auto seconds = [](Clock::time_point a, Clock::time_point b) {
+    return std::chrono::duration<double>(b - a).count();
+  };
+  std::cout << std::setprecision(17)
+            << "case=temporal12_test_oracle_dense_carriers\n"
+            << "alpha_strings=" << count << " beta_strings=" << count << '\n'
+            << "supported_products=" << supported << '\n'
+            << "generator_closure_products=" << closure << '\n'
+            << "separate_ci_seconds=" << seconds(start, ci_done) << '\n'
+            << "separate_orbital_seconds=" << seconds(ci_done, separate_done) << '\n'
+            << "separate_total_seconds=" << seconds(start, separate_done) << '\n'
+            << "shared_seconds=" << seconds(separate_done, shared_done) << '\n'
+            << "shared_faster=" << (seconds(separate_done, shared_done) <
+                                    seconds(start, separate_done)) << '\n'
+            << "separate_ci_reads=" << separate.ci << '\n'
+            << "separate_orbital_reads=" << separate.orbital << '\n'
+            << "separate_state_reads=" << separate.state << '\n'
+            << "shared_ci_reads=" << shared.ci << '\n'
+            << "shared_orbital_reads=" << shared.orbital << '\n'
+            << "shared_state_reads=" << shared.state << '\n'
+            << "ci_image_relative_error=" << errors[0] << '\n'
+            << "orbital_image_relative_error=" << errors[1] << '\n'
+            << "orbital_forcing_relative_error=" << errors[2] << '\n'
+            << "ci_one_electron_relative_error=" << errors[3] << '\n'
+            << "ci_pair_kernel_relative_error=" << errors[4] << '\n'
+            << "orbital_one_electron_relative_error=" << errors[5] << '\n'
+            << "orbital_pair_kernel_relative_error=" << errors[6] << '\n'
+            << "max_rss_kib=" << usage.ru_maxrss << '\n';
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
     if (argc == 2 && std::string(argv[1]) == "--benchmark12") {
       benchmark12(true);
+    } else if (argc == 2 && std::string(argv[1]) == "--temporal12") {
+      benchmark_temporal12();
     } else if (argc == 2 &&
                std::string(argv[1]) == "--benchmark12-no-reference") {
       benchmark12(false);
@@ -2906,7 +3116,7 @@ int main(int argc, char** argv) {
       std::cout << "structure tiles: PASS\n";
     } else {
       throw std::invalid_argument(
-          "usage: test_structure_tiles [--benchmark12|--benchmark12-no-reference|"
+          "usage: test_structure_tiles [--benchmark12|--benchmark12-no-reference|--temporal12|"
           "--selected12 N|--selected12-parity N|--sources12 N|--paths12 N|--gram12 N|"
           "--structure-response12 N|--structure-response12-reference N|"
           "--structure-response14 N|--structure-response14-reference N|"

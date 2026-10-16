@@ -118,7 +118,8 @@ build_selected_structure_direction(
     const AcceptedOuterResponseContext& accepted,
     const ActiveSpaceIntegralDirectionView& direction,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors,
-    const Eigen::MatrixXd* directional_ri_active_pair_factors) {
+    const Eigen::MatrixXd* directional_ri_active_pair_factors,
+    StructureResponseRequest* ci_response) {
   if (accepted.input == nullptr ||
       accepted.accepted_point_context == nullptr) {
     throw std::invalid_argument(
@@ -173,7 +174,7 @@ build_selected_structure_direction(
           direction.overlap,
           direction.one_electron,
           direction.packed_two_electron,
-          &direct_ci_direction);
+          &direct_ci_direction,ci_response);
   require_finite(
       direct_direction.hamiltonian,
       "orthogonal direct-CI directional Hamiltonian images");
@@ -192,7 +193,8 @@ build_selected_structure_direction_from_pair_tiles(
     const ActiveSpaceIntegralDirectionView& direction,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors,
     const Eigen::MatrixXd* directional_ri_active_pair_factors,
-    const detail::DirectionalPairTileConsumer& additional_consumer) {
+    const detail::DirectionalPairTileConsumer& additional_consumer,
+    StructureResponseRequest* ci_response) {
   if (accepted.input == nullptr ||
       accepted.accepted_point_context == nullptr) {
     throw std::invalid_argument(
@@ -211,7 +213,7 @@ build_selected_structure_direction_from_pair_tiles(
         accepted,
         direction,
         accepted_ri_active_pair_factors,
-        directional_ri_active_pair_factors);
+        directional_ri_active_pair_factors,ci_response);
   }
   if (!accepted_point.same_spin_pair_cache.has_pair_providers() ||
       accepted.structure_state == nullptr) {

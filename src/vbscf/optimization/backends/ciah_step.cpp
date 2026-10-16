@@ -117,13 +117,18 @@ bool build_ciah_macro_step(
     if (ns == 0) {
       image = hessian.apply_orbital(x);
     } else {
-      const auto orbital = hessian.apply_orbital_coupling(x.head(no));
+      const bool direct_ci = hessian.structure_action().supports_integral_direction();
+      const Eigen::MatrixXd raw_ci=direct_ci ?
+          structure.coefficient_response_coordinates(x.tail(ns)):Eigen::MatrixXd{};
+      StructureResponseRequest response_request{raw_ci};
+      const auto orbital = hessian.apply_orbital_coupling(x.head(no),
+          direct_ci ? &response_request:nullptr);
       xmvb::profiling::ScopedPhase structure_phase(xmvb::profiling::Phase::CiahStructure, true);
       const auto structure_start=std::chrono::steady_clock::now();
       StructureActiveIntegralAdjoint active_adjoint;
-      const bool direct_ci = hessian.structure_action().supports_integral_direction();
-      const auto ci = structure.apply_coupling_coordinates(x.tail(ns),
-          direct_ci ? &active_adjoint : nullptr);
+      const auto ci = direct_ci ? structure.finish_coupling_coordinates(raw_ci,
+          std::move(response_request.result),&active_adjoint):
+          structure.apply_coupling_coordinates(x.tail(ns));
       const auto coupling_end=std::chrono::steady_clock::now();
       const Eigen::VectorXd adjoint = direct_ci
           ? hessian.apply_structure_coupling_adjoint(active_adjoint)

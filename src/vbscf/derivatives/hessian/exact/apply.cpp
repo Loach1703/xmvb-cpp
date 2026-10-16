@@ -146,8 +146,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced(
 }
 
 OrbitalCouplingAction ExactHvpOperator::apply_orbital_coupling(
-    const Eigen::VectorXd& reduced_direction) const {
-  return state_->apply_orbital_coupling(reduced_direction);
+    const Eigen::VectorXd& reduced_direction,StructureResponseRequest* ci_response) const {
+  return state_->apply_orbital_coupling(reduced_direction,ci_response);
 }
 
 Eigen::VectorXd ExactHvpOperator::apply_orbital(
@@ -169,7 +169,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_orbital(
 }
 
 OrbitalCouplingAction ExactHvpOperator::State::apply_orbital_coupling(
-    const Eigen::VectorXd& reduced_direction) const {
+    const Eigen::VectorXd& reduced_direction,StructureResponseRequest* ci_response) const {
   OrbitalCouplingAction result;
   result.orbital_hessian = apply_reduced_impl(
       reduced_direction,
@@ -178,7 +178,7 @@ OrbitalCouplingAction ExactHvpOperator::State::apply_orbital_coupling(
        .local_active_response = true,
        .structure_response = false},
       nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-      &result);
+      &result,true,ci_response);
   return result;
 }
 
@@ -329,7 +329,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
     const PrecomputedDirection* precomputed_direction,
     OrbitalCouplingAction* coupling_output,
-    bool horizontal_forcing) const {
+    bool horizontal_forcing,StructureResponseRequest* ci_response) const {
   xmvb::profiling::ScopedPhase apply_phase(xmvb::profiling::Phase::HvpApply);
   const auto apply_start_time = std::chrono::steady_clock::now();
   auto record_apply_wall_time = [&]() {
@@ -372,6 +372,16 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           ? precomputed_direction->packed_direction
           : local_packed_direction;
   if (packed_direction.norm() == 0.0) {
+    // A pure CI direction needs no orbital integral transform or mixed sweep.
+    if (ci_response) {
+      auto& accepted=accepted_point_context_->structure_adjoint_state;
+      const auto& action=structure_action();
+      if (!accepted) accepted=action.prepare_active_adjoint(
+          accepted_point_context_->selected_state_eigenvectors,
+          accepted_point_context_->normalized_state_weights,
+          accepted_point_context_->selected_state_energies);
+      ci_response->result=action.apply_response(*accepted,ci_response->coefficients);
+    }
     record_apply_wall_time();
     return Eigen::VectorXd::Zero(reduced_direction.size());
   }
@@ -637,7 +647,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
                   ri_directional_active_pair_factors.has_value()
                       ? &*ri_directional_active_pair_factors
                       : nullptr,
-                  consume_local_active_tile)
+                  consume_local_active_tile,ci_response)
             : build_selected_structure_direction(
                   outer_response_context(),
                   active_space_integral_direction,
@@ -647,7 +657,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
                       : nullptr,
                   ri_directional_active_pair_factors.has_value()
                       ? &*ri_directional_active_pair_factors
-                      : nullptr);
+                      : nullptr,ci_response);
         directional_pair_tiles_consumed = use_directional_pair_tiles;
         local_direct_ci_direction = std::move(images.direct_ci_direction);
         apply_timing_totals_

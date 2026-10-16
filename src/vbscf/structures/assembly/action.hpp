@@ -75,6 +75,12 @@ struct StructureResponseSweep {
   Eigen::MatrixXd generator;
 };
 
+/** @brief Borrowed CI direction and its independently accumulated response. */
+struct StructureResponseRequest {
+  const Eigen::MatrixXd& coefficients;
+  StructureResponseSweep result{};
+};
+
 /** @brief Direction-independent selected-state data for direct-CI adjoints. */
 struct StructureAdjointState {
   /** Accepted coefficients in the originating selected structure space. */
@@ -211,7 +217,8 @@ public:
       const std::vector<double>& overlap_direction,
       const std::vector<double>& one_electron_direction,
       const std::vector<double>& packed_two_electron_direction,
-      StructureIntegralDirection* direct_ci_direction) const;
+      StructureIntegralDirection* direct_ci_direction,
+      StructureResponseRequest* ci_response=nullptr) const;
 
   /** @brief Whether exact orthogonal direct-CI directional actions are available. */
   bool supports_integral_direction() const noexcept;
@@ -432,7 +439,8 @@ private:
       const mcscf::DirectCiSigmaAction* delta_sigma,
       const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma,bool collect_images,
-      StructureIntegralDirection* diagnostic=nullptr) const;
+      StructureIntegralDirection* diagnostic=nullptr,
+      StructureResponseSweep* ci_sweep=nullptr) const;
 
   /** @brief Shared generated product graph for structure H/M actions. */
   StructureResponseSweep contract_product_tiles(

@@ -14,6 +14,7 @@ class OrbitalChart;
 class SparseParameterLayout;
 class StructureAction;
 struct StructureActiveIntegralAdjoint;
+struct StructureResponseRequest;
 struct AcceptedPointContext;
 struct VbScfInput;
 
@@ -207,7 +208,8 @@ public:
    * The accepted-point forward/integral direction is evaluated only once.
    */
   OrbitalCouplingAction apply_orbital_coupling(
-      const Eigen::VectorXd& reduced_direction) const;
+      const Eigen::VectorXd& reduced_direction,
+      StructureResponseRequest* ci_response=nullptr) const;
 
   /**
    * @brief Applies the complete orbital operator without horizontal response.

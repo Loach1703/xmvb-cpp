@@ -51,6 +51,7 @@ env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|SLURM_CPUS_PER_TASK=)' > "$roo
 for mode in selected12-parity structure-response12-reference product-jet12; do
  "$root/bin/test_structure_tiles" --"$mode" 132 > "$root/$mode.out" 2> "$root/$mode.err"
 done
+"$root/bin/test_structure_tiles" --temporal12 > "$root/temporal12.out" 2> "$root/temporal12.err"
 for mode in native loflea-phases; do
  mkdir -p "$root/$mode"
  cd "$root/$mode"

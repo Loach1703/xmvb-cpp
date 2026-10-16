@@ -176,7 +176,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
             apply_reduced(reduced_directions.col(column), components);
       } else {
         OrbitalCouplingAction action =
-            apply_orbital_coupling(reduced_directions.col(column));
+            apply_orbital_coupling(reduced_directions.col(column),nullptr);
         responses.col(column) = action.orbital_hessian;
         coupling_output->orbital_hessian.col(column) =
             action.orbital_hessian;

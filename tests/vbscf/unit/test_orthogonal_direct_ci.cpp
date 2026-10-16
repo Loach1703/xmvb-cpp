@@ -2572,6 +2572,67 @@ void check_tiled_integral_direction_case(
     return (value - reference).norm() <
         3e-11 * std::max(1.0, reference.norm());
   };
+  const Eigen::MatrixXd ci_response = 0.37 * response + 0.21 * state;
+  const Eigen::MatrixXd adjoint_response = response - 0.29 * ci_response;
+  Eigen::MatrixXd ci_image = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  Eigen::MatrixXd orbital_image = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  Eigen::MatrixXd orbital_forcing = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  int state_reads = 0;
+  std::array<int, 3> response_reads{};
+  const auto counted_reader = [&](const Eigen::MatrixXd& carrier, int& count)
+      -> xmvb::mcscf::DirectCiTileReader {
+    const auto base = reader(carrier);
+    return [base, &count](const std::vector<int>& betas,
+                          const std::vector<int>& rows,
+                          Eigen::Ref<Eigen::MatrixXd> tile) {
+      ++count;
+      base(betas, rows, tile);
+    };
+  };
+  const std::array<xmvb::mcscf::DirectCiTileRequest, 3> requests{{
+      {counted_reader(ci_response, response_reads[0]), writer(ci_image), nullptr, {}},
+      {counted_reader(response, response_reads[1]), writer(orbital_image),
+       &direction, writer(orbital_forcing)},
+      {counted_reader(adjoint_response, response_reads[2]), {}, nullptr, {}}}};
+  const auto joint = action.apply_tiled_responses(width, requests,
+      counted_reader(state, state_reads), support, parity);
+  const auto expected_ci_adjoint = action.integral_adjoint(ci_response, state, parity);
+  const auto expected_empty_adjoint =
+      action.integral_adjoint(adjoint_response, state, parity);
+  require(joint.size() == requests.size(),
+          "joint tiled response lost a direction's integral adjoint");
+  require(state_reads > 0 && state_reads == response_reads[0] &&
+              state_reads == response_reads[1] &&
+              state_reads == response_reads[2],
+          "joint tiled response repeated or skipped the accepted-state tile read");
+  require(close(project(ci_image), action.apply(ci_response)) &&
+              close(project(orbital_image), expected_combined) &&
+              close(project(orbital_forcing), expected_forcing),
+          "joint tiled response changed separate CI, orbital, or forcing images");
+  require(close(joint[0].one_electron, expected_ci_adjoint.one_electron) &&
+              close(joint[0].pair_kernel, expected_ci_adjoint.pair_kernel) &&
+              close(joint[1].one_electron, expected_adjoint.one_electron) &&
+              close(joint[1].pair_kernel, expected_adjoint.pair_kernel) &&
+              close(joint[2].one_electron, expected_empty_adjoint.one_electron) &&
+              close(joint[2].pair_kernel, expected_empty_adjoint.pair_kernel),
+          "joint tiled response mixed independent integral adjoints");
+  // With the orbital direction last, its forcing may overwrite the accepted
+  // slab only after both Grams have consumed it. Exercise that smaller layout.
+  ci_image.setZero(); orbital_image.setZero(); orbital_forcing.setZero();
+  state_reads=0; response_reads={};
+  const auto ordered=action.apply_tiled_responses(width,
+      std::span<const xmvb::mcscf::DirectCiTileRequest>(requests).first(2),
+      counted_reader(state,state_reads),support,parity);
+  require(ordered.size()==2 && state_reads>0 && state_reads==response_reads[0] &&
+              state_reads==response_reads[1] &&
+              close(project(ci_image),action.apply(ci_response)) &&
+              close(project(orbital_image),expected_combined) &&
+              close(project(orbital_forcing),expected_forcing) &&
+              close(ordered[0].one_electron,expected_ci_adjoint.one_electron) &&
+              close(ordered[0].pair_kernel,expected_ci_adjoint.pair_kernel) &&
+              close(ordered[1].one_electron,expected_adjoint.one_electron) &&
+              close(ordered[1].pair_kernel,expected_adjoint.pair_kernel),
+          "ordered temporal reuse changed an independent image or cotangent");
   require(close(project(combined), expected_combined),
           "tiled direction changed H*response + deltaH*state");
   require(close(project(forcing), expected_forcing),

@@ -1,11 +1,14 @@
-# Two-channel-slab directional sigma: next implementation target
+# Two-channel-slab directional sigma: prototype assessment
 
 Status: the single-direction prototype passed independent numerical tests but
 was not retained. Hanhai22 jobs 1264662/1264664 took 31.462584/31.070410 s
 end-to-end, versus the saved 30.863387 s baseline. Both retained 4 steps and
-36 physical HVPs. Temporal orbital/CI fusion below remains a design, not an
-implemented performance claim. The alternative production candidate is the
-[lifetime-exact halo bound](sigma_halo_budget.md), which keeps ordinary GEMM.
+36 physical HVPs. The single-direction production path therefore keeps ordinary
+GEMM and the [lifetime-exact halo bound](sigma_halo_budget.md). The temporal
+CI-then-orbital schedule described below has since been implemented and qualified
+through the physical coupled action; see [temporal sharing](temporal_ci_responses.md).
+Its benefit comes from eliminating a second accepted scatter and graph sweep,
+not from assuming that an in-place single-direction GEMM is intrinsically faster.
 
 ## Required operations
 
@@ -81,7 +84,7 @@ share the existing caller budget, rather than duplicating a 64 MiB cache for
 each direction. Arbitrary selected structure spaces remain exact; no closure
 or small-residual assumption is available.
 
-## Qualification sequence
+## Qualification sequence (historical design)
 
 First implement and independently verify the single-direction two-slab kernel,
 including widths>1, forcing on/off, adjoint-only requests, unequal spin spaces,

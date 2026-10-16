@@ -324,6 +324,16 @@ StructureTangentOperator::apply_coupling_coordinates(
       block.adjoint_multipliers.front()};
 }
 
+StructureCoordinateCouplingAction StructureTangentOperator::finish_coupling_coordinates(
+    const Eigen::Ref<const Eigen::MatrixXd>& coefficients,StructureResponseSweep sweep,
+    StructureActiveIntegralAdjoint* adjoint) const {
+  if (coefficients.rows()!=n_structures_ || coefficients.cols()!=n_states_)
+    throw std::invalid_argument("joint structure response has incompatible coordinates");
+  const auto block=finish_coupling_block(coefficients,std::move(sweep.images),&sweep,adjoint);
+  return {block.hessian_coordinates.col(0),block.metric_coordinates.col(0),
+      block.coefficient_responses.front(),block.adjoint_multipliers.front()};
+}
+
 StructureCoordinateCouplingBlock
 StructureTangentOperator::apply_coupling_coordinate_block(
     const Eigen::Ref<const Eigen::MatrixXd>& coordinates,
@@ -365,6 +375,14 @@ StructureTangentOperator::apply_coupling_coordinate_block(
   } else {
     images = action_->apply(raw);
   }
+  return finish_coupling_block(raw,std::move(images),adjoint ? &sweep:nullptr,adjoint);
+}
+
+StructureCoordinateCouplingBlock StructureTangentOperator::finish_coupling_block(
+    const Eigen::Ref<const Eigen::MatrixXd>& raw,StructureActionResult images,
+    StructureResponseSweep* sweep,StructureActiveIntegralAdjoint* adjoint) const {
+  const Eigen::Index width=raw.cols()/n_states_;
+  const Eigen::Index horizontal_rows=n_structures_-n_states_;
   Eigen::MatrixXd shifted = images.hamiltonian;
   for (Eigen::Index block = 0; block < width; ++block) {
     for (int state = 0; state < n_states_; ++state) {
@@ -389,7 +407,7 @@ StructureTangentOperator::apply_coupling_coordinate_block(
   Eigen::MatrixXd scaled_shifted = std::move(shifted);
   if (adjoint)
     *adjoint = action_->finish_response(*accepted_point_->structure_adjoint_state,
-        std::move(sweep), result.adjoint_multipliers.front());
+        std::move(*sweep), result.adjoint_multipliers.front());
   Eigen::MatrixXd scaled_overlap = images.overlap;
   for (Eigen::Index block = 0; block < width; ++block) {
     for (int state = 0; state < n_states_; ++state) {
