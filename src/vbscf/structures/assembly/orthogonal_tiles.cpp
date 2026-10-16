@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "core/openmp.hpp"
+#include "core/timing.hpp"
 #include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma.hpp"
 #include "vbscf/structures/assembly/column_tiles.hpp"
@@ -350,6 +351,11 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     result.tiles.output_resident_bytes = std::max(result.tiles.output_resident_bytes, output.peak_bytes);
     contract();
   }
+  if (profiling::phase_totals().enabled)
+    std::fprintf(stderr,"XMVB_PRODUCT_ACTION,rhs=%ld,overlap=%d,batches=%zu,input=%zu,output=%zu,input_evictions=%zu,output_evictions=%zu\n",
+        static_cast<long>(vectors.cols()),overlap_only,result.tiles.expansions,
+        result.tiles.input_panels,result.tiles.hamiltonian_projections,
+        result.tiles.input_evictions,result.tiles.output_evictions);
   return sweep;
 }
 

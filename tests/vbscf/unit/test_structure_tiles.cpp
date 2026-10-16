@@ -1879,6 +1879,15 @@ void benchmark_selected12(int selected_count, bool compare_reference,
         std::max({1.0, curvature.left.norm(), curvature.right.norm()});
     require(value.allFinite() && dual_error < 2e-10 && curvature_error < 2e-7,
             "CAS(12,12) selected Gram derivative validation failed");
+    const auto prepared=overlap.prepare_metric(right);
+    const Eigen::MatrixXd block=test_vectors(selected_count,3);
+    Eigen::MatrixXd streamed(selected_count,block.cols());
+    // Independent contraction order: each RHS stays coefficient-weighted in
+    // the source factors instead of the common-basis selected Gram build.
+    for (int j=0;j<block.cols();++j)
+      streamed.col(j)=overlap.apply(right,right,block.col(j));
+    const double metric_error=(prepared(block)-streamed).norm()/std::max(1.0,streamed.norm());
+    require(metric_error<2e-12,"CAS(12,12) prepared selected metric differs from streamed action");
     rusage usage{};
     require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
     std::cout << "gram_action_seconds=" << seconds(begin, value_end) << '\n'
@@ -1887,6 +1896,7 @@ void benchmark_selected12(int selected_count, bool compare_reference,
               << "gram_curvature_seconds=" << seconds(gradient_end, curvature_end) << '\n'
               << "gram_duality_error=" << dual_error << '\n'
               << "gram_curvature_fd_error=" << curvature_error << '\n'
+              << "prepared_metric_error=" << metric_error << '\n'
               << "max_rss_kib=" << usage.ru_maxrss << '\n';
     return;
   }

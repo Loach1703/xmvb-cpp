@@ -157,7 +157,7 @@ Eigen::MatrixXd reference_cross(
 
 void check_case(const std::vector<std::vector<int>>& alpha,
                 const std::vector<std::vector<int>>& beta,
-                bool full_ambient, bool sparse = false) {
+                bool full_ambient, bool sparse = false, bool matching = false) {
   Eigen::MatrixXd w = selected_expansion(alpha.size(), beta.size());
   if (sparse) {
     w.setZero();
@@ -167,6 +167,12 @@ void check_case(const std::vector<std::vector<int>>& alpha,
     w(1, 1) = -0.7;
     w(beta.size(), 1) = 0.2;
     w(beta.size() + 1, 2) = 0.9;
+  }
+  if (matching) {
+    w.setZero();
+    for (int b=0;b<static_cast<int>(beta.size());++b)
+      for (int s=0;s<3;++s)
+        w((b%alpha.size())*beta.size()+b,s)=std::sin(0.37*(b+1)*(s+2));
   }
   const auto action = make_action(alpha, beta, w);
   const RepresentationOverlap overlap(action, alpha, beta, 4);
@@ -360,6 +366,8 @@ int main() {
     check_case(full_beta, full_beta, true);
     check_case(full_alpha, full_beta, true, true);
     check_case(full_beta, full_beta, true, true);
+    check_case(full_alpha, full_beta, true, false, true);
+    check_case(full_beta, full_beta, true, false, true);
     check_case({{0, 1}, {0, 2}, {1, 3}}, {{0}, {2}, {3}}, false);
     std::cout << "Selected-space representation cross-Gram and derivatives: passed\n";
     return 0;

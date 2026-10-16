@@ -219,6 +219,18 @@ RepresentationOverlap::PreparedMetric::PreparedMetric(
       beta_transform_ =
           std::make_shared<ExteriorOrbitalTransform>(beta, upper);
     }
+    // M = W^T (T_alpha^T T_alpha tensor T_beta^T T_beta) W is
+    // immutable at this chart. Reapplying its exterior maps in every CG
+    // iteration is unnecessary for a small selected space. Reserve half the
+    // existing budget for construction and quarters for identity/result.
+    const std::size_t n=action.n_structures();
+    if (n && n<=kRowWorkspaceBytes/(4*sizeof(double))/n) {
+      selected_gram_=action.cross_overlap(Eigen::MatrixXd::Identity(n,n),
+          *alpha_transform_,*beta_transform_,*alpha_transform_,*beta_transform_,
+          nullptr,nullptr,nullptr,nullptr,kRowWorkspaceBytes/2);
+      alpha_transform_.reset();
+      beta_transform_.reset();
+    }
   } else {
     kernel_ = upper.transpose() * upper;
   }
@@ -228,6 +240,7 @@ Eigen::MatrixXd RepresentationOverlap::PreparedMetric::operator()(
     const Eigen::Ref<const Eigen::MatrixXd>& coeff) const {
   if (coeff.rows() != action_->n_structures() || coeff.cols() <= 0 ||
       !coeff.allFinite()) throw std::invalid_argument("invalid structure block");
+  if (selected_gram_.size()) return selected_gram_*coeff;
   if (!alpha_transform_)
     return apply_pair_kernel(*action_, *alpha_, *beta_, kernel_, coeff);
 

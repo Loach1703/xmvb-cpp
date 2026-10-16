@@ -33,7 +33,8 @@ public:
 
   /** Reusable symmetric Gram action for one fixed orbital chart.
    * The action and spin-string lists supplied to RepresentationOverlap must
-   * outlive this object. No structure-space Gram matrix is formed.
+   * outlive this object. A selected Gram fitting the existing workspace is
+   * projected once; larger selections retain the exact factor-tile action.
    */
   class PreparedMetric {
   public:
@@ -54,6 +55,7 @@ public:
     std::shared_ptr<const ExteriorOrbitalTransform> alpha_transform_;
     std::shared_ptr<const ExteriorOrbitalTransform> beta_transform_;
     Eigen::MatrixXd kernel_;
+    Eigen::MatrixXd selected_gram_;
   };
 
   PreparedMetric prepare_metric(

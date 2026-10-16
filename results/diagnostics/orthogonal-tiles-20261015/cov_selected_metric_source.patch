@@ -1,0 +1,279 @@
+diff --git a/article/source_column_hamiltonian.tex b/article/source_column_hamiltonian.tex
+index 49349464..775620f4 100644
+--- a/article/source_column_hamiltonian.tex
++++ b/article/source_column_hamiltonian.tex
+@@ -1766,6 +1766,64 @@ same workspace quarter. Narrow support and arrays exceeding that budget
+ use the existing exact generated-panel order. No assumption about closure
+ of the selected structure space or any amplitude cutoff is needed.
+ 
++\subsection{Fixed selected metrics and singleton columns}
++\label{sec:matching-metric}
++
++Let $K_\sigma=T_{l,\sigma}\Tr T_{r,\sigma}$, and label the
++touched original products by $g=(a_g,b_g)\in\Omega$. Suppose each
++touched $\beta$ string occurs with only one $\alpha$ string. This
++single-entry-column property holds for a covalent occupation pattern: the
++$\beta$ occupation is the complement of the $\alpha$ occupation.
++It does not require a complete structure space or spin-adapted closure.
++For $b$ right-hand sides, first form the sparse structure expansion
++$D_{gj}=\sum_I w_{gI}V_{Ij}$. The exact cross overlap is
++\begin{align}
++ P_{gh}&=(K_\alpha)_{a_g a_h}(K_\beta)_{b_g b_h},\\
++ Q_{gj}&=\sum_{h\in\Omega}P_{gh}D_{hj},
++ &Z_{Ij}&=\sum_{g\in\Omega}w_{gI}Q_{gj}.
++\end{align}
++For a source tile $J\subset\Omega$, construct only the columns
++$A_J=K_\alpha[e_{a_h}]_{h\in J}$ and
++$B_J=K_\beta[e_{b_h}]_{h\in J}$. Their coefficient-free basis images
++are shared by all right-hand sides. Sample
++$(P_J)_{gh}=(A_J)_{a_g h}(B_J)_{b_g h}$ and accumulate
++$Q\gets Q+P_JD_J$. The directional version uses precisely
++\begin{equation}
++ \dot P_{gh}=(\dot K_\alpha)_{a_g a_h}(K_\beta)_{b_g b_h}
++ +(K_\alpha)_{a_g a_h}(\dot K_\beta)_{b_g b_h}.
++\end{equation}
++The ordered exterior jets already provide both factor derivatives.
++Unlike transforming coefficient-weighted source factors independently for
++each right-hand side, the basis-image work is no longer multiplied by $b$.
++Writing $t=|\Omega|$ and $s_\sigma$ for the number of one-spin shear
++edges, the arithmetic is
++\begin{equation}
++ O\!\left(t(s_\alpha+s_\beta)+t^2b+
++ \operatorname{nnz}(\Wa)b\right),
++\end{equation}
++with tile width $j$ and bounded RHS width $b$ requiring
++$O((U_\alpha+U_\beta+t)j+tb)$ workspace. No $t\times t$ or
++$U_\alpha\times U_\beta$ numerical array is retained. This ordering
++is especially useful when projecting the selected metric, rather than
++repeatedly mapping each selected basis vector through the same exterior
++operators.
++
++At a fixed chart, the selected metric
++\begin{equation}
++ M=\Wa^*(K_\alpha\otimes K_\beta)\Wa
++\end{equation}
++is immutable. If its $N_{\mathrm{str}}^2$ entries fit the existing
++workspace, project $M$ once with the tiled multi-RHS equations above and
++reuse $Mv$ in subsequent metric CG iterations. This removes repeated
++exterior evaluations, not the selected-space projection or the metric.
++The same iterative solve, initial vector, preconditioner, and residual
++criterion are retained. A larger selected metric remains an exact tiled
++operator. Storage admission changes only the representation of this fixed
++linear operator; it never excludes a wave function from orthogonal CI.
++The implementation partitions the existing metric workspace into one half
++for construction and one quarter each for the selected identity and result;
++it introduces no string-pair storage and no larger memory allowance.
++
+ \section{Correspondence with the current implementation}
+ 
+ The original column contraction corresponds to revision \texttt{a5004add};
+diff --git a/src/vbscf/structures/assembly/orthogonal_tiles.cpp b/src/vbscf/structures/assembly/orthogonal_tiles.cpp
+index 06d0602c..bd4aa186 100644
+--- a/src/vbscf/structures/assembly/orthogonal_tiles.cpp
++++ b/src/vbscf/structures/assembly/orthogonal_tiles.cpp
+@@ -3,6 +3,7 @@
+ #include <algorithm>
+ 
+ #include "core/openmp.hpp"
++#include "core/timing.hpp"
+ #include "mcscf/ci/product_support.hpp"
+ #include "mcscf/ci/sigma.hpp"
+ #include "vbscf/structures/assembly/column_tiles.hpp"
+@@ -350,6 +351,11 @@ StructureResponseSweep StructureAction::contract_product_tiles(
+     result.tiles.output_resident_bytes = std::max(result.tiles.output_resident_bytes, output.peak_bytes);
+     contract();
+   }
++  if (profiling::phase_totals().enabled)
++    std::fprintf(stderr,"XMVB_PRODUCT_ACTION,rhs=%ld,overlap=%d,batches=%zu,input=%zu,output=%zu,input_evictions=%zu,output_evictions=%zu\n",
++        static_cast<long>(vectors.cols()),overlap_only,result.tiles.expansions,
++        result.tiles.input_panels,result.tiles.hamiltonian_projections,
++        result.tiles.input_evictions,result.tiles.output_evictions);
+   return sweep;
+ }
+ 
+diff --git a/src/vbscf/structures/assembly/overlap_tiles.cpp b/src/vbscf/structures/assembly/overlap_tiles.cpp
+index 4e768ba0..4ebe11c0 100644
+--- a/src/vbscf/structures/assembly/overlap_tiles.cpp
++++ b/src/vbscf/structures/assembly/overlap_tiles.cpp
+@@ -94,6 +94,65 @@ Eigen::MatrixXd StructureAction::cross_overlap(
+     }
+     return result;
+   }
++  // Column-singleton support (including covalent structures) has one alpha string
++  // per touched beta. Its scalar coefficient commutes with both exterior
++  // maps. Generate each common basis image once, not once per CI RHS.
++  const bool singleton=std::all_of(sources.columns.begin(),sources.columns.end(),
++      [&](int b) { return sources.beta_groups[b].size()==1; });
++  if (singleton && vectors.cols()>1) {
++    const std::size_t groups=spin_products_.size();
++    const std::size_t factor_rows=(directional ? 4:2)*
++        (static_cast<std::size_t>(n_unique_alpha_)+n_unique_beta_);
++    // One factor panel, one sampled Gram panel and two RHS product blocks.
++    // The same budget bounds all of them; there is no groups-squared cache.
++    const std::size_t capacity=workspace_bytes/sizeof(double);
++    if (capacity>=factor_rows+3*groups) {
++      const int width=std::min<std::size_t>(vectors.cols(),
++          (capacity-factor_rows-groups)/(2*groups));
++      const int extent=std::min<std::size_t>(sources.columns.size(),
++          std::min<std::size_t>(8*effective_openmp_thread_count(),
++              (capacity-2*groups*width)/(factor_rows+groups)));
++      Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n_structures_,vectors.cols());
++      for (int first=0; first<vectors.cols(); first+=width) {
++        const int count_rhs=std::min<int>(width,vectors.cols()-first);
++        Eigen::MatrixXd coefficients=Eigen::MatrixXd::Zero(groups,count_rhs);
++#pragma omp parallel for schedule(static) if(groups>32)
++        for (int g=0;g<static_cast<int>(groups);++g)
++          for (std::size_t t=spin_term_offsets_[g];t<spin_term_offsets_[g+1];++t) {
++            const auto& term=spin_terms_[t];
++            coefficients.row(g).noalias()+=term.coefficient*vectors.row(term.structure).segment(first,count_rhs);
++          }
++        Eigen::MatrixXd image=Eigen::MatrixXd::Zero(groups,count_rhs);
++        for (int begin=0;begin<static_cast<int>(groups);begin+=extent) {
++          const int count=std::min<int>(extent,groups-begin);
++          Factor a(n_unique_alpha_,count,directional),b(n_unique_beta_,count,directional);
++          for (int j=0;j<count;++j) {
++            a.value(spin_products_[begin+j]/n_unique_beta_,j)=1;
++            b.value(spin_products_[begin+j]%n_unique_beta_,j)=1;
++          }
++          transform(ra,dra,a); transform(la,dla,a,true);
++          transform(rb,drb,b); transform(lb,dlb,b,true);
++          Eigen::MatrixXd gram(groups,count);
++#pragma omp parallel for schedule(static) if(groups>32)
++          for (int g=0;g<static_cast<int>(groups);++g) {
++            const int ai=spin_products_[g]/n_unique_beta_,bi=spin_products_[g]%n_unique_beta_;
++            if (directional)
++              gram.row(g)=(a.tangent.row(ai).array()*b.value.row(bi).array()+
++                  a.value.row(ai).array()*b.tangent.row(bi).array()).matrix();
++            else gram.row(g)=(a.value.row(ai).array()*b.value.row(bi).array()).matrix();
++          }
++          image.noalias()+=gram*coefficients.middleRows(begin,count);
++        }
++#pragma omp parallel for schedule(static) if(n_structures_>32)
++        for (int s=0;s<n_structures_;++s)
++          for (auto t=structure_term_offsets_[s];t<structure_term_offsets_[s+1];++t) {
++            const auto& term=spin_terms_[structure_term_indices_[t]];
++            result.row(s).segment(first,count_rhs).noalias()+=term.coefficient*image.row(term.group);
++          }
++      }
++      return result;
++    }
++  }
+   const int extent = panel_width(workspace_bytes, n_unique_alpha_, n_unique_beta_,
+       sources.columns.size(), directional ? 8 : 4);
+   Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_structures_, vectors.cols());
+diff --git a/src/vbscf/structures/overlap/representation.cpp b/src/vbscf/structures/overlap/representation.cpp
+index cc861bc4..af89c99b 100644
+--- a/src/vbscf/structures/overlap/representation.cpp
++++ b/src/vbscf/structures/overlap/representation.cpp
+@@ -219,6 +219,18 @@ RepresentationOverlap::PreparedMetric::PreparedMetric(
+       beta_transform_ =
+           std::make_shared<ExteriorOrbitalTransform>(beta, upper);
+     }
++    // M = W^T (T_alpha^T T_alpha tensor T_beta^T T_beta) W is
++    // immutable at this chart. Reapplying its exterior maps in every CG
++    // iteration is unnecessary for a small selected space. Reserve half the
++    // existing budget for construction and quarters for identity/result.
++    const std::size_t n=action.n_structures();
++    if (n && n<=kRowWorkspaceBytes/(4*sizeof(double))/n) {
++      selected_gram_=action.cross_overlap(Eigen::MatrixXd::Identity(n,n),
++          *alpha_transform_,*beta_transform_,*alpha_transform_,*beta_transform_,
++          nullptr,nullptr,nullptr,nullptr,kRowWorkspaceBytes/2);
++      alpha_transform_.reset();
++      beta_transform_.reset();
++    }
+   } else {
+     kernel_ = upper.transpose() * upper;
+   }
+@@ -228,6 +240,7 @@ Eigen::MatrixXd RepresentationOverlap::PreparedMetric::operator()(
+     const Eigen::Ref<const Eigen::MatrixXd>& coeff) const {
+   if (coeff.rows() != action_->n_structures() || coeff.cols() <= 0 ||
+       !coeff.allFinite()) throw std::invalid_argument("invalid structure block");
++  if (selected_gram_.size()) return selected_gram_*coeff;
+   if (!alpha_transform_)
+     return apply_pair_kernel(*action_, *alpha_, *beta_, kernel_, coeff);
+ 
+diff --git a/src/vbscf/structures/overlap/representation.hpp b/src/vbscf/structures/overlap/representation.hpp
+index 9bc72b05..c8effc50 100644
+--- a/src/vbscf/structures/overlap/representation.hpp
++++ b/src/vbscf/structures/overlap/representation.hpp
+@@ -33,7 +33,8 @@ public:
+ 
+   /** Reusable symmetric Gram action for one fixed orbital chart.
+    * The action and spin-string lists supplied to RepresentationOverlap must
+-   * outlive this object. No structure-space Gram matrix is formed.
++   * outlive this object. A selected Gram fitting the existing workspace is
++   * projected once; larger selections retain the exact factor-tile action.
+    */
+   class PreparedMetric {
+   public:
+@@ -54,6 +55,7 @@ public:
+     std::shared_ptr<const ExteriorOrbitalTransform> alpha_transform_;
+     std::shared_ptr<const ExteriorOrbitalTransform> beta_transform_;
+     Eigen::MatrixXd kernel_;
++    Eigen::MatrixXd selected_gram_;
+   };
+ 
+   PreparedMetric prepare_metric(
+diff --git a/tests/vbscf/unit/test_representation_overlap.cpp b/tests/vbscf/unit/test_representation_overlap.cpp
+index 66ca77aa..422a953e 100644
+--- a/tests/vbscf/unit/test_representation_overlap.cpp
++++ b/tests/vbscf/unit/test_representation_overlap.cpp
+@@ -157,7 +157,7 @@ Eigen::MatrixXd reference_cross(
+ 
+ void check_case(const std::vector<std::vector<int>>& alpha,
+                 const std::vector<std::vector<int>>& beta,
+-                bool full_ambient, bool sparse = false) {
++                bool full_ambient, bool sparse = false, bool matching = false) {
+   Eigen::MatrixXd w = selected_expansion(alpha.size(), beta.size());
+   if (sparse) {
+     w.setZero();
+@@ -168,6 +168,12 @@ void check_case(const std::vector<std::vector<int>>& alpha,
+     w(beta.size(), 1) = 0.2;
+     w(beta.size() + 1, 2) = 0.9;
+   }
++  if (matching) {
++    w.setZero();
++    for (int b=0;b<static_cast<int>(beta.size());++b)
++      for (int s=0;s<3;++s)
++        w((b%alpha.size())*beta.size()+b,s)=std::sin(0.37*(b+1)*(s+2));
++  }
+   const auto action = make_action(alpha, beta, w);
+   const RepresentationOverlap overlap(action, alpha, beta, 4);
+   const Eigen::MatrixXd left = upper(0.04, 0.29);
+@@ -360,6 +366,8 @@ int main() {
+     check_case(full_beta, full_beta, true);
+     check_case(full_alpha, full_beta, true, true);
+     check_case(full_beta, full_beta, true, true);
++    check_case(full_alpha, full_beta, true, false, true);
++    check_case(full_beta, full_beta, true, false, true);
+     check_case({{0, 1}, {0, 2}, {1, 3}}, {{0}, {2}, {3}}, false);
+     std::cout << "Selected-space representation cross-Gram and derivatives: passed\n";
+     return 0;
+diff --git a/tests/vbscf/unit/test_structure_tiles.cpp b/tests/vbscf/unit/test_structure_tiles.cpp
+index 4983e7e5..305a6b89 100644
+--- a/tests/vbscf/unit/test_structure_tiles.cpp
++++ b/tests/vbscf/unit/test_structure_tiles.cpp
+@@ -1879,6 +1879,15 @@ void benchmark_selected12(int selected_count, bool compare_reference,
+         std::max({1.0, curvature.left.norm(), curvature.right.norm()});
+     require(value.allFinite() && dual_error < 2e-10 && curvature_error < 2e-7,
+             "CAS(12,12) selected Gram derivative validation failed");
++    const auto prepared=overlap.prepare_metric(right);
++    const Eigen::MatrixXd block=test_vectors(selected_count,3);
++    Eigen::MatrixXd streamed(selected_count,block.cols());
++    // Independent contraction order: each RHS stays coefficient-weighted in
++    // the source factors instead of the common-basis selected Gram build.
++    for (int j=0;j<block.cols();++j)
++      streamed.col(j)=overlap.apply(right,right,block.col(j));
++    const double metric_error=(prepared(block)-streamed).norm()/std::max(1.0,streamed.norm());
++    require(metric_error<2e-12,"CAS(12,12) prepared selected metric differs from streamed action");
+     rusage usage{};
+     require(getrusage(RUSAGE_SELF, &usage) == 0, "getrusage failed");
+     std::cout << "gram_action_seconds=" << seconds(begin, value_end) << '\n'
+@@ -1887,6 +1896,7 @@ void benchmark_selected12(int selected_count, bool compare_reference,
+               << "gram_curvature_seconds=" << seconds(gradient_end, curvature_end) << '\n'
+               << "gram_duality_error=" << dual_error << '\n'
+               << "gram_curvature_fd_error=" << curvature_error << '\n'
++              << "prepared_metric_error=" << metric_error << '\n'
+               << "max_rss_kib=" << usage.ru_maxrss << '\n';
+     return;
+   }

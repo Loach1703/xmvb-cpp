@@ -1766,6 +1766,64 @@ same workspace quarter. Narrow support and arrays exceeding that budget
 use the existing exact generated-panel order. No assumption about closure
 of the selected structure space or any amplitude cutoff is needed.
 
+\subsection{Fixed selected metrics and singleton columns}
+\label{sec:matching-metric}
+
+Let $K_\sigma=T_{l,\sigma}\Tr T_{r,\sigma}$, and label the
+touched original products by $g=(a_g,b_g)\in\Omega$. Suppose each
+touched $\beta$ string occurs with only one $\alpha$ string. This
+single-entry-column property holds for a covalent occupation pattern: the
+$\beta$ occupation is the complement of the $\alpha$ occupation.
+It does not require a complete structure space or spin-adapted closure.
+For $b$ right-hand sides, first form the sparse structure expansion
+$D_{gj}=\sum_I w_{gI}V_{Ij}$. The exact cross overlap is
+\begin{align}
+ P_{gh}&=(K_\alpha)_{a_g a_h}(K_\beta)_{b_g b_h},\\
+ Q_{gj}&=\sum_{h\in\Omega}P_{gh}D_{hj},
+ &Z_{Ij}&=\sum_{g\in\Omega}w_{gI}Q_{gj}.
+\end{align}
+For a source tile $J\subset\Omega$, construct only the columns
+$A_J=K_\alpha[e_{a_h}]_{h\in J}$ and
+$B_J=K_\beta[e_{b_h}]_{h\in J}$. Their coefficient-free basis images
+are shared by all right-hand sides. Sample
+$(P_J)_{gh}=(A_J)_{a_g h}(B_J)_{b_g h}$ and accumulate
+$Q\gets Q+P_JD_J$. The directional version uses precisely
+\begin{equation}
+ \dot P_{gh}=(\dot K_\alpha)_{a_g a_h}(K_\beta)_{b_g b_h}
+ +(K_\alpha)_{a_g a_h}(\dot K_\beta)_{b_g b_h}.
+\end{equation}
+The ordered exterior jets already provide both factor derivatives.
+Unlike transforming coefficient-weighted source factors independently for
+each right-hand side, the basis-image work is no longer multiplied by $b$.
+Writing $t=|\Omega|$ and $s_\sigma$ for the number of one-spin shear
+edges, the arithmetic is
+\begin{equation}
+ O\!\left(t(s_\alpha+s_\beta)+t^2b+
+ \operatorname{nnz}(\Wa)b\right),
+\end{equation}
+with tile width $j$ and bounded RHS width $b$ requiring
+$O((U_\alpha+U_\beta+t)j+tb)$ workspace. No $t\times t$ or
+$U_\alpha\times U_\beta$ numerical array is retained. This ordering
+is especially useful when projecting the selected metric, rather than
+repeatedly mapping each selected basis vector through the same exterior
+operators.
+
+At a fixed chart, the selected metric
+\begin{equation}
+ M=\Wa^*(K_\alpha\otimes K_\beta)\Wa
+\end{equation}
+is immutable. If its $N_{\mathrm{str}}^2$ entries fit the existing
+workspace, project $M$ once with the tiled multi-RHS equations above and
+reuse $Mv$ in subsequent metric CG iterations. This removes repeated
+exterior evaluations, not the selected-space projection or the metric.
+The same iterative solve, initial vector, preconditioner, and residual
+criterion are retained. A larger selected metric remains an exact tiled
+operator. Storage admission changes only the representation of this fixed
+linear operator; it never excludes a wave function from orthogonal CI.
+The implementation partitions the existing metric workspace into one half
+for construction and one quarter each for the selected identity and result;
+it introduces no string-pair storage and no larger memory allowance.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};
