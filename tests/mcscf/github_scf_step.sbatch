@@ -23,7 +23,7 @@ if [[ ${1:-} == --build-baseline && -d ${2:-} ]]; then
  exit 0
 fi
 [[ -x ${2:-} && -x ${3:-} ]] || exit 64
-[[ $1 == COV || $1 == FULL ]] || exit 64
+[[ $1 == COV || $1 == FULL || $1 == SINGLE ]] || exit 64
 source_dir="$SLURM_SUBMIT_DIR"
 space=$1
 baseline=$(realpath "$2")
@@ -54,6 +54,11 @@ for variant in "${variants[@]}"; do
  # Identical original geometry, HAO supports and initial orbital coefficients.
  sed -E -e 's/^iscf=.*/iscf=9/I' -e "s/^str=.*/str=$space/I" \
   "$source_dir/testdata/vbscf/csd_LOFLEA_vb.xmi" > "$run_dir/input.xmi"
+ if [[ $space == SINGLE ]]; then
+  # LOFLEA has 68 electrons: 28 inactive pairs and 12 active electrons.
+  sed -i '/^str=/Id' "$run_dir/input.xmi"
+  printf '\n$STR\n1:28 29 30 31 32 33 34 35 36 37 38 39 40\n$END\n' >> "$run_dir/input.xmi"
+ fi
  cp "$source_dir/basis/cc-pvdz.gbs" "$run_dir/"
  (
   cd "$run_dir"

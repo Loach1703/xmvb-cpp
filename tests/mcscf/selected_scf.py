@@ -19,11 +19,11 @@ def prepare(bundle, artifact, system):
         "1:24 27 28 26 29 30 31 25 32",
     )
     if system == "LOFLEA":
-        # Twelve active electrons in orbitals 27--38, after 26 inactive pairs.
+        # Twelve active electrons in orbitals 29--40, after 28 inactive pairs.
         structures = (
-            "1:26 27 28 29 30 31 32 33 34 35 36 37 38",
-            "1:26 27 30 28 29 31 32 33 34 35 36 37 38",
-            "1:26 27 28 29 32 30 31 33 34 35 36 37 38",
+            "1:28 29 30 31 32 33 34 35 36 37 38 39 40",
+            "1:28 29 32 30 31 33 34 35 36 37 38 39 40",
+            "1:28 29 30 31 34 32 33 35 36 37 38 39 40",
         )
     for count in (1, 3):
         deck = re.sub(r"^str=.*\n", "", text, flags=re.I | re.M)
