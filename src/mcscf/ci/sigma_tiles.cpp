@@ -120,10 +120,11 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   const auto seconds = [](Clock::time_point begin, Clock::time_point end) {
     return std::chrono::duration<double>(end - begin).count();
   };
-  double prepare_time = 0, read_time = 0, compute_time = 0, write_time = 0;
+  double prepare_time = 0, read_time = 0, compute_time = 0, write_time = 0, gram_time = 0;
+  std::size_t gram_tiles=0;
   std::size_t batches = 0, source_columns = 0, source_elements = 0, peak_payload = 0;
   std::size_t targets = 0, unsupported_targets = 0;
-  Clock::time_point compute_start, prepare_start;
+  Clock::time_point compute_start, prepare_start, gram_start;
 #pragma omp parallel if(workers > 1) num_threads(workers)
   {
     int thread = 0, team = 1;
@@ -395,13 +396,27 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
             if (active[row % count] != groups[group_index[row % count]].beta)
               state_channels.row(row) *= 2.0;
 #pragma omp barrier
-        // Each cotangent row has one owner; no pair-square thread replicas.
+        // G(I,J)=A(:,I)^T B(:,J): a square output grid avoids each narrow
+        // row-stripe worker rereading the entire right-channel slab. Views
+        // share existing storage; every output block has exactly one owner.
+        int axis=1;
+        while (axis*axis<team) axis*=2;
+        const int extent=(pairs+axis-1)/axis;
+        const int blocks=(pairs+extent-1)/extent;
+        if (timing) {
+#pragma omp single
+          { gram_start=tick(); }
+        }
 #pragma omp for schedule(static)
-        for (int part = 0; part < team; ++part) {
-          const int begin = pairs*part/team, end = pairs*(part+1)/team;
-          if (end > begin)
-            kernel_adjoint.middleRows(begin,end-begin).noalias() +=
-                scattered.middleCols(begin,end-begin).transpose()*state_channels;
+        for (int block=0;block<blocks*blocks;++block) {
+          const int row=(block/blocks)*extent,col=(block%blocks)*extent;
+          const int rows=std::min(extent,pairs-row),cols=std::min(extent,pairs-col);
+          kernel_adjoint.block(row,col,rows,cols).noalias()+=
+              scattered.middleCols(row,rows).transpose()*state_channels.middleCols(col,cols);
+        }
+        if (timing) {
+#pragma omp single
+          { gram_time+=seconds(gram_start,tick()); gram_tiles+=blocks*blocks; }
         }
       }
       if (add_columns && last > first)
@@ -518,11 +533,12 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
     std::fprintf(stderr,
         "XMVB_TILE,batches=%zu,source_columns=%zu,source_elements=%zu,peak_payload=%zu,"
         "prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f,targets=%zu,exchange=%d,"
-        "skipped_diagonal_scatters=%zu\n",
+        "skipped_diagonal_scatters=%zu,gram=%.9f,gram_tiles=%zu\n",
         batches, source_columns, source_elements, peak_payload,
         prepare_time, read_time, compute_time, write_time, targets, exchange_parity,
         unsupported_targets * static_cast<std::size_t>(width) *
-            (1 + static_cast<std::size_t>(collect_integrals && static_cast<bool>(state))));
+            (1 + static_cast<std::size_t>(collect_integrals && static_cast<bool>(state))),
+        gram_time,gram_tiles);
   return collect_integrals ? pullback_channel_kernel(kernel_adjoint) : DirectCiIntegralAdjoint{};
 }
 

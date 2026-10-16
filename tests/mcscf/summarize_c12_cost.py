@@ -45,6 +45,14 @@ def summarize(run):
             event_stats[event]["fields"][key] = dict(
                 sum=sum(samples), min=min(samples),
                 median=statistics.median(samples), max=max(samples))
+    tile_totals = dict(sweeps=len(tiles), **{
+        key: sum(row[key] for row in tiles) for key in
+        ("prepare", "read", "compute", "write", "source_elements", "batches")})
+    # Older saved runs did not record these scopes: keep them missing, not zero.
+    for key in ("gram", "gram_tiles"):
+        measured = [row[key] for row in tiles if key in row]
+        if measured:
+            tile_totals[key] = sum(measured)
     return dict(
         run=run.name, node=(run / "node.txt").read_text().strip(),
         note="Nested phase totals overlap; they are not additive wall-time shares.",
@@ -56,9 +64,7 @@ def summarize(run):
         process_s=elapsed_seconds(resource),
         rss_kib=field(resource, r"Maximum resident set size \(kbytes\):\s*(\d+)", int),
         phases=phases,
-        tile_totals=dict(sweeps=len(tiles), **{
-            key: sum(row[key] for row in tiles) for key in
-            ("prepare", "read", "compute", "write", "source_elements", "batches")}),
+        tile_totals=tile_totals,
         events=event_stats)
 
 
