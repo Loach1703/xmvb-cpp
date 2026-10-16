@@ -40,6 +40,7 @@ srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2
  -R '^(structure_tiles|representation_overlap|selected_metric|ci_transport|selected_ci_transport|coupled_structure|keyframe|orthogonal_direct_ci|ciah)$' \
  > "$artifact/ctest.out" 2>&1
 cp "$source_dir/build/Testing/Temporary/LastTest.log" "$artifact/test-details.log"
+if [[ ${1:-} == --tests-only ]]; then exit 0; fi
 cp "$source_dir/build/src/"{xmvb-cpp.exe,test_structure_tiles} "$artifact/bin/"
 sha256sum "$artifact/bin/"* > "$artifact/binaries.sha256"
 export C12_RUN_ROOT="$artifact" C12_RUN_SOURCE="$source_dir"

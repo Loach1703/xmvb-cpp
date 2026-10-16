@@ -2526,7 +2526,8 @@ void check_tiled_integral_direction_case(
     const std::vector<std::vector<int>>& alpha,
     const std::vector<std::vector<int>>& beta, int width, int parity,
     const xmvb::mcscf::ProductSupport* support = nullptr,
-    bool zero_direction = false, bool zero_state = false) {
+    bool zero_direction = false, bool zero_state = false,
+    bool compact_output = false) {
   constexpr int n_orbitals = 4;
   const int n_alpha = static_cast<int>(alpha.size());
   const int n_beta = static_cast<int>(beta.size());
@@ -2600,16 +2601,33 @@ void check_tiled_integral_direction_case(
                 (*source)(rows[a], vector * n_beta + betas[b]);
     };
   };
-  const auto writer = [width, n_beta](Eigen::MatrixXd& image)
+  const auto writer = [width, n_beta,compact_output](Eigen::MatrixXd& image)
       -> xmvb::mcscf::DirectCiTileWriter {
     Eigen::MatrixXd* target = &image;
-    return [target, width, n_beta](const std::vector<int>& betas,
+    return [target, width, n_beta,compact_output](const std::vector<int>& betas,
         const std::vector<int>& rows,
         const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
       for (int b = 0; b < static_cast<int>(betas.size()); ++b)
-        for (int vector = 0; vector < width; ++vector)
+        for (int vector = 0; vector < width; ++vector) {
+          if (compact_output) {
+            // Two disjoint, sorted output subsets with holes. Each receives
+            // three halo-range chunks, exercising bounds across sparse rows.
+            for (int part=0;part<2;++part) {
+              std::vector<int> selected;
+              for (int i=part;i<static_cast<int>(rows.size());i+=2) selected.push_back(rows[i]);
+              if (selected.empty()) continue;
+              Eigen::VectorXd values=Eigen::VectorXd::Zero(selected.size());
+              for (int chunk=0;chunk<3;++chunk)
+                accumulate(b,vector,rows.size()*chunk/3,rows.size()*(chunk+1)/3,
+                    values.data(),selected.data(),selected.size());
+              for (int i=0;i<static_cast<int>(selected.size());++i)
+                (*target)(selected[i],vector*n_beta+betas[b])+=values[i];
+            }
+            continue;
+          }
           accumulate(b, vector, 0, static_cast<int>(rows.size()),
               target->col(vector * n_beta + betas[b]).data(), nullptr, 0);
+        }
     };
   };
   const auto response_reader = reader(response);
@@ -2762,6 +2780,30 @@ void check_tiled_integral_direction_case(
     require(outside > 1e-8,
             "selected-support direction case did not exercise outside-support images");
   }
+}
+
+/** @brief Range restriction must use actual indices, not occupation ordering. */
+void check_permuted_tiled_direction() {
+  auto alpha=complete_space(4,2),beta=complete_space(4,1);
+  std::rotate(alpha.begin(),alpha.begin()+2,alpha.end());
+  std::swap(alpha[1],alpha[4]);
+  std::reverse(beta.begin(),beta.end());
+  const auto masks=[](const auto& strings) {
+    std::vector<std::uint64_t> result;
+    for (const auto& occupied:strings) {
+      std::uint64_t mask=0;
+      for (int orbital:occupied) mask|=std::uint64_t{1}<<orbital;
+      result.push_back(mask);
+    }
+    return result;
+  };
+  const auto a=masks(alpha),b=masks(beta);
+  const int u=alpha.size();
+  const xmvb::mcscf::ProductSupport equal(4,a,a,{u-1,(u-1)*u,2*u+1,u+2});
+  const xmvb::mcscf::ProductSupport unequal(4,a,b,{0,static_cast<int>(beta.size())+2});
+  for (int parity:{0,1,-1})
+    check_tiled_integral_direction_case(alpha,alpha,2,parity,&equal,false,false,true);
+  check_tiled_integral_direction_case(alpha,beta,2,0,&unequal,false,false,true);
 }
 
 /** @brief The complete 8-orbital halo holds one full Gram tile per worker. */
@@ -3109,6 +3151,7 @@ int main(int argc, char** argv) {
     check_exchange_reduced_generator();
     check_fused_spin_sectors();
     check_tiled_integral_direction();
+    check_permuted_tiled_direction();
     check_full_square_tiled_gram();
     check_spin_sector_carrier_inverse();
     check_exchange_adjoint();
