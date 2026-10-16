@@ -65,9 +65,18 @@ or memory-based admission to a different physical representation is allowed.
   matrix elements. This must not survive as an accidental cofactor bottleneck
   after H/M itself has moved to orthogonal CI. Trace precomputed-diagonal
   producers too; do not infer their runtime share from this code inspection.
-- `RestrictedMetricInverse` also enumerates the full product carrier for
-  occupation/complement metadata and reserves full-carrier RHS workspace.
-  Audit and migrate this consumer as well; H/M tiling alone does not bound it.
+- Selected CI transport now solves its original selected Gram using the
+  accepted positive Jacobi diagonal. The optional completed-sector principal
+  inverse, its missing-spin complement, full-product metadata and full-carrier
+  workspaces are deleted, rather than tiled. This does not remove the selected
+  normal equation or its gradient/HVP pullback, and does not change its true
+  residual tolerance. The complete-selected-space exact inverse and carrier
+  AH/Davidson preconditioner are separate remaining consumers; they have not
+  been removed or qualified as bounded-memory by this change.
+  Finite transport starts from its known pre-projection structure coefficients,
+  correcting the full normal-equation defect rather than restarting from zero.
+  Its original RHS-relative accuracy is retained, not replaced by a stricter
+  or looser correction-relative criterion.
 
 ## Ordered milestones
 

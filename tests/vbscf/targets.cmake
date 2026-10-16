@@ -17,7 +17,7 @@ set(_xmvb_vbscf_unit_targets
   test_ciah
   test_ci_transport
   test_representation_overlap
-  test_restricted_metric
+  test_selected_metric
   test_overlap_pullback
   test_selected_ci_transport
   test_orbital_step_geometry
@@ -62,7 +62,7 @@ if (BUILD_TESTING)
   add_test(NAME ciah COMMAND test_ciah)
   add_test(NAME ci_transport COMMAND test_ci_transport)
   add_test(NAME representation_overlap COMMAND test_representation_overlap)
-  add_test(NAME restricted_metric COMMAND test_restricted_metric)
+  add_test(NAME selected_metric COMMAND test_selected_metric)
   add_test(NAME overlap_pullback COMMAND test_overlap_pullback)
   add_test(NAME selected_ci_transport COMMAND test_selected_ci_transport)
   add_test(NAME orbital_step_geometry COMMAND test_orbital_step_geometry)

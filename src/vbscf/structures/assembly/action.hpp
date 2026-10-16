@@ -28,7 +28,6 @@ struct ExteriorTransformDirection;
 struct OrthogonalActiveIntegrals;
 
 class StructureMetricInverse;
-class RestrictedMetricInverse;
 struct UpperPair;
 struct SpinSources;
 
@@ -485,7 +484,6 @@ private:
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       bool collect_images) const;
   friend class StructureMetricInverse;
-  friend class RestrictedMetricInverse;
   struct OrthogonalDirectCiData;
   struct TiledPairData;
   struct StructureTerm {

@@ -13,7 +13,6 @@
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 #include "vbscf/structures/assembly/action.hpp"
-#include "vbscf/structures/orthogonal_ci/restricted_metric.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
 
 namespace {
@@ -88,34 +87,46 @@ struct Fixture {
   }
 };
 
-void compare_dense(Fixture& fixture, int expected_q) {
+void compare_dense(Fixture& fixture) {
   auto action = fixture.action();
   require(action.storage().orthogonal_direct_ci,
           "test carrier did not select exact direct CI");
-  auto inverse = xmvb::vb::RestrictedMetricInverse::make(
-      action, fixture.alpha, fixture.beta, 64ULL * 1024ULL * 1024ULL);
-  require(inverse != nullptr, "valid restricted spin sector was rejected");
-  require(inverse->n_complement() == expected_q,
-          "restricted metric chose the wrong complement dimension");
-  auto prepared = inverse->prepare(fixture.upper);
-  require(prepared != nullptr, "restricted metric preconditioner failed");
   xmvb::vb::RepresentationOverlap representation(
       action, fixture.alpha, fixture.beta, fixture.upper.rows());
   const auto prepared_metric = representation.prepare_metric(fixture.upper);
   const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(
       fixture.selected.cols(), fixture.selected.cols());
-  const Eigen::MatrixXd metric = representation.apply(
-      fixture.upper, fixture.upper, identity);
+  const auto exterior = [&](const std::vector<std::vector<int>>& strings) {
+    Eigen::MatrixXd transform(strings.size(), strings.size());
+    const int electrons = strings.front().size();
+    Eigen::MatrixXd minor(electrons, electrons);
+    for (int left = 0; left < transform.rows(); ++left)
+      for (int right = 0; right < transform.cols(); ++right) {
+        for (int i = 0; i < electrons; ++i)
+          for (int j = 0; j < electrons; ++j)
+            minor(i, j) = fixture.upper(strings[left][i], strings[right][j]);
+        transform(left, right) = minor.determinant();
+      }
+    return transform;
+  };
+  // Independent tiny oracle: explicit minors and direct selected columns.
+  // Production never materializes these full product or Gram matrices.
+  const Eigen::MatrixXd alpha = exterior(fixture.alpha), beta = exterior(fixture.beta);
+  Eigen::MatrixXd carrier = Eigen::MatrixXd::Zero(fixture.selected.rows(), fixture.selected.cols());
+  for (int a = 0; a < alpha.rows(); ++a)
+    for (int b = 0; b < beta.rows(); ++b)
+      for (int i = 0; i < alpha.cols(); ++i)
+        for (int j = 0; j < beta.cols(); ++j)
+          carrier.row(a * beta.rows() + b).noalias() +=
+              alpha(a, i) * beta(b, j) * fixture.selected.row(i * beta.cols() + j);
+  const Eigen::MatrixXd metric = carrier.transpose() * carrier;
+  require((prepared_metric(identity) - metric).norm() < 2.0e-11,
+          "selected metric action disagrees with explicit exterior minors");
   Eigen::MatrixXd rhs(fixture.selected.cols(), 11);
   for (int col = 0; col < rhs.cols(); ++col)
     for (int row = 0; row < rhs.rows(); ++row)
       rhs(row, col) = std::sin(0.21 * (row + 1) * (col + 2));
-  const Eigen::MatrixXd preconditioned = prepared->precondition(rhs);
-  require((preconditioned.leftCols(1) -
-           prepared->precondition(rhs.leftCols(1))).norm() < 1.0e-12,
-          "cached principal inverse changed across repeated RHS");
-  require(rhs.col(0).dot(preconditioned.col(0)) > 0.0,
-          "principal inverse is not a positive preconditioner");
+  const Eigen::VectorXd diagonal = metric.diagonal();
   Eigen::MatrixXd solution(rhs.rows(), rhs.cols());
   for (int col = 0; col < rhs.cols(); ++col) {
     xmvb::core::MetricSolveStats stats;
@@ -125,19 +136,39 @@ void compare_dense(Fixture& fixture, int expected_q) {
           return Eigen::VectorXd(prepared_metric(x).col(0));
         },
         [&](const Eigen::VectorXd& x) {
-          return Eigen::VectorXd(prepared->precondition(x).col(0));
+          return Eigen::VectorXd(x.cwiseQuotient(diagonal));
         }, &stats);
     require(stats.certifications > 0 &&
                 stats.relative_residual <= std::sqrt(std::numeric_limits<double>::epsilon()),
-            "restricted PCG did not certify the selected metric residual");
+            "selected PCG did not certify its true metric residual");
   }
   const Eigen::MatrixXd reference = metric.fullPivLu().solve(rhs);
   require((solution - reference).norm() <
               2.0e-10 * std::max(1.0, reference.norm()),
-          "restricted metric differs from independently solved selected Gram");
+          "selected metric differs from independently solved selected Gram");
   require((metric * solution - rhs).norm() <
               2.0e-10 * std::max(1.0, rhs.norm()),
-          "restricted metric failed selected-space residual");
+          "selected metric failed selected-space residual");
+  // Changing the orbital chart changes M, not the selected coefficient space.
+  // The old positive diagonal remains a valid preconditioner for the new M.
+  Eigen::MatrixXd trial = fixture.upper;
+  trial(0, 0) *= 0.83;
+  trial(0, trial.cols() - 1) += 0.17;
+  const auto trial_action = representation.prepare_metric(trial);
+  const Eigen::MatrixXd trial_metric = trial_action(identity);
+  for (int col = 0; col < rhs.cols(); ++col) {
+    const Eigen::VectorXd x = xmvb::core::solve_metric(
+        Eigen::VectorXd(rhs.col(col)),
+        [&](const Eigen::VectorXd& v) {
+          return Eigen::VectorXd(trial_action(v).col(0));
+        },
+        [&](const Eigen::VectorXd& v) {
+          return Eigen::VectorXd(v.cwiseQuotient(diagonal));
+        });
+    const Eigen::VectorXd reference_trial = trial_metric.fullPivLu().solve(rhs.col(col));
+    require((x - reference_trial).norm() < 2.0e-10 * std::max(1.0, reference_trial.norm()),
+            "accepted Jacobi diagonal changed the trial-chart solution");
+  }
 }
 
 void singlet_case() {
@@ -147,7 +178,7 @@ void singlet_case() {
   selected(8, 2) = 1.0;
   selected(1, 3) = selected(3, 3) = 1.0;
   Fixture fixture(3, 1, 1, selected);
-  compare_dense(fixture, 2);
+  compare_dense(fixture);
 
   Eigen::MatrixXd full = Eigen::MatrixXd::Zero(9, 6);
   full.leftCols(4) = selected;
@@ -167,13 +198,6 @@ void singlet_case() {
   const Eigen::MatrixXd full_metric = full.transpose() * carrier_metric * full;
   const Eigen::MatrixXd naive_pp =
       full_metric.inverse().topLeftCorner(4, 4);
-  auto action = fixture.action();
-  auto inverse = xmvb::vb::RestrictedMetricInverse::make(
-      action, fixture.alpha, fixture.beta, 64ULL * 1024ULL * 1024ULL);
-  require(inverse != nullptr, "singlet preconditioner was not built");
-  auto prepared = inverse->prepare(fixture.upper);
-  require((prepared->precondition(Eigen::Matrix4d::Identity()) - naive_pp).norm() < 1.0e-10,
-          "principal full inverse differs from explicit N_PP");
   require((selected_metric.inverse() - naive_pp).norm() > 1.0e-9,
           "test failed to distinguish the restricted inverse from N_PP");
 
@@ -181,29 +205,21 @@ void singlet_case() {
   Fixture scaled(3, 1, 1, selected);
   scaled.upper(0, 0) = 0.35;
   scaled.upper(2, 2) = 2.8;
-  compare_dense(scaled, 2);
+  const Eigen::MatrixXd scaled_overlap = scaled.upper.transpose() * scaled.upper;
+  scaled.overlap.assign(scaled_overlap.data(), scaled_overlap.data() + scaled_overlap.size());
+  compare_dense(scaled);
 
   selected(3, 3) = 0.0;  // Not annihilated by S_+.
   Fixture impure(3, 1, 1, selected);
-  auto impure_action = impure.action();
-  require(xmvb::vb::RestrictedMetricInverse::make(
-              impure_action, impure.alpha, impure.beta, 64ULL * 1024ULL * 1024ULL) ==
-              nullptr,
-          "spin-impure selected column was admitted");
+  compare_dense(impure);
 
   selected(3, 3) = -2.0;
   selected(0, 3) = 0.2;  // One column now crosses occupation blocks.
   Fixture nonlocal(3, 1, 1, selected);
-  auto nonlocal_action = nonlocal.action();
-  require(xmvb::vb::RestrictedMetricInverse::make(
-              nonlocal_action, nonlocal.alpha, nonlocal.beta,
-              64ULL * 1024ULL * 1024ULL) == nullptr,
-          "occupation-mixed selected column was admitted");
-
-  auto valid_action = fixture.action();
-  require(xmvb::vb::RestrictedMetricInverse::make(
-              valid_action, fixture.alpha, fixture.beta, 1024) == nullptr,
-          "restricted metric ignored its fixed byte budget");
+  compare_dense(nonlocal);
+  // A single selected structure requires one scalar equation, no complement.
+  Fixture single(3, 1, 1, selected.leftCols(1));
+  compare_dense(single);
 }
 
 void doublet_case() {
@@ -222,7 +238,7 @@ void doublet_case() {
   selected(0 * 3 + 2, 6) = 1.0;
   selected(1 * 3 + 1, 6) = 1.0;
   Fixture fixture(3, 2, 1, selected);
-  compare_dense(fixture, 1);
+  compare_dense(fixture);
 }
 
 }  // namespace
@@ -230,5 +246,5 @@ void doublet_case() {
 int main() {
   singlet_case();
   doublet_case();
-  std::cout << "restricted metric checks passed\n";
+  std::cout << "selected metric checks passed\n";
 }

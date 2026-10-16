@@ -36,7 +36,6 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/expansion/expander.cpp
   vbscf/structures/orthogonal_ci/exterior_transform.cpp
   vbscf/structures/orthogonal_ci/metric.cpp
-  vbscf/structures/orthogonal_ci/restricted_metric.cpp
   vbscf/structures/overlap/representation.cpp
   vbscf/structures/orthogonal_ci/integrals.cpp
   vbscf/structures/selection/subspace/selector.cpp

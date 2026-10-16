@@ -35,7 +35,7 @@ hostname > "$AUDIT_ROOT/node.txt"
 lscpu > "$AUDIT_ROOT/cpu.txt"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$SLURM_SUBMIT_DIR/build" \
- -R '^(product_frontier|structure_tiles|representation_overlap|ci_transport|selected_ci_transport|restricted_metric)$' \
+ -R '^(product_frontier|structure_tiles|representation_overlap|ci_transport|selected_ci_transport|selected_metric)$' \
  --output-on-failure > "$AUDIT_ROOT/ctest.out" 2>&1
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores bash -se <<'RUN'
 grep Cpus_allowed_list /proc/self/status > "$AUDIT_ROOT/affinity.txt"

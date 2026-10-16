@@ -35,7 +35,7 @@ cmake -S "$source_dir" -B "$source_dir/build" -DCMAKE_BUILD_TYPE=Release \
 cmake --build "$source_dir/build" --target xmvb test_structure_tiles \
  test_orthogonal_direct_ci test_coupled_structure test_product_frontier \
  test_representation_overlap test_ci_transport test_selected_ci_transport \
- test_restricted_metric -j8 > "$artifact/build.log" 2>&1
+ test_selected_metric -j8 > "$artifact/build.log" 2>&1
 sha256sum "$source_dir/build/src/test_structure_tiles" \
  "$source_dir/build/src/xmvb-cpp.exe" > "$artifact/binaries.sha256"
 sha256sum "$source_dir/src/mcscf/ci/spin_channels.cpp" \
@@ -49,7 +49,7 @@ sha256sum "$source_dir/src/mcscf/ci/spin_channels.cpp" \
  "$source_dir/tests/vbscf/unit/test_structure_tiles.cpp" > "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" \
- -R '^(orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|restricted_metric)$' \
+ -R '^(orthogonal_direct_ci|coupled_structure|structure_tiles|product_frontier|representation_overlap|ci_transport|selected_ci_transport|selected_metric)$' \
  --output-on-failure > "$artifact/ctest.out" 2>&1
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  bash -c 'grep Cpus_allowed_list /proc/self/status' > "$artifact/affinity.txt"

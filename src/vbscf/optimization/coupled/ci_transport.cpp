@@ -34,11 +34,6 @@ CiTransport::CiTransport(const OrbitalPreparationInput& input,
       coordinate_scale_(std::sqrt(2.0 * origin.normalized_state_weights.at(0))),
       diagonal_(action.preconditioner_diagonal().overlap),
       inverse_(origin.metric_inverse(action)) {
-  if (!inverse_)
-    restricted_inverse_ = RestrictedMetricInverse::make(action,
-        origin.same_spin_pair_cache.alpha_reuse_table.unique_determinants,
-        origin.same_spin_pair_cache.beta_reuse_table.unique_determinants,
-        64ULL * 1024 * 1024);
   const auto& images = origin.selected_state_structure_images.value();
   const Eigen::MatrixXd state_h = c0_.transpose() * images.hamiltonian;
   gc0_ = (coordinate_scale_ * coordinate_scale_) *
@@ -55,7 +50,8 @@ Eigen::VectorXd CiTransport::raw_direction(const Eigen::VectorXd& reduced) const
 }
 
 Eigen::MatrixXd CiTransport::solve(const Eigen::MatrixXd& upper,
-                                 const Eigen::MatrixXd& rhs) const {
+                                 const Eigen::MatrixXd& rhs,
+                                 const Eigen::MatrixXd* initial) const {
   // Opt-in diagnosis only: separate the selected metric solve from HVP work.
   const bool timed = profiling::phase_totals().enabled;
   using Clock = std::chrono::steady_clock;
@@ -83,27 +79,18 @@ Eigen::MatrixXd CiTransport::solve(const Eigen::MatrixXd& upper,
   if (!prepared_metric_ || metric_upper_.rows() != upper.rows() ||
       !(metric_upper_.array() == upper.array()).all()) {
     prepared_metric_.emplace(overlap_.prepare_metric(upper));
-    metric_preconditioner_.reset();
-    if (restricted_inverse_) {
-      const auto setup_start = timed ? Clock::now() : Clock::time_point{};
-      metric_preconditioner_ = restricted_inverse_->prepare(upper);
-      if (timed)
-        std::fprintf(stderr,
-            "XMVB_METRIC_COMPLETION,rows=%d,complement=%d,bytes=%zu,setup_wall=%.9f\n",
-            restricted_inverse_->n_selected(), restricted_inverse_->n_complement(),
-            metric_preconditioner_->stored_bytes(),
-            std::chrono::duration<double>(Clock::now() - setup_start).count());
-    }
     metric_upper_ = upper;
   }
-  // N_PP is an SPD preconditioner, not the selected inverse. Its discrepancy
-  // from M_PP^{-1} has rank at most dim(Q). Solve the original selected system
-  // to the unchanged true-residual tolerance without constructing Q columns.
+  // Solve only the selected Gram. The positive accepted-point diagonal is a
+  // Jacobi preconditioner also at a trial chart: it changes convergence, not
+  // the normal equation. Do not complete the selected space to precondition it.
   Eigen::MatrixXd result(rhs.rows(), rhs.cols());
   int actions = 0, iterations = 0, certifications = 0;
   double residual = 0.0;
   for (Eigen::Index s = 0; s < rhs.cols(); ++s) {
     core::MetricSolveStats stats;
+    Eigen::VectorXd seed;
+    if (initial) seed = initial->col(s);
     result.col(s) = core::solve_metric(rhs.col(s),
       [&](const Eigen::VectorXd& x) {
         const auto action_start = timed ? Clock::now() : Clock::time_point{};
@@ -112,18 +99,15 @@ Eigen::MatrixXd CiTransport::solve(const Eigen::MatrixXd& upper,
         return image;
       },
       [&](const Eigen::VectorXd& x) {
-        if (metric_preconditioner_)
-          return Eigen::VectorXd(metric_preconditioner_->precondition(x).col(0));
         return Eigen::VectorXd(x.cwiseQuotient(diagonal_));
       },
-      timed ? &stats : nullptr);
+      timed ? &stats : nullptr, initial ? &seed : nullptr);
     actions += stats.actions;
     iterations += stats.iterations;
     certifications += stats.certifications;
     residual = std::max(residual, stats.relative_residual);
   }
-  report(metric_preconditioner_ ? "selected_completed_cg" : "selected_cg",
-      actions, iterations, certifications, residual);
+  report("selected_cg", actions, iterations, certifications, residual);
   return result;
 }
 
@@ -141,7 +125,10 @@ CiTransportPoint CiTransport::retract(const Eigen::VectorXd& orbital_step,
       structure_.coefficient_response_coordinates(structure_step);
   const Eigen::MatrixXd rhs = overlap_.apply(point.upper, upper_, point.base_coefficients) +
       overlap_.apply_direction(point.upper, upper_, zero_, point.origin_direction, c0_);
-  point.coefficients = solve(point.upper, rhs);
+  // The target already agrees with F' * base_coefficients to first order
+  // in the orbital step (at zero independent CI step). Correct the defect
+  // of this known representative, with the original RHS-relative tolerance.
+  point.coefficients = solve(point.upper, rhs, &point.base_coefficients);
   return point;
 }
 
