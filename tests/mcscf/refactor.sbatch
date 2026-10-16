@@ -47,6 +47,6 @@ for target in test_ciah test_neo test_minres test_casci test_davidson test_eigen
 done
 srun --exact --ntasks=1 --cpus-per-task=4 --cpu-bind=cores \
  ctest --test-dir "$source_dir/build" --output-on-failure \
- -R '^(ci_factors|casci|ciah|neo|neo_globalization|minres|block_inverse_bfgs|orthonormal_hvp_basis|positive_ritz_secants|shifted_metric_preconditioner|state_weights|representation_overlap|ci_transport|selected_ci_transport|keyframe|structure_tiles|sparse_orbital_quotient|coupled_structure|davidson|eigen_response|spectral_trust_region|ciah_hessian_diagonal_f2_hao|ciah_hessian_diagonal_f2_oeo|cli_options|dense_span|openmp|input_guess_selection|output_orbitals|state_average_f2|text_report_f2|tnhvp_trace_f2|ciah_f2|ciah_pyscf_reference_f2)$' \
+ -R '^(ci_factors|casci|ciah|neo|neo_globalization|minres|block_inverse_bfgs|orthonormal_hvp_basis|positive_ritz_secants|shifted_metric_preconditioner|state_weights|representation_overlap|ci_transport|selected_ci_transport|keyframe|structure_tiles|sparse_orbital_quotient|coupled_structure|davidson|eigen_response|spectral_trust_region|ciah_hessian_diagonal_f2_hao|ciah_hessian_diagonal_f2_oeo|cli_options|dense_span|openmp|input_guess_selection|output_orbitals|state_average_f2|text_report_f2|tnhvp_trace_f2|ciah_f2|ciah_pyscf_reference_f2|plbfgs_f2)$' \
  > "$artifact/ctest.out" 2>&1
 cp "$source_dir/build/Testing/Temporary/LastTest.log" "$artifact/test-details.log"

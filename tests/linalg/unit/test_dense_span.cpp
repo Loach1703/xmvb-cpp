@@ -4,7 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 
-static_assert(__cplusplus >= 202002L, "C++20 is required");
+static_assert(__cplusplus > 202002L, "C++23 is required");
 
 int main() {
   const std::array h{2.0, 0.0, 0.0, 6.0};

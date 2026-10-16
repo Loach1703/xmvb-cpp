@@ -92,7 +92,8 @@ still under `vbscf/integrals/` are not yet method-independent APIs. Likewise,
 
 ## Language and Optimizer Names
 
-C++20 is required, with standard extensions disabled and no `-fpermissive`.
+C++23 and CMake3.20 or newer are required, with standard extensions disabled
+and no `-fpermissive`. GCC14 is the tested compiler baseline.
 CMake must fail rather than silently decay to an older language standard.
 Use modern facilities when they clarify ownership or contracts: `std::span`
 borrows contiguous input storage without prescribing its owning container.
@@ -102,7 +103,6 @@ does not change LAPACK's overwrite contract.
 
 | ISCF | Report name | CLI backend | Meaning |
 |---|---|---|---|
-| 5 | L-BFGS | `lbfgs` | XMVB-compatible raw-coordinate baseline |
 | 7 | TNHVP | `nonredundant_truncated_newton` | Truncated Newton with HVPs |
 | 8 | P-LBFGS | `plbfgs` | Preconditioned L-BFGS, the default |
 | 9 | CIAH | `ciah` | Co-iterative augmented Hessian |
@@ -114,11 +114,16 @@ The new name describes the algorithm's preconditioning role. This does not
 rename `BlockInverseBfgs`: that separate algebraic operation really performs
 a simultaneous block-secant update.
 
+The old raw-coordinate L-BFGS backend, its Moré--Thuente search, and its raw
+gradient-only report branches have been deleted. ISCF=5 and the `lbfgs` CLI
+name are rejected; neither silently selects P-LBFGS. Current regression decks
+that requested the removed backend explicitly now request ISCF=8.
+
 The production ISCF=9 driver uses CIAH keyframes and an AH Davidson workspace,
 so its API, output, trace writer and diagnostics use CIAH. `neo/solver.*`
 remains a distinct norm-extended trust-region solver, used in curvature
-diagnostics. It is not an alias for the CIAH driver. Numerical ISCF values are
-unchanged. Old CLI spellings are removed, not forwarded; historical result
+diagnostics. It is not an alias for the CIAH driver. ISCF=7/8/9 are unchanged.
+Old CLI spellings are removed, not forwarded; historical result
 files and manuscript drafts retain their original labels until revised.
 
 ## Filenames

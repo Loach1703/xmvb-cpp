@@ -13,14 +13,6 @@ struct VbScfOptimizerResult;
 
 namespace optimizer_detail {
 
-BackendRunResult run_xmvb_lbfgs_backend(
-    VbScfObjective* objective,
-    const VbScfOptimizerOptions& options,
-    const Eigen::VectorXd& initial_parameters,
-    const Eigen::VectorXd& initial_gradient,
-    double initial_energy,
-    VbScfOptimizerResult* result);
-
 BackendRunResult run_plbfgs_backend(
     VbScfObjective* objective,
     const SparseParameterLayout& parameter_view,

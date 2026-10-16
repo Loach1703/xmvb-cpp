@@ -178,7 +178,7 @@ function(xmvb_add_component target_name)
 endfunction()
 
 xmvb_add_component(xmvb_linalg ${XMVB_LINALG_SOURCES})
-target_compile_features(xmvb_linalg PUBLIC cxx_std_20)
+target_compile_features(xmvb_linalg PUBLIC cxx_std_23)
 if (XMVB_ENABLE_EIGEN_BLAS_BACKEND)
   target_compile_definitions(xmvb_linalg PUBLIC EIGEN_USE_BLAS=1 EIGEN_USE_LAPACKE=1)
 endif()

@@ -15,7 +15,7 @@
 #include "vbscf/orbitals/gauge/support_preserving.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/optimization/objective/function.hpp"
-#include "vbscf/optimization/backends/lbfgs.hpp"
+#include "vbscf/optimization/backends/plbfgs.hpp"
 #include "vbscf/optimization/backends/ciah.hpp"
 #include "vbscf/optimization/backends/projected_gradient.hpp"
 #include "vbscf/optimization/backends/truncated_newton.hpp"
@@ -163,20 +163,6 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
             optimizer_detail::run_projected_gradient_backend(
                 &objective,
                 parameter_view,
-                options_,
-                parameter_vector,
-                gradient,
-                energy,
-                &result);
-        n_iterations = backend_result.n_iterations;
-        final_gradient_l2_norm = backend_result.final_gradient_l2_norm;
-        break;
-      }
-
-      case VbScfOptimizerBackend::Lbfgs: {
-        const auto backend_result =
-            optimizer_detail::run_xmvb_lbfgs_backend(
-                &objective,
                 options_,
                 parameter_vector,
                 gradient,

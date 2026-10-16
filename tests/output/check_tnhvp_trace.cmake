@@ -27,8 +27,8 @@ if (NOT xmvb_report MATCHES
   message(FATAL_ERROR "ISCF=7 did not select TNHVP")
 endif()
 
-file(READ "${XMVB_INPUT}" iscf5_input_text)
-string(REPLACE "ISCF=7" "ISCF=5" iscf5_input_text "${iscf5_input_text}")
+file(READ "${XMVB_INPUT}" input_text)
+string(REPLACE "ISCF=7" "ISCF=5" iscf5_input_text "${input_text}")
 set(iscf5_input "${XMVB_TRACE_ROOT}/F2_iscf5.xmi")
 file(WRITE "${iscf5_input}" "${iscf5_input_text}")
 execute_process(
@@ -40,18 +40,12 @@ execute_process(
   RESULT_VARIABLE iscf5_status
   OUTPUT_VARIABLE iscf5_report
   ERROR_VARIABLE iscf5_errors)
-if (NOT iscf5_status EQUAL 0)
+if (iscf5_status EQUAL 0 OR NOT iscf5_errors MATCHES "unsupported ISCF value 5")
   message(FATAL_ERROR
-    "ISCF=5 selection run failed with status ${iscf5_status}:\n${iscf5_errors}")
-endif()
-if (NOT iscf5_report MATCHES
-    "VBSCF algorithm: L-BFGS [(]XMVB-compatible raw-coordinate method[)]")
-  message(FATAL_ERROR "ISCF=5 did not select XMVB-compatible L-BFGS")
+    "removed ISCF=5 must be rejected explicitly:\n${iscf5_errors}")
 endif()
 
-string(REPLACE "ISCF=7" "ISCF=8" iscf8_input_text "${iscf5_input_text}")
-# The preceding replacement starts from an ISCF=5 deck.
-string(REPLACE "ISCF=5" "ISCF=8" iscf8_input_text "${iscf8_input_text}")
+string(REPLACE "ISCF=7" "ISCF=8" iscf8_input_text "${input_text}")
 set(iscf8_input "${XMVB_TRACE_ROOT}/F2_iscf8.xmi")
 file(WRITE "${iscf8_input}" "${iscf8_input_text}")
 execute_process(
@@ -77,7 +71,7 @@ string(
   "EIGENSOLVER=DAVIDSON"
   "EIGENSOLVER=DENSE"
   dense_input_text
-  "${iscf5_input_text}")
+  "${input_text}")
 set(dense_input "${XMVB_TRACE_ROOT}/F2_dense.xmi")
 file(WRITE "${dense_input}" "${dense_input_text}")
 execute_process(

@@ -21,39 +21,9 @@
 
 namespace xmvb::output {
 
-bool core_backend_reports_projected_gradient(
-    xmvb::vb::VbScfOptimizerBackend backend) {
-  switch (backend) {
-    case xmvb::vb::VbScfOptimizerBackend::Lbfgs:
-      return false;
-    case xmvb::vb::VbScfOptimizerBackend::Plbfgs:
-    case xmvb::vb::VbScfOptimizerBackend::Ciah:
-    case xmvb::vb::VbScfOptimizerBackend::NonredundantProjectedGradient:
-    case xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton:
-      return true;
-  }
-  throw std::invalid_argument("invalid VBSCF optimizer backend");
-}
-
-const char* gradient_tolerance_metric_name(
-    xmvb::vb::VbScfOptimizerBackend backend) {
-  switch (backend) {
-    case xmvb::vb::VbScfOptimizerBackend::Lbfgs:
-      return "raw |g|_2";
-    case xmvb::vb::VbScfOptimizerBackend::Plbfgs:
-    case xmvb::vb::VbScfOptimizerBackend::Ciah:
-    case xmvb::vb::VbScfOptimizerBackend::NonredundantProjectedGradient:
-    case xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton:
-      return "projected |g|_inf";
-  }
-  throw std::invalid_argument("invalid VBSCF optimizer backend");
-}
-
 const char* optimizer_report_name(
     const xmvb::vb::VbScfOptimizerOptions& options) {
   switch (options.backend) {
-    case xmvb::vb::VbScfOptimizerBackend::Lbfgs:
-      return "L-BFGS (XMVB-compatible raw-coordinate method)";
     case xmvb::vb::VbScfOptimizerBackend::Plbfgs:
       return "P-LBFGS (nonredundant orbital-block inverse)";
     case xmvb::vb::VbScfOptimizerBackend::Ciah:
@@ -260,30 +230,27 @@ combine_callbacks(
 }
 
 std::function<void(const xmvb::vb::VbScfAcceptedIterationSnapshot&)>
-iteration_logger(xmvb::vb::VbScfOptimizerBackend backend) {
+iteration_logger() {
   struct LoggerState {
     bool has_reference_energy = false;
     double previous_total_energy = 0.0;
   };
 
   auto state = std::make_shared<LoggerState>();
-  const bool projected_gradient = core_backend_reports_projected_gradient(backend);
   std::cout << "\n                ITER           ENERGY          DELTA_E"
-            << (projected_gradient ? "      |G_PROJ|_INF\n" : "             |G|_2\n");
+            << "      |G_PROJ|_INF\n";
   std::cout.flush();
 
-  return [state, projected_gradient](
+  return [state](
              const xmvb::vb::VbScfAcceptedIterationSnapshot& snapshot) {
     const double delta_energy = state->has_reference_energy
         ? snapshot.total_energy - state->previous_total_energy
         : 0.0;
-    if (projected_gradient && !snapshot.has_projected_gradient) {
+    if (!snapshot.has_projected_gradient) {
       throw std::runtime_error(
           "iteration report requires a projected-gradient norm");
     }
-    const double gradient_norm = projected_gradient
-        ? snapshot.projected_gradient_inf_norm
-        : snapshot.sparse_orbital_energy_gradient_l2_norm;
+    const double gradient_norm = snapshot.projected_gradient_inf_norm;
     std::ostringstream stream;
     stream << std::setw(19) << snapshot.accepted_iteration_index
            << std::setw(22) << std::fixed << std::setprecision(10)
@@ -370,7 +337,7 @@ void print_summary(
   if (molden_output_path.has_value()) {
     print_log_field("Molden output", molden_output_path->string());
   }
-  print_log_field("Gradient metric", gradient_tolerance_metric_name(options.backend));
+  print_log_field("Gradient metric", "projected |g|_inf");
   if (options.backend == vb::VbScfOptimizerBackend::Ciah) {
     print_log_field("Orbital coordinates", "unwhitened quotient");
     print_log_field("Projected infinity norm", "reference coordinates for stopping/final report");
@@ -429,23 +396,21 @@ void print_summary(
   print_log_field(
       "Final gradient |g|_2",
       format_scientific_double(result.final_gradient_l2_norm, 8));
-  if (core_backend_reports_projected_gradient(options.backend)) {
+  print_log_field(
+      "Final projected |g|_inf",
+      format_scientific_double(result.final_projected_gradient_inf_norm, 8));
+  print_log_field(
+      "Final projected |g|_2",
+      format_scientific_double(result.final_projected_gradient_l2_norm, 8));
+  if (result.final_physical_gradient_norm.has_value()) {
     print_log_field(
-        "Final projected |g|_inf",
-        format_scientific_double(result.final_projected_gradient_inf_norm, 8));
+        "Final physical |g|_(G^-1)",
+        format_scientific_double(
+            *result.final_physical_gradient_norm, 8));
+  } else {
     print_log_field(
-        "Final projected |g|_2",
-        format_scientific_double(result.final_projected_gradient_l2_norm, 8));
-    if (result.final_physical_gradient_norm.has_value()) {
-      print_log_field(
-          "Final physical |g|_(G^-1)",
-          format_scientific_double(
-              *result.final_physical_gradient_norm, 8));
-    } else {
-      print_log_field(
-          "Final physical gradient diagnostic",
-          "unavailable: " + result.final_physical_gradient_diagnostic);
-    }
+        "Final physical gradient diagnostic",
+        "unavailable: " + result.final_physical_gradient_diagnostic);
   }
   if (options.backend ==
       xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton) {

@@ -73,7 +73,7 @@ int main() {
 
     using xmvb::vb::InputScfOptimizer;
     const std::pair<int, InputScfOptimizer> optimizers[] = {
-        {5, InputScfOptimizer::Lbfgs}, {7, InputScfOptimizer::Tnhvp},
+        {7, InputScfOptimizer::Tnhvp},
         {8, InputScfOptimizer::Plbfgs}, {9, InputScfOptimizer::Ciah}};
     for (const auto& [iscf, expected] : optimizers) {
       const auto path = root / ("iscf" + std::to_string(iscf) + ".xmi");
@@ -82,6 +82,13 @@ int main() {
       require(deck.metadata.scf_optimizer == expected,
           "numeric ISCF mapping changed during optimizer rename");
     }
+
+    const auto retired_path = root / "iscf5.xmi";
+    write_deck(retired_path, "iscf=5");
+    bool rejected = false;
+    try { (void)xmvb::vb::parse_input_deck_model(retired_path.string()); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    require(rejected, "retired ISCF=5 must not select another optimizer");
 
     const auto state_average_path = root / "state-average.xmi";
     write_deck(state_average_path, "nstate=3");

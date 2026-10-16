@@ -1,6 +1,6 @@
 # xmvb-cpp
 
-A high-performance **Valence Bond Self-Consistent Field (VBSCF)** engine written in C++20.
+A high-performance **Valence Bond Self-Consistent Field (VBSCF)** engine written in C++23.
 
 Valence Bond theory provides direct chemical insight into bonding, reactivity, and electron correlation that molecular orbital methods cannot reveal. xmvb-cpp is an independent open-source VBSCF engine designed for computational chemistry researchers who need VB-level analysis of molecular electronic structure.
 
@@ -49,7 +49,7 @@ in [Code Organization and Naming](docs/code_organization.md).
 
 ## Build
 
-Use a C++20 compiler and an environment providing cmake, ninja, eigen, openblas (with LAPACKE headers), libxc, and libcint, then build with CMake:
+Use a C++23 compiler (tested with GCC14), CMake3.20 or newer, and an environment providing ninja, eigen, openblas (with LAPACKE headers), libxc, and libcint, then build with CMake:
 
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -73,8 +73,8 @@ OMP_NUM_THREADS=1 build/src/xmvb-cpp.exe <input.xmi>
 
 Input files use the `.xmi` format. See `testdata/vbscf/` for the versioned
 regression decks and `testdata/vbscf/F2.xmi` for the compact HAO smoke case.
-Within `$CTRL`, `ISCF=5` selects the XMVB-compatible raw-coordinate L-BFGS,
-`ISCF=7` selects TNHVP, `ISCF=8` selects preconditioned L-BFGS (P-LBFGS), and
+Within `$CTRL`, `ISCF=7` selects TNHVP,
+`ISCF=8` selects preconditioned L-BFGS (P-LBFGS), and
 `ISCF=9` selects co-iterative augmented Hessian (CIAH). The project default
 when `ISCF` is omitted is P-LBFGS.
 `EIGENSOLVER=DAVIDSON` selects the default matrix-free structure solver,
@@ -84,13 +84,12 @@ the corresponding input keyword.
 
 P-LBFGS uses the same local orbital-block initial inverse and transported
 secant recursion as the TNHVP predictor, without exact HVP correction. The
-`ISCF=5` baseline instead follows XMVB 4.0: standard L-BFGS in the stored raw
-orbital coefficients, 100 correction pairs, an initial step of 0.2, and a
-Moré--Thuente strong-Wolfe line search. The corresponding command-line names
-are `--optimizer-backend lbfgs` and `--optimizer-backend plbfgs`.
+native raw-coordinate L-BFGS backend and its Moré--Thuente line search have
+been removed. `ISCF=5` and `--optimizer-backend lbfgs` are rejected, not
+redirected to another method. Use `--optimizer-backend plbfgs` for P-LBFGS.
 Use `--optimizer-backend ciah` and `--ciah-trace path.tsv` for CIAH. The retired
 `neo`, `block_lbfgs`, and `--neo-trace` CLI spellings are not aliases; numeric
-`ISCF` selections are unchanged.
+`ISCF=7/8/9` selections are unchanged.
 
 `NSTATE=n` selects an equal-weight average over the consecutive lowest `n`
 VB states. Omitting it is equivalent to `NSTATE=1`. The optimizer uses the

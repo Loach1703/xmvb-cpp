@@ -94,23 +94,15 @@ int main() {
       ciah_trace->tnhvp_trace_path.empty(),
       "CIAH trace option must not set the TNHVP trace path");
 
-  const auto xmvb_lbfgs = parse({
-      "xmvb-cpp.exe",
-      "unused.xmi",
-      "--optimizer-backend",
-      "lbfgs"});
-  require(xmvb_lbfgs.has_value(), "XMVB L-BFGS option must parse");
-  require(
-      xmvb_lbfgs->optimizer.backend ==
-          xmvb::vb::VbScfOptimizerBackend::Lbfgs,
-      "XMVB L-BFGS option selected the wrong backend");
-
   const auto invalid = parse({
       "xmvb-cpp.exe",
       "unused.xmi",
       "--optimizer-backend",
       "unknown"});
   require(!invalid.has_value(), "invalid optimizer backend must be rejected");
+
+  require(!parse({"xmvb-cpp.exe", "unused.xmi", "--optimizer-backend", "lbfgs"}),
+      "removed native L-BFGS backend must not remain as an alias");
 
   require(!parse({"xmvb-cpp.exe", "unused.xmi", "--optimizer-backend", "neo"}),
       "retired neo CLI alias must not remain");

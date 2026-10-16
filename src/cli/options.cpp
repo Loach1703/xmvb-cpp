@@ -14,10 +14,6 @@ void apply_optimizer_backend_argument(
   if (options == nullptr) {
     throw std::invalid_argument("optimizer options must not be null");
   }
-  if (backend_name == "lbfgs") {
-    options->backend = xmvb::vb::VbScfOptimizerBackend::Lbfgs;
-    return;
-  }
   if (backend_name == "plbfgs") {
     options->backend = xmvb::vb::VbScfOptimizerBackend::Plbfgs;
     return;
@@ -125,7 +121,7 @@ void apply_standard_two_electron_mode_argument(
 
 void print_usage() {
   std::cerr << "usage: xmvb-cpp.exe <input.xmi> "
-               "[--optimizer-backend lbfgs|plbfgs|ciah|nonredundant_projected_gradient|nonredundant_truncated_newton]"
+               "[--optimizer-backend plbfgs|ciah|nonredundant_projected_gradient|nonredundant_truncated_newton]"
                " [--max-iterations <count>]"
                " [--eigensolver davidson|dense]"
                " [--orbital-preconditioner auto|identity|one-electron|hessian-diagonal]"
@@ -141,7 +137,7 @@ void print_usage() {
                " [--tnhvp-trace <path.tsv>]"
                " [--ciah-trace <path.tsv>]"
                " [--dump-final-orbital-value-table-bin <path>]\n"
-               "input optimizer: ISCF=5 selects XMVB L-BFGS; ISCF=7 selects TNHVP; ISCF=8 selects P-LBFGS; ISCF=9 selects CIAH\n"
+               "input optimizer: ISCF=7 selects TNHVP; ISCF=8 selects P-LBFGS; ISCF=9 selects CIAH\n"
                "input eigensolver: EIGENSOLVER=DAVIDSON|DENSE (default DAVIDSON)\n";
 }
 

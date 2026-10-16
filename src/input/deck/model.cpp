@@ -238,10 +238,6 @@ void apply_ctrl_assignment(
   }
   if (key == "ISCF") {
     const int iscf = std::stoi(raw_value);
-    if (iscf == 5) {
-      metadata->scf_optimizer = InputScfOptimizer::Lbfgs;
-      return;
-    }
     if (iscf == 7) {
       metadata->scf_optimizer = InputScfOptimizer::Tnhvp;
       return;
@@ -256,7 +252,7 @@ void apply_ctrl_assignment(
     }
     throw std::invalid_argument(
         "unsupported ISCF value " + raw_value +
-        "; use ISCF=5 for XMVB L-BFGS, ISCF=7 for TNHVP, or "
+        "; use ISCF=7 for TNHVP, "
         "ISCF=8 for P-LBFGS, or ISCF=9 for CIAH");
   }
   if (key == "EIGENSOLVER") {

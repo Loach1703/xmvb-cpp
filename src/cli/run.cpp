@@ -43,9 +43,6 @@ int run(Options command_line) {
       command_line.exact_exchange_memory_budget_bytes;
   if (!command_line.optimizer_backend_explicit) {
     switch (load_result.scf_optimizer) {
-      case xmvb::vb::InputScfOptimizer::Lbfgs:
-        options.backend = xmvb::vb::VbScfOptimizerBackend::Lbfgs;
-        break;
       case xmvb::vb::InputScfOptimizer::Tnhvp:
         options.backend =
             xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton;
@@ -80,7 +77,7 @@ int run(Options command_line) {
   if (options.verbose) {
     options.accepted_iteration_callback = xmvb::output::combine_callbacks(
         std::move(options.accepted_iteration_callback),
-        xmvb::output::iteration_logger(options.backend));
+        xmvb::output::iteration_logger());
   }
   if (!dump_trace_dir.empty()) {
     trace_writer = std::make_shared<xmvb::output::AcceptedIterationTraceWriter>(
