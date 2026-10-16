@@ -246,6 +246,18 @@ public:
   void apply_one_body_generators(
       std::initializer_list<DirectCiGeneratorRequest> requests) const;
 
+  /** @brief One-body generator on a bounded beta panel of an immutable carrier.
+   * Column views must remain valid for the entire call. One shared dense input
+   * panel and borrowed beta spectators serve all workers. No spin-square
+   * generator or thread-local coefficient array is formed. alpha_only omits
+   * beta links; a caller may reconstruct them by a complete exchange-parity
+   * projection, but an isolated output panel is not a complete spin action.
+   */
+  void apply_one_body_generator_columns(int beta_begin,
+      const DirectCiColumnReader& columns,
+      const Eigen::Ref<const Eigen::MatrixXd>& generator,
+      Eigen::Ref<Eigen::MatrixXd> result, bool alpha_only=false) const;
+
   /**
    * @brief Differentiates `left.dot(H * right)` with respect to the integrals.
    *

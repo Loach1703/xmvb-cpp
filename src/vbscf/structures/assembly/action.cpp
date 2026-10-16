@@ -1327,19 +1327,14 @@ StructureActionResult StructureAction::apply_integral_direction(
   const xmvb::mcscf::DirectCiSigmaAction sigma_direction(
       direct_ci_->sigma,
       integral_direction);
-  const Eigen::MatrixXd inverse_orbital_transform =
-      direct_ci_->integrals.orbital_transform
-          .template triangularView<Eigen::Upper>()
-          .solve(Eigen::MatrixXd::Identity(
-              n_active_orbitals,
-              n_active_orbitals));
-  const Eigen::MatrixXd relative_orbital_direction =
-      integral_direction.orbital_transform * inverse_orbital_transform;
-
-  if (state.source_factors)
+  if (state.source_factors) {
+    const Eigen::MatrixXd relative_orbital_direction =
+        direct_ci_->integrals.orbital_transform.transpose().triangularView<Eigen::Lower>()
+            .solve(integral_direction.orbital_transform.transpose()).transpose();
     return source_integral_action(state,relative_orbital_direction,
         direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,
         sigma_direction,integral_direction,direct_ci_direction);
+  }
 
   auto sweep=product_jet(state,nullptr,&integral_direction.orbital_transform,&sigma_direction,
       direct_ci_->alpha_transform,direct_ci_->beta_transform(),direct_ci_->sigma,true,direct_ci_direction);

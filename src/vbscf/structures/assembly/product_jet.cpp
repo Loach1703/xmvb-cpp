@@ -78,6 +78,9 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
   };
   ExteriorTransformDirection da,db;
   if (delta_upper) { da=alpha.direction(*delta_upper); db=beta.direction(*delta_upper); }
+  const Eigen::MatrixXd generator=delta_upper ? Eigen::MatrixXd(
+      alpha.orbital_transform().transpose().triangularView<Eigen::Lower>()
+          .solve(delta_upper->transpose()).transpose()):Eigen::MatrixXd{};
   // Differentiated beta rows are shared by generation and left projection.
   detail::ColumnPanels beta_directions(cache_bytes,[&](int panel) {
     const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);
@@ -99,9 +102,10 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     if (weight==0 && !collect_images) continue;
     const bool cached=tangent && state.product_images && state.product_images->extent==extent &&
         !state.product_images->states[state_id].empty();
+    const bool anchored=cached && delta_upper;
     const int sigma_width=cached ? 1:width;
     const std::size_t product_count=static_cast<std::size_t>(n_unique_alpha_)*n_unique_beta_;
-    const bool resident_input=spin_products_.size()==product_count &&
+    const bool resident_input=!anchored && spin_products_.size()==product_count &&
         product_count<=cache_bytes/(width*sizeof(double));
     Eigen::MatrixXd primal_image,direction_image;
     std::size_t input_bytes=0;
@@ -123,33 +127,52 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       if (cached) primal_image.resize(0,0);
     }
     Eigen::VectorXd coefficients;
-    if (!resident_input && (!cached || delta_upper))
+    if (!resident_input && !anchored && (!cached || delta_upper))
       coefficients=expand_support(state.structure_coefficients.col(state_id));
     Eigen::VectorXd q;
     if (response && !resident_input) q=expand_support(response->col(state_id));
+    const auto accepted_column=[&](int b) -> mcscf::DirectCiColumnView {
+      if (!reachable_mask[b/extent]) return {nullptr,nullptr,0};
+      const auto& tile=state.product_images->states[state_id][b/extent];
+      const int first=tile.pattern->offsets[b%extent],last=tile.pattern->offsets[b%extent+1];
+      return {tile.values.col(0).data()+first,
+          tile.pattern->full ? nullptr:tile.pattern->rows.data()+first,last-first};
+    };
     detail::ColumnPanels input(cache_bytes,[&](int panel) {
       profiling::ScopedPhase phase(profiling::Phase::CiProductGenerate);
       ++result.images.tiles.input_panels;
       const auto pattern=pattern_at(panel);
       const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);
-      const auto rows=beta.row_block(first,count);
+      const auto rows=(!anchored || response) ? beta.row_block(first,count):nullptr;
       Eigen::MatrixXd values=Eigen::MatrixXd::Zero(n_unique_alpha_,(cached ? 1:width)*count);
-      Eigen::MatrixXd primal=Eigen::MatrixXd::Zero(n_unique_alpha_,count),dy=primal;
+      Eigen::MatrixXd primal=anchored ? Eigen::MatrixXd{}:Eigen::MatrixXd::Zero(n_unique_alpha_,count);
+      Eigen::MatrixXd dy=Eigen::MatrixXd::Zero(n_unique_alpha_,count);
       Eigen::MatrixXd dr;
-      if (delta_upper) dr=beta_directions.get(panel).unpack(n_unique_beta_).transpose();
+      if (delta_upper && !anchored) dr=beta_directions.get(panel).unpack(n_unique_beta_).transpose();
       const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),
           static_cast<std::size_t>(n_unique_alpha_)*count);
-      cooperative_openmp_for(n_unique_alpha_,workers,[&](std::ptrdiff_t a) {
+      if (coefficients.size() || response) cooperative_openmp_for(n_unique_alpha_,workers,[&](std::ptrdiff_t a) {
         const auto first_product=mcscf::product_index(a,0,n_unique_beta_);
         auto group=std::lower_bound(spin_products_.begin(),spin_products_.end(),first_product);
         for (;group!=spin_products_.end() && *group<first_product+n_unique_beta_;++group) {
           const int id=group-spin_products_.begin(),b=*group-first_product;
           if (coefficients.size()) primal.row(a).noalias()+=coefficients[id]*rows->col(b).transpose();
-          if (delta_upper) dy.row(a).noalias()+=coefficients[id]*dr.col(b).transpose();
+          if (dr.size()) dy.row(a).noalias()+=coefficients[id]*dr.col(b).transpose();
           if (response) dy.row(a).noalias()+=q[id]*rows->col(b).transpose();
         }
       });
-      if (delta_upper) alpha.apply_directional_left(da,&primal,&dy);
+      if (anchored) {
+        if (response) {
+          if (pattern->full) alpha.apply_left(&dy);
+          else alpha.apply_supported_left(&dy,
+              {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
+              {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())});
+        }
+        sigma.apply_one_body_generator_columns(first,accepted_column,generator,values,
+            spin_exchange_parity_!=0);
+        dy.noalias()+=(spin_exchange_parity_ ? 2.0:1.0)*values;
+      }
+      else if (delta_upper) alpha.apply_directional_left(da,&primal,&dy);
       else {
         if (!cached) {
           if (pattern->full) alpha.apply_left(&primal);
@@ -171,6 +194,14 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       }
       return detail::pack_columns(std::move(values),pattern);
     });
+    if (anchored && spin_exchange_parity_) {
+      // One component on the accepted two-component support fits the same
+      // budget. Complete it before P_s(2 E_alpha Y + T q), without a new slab.
+      std::vector<detail::ColumnTile*> tiles(panels,nullptr);
+      for (const int panel:reachable) tiles[panel]=&input.get(panel);
+      tiles.resize(reachable.back()+1);
+      detail::project_exchange(tiles,extent,spin_exchange_parity_);
+    }
     // Independent readers borrow the same bounded primal/tangent panels.
     const auto reader=[&](int family) -> mcscf::DirectCiTileReader {
       return [&,family,position=std::vector<int>(n_unique_alpha_,-1)](

@@ -59,6 +59,7 @@ set(XMVB_LINALG_SOURCES
 set(XMVB_MCSCF_SOURCES
   mcscf/ci/sigma.cpp
   mcscf/ci/sigma_tiles.cpp
+  mcscf/ci/generator_tiles.cpp
   mcscf/ci/spin_channels.cpp
   mcscf/ci/factors.cpp
   mcscf/ci/factor_generator.cpp

@@ -2031,6 +2031,49 @@ void check_streamed_generator_adjoint_requests() {
 #endif
 }
 
+void check_generated_generator_panels() {
+  constexpr int n=4;
+  const auto alpha=complete_space(n,2);
+  xmvb::vb::OrthogonalActiveIntegrals integrals;
+  integrals.one_electron=Eigen::MatrixXd::Zero(n,n);
+  integrals.pair_kernel=Eigen::MatrixXd::Zero(n*(n+1)/2,n*(n+1)/2);
+  for (const int n_beta_electrons:{1,2}) {
+    const auto beta=complete_space(n,n_beta_electrons);
+    const int na=alpha.size(),nb=beta.size();
+    const xmvb::mcscf::DirectCiSigmaAction action(alpha,beta,integrals);
+    const xmvb::mcscf::DirectCiSigmaAction alpha_action(alpha,complete_space(n,0),integrals);
+    Eigen::MatrixXd carrier(na,nb),generator(n,n);
+    for (int b=0;b<nb;++b)
+      for (int a=0;a<na;++a)
+        carrier(a,b)=(a+b)%3==0 ? 0.0:std::sin(0.27*(a+2)*(b+1));
+    for (int q=0;q<n;++q)
+      for (int p=0;p<n;++p) generator(p,q)=std::cos(0.13*(p+1)*(q+3));
+    std::vector<std::vector<int>> rows(nb);
+    std::vector<std::vector<double>> values(nb);
+    for (int b=0;b<nb;++b)
+      for (int a=0;a<na;++a)
+        if (carrier(a,b)!=0) { rows[b].push_back(a); values[b].push_back(carrier(a,b)); }
+    for (const bool compact:{false,true}) {
+      const xmvb::mcscf::DirectCiColumnReader column=[&](int b) {
+        return compact ? xmvb::mcscf::DirectCiColumnView{values[b].data(),rows[b].data(),
+                static_cast<int>(rows[b].size())}:
+            xmvb::mcscf::DirectCiColumnView{carrier.col(b).data(),nullptr,na};
+      };
+      for (const bool alpha_only:{false,true}) {
+        const Eigen::MatrixXd expected=(alpha_only ? alpha_action:action)
+            .apply_one_body_generator(carrier,generator);
+        Eigen::MatrixXd storage=Eigen::MatrixXd::Constant(na+3,nb,-97.0);
+        for (int first=0;first<nb;first+=2)
+          action.apply_one_body_generator_columns(first,column,generator,
+              storage.topRows(na).middleCols(first,std::min(2,nb-first)),alpha_only);
+        require((storage.topRows(na)-expected).norm()<2e-12 &&
+                (storage.bottomRows(3).array()==-97.0).all(),
+            "generated one-body panel differs from the independent full-carrier action");
+      }
+    }
+  }
+}
+
 void check_exchange_reduced_generator() {
   constexpr int n=4;
   const auto spin=complete_space(n,2);
@@ -2767,6 +2810,7 @@ int main(int argc, char** argv) {
     check_sigma_tile_boundary();
     check_distinct_spin_sigma_action();
     check_streamed_generator_adjoint_requests();
+    check_generated_generator_panels();
     check_exchange_reduced_generator();
     check_fused_spin_sectors();
     check_tiled_integral_direction();
