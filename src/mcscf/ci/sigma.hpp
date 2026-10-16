@@ -206,6 +206,24 @@ public:
       const DirectCiTileReader& state = {},
       const ProductSupport* support = nullptr, int exchange_parity = 0) const;
 
+  /** @brief Fuse H*response + deltaH*state with the integral adjoint.
+   * The required state reader supplies unweighted coefficients. Both readers
+   * use the same RHS packing, support, and certified exchange parity; the
+   * optional writers add the combined image and deltaH*state, respectively,
+   * with the projected-image convention of apply_tiled(). The integral
+   * adjoint is that of <response,H*state>, excluding the direction kernel.
+   * Direction must share this action's immutable spin-string links and
+   * orbital ordering (as with the shared-links constructor). Only three
+   * shared channel slabs and one input halo are live within the 64 MiB tile
+   * workspace; neither reader nor writer may retain a batch view.
+   */
+  DirectCiIntegralAdjoint apply_tiled_direction(
+      int block_width, const DirectCiTileReader& response,
+      const DirectCiTileReader& state, const DirectCiSigmaAction& direction,
+      const DirectCiTileWriter& add_columns,
+      const DirectCiTileWriter& add_forcing = {},
+      const ProductSupport* support = nullptr, int exchange_parity = 0) const;
+
   /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
    * Uses occupation lists and the retained two-electron kernel, not sigma
    * probes. The one-electron integrals must belong to this immutable action.
@@ -322,7 +340,9 @@ private:
   DirectCiIntegralAdjoint contract_tiled(
       int block_width, const DirectCiTileReader& response,
       const DirectCiTileWriter& add_columns, const DirectCiTileReader& state,
-      bool collect_integrals, const ProductSupport* support, int exchange_parity) const;
+      bool collect_integrals, const ProductSupport* support, int exchange_parity,
+      const DirectCiSigmaAction* direction = nullptr,
+      const DirectCiTileWriter& add_forcing = {}) const;
 
   /** @brief Cooperative sigma contraction inside the current OpenMP team.
    * Each output beta column has one owner. All workers must call this method.

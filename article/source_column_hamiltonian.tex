@@ -365,6 +365,70 @@ $O(d^2)$ storage, separately from the fixed shared numerical slab budget.
 No higher-order density tensor is formed, and no closure of the selected
 VB structure space is assumed.
 
+\subsection{Joint orbital-direction action}
+\label{sec:joint-direction}
+
+At a fixed orthogonal evaluation basis the signed spin-string connections
+do not depend on the integrals. Their orbital dependence has already been
+transferred to $Y$ and the channel kernel $K$. For an orbital direction let
+$Z=\delta Y$ and $\dot K=\delta K$, and define $A=\Ea Z$ and $B=\Ea Y$.
+Differentiating the Hamiltonian image gives
+\begin{equation}\label{eq:joint-direction}
+ \delta(\Ha Y)=\Ha Z+\delta\Ha Y
+ =\Ea^*\left(AK\Tr+B\dot K\Tr\right).
+\end{equation}
+Here $\dot K$ includes the transformed one-electron and two-electron
+directions in Eq.~\eqref{eq:K}; it is not merely the two-electron direction.
+The integral cotangent required by the orbital Hessian pullback is obtained
+from the same two scatters:
+\begin{equation}
+ J_K(Z,Y)=A\Tr B.
+ \label{eq:joint-direction-adjoint}
+\end{equation}
+State weights and the factor of two for real-state energy derivatives are
+applied after this bilinear contraction. They must not weight $B$ in
+Eq.~\eqref{eq:joint-direction} itself.
+
+The equality in Eq.~\eqref{eq:joint-direction} eliminates the second
+connection/halo traversal, the repeated scatter of $Y$, and a separate
+physical image gather. It also replaces the two orbital-generator
+cotangents of $\Ha Z$ and $\delta\Ha Y$ by the cotangent of their sum,
+by linearity in the left argument. Both kernel multiplications remain
+necessary; neither the $O(mbd^2)$ dense channel-kernel scaling nor the
+selected variational space changes. In particular, this is not a
+low-rank approximation or a relaxation of the Hessian accuracy.
+
+Three shared channel slabs suffice: retain $A$ and $B$, form $A\Tr B$,
+write $C=AK\Tr$ into the third slab, overwrite the now-consumed $A$ by
+$B\dot K\Tr$, and add it to $C$. The same numerical budget is retained
+by shortening the generated target batch when required. The extra slab
+therefore does not imply an increased cache budget or an additional
+spin-product array. Smaller batches can increase metadata overhead; a
+single symbolic traversal does not guarantee a factor-of-two speedup.
+
+For a certified spin-exchange parity, let $D$ be the diagonal matrix of
+exchange-orbit multiplicities on generated target rows. The integral
+cotangent is $A\Tr DB$. The multiplicity must be removed from the state
+operand before forming $B\dot K\Tr$; the projected-image multiplicity is
+then applied exactly once to the combined output. Unequal spin spaces
+or uncertified parity use $D=I$.
+
+The raw finite-orbital direction still contains the independent left
+exterior-transform term:
+\begin{equation}
+ \delta(H\vv C)=\Wa^*\left[
+       (\delta\Ta)^*\Ha Y+
+       \Ta^*\{\Ha Z+\delta\Ha Y\}\right]
+ \quad(\delta\vv C=0).
+\end{equation}
+This term is not eliminated by channel fusion. When accepted images are
+not resident, a second right-hand side carries $Y$ while the state reader
+has a structural zero in that slot. The joint outputs are then
+$(\Ha Y,\Ha Z+\delta\Ha Y)$, supplying the left term without an
+accepted-point replay outside the shared sweep. Optional diagnostics may
+gather $\delta\Ha Y$ separately from the already-computed overwritten
+slab; the production path needs only the combined image.
+
 \subsection{Triangular directions preserve the generated support}
 
 The support $S$ used above is the downward closure of the original touched

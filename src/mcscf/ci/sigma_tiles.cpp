@@ -29,27 +29,46 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::apply_tiled_with_adjoint(
   return contract_tiled(width,response,add_columns,state,true,support,exchange_parity);
 }
 
+DirectCiIntegralAdjoint DirectCiSigmaAction::apply_tiled_direction(
+    int width, const DirectCiTileReader& response, const DirectCiTileReader& state,
+    const DirectCiSigmaAction& direction, const DirectCiTileWriter& add_columns,
+    const DirectCiTileWriter& add_forcing, const ProductSupport* support,
+    int exchange_parity) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiResponse);
+  return contract_tiled(width,response,add_columns,state,true,support,exchange_parity,
+                        &direction,add_forcing);
+}
+
 DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
     int width, const DirectCiTileReader& read_columns, const DirectCiTileWriter& add_columns,
     const DirectCiTileReader& state, bool collect_integrals,
-    const ProductSupport* support, int exchange_parity) const {
-  if (width <= 0 || !read_columns || (!add_columns && !collect_integrals))
+    const ProductSupport* support, int exchange_parity,
+    const DirectCiSigmaAction* direction, const DirectCiTileWriter& add_forcing) const {
+  if (width <= 0 || !read_columns || (!add_columns && !collect_integrals) ||
+      (direction && !state) || (add_forcing && !direction))
     throw std::invalid_argument("invalid tiled direct-CI callbacks or width");
   if (exchange_parity < -1 || exchange_parity > 1 ||
       (exchange_parity != 0 && distinct_beta_))
     throw std::invalid_argument("exchange projection requires identical spin spaces");
+  if (direction && (n_orbitals_ != direction->n_orbitals_ ||
+                    n_alpha_ != direction->n_alpha_ || n_beta_ != direction->n_beta_ ||
+                    alpha_ != direction->alpha_ ||
+                    distinct_beta_ != direction->distinct_beta_ ||
+                    hamiltonian_pair_kernel_.rows() !=
+                        direction->hamiltonian_pair_kernel_.rows()))
+    throw std::invalid_argument("direction requires shared direct-CI spin links");
 
   const auto& beta_graph = beta_connections();
   const int pairs = hamiltonian_pair_kernel_.rows();
   Eigen::MatrixXd kernel_adjoint = Eigen::MatrixXd::Zero(
       collect_integrals ? pairs : 0,collect_integrals ? pairs : 0);
   constexpr std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL;
-  // Reserve half the slab target for the two channel matrices. The exact
-  // halo/CSR payload check below can shorten a batch further. No fixed
-  // product count constrains how many beta columns can share a contraction.
+  // The ordinary path retains its two-slab limit. The direction path reserves
+  // room for a third shared channel slab under the same 64 MiB target.
+  const std::size_t slab_factor = direction ? 6ULL : 4ULL;
   const int row_limit = static_cast<int>(std::max<std::size_t>(1,
       std::min<std::size_t>(std::numeric_limits<int>::max() / width,
-          workspace_bytes / (4ULL * sizeof(double) * width * pairs))));
+          workspace_bytes / (slab_factor * sizeof(double) * width * pairs))));
   const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(),
       static_cast<std::size_t>(row_limit) * width * pairs);
 
@@ -85,11 +104,12 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
   int full_alpha_offset = 0;
   bool continued = false, finished = false;
   const std::size_t maximum_neighbors=alpha_->n_singles()+1;
-  // Retain the former two-panel bound after removing the output slab, so
-  // batches remain comparable under the same 64 MiB target.
+  // Retain the former two-panel bound for ordinary requests. Direction
+  // requests add only the third channel slab to this conservative estimate.
   const auto payload = [&](std::size_t rows, std::size_t h, std::size_t b, std::size_t g) {
-    return 2.0L * sizeof(double) * width *
-        (static_cast<long double>(h) * b + static_cast<long double>(rows) * pairs) +
+    return sizeof(double) * width *
+        (2.0L * static_cast<long double>(h) * b +
+         static_cast<long double>(direction ? 3 : 2) * rows * pairs) +
         sizeof(int) * static_cast<long double>(h) * g;
   };
   std::exception_ptr failure;
@@ -243,7 +263,12 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
               for (int i = 0; i < n_columns; ++i) column_index[columns[i]] = i;
               panel_size = static_cast<std::size_t>(n_halo) * n_columns * width;
               channel_size = static_cast<std::size_t>(count) * width * pairs;
-              const std::size_t required = panel_size + 2 * channel_size;
+              const std::size_t required = panel_size +
+                  (direction ? 3 : 2) * channel_size;
+              if (direction && required * sizeof(double) +
+                      sizeof(int) * static_cast<std::size_t>(n_halo) * groups.size() >
+                      workspace_bytes)
+                throw std::length_error("tiled direction exceeds 64 MiB workspace");
               if (required > capacity) {
                 workspace.reset();
                 // Reserve the planned slab once, without value-initializing it.
@@ -301,7 +326,10 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
       // Keep each node's channel vector contiguous through scatter and GEMM.
       using ChannelMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
       Eigen::Map<ChannelMatrix> scattered(workspace.get() + panel_size, count * width, pairs);
-      Eigen::Map<ChannelMatrix> transformed(workspace.get() + panel_size + channel_size,
+      Eigen::Map<ChannelMatrix> state_channels(workspace.get() + panel_size + channel_size,
+          count * width, pairs);
+      Eigen::Map<ChannelMatrix> transformed(workspace.get() + panel_size +
+          (direction ? 2 : 1) * channel_size,
           count * width, pairs);
 
       const int first = count * width * thread / team;
@@ -328,8 +356,8 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
       for (int row = first; row < last; ++row) scatter(row,scattered);
       if (collect_integrals) {
         if (state) {
-          // The response scatter is now complete. Refill the same input halo
-          // for the state and use the future K*D slab for its channel image.
+          // The response scatter is complete. Refill the same input halo for
+          // the unweighted state, then scatter it into the second channel slab.
 #pragma omp barrier
 #pragma omp single
           {
@@ -345,14 +373,14 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
             } catch (...) { failure = std::current_exception(); }
           }
           if (failure) break;
-          for (int row = first; row < last; ++row) scatter(row,transformed);
+          for (int row = first; row < last; ++row) scatter(row,state_channels);
         } else if (last > first) {
-          transformed.middleRows(first,last-first) = scattered.middleRows(first,last-first);
+          state_channels.middleRows(first,last-first) = scattered.middleRows(first,last-first);
         }
         if (exchange_parity)
           for (int row = first; row < last; ++row)
             if (active[row % count] != groups[group_index[row % count]].beta)
-              transformed.row(row) *= 2.0;
+              state_channels.row(row) *= 2.0;
 #pragma omp barrier
         // Each cotangent row has one owner; no pair-square thread replicas.
 #pragma omp for schedule(static)
@@ -360,12 +388,27 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
           const int begin = pairs*part/team, end = pairs*(part+1)/team;
           if (end > begin)
             kernel_adjoint.middleRows(begin,end-begin).noalias() +=
-                scattered.middleCols(begin,end-begin).transpose()*transformed;
+                scattered.middleCols(begin,end-begin).transpose()*state_channels;
         }
       }
       if (add_columns && last > first)
         transformed.middleRows(first, last - first).noalias() =
             scattered.middleRows(first, last - first) * hamiltonian_pair_kernel_.transpose();
+      if (direction && last > first) {
+        // The adjoint used orbit multiplicities. The directional image must
+        // use the original state; reconstruction is applied only once below.
+        if (exchange_parity)
+          for (int row = first; row < last; ++row)
+            if (active[row % count] != groups[group_index[row % count]].beta)
+              state_channels.row(row) *= 0.5;
+        // Base K*A has consumed A. Reuse its slab for deltaK*B, then add to C.
+        scattered.middleRows(first, last - first).noalias() =
+            state_channels.middleRows(first, last - first) *
+            direction->hamiltonian_pair_kernel_.transpose();
+        if (add_columns)
+          transformed.middleRows(first, last - first) +=
+              scattered.middleRows(first, last - first);
+      }
       // E commutes with spin exchange. In a fixed-parity bilinear form,
       // off-diagonal exchange orbits have two identical contributions.
       if (add_columns && exchange_parity)
@@ -374,6 +417,12 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
           if (active[local] != groups[group_index[local]].beta)
             transformed.row(row) *= 2.0;
         }
+      if (add_forcing && exchange_parity)
+        for (int row = first; row < last; ++row) {
+          const int local = row % count;
+          if (active[local] != groups[group_index[local]].beta)
+            scattered.row(row) *= 2.0;
+        }
 #pragma omp barrier
 
 #pragma omp single
@@ -381,7 +430,9 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
         try {
           // Evaluate E^T K E directly in the caller's output panel. The callback
           // owns panel lifetimes and schedules disjoint beta/RHS/alpha ranges.
-          const DirectCiColumnAccumulator accumulate = [&](int source, int v,
+          const auto write_image = [&](const DirectCiTileWriter& writer,
+                                       const double* channel_values) {
+            const DirectCiColumnAccumulator accumulate = [&,channel_values](int source, int v,
               int first,int last,double* destination,const int* rows,int n_rows) {
             if (first==last) return;
             int begin=first,end=last;
@@ -401,16 +452,20 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
                 if (index[local] >= 0) {
                   const int row = v * count + index[local];
                   for (const int p : alpha_->occupied(a))
-                    sum += transformed(row, core::PairIndex::packed_pair_index(p, p));
+                    sum += channel_values[static_cast<std::size_t>(row) * pairs +
+                        core::PairIndex::packed_pair_index(p, p)];
                   for (const int p : beta_graph.occupied(columns[source]))
-                    sum += transformed(row, core::PairIndex::packed_pair_index(p, p));
+                    sum += channel_values[static_cast<std::size_t>(row) * pairs +
+                        core::PairIndex::packed_pair_index(p, p)];
                 }
                 const auto& links = alpha_->singles(a);
                 for (int link = 0; link < static_cast<int>(links.size()); ++link) {
                   const int h = halo_index[links[link].source];
                   const int target = h < 0 ? -1 : index[h];
                   if (target >= 0)
-                    sum += links[link].sign * transformed(v * count + target, links[link].pair);
+                    sum += links[link].sign *
+                        channel_values[static_cast<std::size_t>(v * count + target) * pairs +
+                            links[link].pair];
                 }
                 destination[rows ? i:a] += sum;
               }
@@ -420,7 +475,7 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
             for (int edge = offsets[source]; edge < offsets[source + 1]; ++edge) {
               const auto& link = incoming[edge];
               const int* index = target_index.data() + static_cast<std::size_t>(link.group) * n_halo;
-              const double* values = transformed.data() +
+              const double* values = channel_values +
                   static_cast<std::size_t>(v) * count * pairs + link.pair;
               const double sign = link.sign;
               for (int i=begin;i<end;++i) {
@@ -433,9 +488,12 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::contract_tiled(
               }
             }
           };
+            writer(columns, halo, accumulate);
+          };
           const auto write_start = tick();
           compute_time += seconds(compute_start, write_start);
-          if (add_columns) add_columns(columns, halo, accumulate);
+          if (add_columns) write_image(add_columns, transformed.data());
+          if (add_forcing) write_image(add_forcing, scattered.data());
           write_time += seconds(write_start, tick());
         } catch (...) { failure = std::current_exception(); }
       }

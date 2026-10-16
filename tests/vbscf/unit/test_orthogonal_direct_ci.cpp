@@ -1,6 +1,7 @@
 #include <array>
 #include <cmath>
 #include <chrono>
+#include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -21,6 +22,7 @@
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "mcscf/ci/planner.hpp"
+#include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma.hpp"
 #include "vbscf/determinants/pairs/evaluator.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
@@ -2276,6 +2278,191 @@ void benchmark_structure_response() {
   }
 }
 
+/** @brief The streamed directional image and integral adjoint have separate oracles. */
+void check_tiled_integral_direction_case(
+    const std::vector<std::vector<int>>& alpha,
+    const std::vector<std::vector<int>>& beta, int width, int parity,
+    const xmvb::mcscf::ProductSupport* support = nullptr,
+    bool zero_direction = false, bool zero_state = false) {
+  constexpr int n_orbitals = 4;
+  const int n_alpha = static_cast<int>(alpha.size());
+  const int n_beta = static_cast<int>(beta.size());
+  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  xmvb::mcscf::ActiveIntegrals integrals, direction_integrals;
+  integrals.one_electron.resize(n_orbitals, n_orbitals);
+  direction_integrals.one_electron.resize(n_orbitals, n_orbitals);
+  integrals.pair_kernel.resize(n_pairs, n_pairs);
+  direction_integrals.pair_kernel.resize(n_pairs, n_pairs);
+  for (int q = 0; q < n_orbitals; ++q)
+    for (int p = 0; p <= q; ++p) {
+      const double h = 0.16 * std::cos(0.31 * (p + 1) * (q + 2)) +
+                       (p == q ? 0.23 : 0.0);
+      const double dh = zero_direction ? 0.0 :
+          0.07 * std::sin(0.27 * (p + 2) * (q + 1));
+      integrals.one_electron(p, q) = integrals.one_electron(q, p) = h;
+      direction_integrals.one_electron(p, q) =
+          direction_integrals.one_electron(q, p) = dh;
+    }
+  for (int q = 0; q < n_pairs; ++q)
+    for (int p = 0; p <= q; ++p) {
+      const double kernel = 0.035 * std::cos(0.17 * (p + 1) * (q + 3));
+      const double dkernel = zero_direction ? 0.0 :
+          0.021 * std::sin(0.19 * (p + 2) * (q + 1));
+      integrals.pair_kernel(p, q) = integrals.pair_kernel(q, p) = kernel;
+      direction_integrals.pair_kernel(p, q) =
+          direction_integrals.pair_kernel(q, p) = dkernel;
+    }
+  const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
+  const xmvb::mcscf::DirectCiSigmaAction direction(action, direction_integrals);
+
+  Eigen::MatrixXd response(n_alpha, width * n_beta);
+  Eigen::MatrixXd state(n_alpha, width * n_beta);
+  const auto fill = [&](int vector, Eigen::MatrixXd* values, bool cosine) {
+    Eigen::MatrixXd block(n_alpha, n_beta);
+    for (int b = 0; b < n_beta; ++b)
+      for (int a = 0; a < n_alpha; ++a)
+        block(a, b) = cosine
+            ? std::cos(0.23 * (a + 2) * (b + 1) + 0.17 * vector)
+            : std::sin(0.29 * (a + 1) * (b + 3) + 0.11 * vector);
+    if (parity != 0)
+      block = (block + parity * block.transpose()).eval();
+    values->middleCols(vector * n_beta, n_beta) = block;
+  };
+  fill(0, &response, false);                         // Y
+  if (width == 2) fill(1, &response, true);          // Z
+  if (width == 1) fill(0, &state, true);             // Z
+  else {
+    state.middleCols(0, n_beta).setZero();           // 0
+    state.middleCols(n_beta, n_beta) = response.leftCols(n_beta); // Y
+  }
+  if (zero_state) state.setZero();
+  if (support)
+    for (int b = 0; b < n_beta; ++b)
+      for (int a = 0; a < n_alpha; ++a)
+        if (!support->contains(a, b))
+          for (int vector = 0; vector < width; ++vector) {
+            response(a, vector * n_beta + b) = 0.0;
+            state(a, vector * n_beta + b) = 0.0;
+          }
+
+  const auto reader = [width, n_beta](const Eigen::MatrixXd& carrier)
+      -> xmvb::mcscf::DirectCiTileReader {
+    const Eigen::MatrixXd* source = &carrier;
+    return [source, width, n_beta](const std::vector<int>& betas,
+        const std::vector<int>& rows, Eigen::Ref<Eigen::MatrixXd> tile) {
+      for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+        for (int vector = 0; vector < width; ++vector)
+          for (int a = 0; a < static_cast<int>(rows.size()); ++a)
+            tile(a, b * width + vector) =
+                (*source)(rows[a], vector * n_beta + betas[b]);
+    };
+  };
+  const auto writer = [width, n_beta](Eigen::MatrixXd& image)
+      -> xmvb::mcscf::DirectCiTileWriter {
+    Eigen::MatrixXd* target = &image;
+    return [target, width, n_beta](const std::vector<int>& betas,
+        const std::vector<int>& rows,
+        const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
+      for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+        for (int vector = 0; vector < width; ++vector)
+          accumulate(b, vector, 0, static_cast<int>(rows.size()),
+              target->col(vector * n_beta + betas[b]).data(), nullptr, 0);
+    };
+  };
+  const auto response_reader = reader(response);
+  const auto state_reader = reader(state);
+  Eigen::MatrixXd combined = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  Eigen::MatrixXd forcing = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  const auto actual = action.apply_tiled_direction(width, response_reader,
+      state_reader, direction, writer(combined), writer(forcing), support, parity);
+  const Eigen::MatrixXd expected_forcing = direction.apply(state);
+  const Eigen::MatrixXd expected_combined =
+      action.apply(response) + expected_forcing;
+  const auto expected_adjoint = action.integral_adjoint(response, state, parity);
+  const auto project = [width, n_beta, parity](Eigen::MatrixXd image) {
+    if (parity != 0)
+      for (int vector = 0; vector < width; ++vector) {
+        const Eigen::MatrixXd block = image.middleCols(vector * n_beta, n_beta);
+        image.middleCols(vector * n_beta, n_beta) =
+            0.5 * (block + parity * block.transpose());
+      }
+    return image;
+  };
+  const auto close = [](const Eigen::MatrixXd& value,
+                        const Eigen::MatrixXd& reference) {
+    return (value - reference).norm() <
+        3e-11 * std::max(1.0, reference.norm());
+  };
+  require(close(project(combined), expected_combined),
+          "tiled direction changed H*response + deltaH*state");
+  require(close(project(forcing), expected_forcing),
+          "tiled direction forcing differs from the direction action");
+  require(close(actual.one_electron, expected_adjoint.one_electron) &&
+              close(actual.pair_kernel, expected_adjoint.pair_kernel),
+          "tiled direction changed the unweighted integral adjoint");
+  const double derivative =
+      actual.one_electron.cwiseProduct(direction_integrals.one_electron).sum() +
+      actual.pair_kernel.cwiseProduct(direction_integrals.pair_kernel).sum();
+  const double bilinear = response.cwiseProduct(expected_forcing).sum();
+  require(std::abs(derivative - bilinear) <
+              3e-11 * std::max(1.0, std::abs(bilinear)),
+          "tiled direction adjoint has incorrect integral weighting");
+
+  Eigen::MatrixXd combined_only = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  const auto without_forcing = action.apply_tiled_direction(width,
+      response_reader, state_reader, direction, writer(combined_only), {},
+      support, parity);
+  require(close(project(combined_only), expected_combined) &&
+              close(combined_only, combined) &&
+              close(without_forcing.one_electron, expected_adjoint.one_electron) &&
+              close(without_forcing.pair_kernel, expected_adjoint.pair_kernel),
+          "omitting the forcing writer changed the combined image or adjoint");
+  if (support) {
+    double outside = 0.0;
+    for (int b = 0; b < n_beta; ++b)
+      for (int a = 0; a < n_alpha; ++a)
+        if (!support->contains(a, b))
+          for (int vector = 0; vector < width; ++vector)
+            outside += std::abs(expected_combined(a, vector * n_beta + b));
+    require(outside > 1e-8,
+            "selected-support direction case did not exercise outside-support images");
+  }
+}
+
+void check_tiled_integral_direction() {
+  const auto unequal_alpha = complete_space(4, 1);
+  const auto unequal_beta = complete_space(4, 2);
+  const auto equal_spin = complete_space(4, 2);
+  for (int width : {1, 2}) {
+    check_tiled_integral_direction_case(unequal_alpha, unequal_beta, width, 0);
+    for (int parity : {0, 1, -1})
+      check_tiled_integral_direction_case(equal_spin, equal_spin, width, parity);
+  }
+  std::vector<std::uint64_t> alpha_masks, beta_masks;
+  for (const auto& occupied : unequal_alpha) {
+    std::uint64_t mask = 0;
+    for (int orbital : occupied) mask |= std::uint64_t{1} << orbital;
+    alpha_masks.push_back(mask);
+  }
+  for (const auto& occupied : unequal_beta) {
+    std::uint64_t mask = 0;
+    for (int orbital : occupied) mask |= std::uint64_t{1} << orbital;
+    beta_masks.push_back(mask);
+  }
+  const xmvb::mcscf::ProductSupport selected(4, alpha_masks, beta_masks,
+      std::vector<xmvb::mcscf::ProductIndex>{0, 8});
+  int halo_only = 0;
+  for (int b = 0; b < static_cast<int>(unequal_beta.size()); ++b)
+    for (int a = 0; a < static_cast<int>(unequal_alpha.size()); ++a)
+      halo_only += !selected.contains(a, b) && selected.contains(a, b, 1);
+  require(halo_only > 0, "selected support was already generator-closed");
+  check_tiled_integral_direction_case(unequal_alpha, unequal_beta, 2, 0, &selected);
+  check_tiled_integral_direction_case(unequal_alpha, unequal_beta, 1, 0,
+      nullptr, true);
+  check_tiled_integral_direction_case(equal_spin, equal_spin, 1, 1,
+      nullptr, false, true);
+}
+
 /** @brief Check the complete response image, not just a projected scalar. */
 void check_exchange_adjoint(bool benchmark = false) {
   using Clock = std::chrono::steady_clock;
@@ -2449,6 +2636,7 @@ int main(int argc, char** argv) {
     check_distinct_spin_sigma_action();
     check_streamed_generator_adjoint_requests();
     check_fused_spin_sectors();
+    check_tiled_integral_direction();
     check_exchange_adjoint();
     check_demand_driven_structure_diagonal();
     std::cout << "orthogonal direct-CI planner and exterior transform: passed\n";

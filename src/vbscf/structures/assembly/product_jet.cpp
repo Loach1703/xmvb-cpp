@@ -28,7 +28,10 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       detail::kStructureTileWorkspaceBytes/4;
   const int extent=std::max<std::size_t>(1,std::min<std::size_t>(n_unique_beta_,
       std::min<std::size_t>(8*cooperative_openmp_thread_count(),
-          cache_bytes/(sizeof(double)*(2*n_unique_alpha_+2*n_unique_beta_)))));
+          // Three output components plus compact row indices must fit even
+          // for highly unequal spin spaces; the bound is shared by accepted
+          // and directional calls so diagnostic capture does not change it.
+          cache_bytes/(sizeof(double)*(4*n_unique_alpha_+2*n_unique_beta_)))));
   if (!tangent && state.product_images) {
     state.product_images->extent=extent;
     state.product_images->states.resize(states);
@@ -210,7 +213,6 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           values.data()+offset*values.outerStride(),rows.size(),betas.size(),
           Eigen::OuterStride<>(values.outerStride()*sigma_width));
       y(betas,rows,view);
-      view*=weight;
     };
     // C^T is linear: first sum emitted panels in bounded source-group tiles,
     // then visit the structure incidence once per completed/evicted tile.
@@ -268,38 +270,41 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       }
       ++result.images.tiles.structure_projections;
     };
-    const auto sweep=[&](const mcscf::DirectCiSigmaAction& action,bool integral) {
-      const int w=integral ? 1:sigma_width;
+    const auto sweep=[&]() {
+      const int w=sigma_width;
+      const bool forcing=capture && delta_sigma;
+      const int output_width=w+(forcing ? 1:0);
       bool retain=false;
       detail::ColumnPanels output(cache_bytes,[&](int panel) {
         auto pattern=pattern_at(panel);
-        return detail::ColumnTile{pattern,Eigen::MatrixXd::Zero(pattern->offsets[pattern->columns()],w)};
+        return detail::ColumnTile{pattern,Eigen::MatrixXd::Zero(pattern->offsets[pattern->columns()],output_width)};
       },[&](int panel,detail::ColumnTile& tile) {
         ++result.images.tiles.hamiltonian_projections;
         const int first=panel*extent,count=tile.pattern->columns();
         Eigen::MatrixXd images=tile.unpack(n_unique_alpha_);
         const Eigen::MatrixXd h0=images.leftCols(count);
         if (weight!=0) {
-          if (integral || !tangent || cached)
+          if (!tangent || cached)
             result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(first,h0,
                 {{y,y_column,1.0,false,cached}});
           else {
             result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(first,h0,{{dy,dy_column}});
             result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
-                first,images.rightCols(count),{{y,y_column}});
+                first,images.middleCols((w-1)*count,count),{{y,y_column}});
           }
         }
         if (collect_images) {
-          if (integral || !tangent || cached) project(panel,h0,result.images.hamiltonian.col(state_id));
+          if (!tangent || cached) project(panel,h0,result.images.hamiltonian.col(state_id));
           else {
-            project(panel,images.rightCols(count),result.images.hamiltonian.col(state_id));
+            project(panel,images.middleCols((w-1)*count,count),result.images.hamiltonian.col(state_id));
             if (delta_upper) project(panel,h0,result.images.hamiltonian.col(state_id),true);
           }
         }
         if (capture) {
-          if (integral) project(panel,h0,diagnostic->connection->integral_forcing.col(state_id));
-          else if (tangent) {
-            project(panel,cached ? h0:Eigen::MatrixXd(images.rightCols(count)),
+          if (forcing) project(panel,images.middleCols(w*count,count),
+              diagnostic->connection->integral_forcing.col(state_id));
+          if (tangent) {
+            project(panel,cached ? h0:Eigen::MatrixXd(images.middleCols((w-1)*count,count)),
                 diagnostic->connection->representation_forcing.col(state_id));
             if (delta_upper && !cached)
               project(panel,h0,diagnostic->connection->representation_forcing.col(state_id),true);
@@ -316,7 +321,8 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           state.product_images->states[state_id][panel]=std::move(accepted);
         }
       });
-      const mcscf::DirectCiTileWriter add=[&](const std::vector<int>& betas,
+      const auto writer=[&](int source_begin,int vectors,int destination_begin) -> mcscf::DirectCiTileWriter {
+        return [&,source_begin,vectors,destination_begin](const std::vector<int>& betas,
           const std::vector<int>& rows,const mcscf::DirectCiColumnAccumulator& accumulate) {
         for (int j=0;j<static_cast<int>(betas.size());) {
           const int panel=betas[j]/extent;
@@ -325,31 +331,36 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           if (!reachable_mask[panel]) { j=end; continue; }
           auto& tile=output.get(panel);
           const int workers=cooperative_openmp_thread_count(),chunks=std::min<int>(workers,rows.size());
-          const int columns=(end-j)*w;
+          const int columns=(end-j)*vectors;
           cooperative_openmp_for(columns*chunks,workers,[&](std::ptrdiff_t index) {
             const int column=index%columns,chunk=index/columns;
-            const int beta=j+column/w,v=column%w,b=betas[beta]%extent;
+            const int beta=j+column/vectors,v=column%vectors,b=betas[beta]%extent;
             const int offset=tile.pattern->offsets[b],length=tile.pattern->offsets[b+1]-offset;
             if (length==0) return;
-            accumulate(beta,v,rows.size()*chunk/chunks,rows.size()*(chunk+1)/chunks,tile.values.col(v).data()+offset,
+            accumulate(beta,source_begin+v,rows.size()*chunk/chunks,rows.size()*(chunk+1)/chunks,
+                tile.values.col(destination_begin+v).data()+offset,
                 tile.pattern->full ? nullptr:tile.pattern->rows.data()+offset,tile.pattern->full ? 0:length);
           });
           j=end;
         }
+        };
       };
-      if (integral) action.apply_tiled(1,y,add,support,spin_exchange_parity_);
-      else {
+      const auto add=writer(0,w,0);
+      {
         // Accepted bra and ket are identical. Keep the empty-reader identity
         // so the channel kernel reuses its scatter; apply the weight outside.
-        const auto gradient=action.apply_tiled_with_adjoint(w,read,add,
-            tangent ? right:mcscf::DirectCiTileReader{},support,spin_exchange_parity_);
-        result.one_electron.noalias()+=(tangent ? 2:weight)*gradient.one_electron;
-        result.pair_kernel.noalias()+=(tangent ? 2:weight)*gradient.pair_kernel;
+        const auto gradient=delta_sigma ? sigma.apply_tiled_direction(w,read,right,*delta_sigma,add,
+            forcing ? writer(w-1,1,w):mcscf::DirectCiTileWriter{},support,spin_exchange_parity_):
+            sigma.apply_tiled_with_adjoint(w,read,add,
+                tangent ? right:mcscf::DirectCiTileReader{},support,spin_exchange_parity_);
+        // Keep state weights outside the shared scatter and both kernel actions.
+        result.one_electron.noalias()+=(tangent ? 2*weight:weight)*gradient.one_electron;
+        result.pair_kernel.noalias()+=(tangent ? 2*weight:weight)*gradient.pair_kernel;
         ++result.images.tiles.integral_adjoint_sweeps;
       }
-      if (!tangent && !integral && state.product_images && output.evictions==0)
+      if (!tangent && state.product_images && output.evictions==0)
         for (const int panel:reachable) output.get(panel);
-      if (!tangent && !integral && state.product_images && output.evictions==0 &&
+      if (!tangent && state.product_images && output.evictions==0 &&
           2*output.peak_bytes<=cache_bytes-state.product_images->bytes) {
         retain=true;
         state.product_images->states[state_id].resize(panels);
@@ -374,8 +385,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         }
       }
     }
-    sweep(sigma,false);
-    if (delta_sigma) sweep(*delta_sigma,true);
+    sweep();
     double norm=0,parallel=0,square=0;
     std::vector<int> all_rows(n_unique_alpha_); std::iota(all_rows.begin(),all_rows.end(),0);
     for (const int panel:reachable) {
@@ -416,6 +426,8 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     }
     projections.finish();
     if (capture) {
+      if (delta_sigma) diagnostic->connection->representation_forcing.col(state_id)-=
+          diagnostic->connection->integral_forcing.col(state_id);
       diagnostic->connection->squared_norm[state_id]=square-(norm>0 ? parallel*parallel/norm:0);
       diagnostic->connection->representation_forcing.col(state_id).noalias()-=energy*result.images.overlap.col(state_id);
     }

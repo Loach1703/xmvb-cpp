@@ -47,16 +47,5 @@ for count in 1 3 20 132; do
  done
 done
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
- /usr/bin/time -v -o "$artifact/132-structure-response14.time" \
- "${launch[@]}" "$artifact/test_structure_tiles" --structure-response14-once 132 \
- > "$artifact/132-structure-response14.out" 2> "$artifact/132-structure-response14.err"
-srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
- "${launch[@]}" env XMVB_PHASE_TIMING=1 "$artifact/test_structure_tiles" --structure-response12 132 \
+ "${launch[@]}" env XMVB_PHASE_TIMING=1 "$artifact/test_structure_tiles" --product-jet12 132 \
  > "$artifact/phases.out" 2> "$artifact/phases.err"
-# One current-binary control isolates placement from a software speed claim.
-if [[ -n ${XMVB_CI_THREADS:-} ]]; then
- srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
-  /usr/bin/time -v -o "$artifact/132-first-response12.time" \
-  "${launch[@]}" --first "$artifact/test_structure_tiles" --structure-response12 132 \
-  > "$artifact/132-first-response12.out" 2> "$artifact/132-first-response12.err"
-fi
