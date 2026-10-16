@@ -811,10 +811,10 @@ void check_factor_structure_response(int parity, bool unequal = false) {
 void check_joint_product_jet(const xmvb::vb::StructureAction& action,
     const xmvb::vb::StructureAdjointState& state,const Eigen::MatrixXd& q,
     const std::vector<double>& overlap,const std::vector<double>& one,
-    const std::vector<double>& two) {
+    const std::vector<double>& two,bool capture=true) {
   require(!state.source_factors,"joint product-jet fixture selected source factors");
   xmvb::vb::StructureIntegralDirection separate_direction,joint_direction;
-  separate_direction.capture_connection=joint_direction.capture_connection=q.rows()<16;
+  separate_direction.capture_connection=joint_direction.capture_connection=capture && q.rows()<16;
   const auto separate_p=action.apply_integral_direction(state,overlap,one,two,&separate_direction);
   const auto separate_q=action.apply_response(state,q);
   xmvb::vb::StructureResponseRequest request{q,{}};
@@ -899,6 +899,7 @@ void check_product_response(int parity,bool unequal) {
     auto streamed=state;
     streamed.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
     streamed.product_images->budget=128;
+    check_joint_product_jet(action,streamed,q,overlap,one,two);
     const auto evicted=action.active_integral_response_adjoint(streamed,q,multipliers);
     require((actual.overlap-evicted.overlap).norm()<3e-11 &&
             (actual.one_electron-evicted.one_electron).norm()<3e-11 &&
@@ -1005,6 +1006,11 @@ void check_broad_product_projection(bool unequal) {
           (dcached.connection->squared_norm-dw.connection->squared_norm).norm()<3e-11 &&
           cached_image.tiles.input_resident_bytes<=resident.product_images->budget,
           "accepted-state jet reuse changed the derivative or exceeded its shared input budget");
+  for (bool capture:{false,true}) {
+    check_joint_product_jet(action,wide,q,overlap,one,two,capture);
+    check_joint_product_jet(action,narrow,q,overlap,one,two,capture);
+    check_joint_product_jet(action,resident,q,overlap,one,two,capture);
+  }
   constexpr double step=2e-5;
   const auto shifted=[&](double scale) {
     auto f=fixture;

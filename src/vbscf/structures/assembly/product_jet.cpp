@@ -1,6 +1,8 @@
 #include "vbscf/structures/assembly/action.hpp"
 
 #include <algorithm>
+#include <array>
+#include <initializer_list>
 #include <numeric>
 #include <stdexcept>
 
@@ -383,13 +385,15 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           }
         }
     });
-    const auto project=[&](int panel,const Eigen::MatrixXd& image,
-        Eigen::Ref<Eigen::VectorXd> target,bool differentiate=false) {
+    // Consume one or two independent output panels. Concatenated RHS blocks
+    // share the beta rows, support traversal and mutable alpha transform.
+    const auto project=[&](int panel,Eigen::MatrixXd values,
+        std::initializer_list<double*> targets,bool differentiate=false) {
       profiling::ScopedPhase phase(profiling::Phase::CiProductProjection);
-      const int first=panel*extent,count=image.cols();
-      Eigen::MatrixXd values=image,dvalues;
+      const int first=panel*extent,count=values.cols()/targets.size();
+      Eigen::MatrixXd dvalues;
       if (differentiate) {
-        dvalues=Eigen::MatrixXd::Zero(image.rows(),image.cols());
+        dvalues=Eigen::MatrixXd::Zero(values.rows(),values.cols());
         alpha.apply_directional_adjoint_left(da,&values,&dvalues);
       } else {
         const auto pattern=pattern_at(panel);
@@ -398,16 +402,27 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
             {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
             {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())},true);
       }
-      auto found=std::find(projection_targets.begin(),projection_targets.end(),target.data());
-      const int target_id=found-projection_targets.begin();
-      if (found==projection_targets.end()) projection_targets.push_back(target.data());
+      std::array<int,2> target_ids;
+      int lane=0;
+      for (double* target:targets) {
+        auto found=std::find(projection_targets.begin(),projection_targets.end(),target);
+        target_ids[lane++]=found-projection_targets.begin();
+        if (found==projection_targets.end()) projection_targets.push_back(target);
+      }
       if (resident_projection) {
-        if (!projected[target_id].size()) {
-          projected[target_id]=Eigen::MatrixXd::Zero(n_unique_alpha_,n_unique_beta_);
-          if (delta_upper) left_projected[target_id]=projected[target_id];
+        for (int v=0;v<lane;++v) {
+          const int target_id=target_ids[v];
+          if (!projected[target_id].size()) {
+            projected[target_id]=Eigen::MatrixXd::Zero(n_unique_alpha_,n_unique_beta_);
+          }
+          projected[target_id].middleCols(first,count)+=differentiate ?
+              dvalues.middleCols(v*count,count):values.middleCols(v*count,count);
+          if (differentiate) {
+            if (!left_projected[target_id].size())
+              left_projected[target_id]=Eigen::MatrixXd::Zero(n_unique_alpha_,n_unique_beta_);
+            left_projected[target_id].middleCols(first,count)+=values.middleCols(v*count,count);
+          }
         }
-        projected[target_id].middleCols(first,count)+=differentiate ? dvalues:values;
-        if (differentiate) left_projected[target_id].middleCols(first,count)+=values;
         return;
       }
       const auto rows=beta.row_block(first,count);
@@ -416,15 +431,18 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       for (std::size_t begin=0;begin<spin_products_.size();begin+=group_extent) {
         auto& tile=projections.get(begin/group_extent);
         const auto size=std::min(group_extent,spin_products_.size()-begin);
-        const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),size*count);
+        const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),size*count*lane);
         cooperative_openmp_for(size,workers,[&](std::ptrdiff_t local) {
           const auto g=begin+local;
           const int a=spin_products_[g]/n_unique_beta_,b=spin_products_[g]%n_unique_beta_;
-          tile.values(local,target_id)+=differentiate ? dvalues.row(a).dot(rows->col(b))+values.row(a).dot(dr.col(b)):
-              values.row(a).dot(rows->col(b));
+          for (int v=0;v<lane;++v)
+            tile.values(local,target_ids[v])+=differentiate ?
+                dvalues.row(a).segment(v*count,count).dot(rows->col(b))+
+                values.row(a).segment(v*count,count).dot(dr.col(b)):
+                values.row(a).segment(v*count,count).dot(rows->col(b));
         });
       }
-      ++result.images.tiles.structure_projections;
+      result.images.tiles.structure_projections+=lane;
     };
     const auto sweep=[&]() {
       const int w=sigma_width;
@@ -468,25 +486,29 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
                 first,images.middleCols((w-1)*count,count),{{y,y_column}},false,exchange_reduced);
           }
         }
-        if (collect_images) {
-          if (!tangent || cached) project(panel,h0,result.images.hamiltonian.col(state_id));
-          else {
-            project(panel,images.middleCols((w-1)*count,count),result.images.hamiltonian.col(state_id));
-            if (delta_upper) project(panel,h0,result.images.hamiltonian.col(state_id),true);
-          }
-        }
         if (joint) {
-          project(panel,images.middleCols(q_slot*count,count),
-              ci_sweep->images.hamiltonian.col(state_id));
+          project(panel,cached && !capture ? std::move(images):Eigen::MatrixXd(
+              images.middleCols((cached ? 0:w-1)*count,2*count)),
+              {result.images.hamiltonian.col(state_id).data(),
+               ci_sweep->images.hamiltonian.col(state_id).data()});
+          if (delta_upper && !cached)
+            project(panel,h0,{result.images.hamiltonian.col(state_id).data()},true);
+        } else if (collect_images) {
+          if (!tangent || cached) project(panel,capture ? Eigen::MatrixXd(h0):std::move(images),
+              {result.images.hamiltonian.col(state_id).data()});
+          else {
+            project(panel,images.middleCols((w-1)*count,count),{result.images.hamiltonian.col(state_id).data()});
+            if (delta_upper) project(panel,h0,{result.images.hamiltonian.col(state_id).data()},true);
+          }
         }
         if (capture) {
           if (forcing) project(panel,images.middleCols(forcing_slot*count,count),
-              diagnostic->connection->integral_forcing.col(state_id));
+              {diagnostic->connection->integral_forcing.col(state_id).data()});
           if (tangent) {
             project(panel,cached ? h0:Eigen::MatrixXd(images.middleCols((w-1)*count,count)),
-                diagnostic->connection->representation_forcing.col(state_id));
+                {diagnostic->connection->representation_forcing.col(state_id).data()});
             if (delta_upper && !cached)
-              project(panel,h0,diagnostic->connection->representation_forcing.col(state_id),true);
+              project(panel,h0,{diagnostic->connection->representation_forcing.col(state_id).data()},true);
           }
         }
         if (retain) {
@@ -596,14 +618,16 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       const auto& images=state.product_images->states[state_id];
       for (const int panel:reachable) {
         if (!images[panel].pattern) continue;
-        const Eigen::MatrixXd values=images[panel].unpack(n_unique_alpha_);
+        Eigen::MatrixXd values=images[panel].unpack(n_unique_alpha_);
         const int count=images[panel].pattern->columns();
-        const Eigen::MatrixXd residual=values.rightCols(count);
-        {
-          const Eigen::MatrixXd h=residual+energy*values.leftCols(count);
-          project(panel,h,result.images.hamiltonian.col(state_id),true);
-          if (capture) project(panel,h,diagnostic->connection->representation_forcing.col(state_id),true);
-        }
+        // [Y,(H-E)Y] -> [Y,HY] only in this disposable work panel.
+        // Its two left-direction images share a projection; no later Y
+        // reread or independent residual/HY temporary is necessary.
+        values.rightCols(count).noalias()+=energy*values.leftCols(count);
+        if (capture) project(panel,values.rightCols(count),
+            {diagnostic->connection->representation_forcing.col(state_id).data()},true);
+        project(panel,std::move(values),{result.images.overlap.col(state_id).data(),
+            result.images.hamiltonian.col(state_id).data()},true);
       }
     }
     sweep();
@@ -612,14 +636,16 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     if (tangent || collect_images || capture) for (const int panel:reachable) {
       const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);
       std::vector<int> betas(count); std::iota(betas.begin(),betas.end(),first);
-      Eigen::MatrixXd values,dv;
-      if (!tangent || delta_upper || capture) {
+      Eigen::MatrixXd values,directions;
+      if (!tangent || (!cached && delta_upper) || capture) {
         values.resize(n_unique_alpha_,count);
         y(betas,all_rows,values);
       }
-      if (tangent) { dv.resize(n_unique_alpha_,count); dy(betas,all_rows,dv); }
-      Eigen::MatrixXd dq;
-      if (joint) { dq.resize(n_unique_alpha_,count); q_reader(betas,all_rows,dq); }
+      if (tangent) directions.resize(n_unique_alpha_,(joint ? 2:1)*count);
+      auto dv=directions.leftCols(tangent ? count:0);
+      auto dq=directions.rightCols(joint ? count:0);
+      if (tangent) dy(betas,all_rows,dv);
+      if (joint) q_reader(betas,all_rows,dq);
       if (weight!=0 && tangent) {
           // D(R,Z)=D(Z,R)^T: both accepted cotangents share the generated
           // Z panel and one spin-link traversal, without unpacking R first.
@@ -636,30 +662,36 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           else result.generator.noalias()-=2*weight*energy*
               sigma.generator_adjoint_streamed(first,dv,{{y,y_column}},true,spin_exchange_parity_!=0);
       }
-      if (collect_images) {
-        if (!tangent) project(panel,values,result.images.overlap.col(state_id));
-        else {
-          project(panel,dv,result.images.overlap.col(state_id));
-          if (delta_upper) project(panel,values,result.images.overlap.col(state_id),true);
-        }
-      }
-      if (joint) {
-        if (weight!=0 && !cached) {
-          ci_sweep->generator.noalias()-=2*weight*energy*sigma.generator_adjoint_streamed(
+      if (joint && weight!=0 && !cached)
+        ci_sweep->generator.noalias()-=2*weight*energy*sigma.generator_adjoint_streamed(
               first,dq,{{y,y_column}},true,spin_exchange_parity_!=0);
-        }
-        project(panel,dq,ci_sweep->images.overlap.col(state_id));
-      }
+      // Consume diagnostics before the destructive physical projections too.
+      // Capture then needs no second copy of both direction components.
       if (capture) {
-        project(panel,dv,diagnostic->connection->overlap.col(state_id));
+        project(panel,dv,{diagnostic->connection->overlap.col(state_id).data()});
         norm+=values.squaredNorm(); parallel+=(values.array()*dv.array()).sum(); square+=dv.squaredNorm();
       }
+      // All original-image consumers are finished. Move the shared owner
+      // directly into its final selected-space projection.
+      if (joint) {
+        project(panel,std::move(directions),
+            {result.images.overlap.col(state_id).data(),ci_sweep->images.overlap.col(state_id).data()});
+      } else if (collect_images) {
+        if (!tangent) project(panel,std::move(values),
+            {result.images.overlap.col(state_id).data()});
+        else project(panel,std::move(directions),
+            {result.images.overlap.col(state_id).data()});
+      }
+      if (collect_images && delta_upper && !cached)
+        project(panel,std::move(values),{result.images.overlap.col(state_id).data()},true);
     }
     projections.finish();
     if (resident_projection) {
       profiling::ScopedPhase phase(profiling::Phase::CiProductProjection);
       for (int target=0;target<static_cast<int>(projection_targets.size());++target) {
-        if (delta_upper)
+        // CI-only/forcing targets have no left-direction component. Do not
+        // allocate or transform a zero carrier merely because p also exists.
+        if (left_projected[target].size())
           beta.apply_directional_adjoint_right(db,&left_projected[target],&projected[target]);
         else beta.apply_adjoint_right(&projected[target]);
         Eigen::Map<Eigen::VectorXd>(projection_targets[target],n_structures_)+=
