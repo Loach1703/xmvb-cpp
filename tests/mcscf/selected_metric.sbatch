@@ -35,7 +35,7 @@ if [[ ${2:-} == --audit ]]; then
 fi
 cmake --build "$source_dir/build" --target "$target" -j8 > "$artifact/build.log" 2>&1
 sha256sum "$binary" > "$artifact/binary.sha256"
-sha256sum "$source_dir/src/vbscf/optimization/neo/ciah.cpp" \
+sha256sum "$source_dir/src/mcscf/optimization/neo/ciah.cpp" \
  "$source_dir/src/vbscf/orbitals/charts/physical_metric.cpp" \
  "$source_dir/src/vbscf/optimization/trust_region/retraction.cpp" > "$artifact/sources.sha256"
 cp "$input_dir/input.xmi" "$input_dir/cc-pvdz.gbs" "$artifact/"

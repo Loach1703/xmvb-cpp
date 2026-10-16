@@ -142,20 +142,12 @@ set(XMVB_VBSCF_OPTIMIZATION_SOURCES
   vbscf/optimization/backends/neo.cpp
   vbscf/optimization/backends/projected_gradient.cpp
   vbscf/optimization/backends/truncated_newton.cpp
-  vbscf/optimization/krylov/minres.cpp
   vbscf/optimization/globalization/line_search.cpp
   vbscf/optimization/driver/session.cpp
   vbscf/optimization/neo/coordinates.cpp
-  vbscf/optimization/neo/ciah.cpp
   vbscf/optimization/neo/curvature.cpp
-  vbscf/optimization/neo/globalization.cpp
-  vbscf/optimization/neo/problem.cpp
-  vbscf/optimization/neo/solver.cpp
-  vbscf/optimization/preconditioners/block_inverse_bfgs.cpp
   vbscf/optimization/preconditioners/hessian_diagonal.cpp
   vbscf/optimization/preconditioners/density.cpp
-  vbscf/optimization/preconditioners/coarse.cpp
-  vbscf/optimization/preconditioners/shifted_metric.cpp
   vbscf/optimization/preconditioners/transported_lbfgs.cpp
   vbscf/optimization/objective/reduced_hvp.cpp
   vbscf/optimization/trust_region/retraction.cpp

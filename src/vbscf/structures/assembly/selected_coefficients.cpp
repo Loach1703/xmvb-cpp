@@ -1,5 +1,7 @@
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 
+#include "mcscf/states/weights.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <iterator>
@@ -83,17 +85,6 @@ void validate_selected_state_indices(
   }
 }
 
-void validate_nonnegative_weights(
-    const std::vector<double>& state_average_weights) {
-  if (state_average_weights.empty()) {
-    throw std::invalid_argument("state_average_weights must not be empty");
-  }
-  for (const double state_weight : state_average_weights) {
-    if (state_weight < 0.0) {
-      throw std::invalid_argument("state_average_weights must be non-negative");
-    }
-  }
-}
 
 void validate_input_shapes(
     const FullDeterminantStructureData& full_determinant_data,
@@ -127,7 +118,7 @@ void validate_input_shapes(
         "selected_state_indices and state_average_weights must have the same length");
   }
   validate_selected_state_indices(selected_state_indices, n_structures);
-  validate_nonnegative_weights(state_average_weights);
+  mcscf::validate_weights(state_average_weights);
 
   if (same_spin_pair_cache.alpha_reuse_table.determinant_to_unique_id.size() != n_determinants ||
       same_spin_pair_cache.beta_reuse_table.determinant_to_unique_id.size() != n_determinants) {
@@ -172,7 +163,7 @@ void validate_selected_state_column_matrix_input_shapes(
         "selected_state_indices and state_average_weights must have the same length");
   }
   validate_selected_state_indices(selected_state_indices, n_structures);
-  validate_nonnegative_weights(state_average_weights);
+  mcscf::validate_weights(state_average_weights);
 
   if (same_spin_pair_cache.alpha_reuse_table.determinant_to_unique_id.size() !=
           n_determinants ||
@@ -190,7 +181,7 @@ void validate_selected_state_column_matrix_input_shapes(
 
 void validate_normalized_weights(
     const std::vector<double>& normalized_state_weights) {
-  validate_nonnegative_weights(normalized_state_weights);
+  mcscf::validate_weights(normalized_state_weights);
   double weight_sum = 0.0;
   for (const double state_weight : normalized_state_weights) {
     weight_sum += state_weight;
@@ -548,23 +539,6 @@ SelectedStateDeterminantMatrices build_selected_state_determinant_matrices_impl(
 
 }  // namespace
 
-std::vector<double> normalize_state_average_weights(
-    const std::vector<double>& state_average_weights) {
-  validate_nonnegative_weights(state_average_weights);
-  double weight_sum = 0.0;
-  for (const double state_weight : state_average_weights) {
-    weight_sum += state_weight;
-  }
-  if (weight_sum <= 0.0) {
-    throw std::invalid_argument("state_average_weights must sum to a positive value");
-  }
-
-  std::vector<double> normalized_weights = state_average_weights;
-  for (double& state_weight : normalized_weights) {
-    state_weight /= weight_sum;
-  }
-  return normalized_weights;
-}
 
 SelectedStateDeterminantMatrices build_selected_state_determinant_matrices(
     const FullDeterminantStructureData& full_determinant_data,
@@ -579,7 +553,7 @@ SelectedStateDeterminantMatrices build_selected_state_determinant_matrices(
       state_average_weights,
       same_spin_pair_cache);
   const std::vector<double> normalized_state_weights =
-      normalize_state_average_weights(state_average_weights);
+      mcscf::normalize_weights(state_average_weights);
   return build_selected_state_determinant_matrices_impl(
       full_determinant_data,
       eigenvector_matrix,

@@ -1,6 +1,6 @@
 #include "vbscf/optimization/backends/neo.hpp"
 #include "vbscf/optimization/backends/ciah.hpp"
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "mcscf/optimization/trace.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -116,7 +116,7 @@ bool build_accepted_neo_keyframe(
       admit_structure_response(
           *objective, structure_hessian, orbital_hessian.structure_action(),
           chart.reduced_size());
-  diagnostics::neo_trace_context =
+  mcscf::diagnostics::neo_trace_context =
       {record->accepted_iteration_index, 0, "ciah"};
   CiahMacroStep macro;
   if (!build_ciah_macro_step(objective, parameter_view, options, chart,

@@ -6,7 +6,7 @@
 #include "core/timing.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "mcscf/optimization/trace.hpp"
 #include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 #include "vbscf/orbitals/preparation/cholesky.hpp"

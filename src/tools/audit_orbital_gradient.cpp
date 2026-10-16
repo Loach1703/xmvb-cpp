@@ -370,13 +370,13 @@ void run_audit(int argc, char** argv) {
                                                 operation.structure_action());
       const auto probe = probe_neo_curvature(operation, structure, chart);
       std::cout << "independent_probe_found_negative = "
-                << (probe.stop_reason == NeoStopReason::NegativeCurvature) << '\n'
+                << (probe.stop_reason == xmvb::mcscf::NeoStopReason::NegativeCurvature) << '\n'
                 << "independent_probe_actions = " << probe.hessian_actions << '\n'
                 << "independent_probe_rayleigh = " << probe.minimum_curvature_value << '\n'
                 << "independent_probe_ritz_residual = " << probe.curvature_residual_norm << '\n'
                 << "independent_probe_global_certificate = "
                 << probe.global_curvature_certified << '\n';
-      if (probe.stop_reason == NeoStopReason::NegativeCurvature) {
+      if (probe.stop_reason == xmvb::mcscf::NeoStopReason::NegativeCurvature) {
         Eigen::VectorXd packed_mode = chart.expand_step(
             probe.minimum_curvature_direction.head(chart.reduced_size()));
         const double norm = metric.norm(
@@ -390,7 +390,7 @@ void run_audit(int argc, char** argv) {
         // committing either trial or changing the optimization algorithm.
         const Eigen::VectorXd orbital_mode =
             probe.minimum_curvature_direction.head(chart.reduced_size()) / norm;
-        const double radius = NeoOptions{}.trust_radius;
+        const double radius = xmvb::mcscf::NeoOptions{}.trust_radius;
         double best_energy = accepted_energy;
         Eigen::VectorXd best_orbitals;
         for (double signed_radius : {-radius, radius}) {

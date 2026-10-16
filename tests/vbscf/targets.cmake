@@ -9,12 +9,10 @@ set(_xmvb_vbscf_unit_targets
   test_spinor_projection
   test_active_two_electron_sparse
   test_accepted_pair_tile
-  test_block_inverse_bfgs
   test_hessian_diagonal
   test_keyframe
   test_cofactor_differential
   test_coupled_structure
-  test_ciah
   test_ci_transport
   test_representation_overlap
   test_selected_metric
@@ -25,21 +23,15 @@ set(_xmvb_vbscf_unit_targets
   test_davidson
   test_eigen_response
   test_localized_representative_selector
-  test_minres
-  test_neo
-  test_neo_globalization
   test_normalized_orbital_curvature
   test_oeo_normalization_pullback
   test_opposite_spin_pair_graph
   test_orthogonal_direct_ci
-  test_orthonormal_hvp_basis
-  test_positive_ritz_secants
   test_projected_orbital_surrogate
   test_reduced_hessian_reference
   test_ri_ao_h1e_hvp
   test_ri_pair_contractions
   test_ri_active_two_electron_response
-  test_shifted_metric_preconditioner
   test_sparse_orbital_quotient
   test_support_preserving_gauge
   test_spectral_trust_region
@@ -59,7 +51,6 @@ add_executable(test_metric_point EXCLUDE_FROM_ALL
 target_link_libraries(test_metric_point PRIVATE xmvb_input xmvb_vbscf)
 
 if (BUILD_TESTING)
-  add_test(NAME ciah COMMAND test_ciah)
   add_test(NAME ci_transport COMMAND test_ci_transport)
   add_test(NAME representation_overlap COMMAND test_representation_overlap)
   add_test(NAME selected_metric COMMAND test_selected_metric)
@@ -72,11 +63,8 @@ if (BUILD_TESTING)
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME active_two_electron_sparse COMMAND test_active_two_electron_sparse)
   add_test(NAME accepted_pair_tile COMMAND test_accepted_pair_tile)
-  add_test(NAME block_inverse_bfgs COMMAND test_block_inverse_bfgs)
   add_test(NAME hessian_diagonal COMMAND test_hessian_diagonal)
   add_test(NAME keyframe COMMAND test_keyframe)
-  set_tests_properties(block_inverse_bfgs PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME orbital_block_partition COMMAND test_orbital_block_partition)
   add_test(NAME curvature_decomposition COMMAND test_curvature_decomposition)
   add_test(NAME oeo_normalization_pullback COMMAND test_oeo_normalization_pullback)
@@ -89,18 +77,6 @@ if (BUILD_TESTING)
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME davidson COMMAND test_davidson)
   add_test(NAME eigen_response COMMAND test_eigen_response)
-  add_test(NAME minres COMMAND test_minres)
-  set_tests_properties(minres PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME neo COMMAND test_neo)
-  set_tests_properties(neo PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME neo_globalization COMMAND test_neo_globalization)
-  add_test(
-    NAME shifted_metric_preconditioner
-    COMMAND test_shifted_metric_preconditioner)
-  set_tests_properties(neo_globalization PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(
     NAME localized_representative_selector
     COMMAND test_localized_representative_selector)
@@ -165,18 +141,12 @@ if (BUILD_TESTING)
   add_test(NAME projected_orbital_surrogate COMMAND test_projected_orbital_surrogate)
   set_tests_properties(projected_orbital_surrogate PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME positive_ritz_secants COMMAND test_positive_ritz_secants)
-  set_tests_properties(positive_ritz_secants PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME normalized_orbital_curvature COMMAND test_normalized_orbital_curvature)
   set_tests_properties(normalized_orbital_curvature PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME spectral_trust_region COMMAND test_spectral_trust_region)
   add_test(NAME structure_spin COMMAND test_structure_spin)
   set_tests_properties(spectral_trust_region PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME orthonormal_hvp_basis COMMAND test_orthonormal_hvp_basis)
-  set_tests_properties(orthonormal_hvp_basis PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME reduced_hessian_reference COMMAND test_reduced_hessian_reference)
   set_tests_properties(reduced_hessian_reference PROPERTIES

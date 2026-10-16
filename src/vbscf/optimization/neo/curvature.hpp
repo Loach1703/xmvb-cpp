@@ -1,6 +1,6 @@
 #pragma once
 
-#include "vbscf/optimization/neo/solver.hpp"
+#include "mcscf/optimization/neo/solver.hpp"
 
 namespace xmvb::vb {
 
@@ -15,7 +15,7 @@ class OrbitalChart;
  * A negative Rayleigh direction is a witness, not a converged Newton step.
  * A positive partial-space result is not a global positivity certificate.
  */
-NeoResult probe_neo_curvature(
+mcscf::NeoResult probe_neo_curvature(
     ExactHvpOperator& orbital_hessian,
     const StructureTangentOperator& structure_hessian,
     const OrbitalChart& chart);

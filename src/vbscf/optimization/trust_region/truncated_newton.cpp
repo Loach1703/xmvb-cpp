@@ -11,10 +11,10 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/Cholesky>
 
-#include "vbscf/optimization/krylov/orthonormal_basis.hpp"
-#include "vbscf/optimization/krylov/positive_ritz_secants.hpp"
-#include "vbscf/optimization/preconditioners/block_inverse_bfgs.hpp"
-#include "vbscf/optimization/trust_region/spectral.hpp"
+#include "mcscf/optimization/krylov/orthonormal_basis.hpp"
+#include "mcscf/optimization/krylov/positive_ritz_secants.hpp"
+#include "mcscf/optimization/preconditioners/block_inverse_bfgs.hpp"
+#include "mcscf/optimization/trust_region/spectral.hpp"
 #include "vbscf/optimization/driver/checks.hpp"
 
 namespace xmvb::vb {
@@ -362,7 +362,7 @@ static TruncatedNewtonSubspace build_truncated_newton_subspace(
   return subspace;
 }
 
-static std::unique_ptr<BlockInverseBfgs> build_exact_positive_curvature_update(
+static std::unique_ptr<mcscf::BlockInverseBfgs> build_exact_positive_curvature_update(
     const std::vector<Eigen::VectorXd>& basis,
     const std::vector<Eigen::VectorXd>& hessian_basis) {
   if (basis.empty() || basis.size() != hessian_basis.size()) return nullptr;
@@ -382,7 +382,7 @@ static std::unique_ptr<BlockInverseBfgs> build_exact_positive_curvature_update(
   const Eigen::MatrixXd projected = 0.5 *
       (directions.transpose() * images +
        images.transpose() * directions).eval();
-  const std::vector<RitzSecant> positive = positive_ritz_secants(
+  const std::vector<mcscf::RitzSecant> positive = mcscf::positive_ritz_secants(
       directions,
       images,
       projected,
@@ -397,7 +397,7 @@ static std::unique_ptr<BlockInverseBfgs> build_exact_positive_curvature_update(
     positive_images.col(static_cast<Eigen::Index>(column)) =
         positive[column].image;
   }
-  return std::make_unique<BlockInverseBfgs>(
+  return std::make_unique<mcscf::BlockInverseBfgs>(
       std::move(positive_directions),
       std::move(positive_images));
 }
@@ -508,7 +508,7 @@ TruncatedNewtonStepResult solve_affine_trust_region_in_subspace(
     return result;
   }
 
-  const auto spectral_solution = solve_spectral_trust_region(
+  const auto spectral_solution = mcscf::solve_spectral_trust_region(
       eigenvalues, projected_gradient_in_eigenbasis, effective_radius);
   const Eigen::VectorXd& eigen_coordinates = spectral_solution.step;
   const double trust_region_shift = spectral_solution.shift;
@@ -971,7 +971,7 @@ TruncatedNewtonStepResult solve_nonredundant_truncated_newton_step(
         sampled_directions.end(), basis.begin(), basis.end());
     sampled_images.insert(
         sampled_images.end(), hessian_basis.begin(), hessian_basis.end());
-    const std::unique_ptr<BlockInverseBfgs> curvature_update =
+    const std::unique_ptr<mcscf::BlockInverseBfgs> curvature_update =
         build_exact_positive_curvature_update(
             sampled_directions, sampled_images);
     const Eigen::VectorXd preconditioned_correction =
@@ -993,7 +993,7 @@ TruncatedNewtonStepResult solve_nonredundant_truncated_newton_step(
     }
 
     const std::size_t previous_basis_size = basis.size();
-    const int admitted = append_orthonormal_hvp_block(
+    const int admitted = mcscf::append_orthonormal_hvp_block(
         candidate_block,
         [&](const Eigen::Ref<const Eigen::MatrixXd>& directions) {
           return hvp->apply_batch(directions);

@@ -15,7 +15,7 @@
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "core/metric_solve.hpp"
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "mcscf/optimization/trace.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -140,7 +140,7 @@ StructureTangentOperator::StructureTangentOperator(
   }
   constraint_qr_.compute(selected_images.overlap);
   metric_inverse_ = accepted_point_->metric_inverse(action);
-  if (metric_inverse_) diagnostics::neo_trace("ciah_metric_factors",
+  if (metric_inverse_) mcscf::diagnostics::neo_trace("ciah_metric_factors",
       "bytes=%zu,blocks=%zu,max_block=%d,carrier_diagonal=%d", metric_inverse_->factor_bytes(),
       metric_inverse_->block_count(), metric_inverse_->max_block_size(),
       static_cast<int>(action_->supports_carrier_diagonal()));
@@ -494,7 +494,7 @@ core::MetricImage StructureTangentOperator::metric_image(const Eigen::VectorXd& 
     core::MetricSolveWorkspace* workspace, const core::MetricImage* initial) const {
   if (covector.size() != tangent_size() || !covector.allFinite())
     throw std::invalid_argument("invalid structure metric covector");
-  const bool trace = diagnostics::neo_event_trace_enabled();
+  const bool trace = mcscf::diagnostics::neo_event_trace_enabled();
   const auto start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   core::MetricSolveStats stats;
@@ -512,7 +512,7 @@ core::MetricImage StructureTangentOperator::metric_image(const Eigen::VectorXd& 
         trace ? &stats : nullptr, initial ? &initial->inverse : nullptr, &image);
     result.residual = covector - image;
   }
-  if (trace) diagnostics::neo_trace("ciah_structure_norm",
+  if (trace) mcscf::diagnostics::neo_trace("ciah_structure_norm",
       "seconds=%.17g,iterations=%d,actions=%d,certifications=%d,relative_residual=%.17g,cache_hit=%d,seeded=%d,propagated_residual=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
       stats.iterations, stats.actions, stats.certifications, stats.relative_residual,

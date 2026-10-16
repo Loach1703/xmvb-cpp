@@ -1,5 +1,7 @@
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
 
+#include "mcscf/states/weights.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
@@ -28,7 +30,7 @@
 #include "vbscf/structures/assembly/states.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "mcscf/optimization/trace.hpp"
 
 namespace xmvb::vb {
 
@@ -55,25 +57,6 @@ struct ActiveSpaceGradientForwardContext {
   double eigensolver_wall_time_seconds = 0.0;
 };
 
-std::vector<double> normalize_state_average_weights_local(
-    const std::vector<double>& state_average_weights) {
-  double weight_sum = 0.0;
-  for (const double state_weight : state_average_weights) {
-    if (state_weight < 0.0) {
-      throw std::invalid_argument("state_average_weights must be non-negative");
-    }
-    weight_sum += state_weight;
-  }
-  if (weight_sum <= 0.0) {
-    throw std::invalid_argument("state_average_weights must sum to a positive value");
-  }
-
-  std::vector<double> normalized_weights = state_average_weights;
-  for (double& state_weight : normalized_weights) {
-    state_weight /= weight_sum;
-  }
-  return normalized_weights;
-}
 
 void validate_state_selection(
     const std::vector<int>& selected_state_indices,
@@ -193,12 +176,12 @@ xmvb::core::DavidsonResult solve_selected_structure_roots(
   options.physical_residual_norm = std::move(physical_residual_norm);
   options.residual_preconditioner = std::move(residual_preconditioner);
   options.identity_overlap=identity_overlap;
-  if (diagnostics::neo_event_trace_enabled()) {
+  if (mcscf::diagnostics::neo_event_trace_enabled()) {
     options.observe_iteration = [](int iteration, int dimension,
         double energy, double residual) {
       // Existing quantities only; no additional action or certification.
       if (iteration == 1 || iteration % 32 == 0)
-        diagnostics::neo_trace("ciah_ci_iteration",
+        mcscf::diagnostics::neo_trace("ciah_ci_iteration",
             "iteration=%d,basis=%d,energy=%.17g,relative_residual=%.17g",
             iteration,dimension,energy,residual);
     };
@@ -301,12 +284,12 @@ std::shared_ptr<SelectedCiMetric> selected_ci_metric(const StructureAction& acti
   result->factor.compute(result->overlap);
   if (result->factor.info()!=Eigen::Success)
     throw std::runtime_error("selected CI metric is not positive definite");
-  if (diagnostics::neo_event_trace_enabled()) {
+  if (mcscf::diagnostics::neo_event_trace_enabled()) {
     const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(metric.selected_matrix(),Eigen::EigenvaluesOnly);
     const Eigen::VectorXd scale=action.preconditioner_diagonal().overlap.array().rsqrt();
     const Eigen::MatrixXd scaled=scale.asDiagonal()*metric.selected_matrix()*scale.asDiagonal();
     const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> normalized(scaled,Eigen::EigenvaluesOnly);
-    diagnostics::neo_trace("ciah_ci_selected_metric",
+    mcscf::diagnostics::neo_trace("ciah_ci_selected_metric",
         "dimension=%d,condition=%.17g,diagonal_scaled_condition=%.17g,factor_bytes=%zu",
         action.n_structures(),spectrum.eigenvalues().tail(1)[0]/spectrum.eigenvalues()[0],
         normalized.eigenvalues().tail(1)[0]/normalized.eigenvalues()[0],
@@ -472,7 +455,7 @@ void solve_structure_problem(
       physical_residual = [&structure_action](const Eigen::VectorXd& coefficients, double energy) {
         const auto start = std::chrono::steady_clock::now();
         const double norm = structure_action.complete_space_residual_norm(coefficients, energy);
-        diagnostics::neo_trace("ciah_ci_physical_residual", "seconds=%.17g",
+        mcscf::diagnostics::neo_trace("ciah_ci_physical_residual", "seconds=%.17g",
             std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
         return norm;
       };
@@ -484,10 +467,10 @@ void solve_structure_problem(
         const auto inverse_start = std::chrono::steady_clock::now();
         context->structure_metric_inverse = std::make_unique<StructureMetricInverse>(
             structure_action,alpha,beta,true,budget,budget);
-        diagnostics::neo_trace("ciah_ci_inverse_setup", "seconds=%.17g",
+        mcscf::diagnostics::neo_trace("ciah_ci_inverse_setup", "seconds=%.17g",
             std::chrono::duration<double>(std::chrono::steady_clock::now()-inverse_start).count());
         const auto* inverse = context->structure_metric_inverse.get();
-        diagnostics::neo_trace("ciah_ci_preconditioner",
+        mcscf::diagnostics::neo_trace("ciah_ci_preconditioner",
             "carrier=1,factor_bytes=%zu,blocks=%zu,max_block=%d",
             inverse->factor_bytes(),inverse->block_count(),inverse->max_block_size());
       }
@@ -779,7 +762,7 @@ void initialize_active_space_derivatives(
       forward_context.structure_matrix_wall_time_seconds;
   result->eigensolver_wall_time_seconds =
       forward_context.eigensolver_wall_time_seconds;
-  diagnostics::neo_trace("ciah_forward_cost",
+  mcscf::diagnostics::neo_trace("ciah_forward_cost",
       "orbital=%.17g,ao_effective=%.17g,active_one=%.17g,active_two=%.17g,"
       "structure_setup=%.17g,ci_solve=%.17g",
       result->orbital_preparation_wall_time_seconds,
@@ -1068,7 +1051,7 @@ ActiveSpaceForwardEvaluation ActiveSpaceGradientEvaluator::evaluate_forward(
   auto& state = *evaluation.state_;
   state.selected_state_indices = selected_state_indices;
   state.normalized_weights =
-      normalize_state_average_weights_local(state_average_weights);
+      mcscf::normalize_weights(state_average_weights);
   state.nuclear_repulsion_energy = nuclear_repulsion_energy;
   state.structure_solve_accuracy = structure_solve_accuracy;
   state.forward_context = build_active_space_gradient_forward_context(
@@ -1156,7 +1139,7 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
         "fixed structure coefficients have inconsistent dimensions or values");
   }
   const std::vector<double> normalized_weights =
-      normalize_state_average_weights_local(state_average_weights);
+      mcscf::normalize_weights(state_average_weights);
 
   ActiveSpaceGradientForwardContext context;
   context.timed_active_space_context = prepare_timed_active_space_context(
@@ -1209,7 +1192,7 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
     accumulate_active_space_gradient(input,selected_state_indices,normalized_weights,context,&fixed.gradient);
   fixed.gradient.total_wall_time_seconds = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - total_start_time).count();
-  if (diagnostics::neo_event_trace_enabled()) diagnostics::neo_trace("ciah_keyframe_active_cost",
+  if (mcscf::diagnostics::neo_event_trace_enabled()) mcscf::diagnostics::neo_trace("ciah_keyframe_active_cost",
       "seconds=%.17g,setup=%.17g,action=%.17g,adjoint=%.17g,actions=1,diagonal_bytes=%zu",
       fixed.gradient.total_wall_time_seconds, context.structure_matrix_wall_time_seconds,
       action_seconds, fixed.gradient.adjoint_wall_time_seconds,
@@ -1235,7 +1218,7 @@ ActiveSpaceGradientResult ActiveSpaceGradientEvaluator::evaluate(
       state_average_weights,
       input.structure_data.n_structures);
   const std::vector<double> normalized_weights =
-      normalize_state_average_weights_local(state_average_weights);
+      mcscf::normalize_weights(state_average_weights);
 
   const Eigen::MatrixXd no_initial_eigenvectors;
   auto forward_context = build_active_space_gradient_forward_context(

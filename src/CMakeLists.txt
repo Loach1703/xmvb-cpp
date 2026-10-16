@@ -40,7 +40,16 @@ set(XMVB_MCSCF_SOURCES
   mcscf/ci/factor_plan.cpp
   mcscf/ci/planner.cpp
   mcscf/ci/strings.cpp
-  mcscf/ci/spin.cpp)
+  mcscf/ci/spin.cpp
+  mcscf/states/weights.cpp
+  mcscf/optimization/neo/ciah.cpp
+  mcscf/optimization/neo/globalization.cpp
+  mcscf/optimization/neo/problem.cpp
+  mcscf/optimization/neo/solver.cpp
+  mcscf/optimization/krylov/minres.cpp
+  mcscf/optimization/preconditioners/block_inverse_bfgs.cpp
+  mcscf/optimization/preconditioners/coarse.cpp
+  mcscf/optimization/preconditioners/shifted_metric.cpp)
 set(XMVB_CASSCF_SOURCES
   casscf/integrals/active.cpp
   casscf/driver/casci.cpp)
@@ -192,6 +201,7 @@ unset(_xmvb_common_file)
 unset(_xmvb_vb_includes)
 
 if (XMVB_BUILD_DEV_TARGETS)
+  include(${CMAKE_SOURCE_DIR}/tests/mcscf/targets.cmake)
   add_executable(test_ci_factors ${CMAKE_SOURCE_DIR}/tests/mcscf/test_factors.cpp)
   target_link_libraries(test_ci_factors PRIVATE xmvb_mcscf)
   add_executable(test_casci ${CMAKE_SOURCE_DIR}/tests/mcscf/test_casci.cpp)

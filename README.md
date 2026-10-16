@@ -9,13 +9,15 @@ Valence Bond theory provides direct chemical insight into bonding, reactivity, a
 ```
 src/
   core/            Shared eigensolver and OpenMP execution helpers
+  mcscf/           Shared direct-CI, state contracts, and NEO/CIAH solvers
+  casscf/          Orthogonal CASCI model (orbital optimization not yet exposed)
   vbscf/           Canonical VBSCF implementation
     orbitals/      Sparse/full-AO charts, gauges, and pullbacks
     integrals/     AO and active-space integral operators
     determinants/  Determinant-pair algebra and caches
     structures/    VB structure expansion and state matrices
     derivatives/   Gradient and matrix-free Hessian-vector products
-    optimization/  L-BFGS and trust-region Newton solvers
+    optimization/  VB coordinates, physical preconditioners, and solver adapters
     workflow/      End-to-end VBSCF evaluation
   input/           XMI deck contracts and VBSCF input loading
   libcint/         libcint providers and AO integral preparation
@@ -26,6 +28,7 @@ src/
 basis/             Standard basis set library (Pople, Dunning, etc.)
 testdata/vbscf/    Versioned VBSCF regression decks
 tests/vbscf/       Unit and numerical-regression tests
+tests/mcscf/       Independent CI, CASCI, and common-solver tests
 ```
 
 The component dependency rules and numerical naming conventions are recorded

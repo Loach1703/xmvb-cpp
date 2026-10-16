@@ -9,7 +9,9 @@ operation or data owned by that directory.
 ```text
 src/
   core/     Small numerical and execution utilities shared across methods
-  vbscf/    VBSCF mathematics, workflows, derivatives, and optimizers
+  mcscf/    Method-independent CI, optimization, and state contracts
+  casscf/   Orthogonal CASCI model and active-integral preparation
+  vbscf/    VB structures, nonorthogonal orbitals, derivatives, and workflows
   input/    XMI deck representation and construction of VBSCF inputs
   libcint/  AO integral providers and libcint-specific preparation
   guess/    Initial-orbital and restricted-HF construction
@@ -24,30 +26,60 @@ scientific logic.
 
 ## Build Dependencies
 
-The static-library dependency direction is:
+The method libraries depend on a common numerical library:
 
 ```text
-xmvb_vbscf
-    ^
-xmvb_libcint
-    ^
-xmvb_input_deck
-    ^
-xmvb_guess
-    ^
-xmvb_input
-    ^
-xmvb_output
+xmvb_vbscf ----> xmvb_mcscf <---- xmvb_casscf
 ```
 
-Some components depend directly on more than the immediately preceding node;
-all dependencies still point toward `xmvb_vbscf`. `xmvb_input_deck` is a
-separate build target because guess construction consumes parsed deck data,
-while complete input loading consumes the guess builder. This keeps the graph
-acyclic without introducing an umbrella library.
+An arrow means "depends on". The common library owns direct-CI actions, spin
+operations, state weights, matrix-free optimization, and the shared `core/`
+eigensolvers. It does not depend on either physical model. CMake rejects direct
+VB includes in `mcscf/` or `casscf/`; public solver tests link only
+`xmvb_mcscf`, not `xmvb_vbscf`.
+
+The I/O components depend toward the VB model: `xmvb_libcint`,
+`xmvb_input_deck`, `xmvb_guess`, `xmvb_input`, and `xmvb_output` form an acyclic
+graph. `xmvb_input_deck` is separate because guess construction consumes parsed
+deck data, while complete input loading consumes the guess builder.
 
 The `xmvb` executable owns only files in `src/cli/`. Diagnostic executables are
 excluded from the default build and live in `src/tools/`.
+
+## Common Solver Boundary
+
+```text
+mcscf/
+  ci/                          Spin strings and direct-CI actions
+  states/weights.*             State-weight validation and normalization
+  optimization/
+    actions.hpp                Vector action and dual-norm contracts
+    neo/                       NEO/CIAH subspaces and numerical solvers
+    krylov/                    MINRES and HVP basis operations
+    preconditioners/           Algebraic BFGS, coarse, and shifted-metric actions
+    trust_region/              Spectral trust-region solve
+    trace.hpp                  Scalar solver-event logging
+```
+
+These APIs use `xmvb::mcscf`. A `VectorAction` maps a vector to a vector;
+the caller defines its coordinates. A `DualNorm` evaluates a covector norm
+using the physical model's metric. A common solver must not infer orbital
+coordinates, CI normalization, or a VB structure representation from either
+callback. `NeoProblem` supplies the gradient and action/metric/preconditioner
+callbacks; `CiahWorkspace` owns only numerical subspace state.
+
+VB orbital charts, CI transport, physical curvature construction, and macrostep
+evaluation remain in `vbscf/optimization/`. In particular,
+`vbscf/optimization/neo/coordinates.*` and `curvature.*` are VB model adapters,
+not common solvers. Their dependence on VB derivatives is intentional.
+
+There are no forwarding headers or namespace aliases at the old solver paths.
+Callers include the owning module directly. Shared state weights have one
+implementation; workflow and derivative code must not normalize independently.
+
+The common integral layer is the next extraction step. AO/active-space kernels
+still under `vbscf/integrals/` are not yet method-independent APIs. Likewise,
+`casscf/` currently exposes CASCI, not a complete CASSCF orbital optimizer.
 
 ## Filenames
 

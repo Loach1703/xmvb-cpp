@@ -10,7 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "mcscf/optimization/trace.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/preparation/input.hpp"
 
@@ -45,7 +45,7 @@ bool orbital_step_audit_enabled() {
     const char* flag = std::getenv("XMVB_NEO_ORBITAL_STEP_AUDIT");
     return flag && std::strcmp(flag, "1") == 0;
   }();
-  return enabled && neo_event_trace_enabled();
+  return enabled && mcscf::diagnostics::neo_event_trace_enabled();
 }
 
 void audit_orbital_step(const OrbitalPreparationInput& input,
@@ -67,7 +67,7 @@ void audit_orbital_step(const OrbitalPreparationInput& input,
     std::filesystem::create_directories(folder);
     std::ostringstream name;
     name << "macro-" << std::setw(3) << std::setfill('0')
-         << neo_trace_context.keyframe;
+         << mcscf::diagnostics::neo_trace_context.keyframe;
     origin_path = std::filesystem::path(folder) / (name.str() + "-origin.bin");
     name << '-' << stage << '-' << std::setw(4) << sequence;
     trial_path = std::filesystem::path(folder) / (name.str() + ".bin");
@@ -98,7 +98,7 @@ void audit_orbital_step(const OrbitalPreparationInput& input,
       const Eigen::VectorXd trial = b + delta;
       trial_file.write(reinterpret_cast<const char*>(trial.data()), trial.size() * sizeof(double));
     }
-    neo_trace("orbital_step_geometry",
+    mcscf::diagnostics::neo_trace("orbital_step_geometry",
         "stage=%s,micro=%d,orbital=%d,role=%s,coefficients=%d,alpha=%.17g,theta=%.17g,"
         "step_norm=%.17g,actual_angle=%.17g,norm_ratio=%.17g",
         stage, micro, orbital + 1, orbital < n_inactive ? "inactive" : "active", count,
@@ -110,7 +110,7 @@ void audit_orbital_step(const OrbitalPreparationInput& input,
     if (origin_file.is_open()) origin_file.close();
     if (!trial_file || !origin_file)
       throw std::runtime_error("orbital path snapshot write failed");
-    neo_trace("orbital_step_snapshot",
+    mcscf::diagnostics::neo_trace("orbital_step_snapshot",
         "stage=%s,micro=%d,n_bf=%zu,n_core=%d,n_active=%zu,origin=%s,trial=%s",
         stage, micro, input.n_basis_functions, n_inactive, input.n_active_orbitals,
         origin_path.c_str(), trial_path.c_str());

@@ -14,11 +14,53 @@
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/expansion/expander.hpp"
+#include "vbscf/optimization/backends/ciah.hpp"
 
 namespace {
 
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
+}
+
+/** @brief Recycled CI directions transform with a relaxed root's arbitrary phase. */
+void check_restart_phase() {
+  const auto require_close=[](const Eigen::VectorXd& actual,const Eigen::VectorXd& expected,
+      double tolerance,const char* message) {
+    require((actual-expected).stableNorm()<=tolerance*std::max(1.0,expected.stableNorm()),message);
+  };
+  using xmvb::vb::optimizer_detail::CiahMacroStep;
+  const Eigen::Vector3d reference(0.8,0.4,0.1);
+  Eigen::Matrix3d metric;
+  metric << 1.0,0.2,0.1,0.2,2.0,0.3,0.1,0.3,3.0;
+  const Eigen::Vector3d root(0.7,0.5,0.2);
+  const Eigen::Vector3d response(0.1,-0.2,0.05);
+  CiahMacroStep positive,negative;
+  positive.next_structure_guess=response;
+  negative.next_structure_guess=response;
+  positive.next_orbital_guess_packed=reference;
+  negative.next_orbital_guess_packed=reference;
+  positive.align_structure_frame(reference,metric*root);
+  negative.align_structure_frame(reference,-metric*root);
+  require_close(positive.next_structure_guess,response,1.0e-14,
+      "CIAH changed a phase-consistent structure seed");
+  require_close(negative.next_structure_guess,-response,1.0e-14,
+      "CIAH failed to reverse the seed with the relaxed root");
+  require_close(positive.next_orbital_guess_packed,negative.next_orbital_guess_packed,
+      1.0e-14,"CIAH phase alignment changed the orbital direction");
+  // B changes sign with the CI root; the coupled orbital image is invariant.
+  Eigen::Matrix3d coupling;
+  coupling << 2.0,0.3,0.1,0.2,1.0,0.4,0.3,-0.1,0.7;
+  require_close(coupling*positive.next_structure_guess,
+      -coupling*negative.next_structure_guess,1.0e-14,
+      "CIAH restart violates coupled-action phase covariance");
+  const Eigen::MatrixXd frame = Eigen::Matrix3d::Identity().leftCols(2);
+  Eigen::Matrix2d rotation;
+  rotation << std::cos(0.7), -std::sin(0.7), std::sin(0.7), std::cos(0.7);
+  CiahMacroStep block;
+  block.next_structure_guess = frame;
+  block.align_structure_frame(frame, frame * rotation);
+  require((block.next_structure_guess - frame * rotation).norm() < 1e-14,
+      "CIAH state-frame alignment fails an equal-weight root rotation");
 }
 
 /** @brief Complete accepted-gradient producer, not only a StructureAction consumer. */
@@ -294,6 +336,7 @@ void check_keyframe(bool complete_carrier) {
 
 int main(int argc, char** argv) {
   try {
+    check_restart_phase();
     if (argc == 2 && (std::string(argv[1]) == "--accepted-state16" ||
                       std::string(argv[1]) == "--accepted-hvp16")) {
       benchmark_accepted_state16(std::string(argv[1]) == "--accepted-hvp16");

@@ -7,6 +7,9 @@ VB macro driver, construct VB structures for CASSCF, or introduce compatibility
 headers. The initial scope is real, state-specific, full-CAS, exact integrals.
 
 - `mcscf/ci`: physical active integrals, spin strings, sigma/adjoint and spin.
+- `mcscf/optimization`: shared NEO/CIAH subspace solvers and algebraic
+  preconditioners; vector actions and dual norms are supplied by each model.
+- `mcscf/states`: one implementation of state-weight normalization.
 - `casscf/integrals`: inactive energy and active-Hamiltonian construction.
 - `casscf/driver`: orthogonal-model state and CI solve.
 - `vbscf`: nonorthogonal charts, selected structures and their transport.
@@ -35,6 +38,9 @@ must not require a full four-index MO integral array.
    - Preserve target spin in guesses and every correction direction.
    - No additional relaxed-Hessian response solve inside the joint action.
 4. Shared CIAH macro policy, with VB and orthogonal model callbacks.
+   - Numerical solvers and their tests are now independent of VBSCF. The VB
+     macrostep driver still owns charts, CI transport and physical actions;
+     extracting that policy remains separate work, not a second solver copy.
    - First extract policy from the working VB driver; do not copy it.
    - Include finite-update derivative pullbacks consistently.
 5. Same-guess validation: F2, 241, FeCl2, then Fe-porphine.

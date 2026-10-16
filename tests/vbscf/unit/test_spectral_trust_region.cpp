@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "vbscf/optimization/trust_region/spectral.hpp"
+#include "mcscf/optimization/trust_region/spectral.hpp"
 #include "vbscf/optimization/trust_region/truncated_newton.hpp"
 
 namespace {
@@ -14,7 +14,7 @@ void require(bool condition, const std::string& message) {
 void check(const std::string& name, const Eigen::VectorXd& d,
            const Eigen::VectorXd& g, double radius, bool boundary,
            bool hard_case = false) {
-  const auto result = xmvb::vb::solve_spectral_trust_region(d, g, radius);
+  const auto result = xmvb::mcscf::solve_spectral_trust_region(d, g, radius);
   const double norm = result.step.stableNorm();
   const Eigen::VectorXd residual =
       ((d.array() + result.shift) * result.step.array()).matrix() + g;
@@ -255,8 +255,8 @@ int main() {
     check("small radius with disparate scales", V(0, 1e200), V(1e-200, 0), 1e-200, true);
     for (double scale : {1e-100, 1e100}) {
       check("energy rescaling", scale * V(-2, 3), scale * V(1, 2), 1, true);
-      const auto reference = xmvb::vb::solve_spectral_trust_region(V(-2, 3), V(1, 2), 1);
-      const auto scaled = xmvb::vb::solve_spectral_trust_region(
+      const auto reference = xmvb::mcscf::solve_spectral_trust_region(V(-2, 3), V(1, 2), 1);
+      const auto scaled = xmvb::mcscf::solve_spectral_trust_region(
           scale * V(-2, 3), scale * V(1, 2), 1);
       require((reference.step - scaled.step).norm() < 1e-12,
               "solution changed under energy rescaling");

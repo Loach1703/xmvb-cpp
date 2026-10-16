@@ -18,12 +18,6 @@ enum class StandardTwoElectronMode {
   ResolutionOfIdentity,
 };
 
-enum class PfTwoElectronMode {
-  Auto,
-  Exact,
-  ResolutionOfIdentity,
-};
-
 /**
  * @brief End-to-end input bundle for the VBSCF matrix path.
  */
@@ -76,13 +70,6 @@ struct VbScfInput {
    */
   StandardTwoElectronMode standard_two_electron_mode =
       StandardTwoElectronMode::Auto;
-
-  /**
-   * @brief Requested Pf two-electron representation.
-   *
-   * `Auto` lets the consuming Pf evaluator select its default representation.
-   */
-  PfTwoElectronMode pf_two_electron_mode = PfTwoElectronMode::Auto;
 
   /**
    * @brief Provider for lazily building AO-side RI factors.

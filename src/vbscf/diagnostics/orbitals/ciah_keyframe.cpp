@@ -3,13 +3,13 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "mcscf/optimization/trace.hpp"
 
 namespace xmvb::vb::diagnostics {
 
 bool ciah_keyframe_audit_enabled() {
   const char* flag = std::getenv("XMVB_NEO_KEYFRAME_AUDIT");
-  return neo_event_trace_enabled() && flag &&
+  return mcscf::diagnostics::neo_event_trace_enabled() && flag &&
       (std::strcmp(flag, "transport") == 0 || std::strcmp(flag, "1") == 0);
 }
 
@@ -24,7 +24,7 @@ void audit_ciah_keyframe(
     const auto minus = evaluate(-epsilon * displacement);
     const Eigen::VectorXd error = (plus.gradient - minus.gradient) / (2.0 * epsilon) -
         hessian_displacement;
-    neo_trace("ciah_transported_hvp_audit",
+    mcscf::diagnostics::neo_trace("ciah_transported_hvp_audit",
         "epsilon=%.17g,full_error=%.17g,orbital_error=%.17g,structure_error=%.17g,image_norm=%.17g",
         epsilon, error.norm(), error.head(orbital_size).norm(),
         error.tail(error.size() - orbital_size).norm(), hessian_displacement.norm());
@@ -32,7 +32,7 @@ void audit_ciah_keyframe(
     const auto finite_minus = evaluate((1.0 - epsilon) * displacement);
     const double derivative = actual_gradient.dot(displacement);
     const double finite = (finite_plus.energy - finite_minus.energy) / (2.0 * epsilon);
-    neo_trace("ciah_transported_gradient_audit", "epsilon=%.17g,analytic=%.17g,finite=%.17g,error=%.17g",
+    mcscf::diagnostics::neo_trace("ciah_transported_gradient_audit", "epsilon=%.17g,analytic=%.17g,finite=%.17g,error=%.17g",
         epsilon, derivative, finite, std::abs(derivative - finite));
   }
 }
