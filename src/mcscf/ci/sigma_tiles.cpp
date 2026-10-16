@@ -4,6 +4,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -17,6 +18,64 @@ namespace xmvb::mcscf {
 namespace {
 
 using ChannelMatrix=Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::RowMajor>;
+constexpr std::size_t kWorkspaceBytes=64ULL*1024*1024;
+
+/** @brief Exclusive scratch lease; cache one idle slab, never one per thread.
+ * Concurrent or recursive actions still own disjoint buffers. Earlier returns
+ * release their buffer while another lease is active, so the idle cache cannot
+ * add a slab to the concurrent working set. Only pointer ownership is moved.
+ */
+class ChannelWorkspace {
+  struct Storage {
+    std::unique_ptr<double[]> data;
+    std::size_t capacity=0;
+    void swap(Storage& other) noexcept {
+      data.swap(other.data);
+      std::swap(capacity,other.capacity);
+    }
+  };
+  struct Pool {
+    std::mutex mutex;
+    Storage idle;
+    std::size_t active=0;
+  };
+  static Pool& pool() { static Pool shared; return shared; }
+  Storage storage_;
+  bool reused_=false;
+  std::size_t allocations_=0;
+
+public:
+  ChannelWorkspace() {
+    auto& shared=pool();
+    std::lock_guard lock(shared.mutex);
+    ++shared.active;
+    storage_.swap(shared.idle);
+    reused_=storage_.capacity!=0;
+  }
+  ~ChannelWorkspace() {
+    auto& shared=pool();
+    std::lock_guard lock(shared.mutex);
+    if (--shared.active==0 && storage_.capacity<=kWorkspaceBytes/sizeof(double))
+      storage_.swap(shared.idle);
+  }
+  ChannelWorkspace(const ChannelWorkspace&)=delete;
+  ChannelWorkspace& operator=(const ChannelWorkspace&)=delete;
+
+  void reserve(std::size_t required) {
+    if (required<=storage_.capacity) return;
+    storage_.data.reset();
+    storage_.capacity=0;
+    const auto capacity=std::max(required,kWorkspaceBytes/sizeof(double));
+    storage_.data=std::make_unique_for_overwrite<double[]>(capacity);
+    storage_.capacity=capacity;
+    ++allocations_;
+  }
+  double* get() const noexcept { return storage_.data.get(); }
+  double& operator[](std::size_t index) const noexcept { return storage_.data[index]; }
+  bool reused() const noexcept { return reused_; }
+  std::size_t allocations() const noexcept { return allocations_; }
+  std::size_t bytes() const noexcept { return storage_.capacity*sizeof(double); }
+};
 
 /** @brief Row-independent product using disjoint, already consumed halo storage. */
 void multiply_in_place(Eigen::Ref<ChannelMatrix> values,
@@ -97,7 +156,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   std::vector<Eigen::MatrixXd> kernel_adjoints(requests.size());
   if (collect_integrals) for (auto& gradient:kernel_adjoints)
     gradient=Eigen::MatrixXd::Zero(pairs,pairs);
-  constexpr std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL;
+  constexpr std::size_t workspace_bytes=kWorkspaceBytes;
   // Only these channel slabs coexist: response/state and, for a direction,
   // its output. Response and state refill the same input halo sequentially.
   const bool separate_output=has_direction || requests.size()>1;
@@ -123,8 +182,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   active.reserve(row_limit);
   active_support.reserve(row_limit);
   group_index.reserve(row_limit);
-  std::unique_ptr<double[]> workspace;
-  std::size_t capacity = 0, panel_size = 0, channel_size = 0,scratch_size=0;
+  ChannelWorkspace workspace;
+  std::size_t panel_size = 0, channel_size = 0,scratch_size=0;
   int count = 0, n_halo = 0, n_columns = 0;
 
   // Project the prefix tree onto beta first. Only O(U_beta) column indices
@@ -326,13 +385,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                       sizeof(int) * static_cast<std::size_t>(n_halo) * groups.size() >
                       workspace_bytes)
                 throw std::length_error("tiled direction exceeds 64 MiB workspace");
-              if (required > capacity) {
-                workspace.reset();
-                // Reserve the planned slab once, without value-initializing it.
-                // Successively larger batches must not churn large allocations.
-                capacity = std::max(required, workspace_bytes / sizeof(double));
-                workspace.reset(new double[capacity]);
-              }
+              workspace.reserve(required);
               Eigen::Map<Eigen::MatrixXd> input(workspace.get(), n_halo,
                   static_cast<Eigen::Index>(n_columns) * width);
               // Each distinct source column is read once per batch. Callbacks
@@ -673,13 +726,15 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
         "prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f,targets=%zu,exchange=%d,"
         "skipped_diagonal_scatters=%zu,gram=%.9f,gram_tiles=%zu,"
         "identity_halo_targets=%zu,beta_map_bytes=%zu,gram_partitions=%d,"
-        "gram_extent=%d,gram_scratch_bytes=%zu\n",
+        "gram_extent=%d,gram_scratch_bytes=%zu,workspace_reused=%d,"
+        "workspace_allocations=%zu,workspace_bytes=%zu\n",
         batches, source_columns, source_elements, peak_payload,
         prepare_time, read_time, compute_time, write_time, targets, exchange_parity,
         unsupported_targets * static_cast<std::size_t>(width) *
             (requests.size() + static_cast<std::size_t>(collect_integrals && static_cast<bool>(state))),
         gram_time,gram_tiles,identity_halo_targets,beta_map_bytes,
-        gram_partitions,gram_extent,gram_scratch_bytes);
+        gram_partitions,gram_extent,gram_scratch_bytes,
+        static_cast<int>(workspace.reused()),workspace.allocations(),workspace.bytes());
   std::vector<DirectCiIntegralAdjoint> results(requests.size());
   if (collect_integrals) for (std::size_t r=0;r<requests.size();++r)
     results[r]=pullback_channel_kernel(kernel_adjoints[r]);

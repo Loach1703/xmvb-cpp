@@ -95,3 +95,9 @@ Raw logs, build cache, hashes, affinity and numerical outputs are archived,
 excluding binaries. `comparison.csv` uses the existing native parser and
 `phase-summary.json` the existing phase parser. Check Slurm job 1264881 rather
 than assuming it completed or resubmitting because an observation timed out.
+
+Follow-up: job 1264881 was cancelled while still pending, before executing any
+calculation, because the workspace-lease candidate superseded it. Frozen
+latest-candidate job **1264892** subsequently completed on anode40; see
+`../c12-workspace-lease-20261017/README.md`. The anode42 data above remain
+unchanged and no old baseline was rerun.

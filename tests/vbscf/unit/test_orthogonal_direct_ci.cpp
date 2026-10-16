@@ -1,7 +1,9 @@
 #include <array>
+#include <barrier>
 #include <cmath>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -2885,17 +2887,28 @@ void check_full_square_tiled_gram() {
     const std::array<xmvb::mcscf::DirectCiIntegralAdjoint, 2> expected_adjoints{
         action.integral_adjoint(response, state, parity),
         action.integral_adjoint(second, state, parity)};
-    for (const int threads : thread_counts) {
-#ifdef _OPENMP
-      omp_set_num_threads(threads);
-#else
-      (void)threads;
-#endif
+    const auto verify=[&](bool recursive=false,std::barrier<>* rendezvous=nullptr) {
       std::array<Eigen::MatrixXd, 2> images{
           Eigen::MatrixXd::Zero(u, width * u),
           Eigen::MatrixXd::Zero(u, width * u)};
+      bool entered=false;
+      const auto base_reader=reader(responses[0]);
+      const xmvb::mcscf::DirectCiTileReader first_reader=[&](const auto& betas,
+          const auto& rows,Eigen::Ref<Eigen::MatrixXd> tile) {
+        if (!entered) {
+          entered=true;
+          // Both calls already own live scratch when they meet here.
+          if (rendezvous) rendezvous->arrive_and_wait();
+          if (recursive) {
+            Eigen::MatrixXd nested=Eigen::MatrixXd::Zero(u,width*u);
+            action.apply_tiled(width,reader(responses[1]),writer(nested));
+            require(close(nested,expected_images[1]),"recursive sigma corrupted its scratch");
+          }
+        }
+        base_reader(betas,rows,tile);
+      };
       const std::array<xmvb::mcscf::DirectCiTileRequest, 2> requests{{
-          {reader(responses[0]), writer(images[0]), nullptr, {}},
+          {first_reader, writer(images[0]), nullptr, {}},
           {reader(responses[1]), writer(images[1]), nullptr, {}}}};
       const auto actual = action.apply_tiled_responses(
           width, requests, reader(state), nullptr, parity);
@@ -2913,7 +2926,27 @@ void check_full_square_tiled_gram() {
                 close(actual[i].pair_kernel, expected_adjoints[i].pair_kernel),
                 "full-square row-partitioned Gram differs from dense CI oracles");
       }
+    };
+    for (const int threads : thread_counts) {
+#ifdef _OPENMP
+      omp_set_num_threads(threads);
+#else
+      (void)threads;
+#endif
+      verify();
     }
+    verify(true);
+    std::barrier rendezvous(2);
+    const auto concurrent=[&] {
+#ifdef _OPENMP
+      omp_set_num_threads(2);
+#endif
+      verify(false,&rendezvous);
+    };
+    auto first=std::async(std::launch::async,concurrent);
+    auto second_call=std::async(std::launch::async,concurrent);
+    first.get();
+    second_call.get();
   }
 #ifdef _OPENMP
   omp_set_num_threads(saved_threads);

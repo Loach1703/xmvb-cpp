@@ -49,10 +49,14 @@ def summarize(run):
         key: sum(row[key] for row in tiles) for key in
         ("prepare", "read", "compute", "write", "source_elements", "batches")})
     # Older saved runs did not record these scopes: keep them missing, not zero.
-    for key in ("gram", "gram_tiles"):
+    for key in ("gram", "gram_tiles", "workspace_allocations", "workspace_reused"):
         measured = [row[key] for row in tiles if key in row]
         if measured:
             tile_totals[key] = sum(measured)
+    capacities = [row["workspace_bytes"] for row in tiles if "workspace_bytes" in row]
+    if capacities:
+        # A reused slab is not another allocation: never sum its capacities.
+        tile_totals["workspace_peak_capacity_bytes"] = max(capacities)
     return dict(
         run=run.name, node=(run / "node.txt").read_text().strip(),
         note="Nested phase totals overlap; they are not additive wall-time shares.",
