@@ -31,7 +31,7 @@ enum class Phase {
   ChartGram, ChartCurvature, CiProductProjection,
   CiTransformBuild, CiOverlapApply, CiOverlapDirection, CiOverlapAdjoint,
   CiOverlapAdjointDirection, CiTransportRetract, CiTransportGradient,
-  CiTransportCurvature, Count
+  CiTransportCurvature, CiOverlapTransport, Count
 };
 
 /** @brief Opt-in wall/process-CPU totals. Nested scopes are not additive.
@@ -71,7 +71,7 @@ class PhaseTotals {
         "chart_gram", "chart_curvature", "ci_product_projection",
         "ci_transform_build", "ci_overlap_apply", "ci_overlap_direction", "ci_overlap_adjoint",
         "ci_overlap_adjoint_direction", "ci_transport_retract", "ci_transport_gradient",
-        "ci_transport_curvature"};
+        "ci_transport_curvature", "ci_overlap_transport"};
     static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Phase::Count));
     return names[static_cast<std::size_t>(phase)];
   }

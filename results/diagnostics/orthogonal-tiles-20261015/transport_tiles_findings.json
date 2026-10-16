@@ -1,0 +1,68 @@
+{
+  "case": "LOFLEA COV CAS(12,12), 132 structures, exact cc-pVDZ, HAO, NEO/CIAH, structure-space Davidson",
+  "actual_threads": 8,
+  "primary_native_comparison": {
+    "node": "anode50",
+    "saved_baseline_job": 1263333,
+    "current_at_entry_job": 1263538,
+    "final_job": 1263716,
+    "baseline_process_s": 71.48,
+    "entry_process_s": 72.14,
+    "final_process_s": 65.18,
+    "baseline_scf_s": 67.355929,
+    "final_scf_s": 60.480704,
+    "baseline_rss_kib": 2632084,
+    "final_rss_kib": 2627804,
+    "baseline_final_Eh": -399.106646267332,
+    "final_Eh": -399.106646267331,
+    "accepted_steps": 4,
+    "orbital_hvp": 36,
+    "structure_responses": 36,
+    "input_hash": "5d3086bf489db0d039c33197dc3ca61f3e5dc85bc4e1a1aaada292383ef0a858",
+    "note": "All macro/micro/keyframe/rejection counters agree. Entry and final runs use CPUs 184-191; the earlier excellent baseline uses CPUs 80-87 on the same node. Each is one native sample; old binaries were not rerun."
+  },
+  "same_node_phase_comparison": {
+    "node": "anode50",
+    "before_job": 1263535,
+    "after_job": 1263717,
+    "transport_curvature_s": [14.680027681, 7.481351310],
+    "keyframe_transport_gradient_s": [6.435212832, 4.153584628],
+    "analytic_diagonal_s": [5.180054382, 4.943222797],
+    "normal_adjoint_calls": [73, 37],
+    "directional_adjoint_calls": [47, 11],
+    "separate_overlap_direction_calls": [51, 15],
+    "new_fused_transport_calls": 36,
+    "exterior_constructor_calls": [828, 432],
+    "directional_transform_calls": [9450, 5670],
+    "ordinary_left_transform_calls": [16250, 18950],
+    "note": "Fixed-chart primal/tangent transforms are now ordinary actions instead of directional actions with a zero chart direction. Ordinary call counts therefore rise while directional work falls. Nested clocks overlap and are not additive."
+  },
+  "implemented": [
+    "Left/Right/Both overlap-adjoint requests compute only consumed cotangents. Left requests use exact scalar cross-Gram symmetry, not duplicated kernels.",
+    "Origin transport curvature, its mixed CI cotangent and its transpose directional forcing share one factor-tile sweep.",
+    "The transpose forcing reuses the accepted tile seeds through a directional exterior adjoint; no independent overlap-direction sweep remains in curvature.",
+    "One shared W lambda vector; W c and W q are generated only for the current tile. No worker copies of large panels, product images or integrals.",
+    "COV factor panels share one 8 MiB allowance. At width 64, their payload is at most 7096320 bytes for 924/924 strings, plus required small outputs and the shared support vector.",
+    "Broad complete product support retains the faster one-body-moment order. Its three shared product images must fit the existing 64 MiB overlap allowance; their dead storage is reused. Larger or restricted support uses the exact bounded factor order.",
+    "Keyframe transport uses single-sided pullbacks. Its distinct finite-chart calls have not all been fused into one sweep."
+  ],
+  "verification": {
+    "final_build_test_job": 1263712,
+    "ctest_passed": "8/8",
+    "coverage": "Independent occupied-minor finite differences; single-side versus complete adjoints; fused versus separate contractions; transpose duality; dense and sparse nonclosed selections; equal, unequal and empty-beta spin carriers; 1/4-thread row scatters; one-column/wider budgets; multistate transport; F2 HAO/OEO.",
+    "contraction_comparison_tolerance": "3e-12, normalized by max(1, reference norm)",
+    "source_hashes": "Local and remote production, test and runner SHA-256 values match.",
+    "binary_sha256": "372de79b3de42c38976e240719a08c173050df81de5d6286f17cfdc353ce58f8",
+    "unchanged": "Coordinates, complete physical transport curvature, gradient/HVP model, CIAH decisions, metric solves, analytic preconditioner and all convergence thresholds.",
+    "prototype_failure": "1263613 failed compiling a test that passed a fixed-size Eigen zero matrix pointer to a dynamic-matrix API. Corrected before chemistry runs. No production numerical failure was hidden."
+  },
+  "supplemental_candidate": {
+    "node": "anode56",
+    "native_job": 1263681,
+    "process_s": 49.58,
+    "rss_kib": 2643668,
+    "note": "Candidate before the final FULL temporary-lifetime cleanup; its COV branch is unchanged. Same CPU model and numerical settings, but a different node. Not used to claim the primary algorithmic speedup."
+  },
+  "theory": "article/ci_transport_tiles.tex and its compiled three-page PDF",
+  "scope": "No old benchmark reruns, no threshold tuning, no new routine certification, no unrelated RI edits."
+}

@@ -41,7 +41,8 @@ CiTransport::CiTransport(const OrbitalPreparationInput& input,
   lambda0_ = solve(upper_, gc0_);
   residual_upper_gradient_ = zero_;
   for (Eigen::Index s = 0; s < c0_.cols(); ++s)
-    residual_upper_gradient_ += overlap_.adjoint(upper_, upper_, lambda0_.col(s), c0_.col(s)).right;
+    residual_upper_gradient_ += overlap_.adjoint(upper_, upper_, lambda0_.col(s),
+        c0_.col(s),OverlapSide::Right).right;
   residual_overlap_gradient_ = overlap_upper_gradient(upper_, residual_upper_gradient_);
 }
 
@@ -139,10 +140,12 @@ Eigen::VectorXd CiTransport::gradient(const CiTransportPoint& point,
   const Eigen::MatrixXd lambda = solve(point.upper, fixed.coefficient_gradient);
   Eigen::MatrixXd current_upper = zero_, origin_upper = zero_;
   for (Eigen::Index s = 0; s < c0_.cols(); ++s) {
-    const UpperPair base = overlap_.adjoint(point.upper, upper_, lambda.col(s), point.base_coefficients.col(s));
-    const UpperPair origin = overlap_.adjoint(point.upper, upper_, lambda.col(s), c0_.col(s));
+    const UpperPair base = overlap_.adjoint(point.upper, upper_, lambda.col(s),
+        point.base_coefficients.col(s),OverlapSide::Left);
+    const UpperPair origin = overlap_.adjoint(point.upper, upper_, lambda.col(s),
+        c0_.col(s),OverlapSide::Right);
     const UpperPair connection = overlap_.adjoint_direction(point.upper, upper_,
-        zero_, point.origin_direction, lambda.col(s), c0_.col(s));
+        zero_, point.origin_direction, lambda.col(s), c0_.col(s),OverlapSide::Left);
     const UpperPair metric = overlap_.adjoint(point.upper, point.upper, lambda.col(s), point.coefficients.col(s));
     current_upper += base.left + connection.left - metric.left - metric.right;
     origin_upper += origin.right;
@@ -166,9 +169,13 @@ CiTransportCurvature CiTransport::curvature(const Eigen::VectorXd& orbital_direc
       origin_pullback_.overlap_direction(packed));
   const Eigen::MatrixXd dc = structure_.coefficient_response_coordinates(structure_direction);
   Eigen::MatrixXd dg = zero_, mixed = zero_;
+  Eigen::MatrixXd forcing(c0_.rows(),c0_.cols());
   for (Eigen::Index s = 0; s < c0_.cols(); ++s) {
-    dg += overlap_.adjoint_direction(upper_, upper_, zero_, dr, lambda0_.col(s), c0_.col(s)).right;
-    mixed += overlap_.adjoint(upper_, upper_, lambda0_.col(s), dc.col(s)).right;
+    const auto contractions=overlap_.transport_curvature(upper_,dr,lambda0_.col(s),
+        c0_.col(s),dc.col(s));
+    dg+=contractions.directional;
+    mixed+=contractions.mixed;
+    forcing.col(s)=contractions.image;
   }
   const Eigen::MatrixXd d_overlap_gradient = overlap_upper_gradient_direction(
       upper_, dr, residual_upper_gradient_, dg);
@@ -178,7 +185,7 @@ CiTransportCurvature CiTransport::curvature(const Eigen::VectorXd& orbital_direc
   result.orbital_from_structure = -chart_.project_reduced_gradient(
       origin_pullback_.gradient(overlap_upper_gradient(upper_, mixed)));
   result.structure_from_orbital = -structure_.project_coordinates(
-      overlap_.apply_direction(upper_, upper_, dr, zero_, lambda0_) / coordinate_scale_);
+      forcing / coordinate_scale_);
   return result;
 }
 

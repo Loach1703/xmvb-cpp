@@ -8,6 +8,9 @@
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
 #include <Eigen/QR>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
@@ -262,6 +265,12 @@ void check_case(const std::vector<std::vector<int>>& alpha,
   }
 
   const UpperPair adjoint = overlap.adjoint(left, right, x, y);
+  const auto only_left=overlap.adjoint(left,right,x,y,OverlapSide::Left);
+  const auto only_right=overlap.adjoint(left,right,x,y,OverlapSide::Right);
+  require(only_left.right.size()==0 && only_right.left.size()==0 &&
+      relative_error(only_left.left,adjoint.left)<2e-12 &&
+      relative_error(only_right.right,adjoint.right)<2e-12,
+      "single-sided adjoints differ from the complete pullback");
   const double adjoint_dot = dot(adjoint.left, dl) + dot(adjoint.right, dr);
   const double scalar_difference =
       (x.dot(overlap.apply(left + h * dl, right + h * dr, y).col(0)) -
@@ -281,6 +290,12 @@ void check_case(const std::vector<std::vector<int>>& alpha,
 
   const UpperPair analytic_adjoint_direction =
       overlap.adjoint_direction(left, right, dl, dr, x, y);
+  const auto direction_left=overlap.adjoint_direction(left,right,dl,dr,x,y,OverlapSide::Left);
+  const auto direction_right=overlap.adjoint_direction(left,right,dl,dr,x,y,OverlapSide::Right);
+  require(direction_left.right.size()==0 && direction_right.left.size()==0 &&
+      relative_error(direction_left.left,analytic_adjoint_direction.left)<2e-12 &&
+      relative_error(direction_right.right,analytic_adjoint_direction.right)<2e-12,
+      "single-sided directional adjoints differ from the complete pullback");
   const UpperPair plus = overlap.adjoint(left + h * dl, right + h * dr, x, y);
   const UpperPair minus = overlap.adjoint(left - h * dl, right - h * dr, x, y);
   require(relative_error(analytic_adjoint_direction.left,
@@ -301,6 +316,47 @@ void check_case(const std::vector<std::vector<int>>& alpha,
       (2.0 * h);
   require(std::abs(dot(identity_adjoint.left, dl) - identity_difference) < 2e-8,
           "singular occupied minors lost their derivative contribution");
+
+  const Eigen::Vector3d dc(0.21,-0.13,0.31);
+  const Eigen::MatrixXd zero=Eigen::Matrix4d::Zero();
+  for (const Eigen::MatrixXd& r : {left,Eigen::MatrixXd(identity)}) {
+    const auto fused=overlap.transport_curvature(r,dr,x,y,dc);
+    const auto expected_d=overlap.adjoint_direction(r,r,zero,dr,x,y);
+    const auto expected_m=overlap.adjoint(r,r,x,dc);
+    const auto expected_image=overlap.apply_direction(r,r,dr,zero,x);
+    require(relative_error(fused.directional,expected_d.right)<3e-12 &&
+        relative_error(fused.mixed,expected_m.right)<3e-12 &&
+        relative_error(fused.image,expected_image)<3e-12,
+        "fused transport differs from independent overlap contractions");
+    require(std::abs(dot(fused.mixed,dr)-dc.dot(fused.image))<3e-11,
+        "fused transport mixed blocks violate transpose duality");
+    const Eigen::MatrixXd finite_image=(reference_cross(r+h*dr,r,w,alpha,beta)-
+        reference_cross(r-h*dr,r,w,alpha,beta))*x/(2*h);
+    require(relative_error(fused.image,finite_image)<2e-8,
+        "fused transport transpose image fails independent minor differences");
+    const auto stationary=overlap.transport_curvature(r,zero,x,y,dc);
+    require(stationary.directional.norm()<2e-12 && stationary.image.norm()<2e-12 &&
+        relative_error(stationary.mixed,expected_m.right)<3e-12,
+        "zero orbital direction changed the mixed transport cotangent");
+    if (full_ambient) {
+      const ExteriorOrbitalTransform a(alpha,r),b(beta,r);
+      const auto narrow=action.cross_overlap_transport(x,y,dc,a,b,dr,
+          8*sizeof(double)*(alpha.size()+beta.size()));
+      require(relative_error(narrow.directional,fused.directional)<3e-12 &&
+          relative_error(narrow.mixed,fused.mixed)<3e-12 &&
+          relative_error(narrow.image,fused.image)<3e-12,
+          "one-column transport tiles differ from wide panels");
+      const auto single_a=action.cross_overlap_adjoint(x,y,a,b,a,b,nullptr,nullptr,
+          8*sizeof(double)*(alpha.size()+beta.size()),OverlapSide::Left);
+      const auto single_b=action.cross_overlap_adjoint(x,y,a,b,a,b,&zero,&dr,
+          16*sizeof(double)*(alpha.size()+beta.size()),OverlapSide::Right);
+      const auto both=overlap.adjoint(r,r,x,y);
+      require(single_a.right.size()==0 && single_b.left.size()==0 &&
+          relative_error(single_a.left,both.left)<3e-12 &&
+          relative_error(single_b.right,expected_d.right)<3e-12,
+          "one-sided bounded adjoints differ from full pullbacks");
+    }
+  }
 
   if (full_ambient) {
     // The carrier is complete, but the three selected columns do not close
@@ -353,16 +409,72 @@ void check_broad_moment_budget() {
   }
 }
 
+/** @brief Real parallel row scatters, with unequal complete spin carriers. */
+void check_parallel_transport() {
+  constexpr int n=8;
+  std::vector<std::vector<int>> alpha,beta;
+  for (unsigned mask=0; mask<(1u<<n); ++mask) {
+    const int electrons=__builtin_popcount(mask);
+    if (electrons!=3 && electrons!=4) continue;
+    std::vector<int> occupied;
+    for (int p=0; p<n; ++p) if ((mask>>p)&1u) occupied.push_back(p);
+    (electrons==4 ? alpha:beta).push_back(std::move(occupied));
+  }
+  Eigen::MatrixXd r=Eigen::MatrixXd::Identity(n,n),dr=Eigen::MatrixXd::Zero(n,n);
+  for (int q=0; q<n; ++q) for (int p=0; p<=q; ++p) {
+    if (p<q) r(p,q)=0.08*std::sin(p+2*q+1);
+    dr(p,q)=0.03*std::cos(2*p+q+1);
+  }
+  const ExteriorOrbitalTransform a(alpha,r),b(beta,r);
+  const Eigen::Vector3d x(0.4,-0.7,0.8),y(-0.2,0.6,0.3),q(0.1,0.3,-0.5);
+  const Eigen::MatrixXd zero=Eigen::MatrixXd::Zero(n,n);
+#ifdef _OPENMP
+  const int saved_threads=omp_get_max_threads();
+#endif
+  for (bool sparse : {false,true}) {
+    Eigen::MatrixXd w=selected_expansion(alpha.size(),beta.size());
+    if (sparse) {
+      w.setZero();
+      for (int bi=0; bi<static_cast<int>(beta.size()); ++bi)
+        for (int s=0; s<3; ++s)
+          w(((11*bi+3)%alpha.size())*beta.size()+bi,s)=std::sin(0.37*(bi+1)*(s+2));
+    }
+    const auto action=make_action(alpha,beta,w);
+    const auto reference_d=action.cross_overlap_adjoint(x,y,a,b,a,b,&zero,&dr);
+    const auto reference_q=action.cross_overlap_adjoint(x,q,a,b,a,b);
+    const auto da=a.direction(dr),db=b.direction(dr),za=a.direction(zero),zb=b.direction(zero);
+    const auto reference_image=action.cross_overlap(x,a,b,a,b,&da,&db,&za,&zb);
+    for (int threads : {1,4}) {
+#ifdef _OPENMP
+      omp_set_num_threads(threads);
+#endif
+      for (std::size_t columns : {1u,7u}) {
+        const auto fused=action.cross_overlap_transport(x,y,q,a,b,dr,
+            columns*8*sizeof(double)*(alpha.size()+beta.size()));
+        require(relative_error(fused.directional,reference_d.right)<3e-12 &&
+            relative_error(fused.mixed,reference_q.right)<3e-12 &&
+            relative_error(fused.image,reference_image)<3e-12,
+            "parallel unequal-spin transport changed the selected contractions");
+      }
+    }
+  }
+#ifdef _OPENMP
+  omp_set_num_threads(saved_threads);
+#endif
+}
+
 }  // namespace
 
 int main() {
   try {
     check_broad_moment_budget();
+    check_parallel_transport();
     const std::vector<std::vector<int>> full_alpha = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
     const std::vector<std::vector<int>> full_beta = {
         {0}, {1}, {2}, {3}};
     check_case(full_alpha, full_beta, true);
+    check_case(full_alpha, {{}}, true);
     check_case(full_beta, full_beta, true);
     check_case(full_alpha, full_beta, true, true);
     check_case(full_beta, full_beta, true, true);

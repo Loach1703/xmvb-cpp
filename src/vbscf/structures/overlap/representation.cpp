@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -348,7 +349,7 @@ UpperPair RepresentationOverlap::adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& left_upper,
     const Eigen::Ref<const Eigen::MatrixXd>& right_upper,
     const Eigen::Ref<const Eigen::VectorXd>& left_coeff,
-    const Eigen::Ref<const Eigen::VectorXd>& right_coeff) const {
+    const Eigen::Ref<const Eigen::VectorXd>& right_coeff, OverlapSide side) const {
   profiling::ScopedPhase phase(profiling::Phase::CiOverlapAdjoint);
   validate_chart(left_upper, n_active_);
   validate_chart(right_upper, n_active_);
@@ -363,7 +364,8 @@ UpperPair RepresentationOverlap::adjoint(
   if (complete_carrier_) {
     ExteriorOrbitalTransform la(alpha_, left_upper), lb(beta_, left_upper);
     ExteriorOrbitalTransform ra(alpha_, right_upper), rb(beta_, right_upper);
-    return action_->cross_overlap_adjoint(left_coeff, right_coeff, la, lb, ra, rb);
+    return action_->cross_overlap_adjoint(left_coeff, right_coeff, la, lb, ra, rb,
+        nullptr,nullptr,64ULL*1024ULL*1024ULL,side);
   }
   const Eigen::MatrixXd k = left_upper.transpose() * right_upper;
   Eigen::MatrixXd g = Eigen::MatrixXd::Zero(n_active_, n_active_);
@@ -396,8 +398,8 @@ UpperPair RepresentationOverlap::adjoint(
                         weight, 0.0, &g, nullptr);
     }
   }
-  return {upper_part(right_upper * g.transpose()),
-          upper_part(left_upper * g)};
+  return {side != OverlapSide::Right ? upper_part(right_upper * g.transpose()) : Eigen::MatrixXd{},
+          side != OverlapSide::Left ? upper_part(left_upper * g) : Eigen::MatrixXd{}};
 }
 
 UpperPair RepresentationOverlap::adjoint_direction(
@@ -406,7 +408,7 @@ UpperPair RepresentationOverlap::adjoint_direction(
     const Eigen::Ref<const Eigen::MatrixXd>& delta_left_upper,
     const Eigen::Ref<const Eigen::MatrixXd>& delta_right_upper,
     const Eigen::Ref<const Eigen::VectorXd>& left_coeff,
-    const Eigen::Ref<const Eigen::VectorXd>& right_coeff) const {
+    const Eigen::Ref<const Eigen::VectorXd>& right_coeff, OverlapSide side) const {
   profiling::ScopedPhase phase(profiling::Phase::CiOverlapAdjointDirection);
   validate_chart(left_upper, n_active_);
   validate_chart(right_upper, n_active_);
@@ -424,7 +426,8 @@ UpperPair RepresentationOverlap::adjoint_direction(
     ExteriorOrbitalTransform la(alpha_, left_upper), lb(beta_, left_upper);
     ExteriorOrbitalTransform ra(alpha_, right_upper), rb(beta_, right_upper);
     const Eigen::MatrixXd dl = delta_left_upper, dr = delta_right_upper;
-    return action_->cross_overlap_adjoint(left_coeff, right_coeff, la, lb, ra, rb, &dl, &dr);
+    return action_->cross_overlap_adjoint(left_coeff, right_coeff, la, lb, ra, rb,
+        &dl,&dr,64ULL*1024ULL*1024ULL,side);
   }
   const Eigen::MatrixXd k = left_upper.transpose() * right_upper;
   const Eigen::MatrixXd dk = delta_left_upper.transpose() * right_upper +
@@ -463,9 +466,36 @@ UpperPair RepresentationOverlap::adjoint_direction(
                         xl.col(0).dot(dprojected), &g, &dg);
     }
   }
-  return {upper_part(delta_right_upper * g.transpose() +
-                     right_upper * dg.transpose()),
-          upper_part(delta_left_upper * g + left_upper * dg)};
+  return {side != OverlapSide::Right ? upper_part(delta_right_upper * g.transpose() +
+                     right_upper * dg.transpose()) : Eigen::MatrixXd{},
+          side != OverlapSide::Left ? upper_part(delta_left_upper * g + left_upper * dg) : Eigen::MatrixXd{}};
+}
+
+OverlapTransportCurvature RepresentationOverlap::transport_curvature(
+    const Eigen::Ref<const Eigen::MatrixXd>& upper,
+    const Eigen::Ref<const Eigen::MatrixXd>& direction,
+    const Eigen::Ref<const Eigen::VectorXd>& lambda,
+    const Eigen::Ref<const Eigen::VectorXd>& coefficients,
+    const Eigen::Ref<const Eigen::VectorXd>& coefficient_direction) const {
+  validate_chart(upper,n_active_);
+  validate_direction(direction,n_active_);
+  if (lambda.size()!=action_->n_structures() || coefficients.size()!=lambda.size() ||
+      coefficient_direction.size()!=lambda.size() || !lambda.allFinite() ||
+      !coefficients.allFinite() || !coefficient_direction.allFinite())
+    throw std::invalid_argument("invalid overlap transport coefficients");
+  if (complete_carrier_) {
+    ExteriorOrbitalTransform alpha(alpha_,upper);
+    std::optional<ExteriorOrbitalTransform> beta;
+    if (alpha_!=beta_) beta.emplace(beta_,upper);
+    return action_->cross_overlap_transport(lambda,coefficients,coefficient_direction,
+        alpha,beta ? *beta : alpha,direction);
+  }
+  // The occupied-minor representation is a different physical carrier;
+  // its existing exact derivatives do not require a complete exterior space.
+  const Eigen::MatrixXd zero=Eigen::MatrixXd::Zero(n_active_,n_active_);
+  return {adjoint_direction(upper,upper,zero,direction,lambda,coefficients,OverlapSide::Right).right,
+          adjoint(upper,upper,lambda,coefficient_direction,OverlapSide::Right).right,
+          apply_direction(upper,upper,direction,zero,lambda).col(0)};
 }
 
 }  // namespace xmvb::vb

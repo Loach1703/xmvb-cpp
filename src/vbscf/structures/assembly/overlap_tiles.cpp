@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "core/openmp.hpp"
+#include "core/timing.hpp"
 #include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
@@ -203,18 +204,26 @@ UpperPair StructureAction::cross_overlap_adjoint(
     const ExteriorOrbitalTransform& la, const ExteriorOrbitalTransform& lb,
     const ExteriorOrbitalTransform& ra, const ExteriorOrbitalTransform& rb,
     const Eigen::MatrixXd* delta_left, const Eigen::MatrixXd* delta_right,
-    std::size_t workspace_bytes) const {
+    std::size_t workspace_bytes, OverlapSide side) const {
   const bool directional = delta_left != nullptr;
   if (left.size() != n_structures_ || right.size() != n_structures_ ||
       directional != (delta_right != nullptr))
     throw std::invalid_argument("invalid cross overlap adjoint");
+  // Scalar cross-Gram symmetry turns a left-only pullback into the same
+  // right-only contraction, including both chart directions when present.
+  if (side == OverlapSide::Left) {
+    auto swapped = cross_overlap_adjoint(right,left,ra,rb,la,lb,
+        delta_right,delta_left,workspace_bytes,OverlapSide::Right);
+    return {std::move(swapped.right),{}};
+  }
+  const bool left_requested = side == OverlapSide::Both;
   const std::size_t products=static_cast<std::size_t>(n_unique_alpha_)*n_unique_beta_;
   const bool dl=directional && !delta_left->isZero(0.0);
   const bool dr=directional && !delta_right->isZero(0.0);
   if (spin_products_.size()==products && same_chart(la,lb) && same_chart(ra,rb) &&
       products<=workspace_bytes/((2+static_cast<int>(dl)+static_cast<int>(dr))*sizeof(double))) {
     if (directional && !dl && !dr)
-      return {Eigen::MatrixXd::Zero(la.n_orbitals(),la.n_orbitals()),
+      return {left_requested ? Eigen::MatrixXd::Zero(la.n_orbitals(),la.n_orbitals()).eval() : Eigen::MatrixXd{},
               Eigen::MatrixXd::Zero(ra.n_orbitals(),ra.n_orbitals())};
     ExteriorTransformDirection dla,dlb,dra,drb;
     if (dl) { dla=la.direction(*delta_left); dlb=lb.direction(*delta_left); }
@@ -225,12 +234,13 @@ UpperPair StructureAction::cross_overlap_adjoint(
     const Eigen::MatrixXd moment=carrier_generator_adjoint(r.value,l.value);
     const Eigen::MatrixXd transpose=moment.transpose();
     if (!directional)
-      return {la.moment_pullback(moment),ra.moment_pullback(transpose)};
+      return {left_requested ? la.moment_pullback(moment) : Eigen::MatrixXd{},
+              ra.moment_pullback(transpose)};
     Eigen::MatrixXd delta=Eigen::MatrixXd::Zero(moment.rows(),moment.cols());
     if (dl) delta+=carrier_generator_adjoint(r.value,l.tangent);
     if (dr) delta+=carrier_generator_adjoint(r.tangent,l.value);
     const Eigen::MatrixXd delta_transpose=delta.transpose();
-    return {la.moment_pullback(moment,&delta,delta_left),
+    return {left_requested ? la.moment_pullback(moment,&delta,delta_left) : Eigen::MatrixXd{},
             ra.moment_pullback(transpose,&delta_transpose,delta_right)};
   }
   const auto& sources = *sources_;
@@ -249,7 +259,7 @@ UpperPair StructureAction::cross_overlap_adjoint(
       coefficients(group, 0) += term.coefficient * left[term.structure];
       coefficients(group, 1) += term.coefficient * right[term.structure];
     }
-  UpperPair result{Eigen::MatrixXd::Zero(la.n_orbitals(), la.n_orbitals()),
+  UpperPair result{left_requested ? Eigen::MatrixXd::Zero(la.n_orbitals(), la.n_orbitals()).eval() : Eigen::MatrixXd{},
                    Eigen::MatrixXd::Zero(ra.n_orbitals(), ra.n_orbitals())};
   for (int begin = 0; begin < static_cast<int>(sources.columns.size()); begin += extent) {
     const int count = std::min<int>(extent, sources.columns.size() - begin);
@@ -288,8 +298,123 @@ UpperPair StructureAction::cross_overlap_adjoint(
       return map.generator_pullback(seed.value, image.value,
           directional ? &seed.tangent : nullptr, directional ? &image.tangent : nullptr, delta);
     };
-    result.left += pullback(la, u, za, delta_left) + pullback(lb, v, zb, delta_left);
+    if (left_requested)
+      result.left += pullback(la, u, za, delta_left) + pullback(lb, v, zb, delta_left);
     result.right += pullback(ra, za, u, delta_right) + pullback(rb, zb, v, delta_right);
+  }
+  return result;
+}
+
+OverlapTransportCurvature StructureAction::cross_overlap_transport(
+    const Eigen::VectorXd& lambda, const Eigen::VectorXd& coefficients,
+    const Eigen::VectorXd& coefficient_direction,
+    const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+    const Eigen::MatrixXd& direction, std::size_t workspace_bytes) const {
+  profiling::ScopedPhase phase(profiling::Phase::CiOverlapTransport);
+  const int n=alpha.n_orbitals();
+  if (lambda.size()!=n_structures_ || coefficients.size()!=n_structures_ ||
+      coefficient_direction.size()!=n_structures_ || alpha.dimension()!=n_unique_alpha_ ||
+      beta.dimension()!=n_unique_beta_ || beta.n_orbitals()!=n ||
+      direction.rows()!=n || direction.cols()!=n)
+    throw std::invalid_argument("invalid overlap transport tile inputs");
+  const auto da=alpha.direction(direction), db=beta.direction(direction);
+  OverlapTransportCurvature result{Eigen::MatrixXd::Zero(n,n),
+      Eigen::MatrixXd::Zero(n,n),Eigen::VectorXd::Zero(n_structures_)};
+  const std::size_t products=static_cast<std::size_t>(n_unique_alpha_)*n_unique_beta_;
+  // Broad support already has a cheaper one-body-moment contraction order.
+  // Keep it within the existing 64 MiB overlap allowance; narrower selections
+  // never expand here. Three shared images suffice for all consumers.
+  if (spin_products_.size()==products && same_chart(alpha,beta) &&
+      products<=workspace_bytes/(3*sizeof(double))) {
+    auto accepted=physical_product(*this,lambda,alpha,beta);
+    auto right=physical_product(*this,coefficients,alpha,beta,&da,&db);
+    const Eigen::MatrixXd moment=carrier_generator_adjoint(accepted.value,right.value);
+    const Eigen::MatrixXd delta=carrier_generator_adjoint(accepted.value,right.tangent);
+    result.directional=alpha.moment_pullback(moment,&delta,&direction);
+    right.value.resize(0,0);
+    right.value=expand_structure_block(coefficient_direction);
+    alpha.apply_left(&right.value); beta.apply_right(&right.value);
+    result.mixed=alpha.moment_pullback(carrier_generator_adjoint(accepted.value,right.value));
+    right.value.resize(0,0);
+    right.tangent.setZero();
+    // Reuse the dead directional image as the transpose-action workspace.
+    beta.apply_directional_adjoint_right(db,&accepted.value,&right.tangent);
+    alpha.apply_directional_adjoint_left(da,&accepted.value,&right.tangent);
+    result.image=contract_spin_product_block(right.tangent).col(0);
+    return result;
+  }
+  const auto& sources=*sources_;
+  // Eight alpha and seven beta row panels coexist at most. One allowance
+  // bounds all three consumers together, not three independent workspaces.
+  const std::size_t minimum_bytes=8*sizeof(double)*
+      (static_cast<std::size_t>(n_unique_alpha_)+n_unique_beta_);
+  const auto panel_bytes=std::max(std::min<std::size_t>(workspace_bytes,8ULL*1024*1024),minimum_bytes);
+  const int extent=panel_width(panel_bytes,n_unique_alpha_,n_unique_beta_,
+      sources.columns.size(),8);
+  const Eigen::VectorXd weights=expand_support(lambda);
+  const auto fixed_adjoint=[](const ExteriorOrbitalTransform& map,Factor& factor) {
+    map.apply_adjoint_left(&factor.value);
+    if (factor.tangent.size()) map.apply_adjoint_left(&factor.tangent);
+  };
+  const auto fixed_forward=[](const ExteriorOrbitalTransform& map,Factor& factor) {
+    map.apply_left(&factor.value);
+    if (factor.tangent.size()) map.apply_left(&factor.tangent);
+  };
+  for (int begin=0; begin<static_cast<int>(sources.columns.size()); begin+=extent) {
+    const int count=std::min<int>(extent,sources.columns.size()-begin);
+    Factor u(n_unique_alpha_,count,true), v(n_unique_beta_,count,true);
+    Factor mixed_u(n_unique_alpha_,count,false);
+    for (int j=0; j<count; ++j) {
+      const int b=sources.columns[begin+j];
+      v.value(b,j)=1;
+      for (const int g:sources.beta_groups[b]) {
+        const int a=spin_products_[g]/n_unique_beta_;
+        for (auto t=spin_term_offsets_[g]; t<spin_term_offsets_[g+1]; ++t) {
+          const auto& term=spin_terms_[t];
+          u.value(a,j)+=term.coefficient*coefficients[term.structure];
+          mixed_u.value(a,j)+=term.coefficient*coefficient_direction[term.structure];
+        }
+      }
+    }
+    transform(alpha,&da,u); transform(beta,&db,v);
+    transform(alpha,nullptr,mixed_u);
+    Factor a=u,b=v, mixed_a=mixed_u;
+    fixed_adjoint(alpha,a); fixed_adjoint(beta,b); fixed_adjoint(alpha,mixed_a);
+    Factor za(n_unique_alpha_,count,true), zb(n_unique_beta_,count,true);
+    Factor mixed_zb(n_unique_beta_,count,false);
+#pragma omp parallel for schedule(static) if(n_unique_alpha_>32)
+    for (int ai=0; ai<n_unique_alpha_; ++ai)
+      for (int g=sources.alpha_offsets[ai]; g<sources.alpha_offsets[ai+1]; ++g) {
+        const int bi=spin_products_[g]%n_unique_beta_;
+        za.value.row(ai).noalias()+=weights[g]*b.value.row(bi);
+        za.tangent.row(ai).noalias()+=weights[g]*b.tangent.row(bi);
+      }
+#pragma omp parallel for schedule(static) if(n_unique_beta_>32)
+    for (int bi=0; bi<n_unique_beta_; ++bi)
+      for (const int g:sources.beta_groups[bi]) {
+        const int ai=spin_products_[g]/n_unique_beta_;
+        zb.value.row(bi).noalias()+=weights[g]*a.value.row(ai);
+        zb.tangent.row(bi).noalias()+=weights[g]*a.tangent.row(ai);
+        mixed_zb.value.row(bi).noalias()+=weights[g]*mixed_a.value.row(ai);
+      }
+    fixed_forward(alpha,za); fixed_forward(beta,zb); fixed_forward(beta,mixed_zb);
+    result.directional+=alpha.generator_pullback(za.value,u.value,
+        &za.tangent,&u.tangent,&direction)+beta.generator_pullback(zb.value,v.value,
+        &zb.tangent,&v.tangent,&direction);
+    result.mixed+=alpha.generator_pullback(za.value,mixed_u.value)+
+        beta.generator_pullback(mixed_zb.value,v.value);
+    // The transpose directional image reuses za=T_a X_lambda T_b^T v:
+    // d(T_a^T za)=dT_a^T za + T_a^T T_a X_lambda T_b^T dv.
+    // Sampling only touched original products is exactly W^T, not closure.
+    alpha.apply_directional_adjoint_left(da,&za.value,&za.tangent);
+    for (int j=0; j<count; ++j)
+      for (const int g:sources.beta_groups[sources.columns[begin+j]]) {
+        const double value=za.tangent(spin_products_[g]/n_unique_beta_,j);
+        for (auto t=spin_term_offsets_[g]; t<spin_term_offsets_[g+1]; ++t) {
+          const auto& term=spin_terms_[t];
+          result.image[term.structure]+=term.coefficient*value;
+        }
+      }
   }
   return result;
 }

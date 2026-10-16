@@ -13,6 +13,7 @@
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 #include "vbscf/structures/assembly/connection.hpp"
 #include "vbscf/structures/expansion/types.hpp"
+#include "vbscf/structures/overlap/representation.hpp"
 
 namespace xmvb::mcscf {
 class DirectCiSigmaAction;
@@ -30,7 +31,6 @@ struct ExteriorTransformDirection;
 struct OrthogonalActiveIntegrals;
 
 class StructureMetricInverse;
-struct UpperPair;
 struct SpinSources;
 
 /** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
@@ -364,6 +364,15 @@ public:
       const ExteriorOrbitalTransform& lb, const ExteriorOrbitalTransform& ra,
       const ExteriorOrbitalTransform& rb, const Eigen::MatrixXd* delta_left = nullptr,
       const Eigen::MatrixXd* delta_right = nullptr,
+      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL,
+      OverlapSide side = OverlapSide::Both) const;
+
+  /** @brief Fused overlap transport; shared panels, no transformed product array. */
+  OverlapTransportCurvature cross_overlap_transport(
+      const Eigen::VectorXd& lambda, const Eigen::VectorXd& coefficients,
+      const Eigen::VectorXd& coefficient_direction,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const Eigen::MatrixXd& direction,
       std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
 
   /**

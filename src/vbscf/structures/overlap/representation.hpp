@@ -10,10 +10,23 @@ namespace xmvb::vb {
 class StructureAction;
 class ExteriorOrbitalTransform;
 
+/** @brief Chart cotangents actually consumed by the caller. */
+enum class OverlapSide { Left, Right, Both };
+
 /** Gradients in the independent upper-triangular entries of the two charts. */
 struct UpperPair {
   Eigen::MatrixXd left;
   Eigen::MatrixXd right;
+};
+
+/** @brief Three origin-chart contractions sharing the same selected factors.
+ * For f(L,R)=lambda^T F(L)^T F(R)c, directional is D_R grad_R f[dR],
+ * mixed is grad_R f with c replaced by dc, and image is D F(R)^T[dR] F(R)lambda.
+ */
+struct OverlapTransportCurvature {
+  Eigen::MatrixXd directional;
+  Eigen::MatrixXd mixed;
+  Eigen::VectorXd image;
 };
 
 /** Cross Gram action F(R_left)^T F(R_right), with F(R) = wedge(R) W.
@@ -78,12 +91,15 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& delta_right_upper,
       const Eigen::Ref<const Eigen::MatrixXd>& structure_coeff_block) const;
 
-  /** Adjoint of left_coeff^T F(left)^T F(right) right_coeff. */
+  /** Adjoint of left_coeff^T F(left)^T F(right) right_coeff.
+   * The unrequested side is empty, not computed and discarded.
+   */
   UpperPair adjoint(
       const Eigen::Ref<const Eigen::MatrixXd>& left_upper,
       const Eigen::Ref<const Eigen::MatrixXd>& right_upper,
       const Eigen::Ref<const Eigen::VectorXd>& left_coeff,
-      const Eigen::Ref<const Eigen::VectorXd>& right_coeff) const;
+      const Eigen::Ref<const Eigen::VectorXd>& right_coeff,
+      OverlapSide side = OverlapSide::Both) const;
 
   /** Chart-direction derivative of adjoint, with coefficients held fixed. */
   UpperPair adjoint_direction(
@@ -92,7 +108,19 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& delta_left_upper,
       const Eigen::Ref<const Eigen::MatrixXd>& delta_right_upper,
       const Eigen::Ref<const Eigen::VectorXd>& left_coeff,
-      const Eigen::Ref<const Eigen::VectorXd>& right_coeff) const;
+      const Eigen::Ref<const Eigen::VectorXd>& right_coeff,
+      OverlapSide side = OverlapSide::Both) const;
+
+  /** @brief Origin-chart directional/mixed cotangents and transpose action.
+   * Uses a single bounded tile sweep for an orthogonal-CI carrier. The
+   * selected structure columns need not be closed under orbital transforms.
+   */
+  OverlapTransportCurvature transport_curvature(
+      const Eigen::Ref<const Eigen::MatrixXd>& upper,
+      const Eigen::Ref<const Eigen::MatrixXd>& direction,
+      const Eigen::Ref<const Eigen::VectorXd>& lambda,
+      const Eigen::Ref<const Eigen::VectorXd>& coefficients,
+      const Eigen::Ref<const Eigen::VectorXd>& coefficient_direction) const;
 
 private:
   const StructureAction* action_;
