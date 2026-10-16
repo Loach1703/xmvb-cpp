@@ -95,7 +95,7 @@ VbScfResult VbScfEvaluator::evaluate(
   result.nuclear_repulsion_energy = nuclear_repulsion_energy;
   result.selected_state_indices = selected_state_indices;
   result.state_average_weights = normalized_weights;
-  const auto prepared_active_space = matrix_evaluator_.prepare_active_space(input);
+  const auto prepared_active_space = prepare_timed_active_space_context(input).prepared_active_space;
   result.structure_matrices = matrix_evaluator_.evaluate(
       input,
       prepared_active_space);

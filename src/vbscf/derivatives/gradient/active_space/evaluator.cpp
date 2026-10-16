@@ -17,7 +17,7 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
 
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "vbscf/orbitals/preparation/cholesky.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "core/pair_index.hpp"
@@ -523,20 +523,11 @@ ActiveSpaceGradientForwardContext build_active_space_gradient_forward_context(
     StructureEigensolver structure_eigensolver,
     StructureSolveAccuracy structure_solve_accuracy,
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors,
-    const ActiveSpaceOrbitalPreparer& orbital_preparer,
-    const AoEffectiveOneElectronBuilder& ao_effective_one_electron_builder,
-    const xmvb::integrals::ActiveSpaceOneElectronBuilder& active_space_one_electron_builder,
-    const ActiveSpaceTwoElectronBuilder& active_space_two_electron_builder,
     const FullDeterminantStructureHamiltonianOverlapBuilder& structure_builder,
     const xmvb::linalg::GeneralizedEigensolver& generalized_eigensolver) {
   ActiveSpaceGradientForwardContext context;
   context.timed_active_space_context =
-      prepare_timed_active_space_context(
-          input,
-          orbital_preparer,
-          ao_effective_one_electron_builder,
-          active_space_one_electron_builder,
-          active_space_two_electron_builder);
+      prepare_timed_active_space_context(input);
 
   context.same_spin_pair_cache = build_orthogonal_spin_topology(
       input.structure_data.alpha_det,
@@ -966,28 +957,6 @@ bool ActiveSpaceForwardEvaluation::valid() const noexcept {
   return state_ != nullptr;
 }
 
-ActiveSpaceGradientEvaluator::ActiveSpaceGradientEvaluator()
-    : orbital_preparer_(),
-      ao_effective_one_electron_builder_(),
-      active_space_one_electron_builder_(),
-      active_space_two_electron_builder_(),
-      structure_builder_(),
-      generalized_eigensolver_() {}
-
-ActiveSpaceGradientEvaluator::ActiveSpaceGradientEvaluator(
-    ActiveSpaceOrbitalPreparer orbital_preparer,
-    AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
-    xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
-    ActiveSpaceTwoElectronBuilder active_space_two_electron_builder,
-    FullDeterminantStructureHamiltonianOverlapBuilder structure_builder,
-    xmvb::linalg::GeneralizedEigensolver generalized_eigensolver)
-    : orbital_preparer_(std::move(orbital_preparer)),
-      ao_effective_one_electron_builder_(std::move(ao_effective_one_electron_builder)),
-      active_space_one_electron_builder_(std::move(active_space_one_electron_builder)),
-      active_space_two_electron_builder_(std::move(active_space_two_electron_builder)),
-      structure_builder_(std::move(structure_builder)),
-      generalized_eigensolver_(std::move(generalized_eigensolver)) {}
-
 ActiveSpaceGradientResult ActiveSpaceGradientEvaluator::evaluate(
     const VbScfInput& input,
     double nuclear_repulsion_energy) const {
@@ -1060,10 +1029,6 @@ ActiveSpaceForwardEvaluation ActiveSpaceGradientEvaluator::evaluate_forward(
       structure_eigensolver,
       structure_solve_accuracy,
       initial_eigenvectors,
-      orbital_preparer_,
-      ao_effective_one_electron_builder_,
-      active_space_one_electron_builder_,
-      active_space_two_electron_builder_,
       structure_builder_,
       generalized_eigensolver_);
   const auto& prepared =
@@ -1142,12 +1107,7 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       mcscf::normalize_weights(state_average_weights);
 
   ActiveSpaceGradientForwardContext context;
-  context.timed_active_space_context = prepare_timed_active_space_context(
-      input,
-      orbital_preparer_,
-      ao_effective_one_electron_builder_,
-      active_space_one_electron_builder_,
-      active_space_two_electron_builder_);
+  context.timed_active_space_context = prepare_timed_active_space_context(input);
   const auto& prepared =
       context.timed_active_space_context.prepared_active_space;
   context.same_spin_pair_cache = build_orthogonal_spin_topology(
@@ -1268,12 +1228,7 @@ ActiveSpaceGradientEvaluator::evaluate_with_fixed_active_space_adjoint(
   }
 
   auto timed_active_space_context =
-      prepare_timed_active_space_context(
-          input,
-          orbital_preparer_,
-          ao_effective_one_electron_builder_,
-          active_space_one_electron_builder_,
-          active_space_two_electron_builder_);
+      prepare_timed_active_space_context(input);
 
   ActiveSpaceGradientResult result;
   initialize_active_space_gradient_probe_result(
@@ -1302,17 +1257,6 @@ ActiveSpaceGradientEvaluator::evaluate_with_fixed_active_space_adjoint(
       std::chrono::duration<double>(std::chrono::steady_clock::now() - total_start_time).count();
   (void)nuclear_repulsion_energy;
   return result;
-}
-
-TimedPreparedActiveSpaceContext
-ActiveSpaceGradientEvaluator::prepare_timed_active_space_context_for_probe(
-    const VbScfInput& input) const {
-  return prepare_timed_active_space_context(
-      input,
-      orbital_preparer_,
-      ao_effective_one_electron_builder_,
-      active_space_one_electron_builder_,
-      active_space_two_electron_builder_);
 }
 
 }  // namespace xmvb::vb

@@ -23,7 +23,7 @@ export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM
 export LD_LIBRARY_PATH="/home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib:${LD_LIBRARY_PATH:-}"
 hostname > "$artifact/node.txt"
 cmake -S "$source_dir" -B "$source_dir/build" > "$artifact/configure.log" 2>&1
-find "$source_dir/src" "$source_dir/tests/mcscf/unit" "$source_dir/tests/linalg/unit" \
+find "$source_dir/src" "$source_dir/tests/mcscf" "$source_dir/tests/linalg" \
  "$source_dir/tests/parallel" "$source_dir/tests/cli" \
  "$source_dir/tests/vbscf/unit" -type f \( -name '*.cpp' -o -name '*.hpp' \) \
  -print0 | sort -z | xargs -0 sha256sum > "$artifact/sources.sha256"
@@ -37,7 +37,12 @@ cmake --build "$source_dir/build" --target xmvb test_ci_factors test_casci \
  test_keyframe test_structure_tiles test_sparse_orbital_quotient test_coupled_structure \
  test_davidson test_eigen_response test_spectral_trust_region test_cli_options test_dense_span test_openmp \
  test_input_guess_selection test_output_orbitals \
- audit_orbital_gradient benchmark_exact_ctx_hvp -j8 > "$artifact/build.log" 2>&1
+ audit_orbital_gradient benchmark_exact_ctx_hvp check_exact_two_electron_hvp \
+ check_auxiliary_gradient check_exact_active_space_builders compare_ri_active_space_builder \
+ compare_exact_ri_energy_decomposition check_structure_builder_fast_path \
+ benchmark_union_graph_single_step check_structure_expansion_signs \
+ check_structure_overlap_against_raw_reference validate_multi_leaf_open_state_one_electron \
+ -j8 > "$artifact/build.log" 2>&1
 cp "$source_dir/build/CMakeCache.txt" "$artifact/"
 cp "$source_dir/build/src/CMakeFiles/xmvb_linalg.dir/flags.make" "$artifact/linalg-flags.make"
 sha256sum "$source_dir/build/src/xmvb-cpp.exe" "$source_dir/build/src/test_ciah" \

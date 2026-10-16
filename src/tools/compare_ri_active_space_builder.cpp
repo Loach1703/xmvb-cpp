@@ -10,8 +10,8 @@
 #include "input/deck/primary_basis.hpp"
 #include "libcint/ri_provider.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/builder.hpp"
-#include "vbscf/integrals/active/two_electron/construction/ri_builder.hpp"
+#include "integrals/active/exact.hpp"
+#include "integrals/active/ri.hpp"
 #include "integrals/active/two_electron.hpp"
 
 namespace {
@@ -68,11 +68,10 @@ int main(int argc, char** argv) {
     const auto orbital_result =
         orbital_preparer.prepare(input.orbital_preparation_input);
 
-    xmvb::vb::ActiveSpaceTwoElectronBuilder exact_builder;
-    const auto exact_result = exact_builder.build(
-        input.ao_integral_input,
-        orbital_result,
-        input.orbital_preparation_input.n_active_orbitals);
+    const auto exact_result = xmvb::integrals::transform_exact_active_integrals(
+        input.ao_integral_input, orbital_result.active_sparse_row_offsets,
+        orbital_result.active_sparse_orbital_indices,
+        orbital_result.active_sparse_values, input.orbital_preparation_input.n_active_orbitals);
 
     xmvb::libcint::LibcintRiIntegralProvider provider;
     xmvb::libcint::LibcintRiIntegralProviderOptions provider_options;
@@ -100,12 +99,9 @@ int main(int argc, char** argv) {
         auxiliary_input,
         provider_options);
 
-    xmvb::vb::RiActiveSpaceTwoElectronBuilder ri_builder;
-    auto ri_result = ri_builder.build(
-        ao_ri_result,
-        orbital_result,
-        input.orbital_preparation_input.n_basis_functions,
-        input.orbital_preparation_input.n_active_orbitals);
+    auto ri_result = xmvb::integrals::transform_ri_active_integrals(
+        ao_ri_result, orbital_result.auxiliary_orbital_matrix.middleCols(
+            orbital_result.inactive_density_low_rank_factors.cols(), input.orbital_preparation_input.n_active_orbitals));
     ri_result.packed_active_two_electron_integrals =
         xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
             xmvb::integrals::make_active_space_two_electron_view(ri_result),

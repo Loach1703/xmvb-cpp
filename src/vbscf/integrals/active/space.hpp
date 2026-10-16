@@ -3,12 +3,8 @@
 #include <Eigen/Core>
 
 #include "vbscf/core/contracts/input.hpp"
-#include "integrals/active/one_electron.hpp"
 #include "integrals/active/one_electron_result.hpp"
-#include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/builder.hpp"
 #include "integrals/active/two_electron_result.hpp"
-#include "vbscf/integrals/ao/one_electron/builder.hpp"
 #include "vbscf/integrals/ao/one_electron/result.hpp"
 #include "vbscf/orbitals/preparation/result.hpp"
 
@@ -41,11 +37,15 @@ double compute_one_electron_reference_energy(
     const Eigen::Ref<const Eigen::MatrixXd>& ao_core_hamiltonian_matrix,
     int n_basis_functions);
 
-TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
+TimedPreparedActiveSpaceContext prepare_timed_active_space_context(const VbScfInput& input);
+
+/** @brief Map the active ERI adjoint to AO-by-active orbital coefficients.
+ * Selects the integral representation; numerical contractions belong to the
+ * common integral library. No inactive/virtual zero columns are materialized.
+ */
+Eigen::MatrixXd pullback_active_integrals(
     const VbScfInput& input,
-    const ActiveSpaceOrbitalPreparer& orbital_preparer,
-    const AoEffectiveOneElectronBuilder& ao_effective_one_electron_builder,
-    const xmvb::integrals::ActiveSpaceOneElectronBuilder& active_space_one_electron_builder,
-    const ActiveSpaceTwoElectronBuilder& active_space_two_electron_builder);
+    const integrals::ActiveSpaceTwoElectronResult& accepted,
+    const std::vector<double>& packed_gradient);
 
 }  // namespace xmvb::vb

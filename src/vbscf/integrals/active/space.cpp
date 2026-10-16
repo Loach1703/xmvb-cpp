@@ -1,4 +1,4 @@
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/integrals/active/space.hpp"
 
 #include <chrono>
 #include <stdexcept>
@@ -6,18 +6,15 @@
 #include <Eigen/Core>
 
 #include "vbscf/integrals/ao/ri/cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/ri_builder.hpp"
+#include "integrals/active/exact.hpp"
+#include "integrals/active/ri.hpp"
+#include "integrals/response/adjoint.hpp"
+#include "integrals/response/ri.hpp"
+#include "integrals/active/one_electron.hpp"
+#include "vbscf/orbitals/preparation/preparer.hpp"
+#include "vbscf/integrals/ao/one_electron/builder.hpp"
 
 namespace xmvb::vb {
-
-namespace {
-
-bool use_standard_ri_active_space_path(const VbScfInput& input) {
-  return input.standard_two_electron_mode ==
-      StandardTwoElectronMode::ResolutionOfIdentity;
-}
-
-}  // namespace
 
 double compute_one_electron_reference_energy(
     const Eigen::Ref<const Eigen::MatrixXd>& inactive_density_matrix,
@@ -40,15 +37,11 @@ double compute_one_electron_reference_energy(
           (ao_effective_h1e.array() + ao_core_hamiltonian_matrix.array())).sum();
 }
 
-TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
-    const VbScfInput& input,
-    const ActiveSpaceOrbitalPreparer& orbital_preparer,
-    const AoEffectiveOneElectronBuilder& ao_effective_one_electron_builder,
-    const xmvb::integrals::ActiveSpaceOneElectronBuilder& active_space_one_electron_builder,
-    const ActiveSpaceTwoElectronBuilder& active_space_two_electron_builder) {
+TimedPreparedActiveSpaceContext prepare_timed_active_space_context(const VbScfInput& input) {
   TimedPreparedActiveSpaceContext timed_context;
   auto& context = timed_context.prepared_active_space;
-  const bool use_ri_active_space = use_standard_ri_active_space_path(input);
+  const bool use_ri_active_space =
+      input.standard_two_electron_mode == StandardTwoElectronMode::ResolutionOfIdentity;
   const xmvb::integrals::RiAoFactorization* ao_ri_result = nullptr;
   if (use_ri_active_space) {
     ao_ri_result = &ensure_vbscf_input_ri_cache(input);
@@ -60,14 +53,14 @@ TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
        input.orbital_preparation_input.n_active_electrons) /
       2;
   context.orbital_result =
-      orbital_preparer.prepare(input.orbital_preparation_input);
+      ActiveSpaceOrbitalPreparer{}.prepare(input.orbital_preparation_input);
   timed_context.timings.orbital_preparation_wall_time_seconds =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - stage_start_time).count();
 
   stage_start_time = std::chrono::steady_clock::now();
   if (use_ri_active_space) {
     context.ao_effective_one_electron_result =
-        ao_effective_one_electron_builder.build(
+        AoEffectiveOneElectronBuilder{}.build(
             context.orbital_result,
             input.ao_integral_input.ao_core_hamiltonian_matrix,
             *ao_ri_result,
@@ -79,7 +72,7 @@ TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
           "standard exact AO h1e path requires materialized AO two-electron integrals");
     }
     context.ao_effective_one_electron_result =
-        ao_effective_one_electron_builder.build(
+        AoEffectiveOneElectronBuilder{}.build(
             context.orbital_result.inactive_density_matrix,
             input.ao_integral_input);
   }
@@ -88,7 +81,7 @@ TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
 
   stage_start_time = std::chrono::steady_clock::now();
   context.active_space_one_electron_result =
-      active_space_one_electron_builder.build(
+      integrals::ActiveSpaceOneElectronBuilder{}.build(
           context.ao_effective_one_electron_result.ao_effective_h1e,
           context.orbital_result.auxiliary_orbital_matrix,
           input.ao_integral_input.n_basis_functions,
@@ -99,18 +92,19 @@ TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
 
   stage_start_time = std::chrono::steady_clock::now();
   if (use_ri_active_space) {
-    RiActiveSpaceTwoElectronBuilder ri_builder;
     context.active_space_two_electron_result =
-        ri_builder.build(
+        integrals::transform_ri_active_integrals(
             *ao_ri_result,
-            context.orbital_result,
-            input.ao_integral_input.n_basis_functions,
-            input.orbital_preparation_input.n_active_orbitals);
+            context.orbital_result.auxiliary_orbital_matrix.middleCols(
+                context.n_inactive_doubly_occupied_orbitals,
+                input.orbital_preparation_input.n_active_orbitals));
   } else {
     context.active_space_two_electron_result =
-        active_space_two_electron_builder.build(
+        integrals::transform_exact_active_integrals(
             input.ao_integral_input,
-            context.orbital_result,
+            context.orbital_result.active_sparse_row_offsets,
+            context.orbital_result.active_sparse_orbital_indices,
+            context.orbital_result.active_sparse_values,
             input.orbital_preparation_input.n_active_orbitals);
   }
   timed_context.timings.active_two_electron_wall_time_seconds =
@@ -122,6 +116,19 @@ TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
           input.ao_integral_input.ao_core_hamiltonian_matrix,
           input.ao_integral_input.n_basis_functions);
   return timed_context;
+}
+
+Eigen::MatrixXd pullback_active_integrals(
+    const VbScfInput& input,
+    const integrals::ActiveSpaceTwoElectronResult& accepted,
+    const std::vector<double>& packed_gradient) {
+  if (accepted.representation==integrals::ActiveSpaceTwoElectronRepresentation::PackedExact)
+    return integrals::backpropagate_exact_packed_active_two_electron_gradient(
+        packed_gradient,input.ao_integral_input,accepted);
+  const auto cache=integrals::build_ri_active_two_electron_response_cache(
+      ensure_vbscf_input_ri_cache(input),accepted,
+      input.orbital_preparation_input.n_active_orbitals);
+  return integrals::backpropagate_ri_packed_active_two_electron_gradient(packed_gradient,cache);
 }
 
 }  // namespace xmvb::vb

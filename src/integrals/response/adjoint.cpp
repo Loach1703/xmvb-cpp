@@ -76,6 +76,30 @@ void build_orbital_pair_products(ExactPackedActiveTwoElectronAdjointCache* cache
 }  // namespace
 
 Eigen::MatrixXd backpropagate_exact_packed_active_two_electron_gradient(
+    const std::vector<double>& packed_gradient,
+    const AoIntegralInput& ao,
+    const ActiveSpaceTwoElectronResult& accepted) {
+  if (ao.n_basis_functions<=0 ||
+      accepted.dense_active_coefficients.rows()!=ao.n_basis_functions ||
+      accepted.dense_active_coefficients.cols()<1)
+    throw std::invalid_argument("invalid exact integral pullback dimensions");
+  ExactPackedActiveTwoElectronAdjointCache cache;
+  cache.n_basis_functions=ao.n_basis_functions;
+  cache.n_active_orbitals=static_cast<int>(accepted.dense_active_coefficients.cols());
+  cache.ao_integral_input=&ao;
+  cache.accepted_active_coefficients=&accepted.dense_active_coefficients;
+  if (accepted.dense_ao_pair_products.size()!=0)
+    cache.accepted_pair_products=&accepted.dense_ao_pair_products;
+  build_ao_pair_component_tables(ao.n_basis_functions,
+      &cache.ao_pair_first_indices,&cache.ao_pair_second_indices);
+  for (const auto pair : build_active_pair_list(cache.n_active_orbitals)) {
+    cache.active_pair_first_indices.push_back(pair.first);
+    cache.active_pair_second_indices.push_back(pair.second);
+  }
+  return backpropagate_exact_packed_active_two_electron_gradient(packed_gradient,cache);
+}
+
+Eigen::MatrixXd backpropagate_exact_packed_active_two_electron_gradient(
     const std::vector<double>& packed_active_two_electron_gradient,
     const ExactPackedActiveTwoElectronAdjointCache& accepted_cache) {
   const int n_bf = accepted_cache.n_basis_functions;

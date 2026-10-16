@@ -17,7 +17,7 @@
 #include "core/pair_index.hpp"
 #include "integrals/active/one_electron.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/builder.hpp"
+#include "integrals/active/exact.hpp"
 #include "vbscf/integrals/ao/one_electron/builder.hpp"
 
 namespace {
@@ -468,12 +468,11 @@ int main(int argc, char** argv) {
                      reference_h1e_act)
               << '\n';
     if (!options.skip_active_eri) {
-      xmvb::vb::ActiveSpaceTwoElectronBuilder active_eri_builder;
       const auto current_active_eri_result =
-          active_eri_builder.build(
-              input.ao_integral_input,
-              orbital_result,
-              n_active_orbitals);
+          xmvb::integrals::transform_exact_active_integrals(
+              input.ao_integral_input, orbital_result.active_sparse_row_offsets,
+              orbital_result.active_sparse_orbital_indices,
+              orbital_result.active_sparse_values, n_active_orbitals);
       const auto reference_active_eri_result =
           build_reference_active_space_two_electron(
               input.ao_integral_input,

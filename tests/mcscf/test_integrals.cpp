@@ -77,6 +77,12 @@ int main() {
       derivative+=w[i]*delta[i];
     }
     const auto gradient=backpropagate_exact_packed_active_two_electron_gradient(w,cache);
+    require((backpropagate_exact_packed_active_two_electron_gradient(w,ao,accepted)-gradient).norm()<1e-11,
+        "direct exact pullback differs from the accepted HVP cache");
+    auto streamed=accepted;
+    streamed.dense_ao_pair_products.resize(0,0);
+    require((backpropagate_exact_packed_active_two_electron_gradient(w,ao,streamed)-gradient).norm()<1e-11,
+        "streamed exact pullback differs from resident accepted products");
     require(std::abs((gradient.array()*d.array()).sum()-derivative)<1e-11,
         "shared integral adjoint identity failed");
     auto cache_at=[&](const ActiveSpaceTwoElectronResult& at) {

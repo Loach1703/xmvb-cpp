@@ -3,7 +3,7 @@
 #include <optional>
 #include <vector>
 
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "vbscf/core/contracts/eigensolver.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/expansion/types.hpp"

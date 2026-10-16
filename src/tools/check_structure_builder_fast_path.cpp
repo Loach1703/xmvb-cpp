@@ -13,7 +13,7 @@
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "mcscf/ci/planner.hpp"
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "integrals/active/two_electron.hpp"
 
@@ -154,17 +154,9 @@ int main(int argc, char** argv) {
     const auto load_result =
         xmvb::vb::load_vbscf_input_with_timings(options.input_path, load_options);
 
-    xmvb::vb::ActiveSpaceOrbitalPreparer orbital_preparer;
-    xmvb::vb::AoEffectiveOneElectronBuilder ao_effective_one_electron_builder;
-    xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
-    xmvb::vb::ActiveSpaceTwoElectronBuilder active_space_two_electron_builder;
+
     const auto prepared_active_space =
-        xmvb::vb::prepare_timed_active_space_context(
-            load_result.input,
-            orbital_preparer,
-            ao_effective_one_electron_builder,
-            active_space_one_electron_builder,
-            active_space_two_electron_builder)
+        xmvb::vb::prepare_timed_active_space_context(load_result.input)
             .prepared_active_space;
 
     std::vector<double> packed_active_eri =
@@ -236,7 +228,7 @@ int main(int argc, char** argv) {
     const Eigen::MatrixXd reference_overlap_action =
         dense_overlap * trial_vectors;
     const auto direct_ci_plan =
-        xmvb::vb::plan_orthogonal_direct_ci_action(
+        xmvb::mcscf::plan_orthogonal_direct_ci_action(
             same_spin_pair_cache.alpha_reuse_table.unique_determinants,
             same_spin_pair_cache.beta_reuse_table.unique_determinants,
             load_result.input.orbital_preparation_input.n_active_orbitals,

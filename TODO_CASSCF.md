@@ -42,6 +42,9 @@ must not require a full four-index MO integral array.
      consumes these same kernels, with an independent rotated-MO reference.
    - This does not yet implement orthogonal orbital-coordinate derivatives or
      a complete CASSCF macro driver.
+   - VB adapters now call common exact/RI transforms and adjoints directly;
+     old builder/backpropagator classes and duplicated reverse contractions
+     are removed. Ordinary exact gradients do not construct HVP-only images.
    - Use inactive/active/virtual cross-sector rotations only for full CAS.
    - Verify directional derivatives, HVPs and bilinear symmetry.
 3. Joint orbital/CI action and CI tangent.

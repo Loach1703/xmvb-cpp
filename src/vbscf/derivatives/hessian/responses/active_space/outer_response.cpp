@@ -14,7 +14,7 @@
 #include "vbscf/derivatives/hessian/responses/opposite_spin/backward.hpp"
 #include "integrals/active/matrix_adjoint.hpp"
 #include "integrals/response/adjoint.hpp"
-#include "vbscf/integrals/active/two_electron/response/backpropagator.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "integrals/active/two_electron.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"

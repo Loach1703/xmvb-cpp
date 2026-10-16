@@ -110,11 +110,21 @@ data and must keep it alive. This extraction does not change tiling, memory
 budgets, threading, screening or numerical tolerances.
 
 `vbscf/integrals/` retains orbital-preparation adapters, inactive-density
-assembly and lazy RI acquisition from `VbScfInput`. Its exact and RI active
-builders pass numerical coefficients to the common transforms; they do not
-own another implementation of either transform. The remaining VB backward
-adapter converts integral adjoints into the layout required by orbital
-preparation. Further adapter simplification is separate from this extraction.
+assembly and lazy RI acquisition from `VbScfInput`.
+`vbscf/integrals/active/space.*` owns this thin model boundary.
+`prepare_timed_active_space_context(input)` prepares the physical orbitals and
+calls the exact/RI common transforms directly. `pullback_active_integrals`
+selects the representation and returns an AO-by-active Eigen gradient from
+the common adjoint kernels. The old exact/RI two-electron builder classes,
+VB two-electron backpropagator and its single-field result were deleted.
+There is no second VB pair-map, packed-adjoint or RI-factor-adjoint formula.
+
+Evaluator constructors no longer inject stateless integral helpers. Forward
+preparation takes the physical input alone, and probes call the same operation
+directly instead of traversing evaluator forwarding methods. The exact ordinary
+gradient borrows accepted products or streams pair tiles; it does not build
+exchange/one-index images used only by HVPs. RI gradients use the existing
+factor-native response kernel, not an AO-pair-by-active-pair adjoint buffer.
 
 The AO-to-CASCI entry in `casscf/integrals/active.*` uses the same AO response,
 active one-electron projection and exact two-electron transform, including the

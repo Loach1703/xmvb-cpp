@@ -71,10 +71,7 @@ set(XMVB_VBSCF_AO_INTEGRAL_SOURCES
 )
 
 set(XMVB_VBSCF_ACTIVE_INTEGRAL_SOURCES
-  vbscf/integrals/active/two_electron/response/backpropagator.cpp
-  vbscf/integrals/active/two_electron/construction/builder.cpp
-  vbscf/integrals/active/two_electron/construction/ri_builder.cpp
-  vbscf/integrals/active/preparation/space.cpp
+  vbscf/integrals/active/space.cpp
 )
 
 set(XMVB_VBSCF_DERIVATIVE_SOURCES

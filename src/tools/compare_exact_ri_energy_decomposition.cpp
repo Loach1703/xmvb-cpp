@@ -12,9 +12,9 @@
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "integrals/active/one_electron.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/builder.hpp"
+#include "integrals/active/exact.hpp"
 #include "vbscf/integrals/ao/one_electron/builder.hpp"
-#include "vbscf/integrals/active/two_electron/construction/ri_builder.hpp"
+#include "integrals/active/ri.hpp"
 #include "integrals/active/two_electron.hpp"
 
 namespace {
@@ -143,11 +143,10 @@ EnergyBreakdown build_exact_breakdown(
       n_inactive_doubly_occupied_orbitals,
       n_active_orbitals);
 
-  xmvb::vb::ActiveSpaceTwoElectronBuilder exact_builder;
-  const auto exact_eri_result = exact_builder.build(
-      input.ao_integral_input,
-      orbital_result,
-      n_active_orbitals);
+  const auto exact_eri_result = xmvb::integrals::transform_exact_active_integrals(
+      input.ao_integral_input, orbital_result.active_sparse_row_offsets,
+      orbital_result.active_sparse_orbital_indices,
+      orbital_result.active_sparse_values, n_active_orbitals);
 
   EnergyBreakdown breakdown;
   breakdown.one_electron_reference_energy =
@@ -214,12 +213,9 @@ EnergyBreakdown build_ri_breakdown(
       n_inactive_doubly_occupied_orbitals,
       n_active_orbitals);
 
-  xmvb::vb::RiActiveSpaceTwoElectronBuilder ri_builder;
-  auto ri_eri_result = ri_builder.build(
-      ri_cache,
-      orbital_result,
-      n_basis_functions,
-      n_active_orbitals);
+  auto ri_eri_result = xmvb::integrals::transform_ri_active_integrals(
+      ri_cache, orbital_result.auxiliary_orbital_matrix.middleCols(
+          orbital_result.inactive_density_low_rank_factors.cols(), n_active_orbitals));
   ri_eri_result.packed_active_two_electron_integrals =
       xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
           xmvb::integrals::make_active_space_two_electron_view(ri_eri_result),
@@ -332,17 +328,15 @@ int main(int argc, char** argv) {
         n_basis_functions,
         n_inactive_doubly_occupied_orbitals,
         n_active_orbitals);
-    xmvb::vb::ActiveSpaceTwoElectronBuilder exact_eri_builder;
-    const auto exact_eri = exact_eri_builder.build(
-        input.ao_integral_input,
-        orbital_result,
-        n_active_orbitals);
-    xmvb::vb::RiActiveSpaceTwoElectronBuilder ri_eri_builder;
-    auto ri_eri = ri_eri_builder.build(
-        xmvb::vb::ensure_vbscf_input_ri_cache(input),
-        orbital_result,
-        n_basis_functions,
-        n_active_orbitals);
+
+    const auto exact_eri = xmvb::integrals::transform_exact_active_integrals(
+        input.ao_integral_input, orbital_result.active_sparse_row_offsets,
+        orbital_result.active_sparse_orbital_indices,
+        orbital_result.active_sparse_values, n_active_orbitals);
+
+    auto ri_eri = xmvb::integrals::transform_ri_active_integrals(
+        xmvb::vb::ensure_vbscf_input_ri_cache(input), orbital_result.auxiliary_orbital_matrix.middleCols(
+            orbital_result.inactive_density_low_rank_factors.cols(), n_active_orbitals));
     ri_eri.packed_active_two_electron_integrals =
         xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
             xmvb::integrals::make_active_space_two_electron_view(ri_eri),

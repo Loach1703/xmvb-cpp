@@ -10,7 +10,7 @@
 #include "integrals/active/matrix_adjoint.hpp"
 #include "vbscf/orbitals/pullback/operator.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/active/two_electron/response/backpropagator.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
 #include "vbscf/integrals/ao/one_electron/builder.hpp"
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
@@ -38,22 +38,7 @@ struct OrbitalFixedStructureGradient {
  */
 class OrbitalGradientEvaluator {
 public:
-  /**
-   * @brief Creates an evaluator with default helper components.
-   */
-  OrbitalGradientEvaluator();
-
-  /**
-   * @brief Creates an evaluator with explicit helper components.
-   */
-  OrbitalGradientEvaluator(
-      ActiveSpaceGradientEvaluator active_space_gradient_evaluator,
-      ActiveSpaceOrbitalPreparer orbital_preparer,
-      AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
-      AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator,
-      xmvb::integrals::ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator,
-      ActiveSpaceTwoElectronBackpropagator active_space_two_electron_backpropagator,
-      ActiveSpaceOrbitalBackpropagator active_space_orbital_backpropagator);
+  OrbitalGradientEvaluator() = default;
 
   /**
    * @brief Evaluates the ground-state orbital gradient.
@@ -186,11 +171,9 @@ public:
 
 private:
   ActiveSpaceGradientEvaluator active_space_gradient_evaluator_;
-  ActiveSpaceOrbitalPreparer orbital_preparer_;
-  AoEffectiveOneElectronBuilder ao_effective_one_electron_builder_;
   AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator_;
   xmvb::integrals::ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator_;
-  ActiveSpaceTwoElectronBackpropagator active_space_two_electron_backpropagator_;
+
   ActiveSpaceOrbitalBackpropagator active_space_orbital_backpropagator_;
   OrbitalGradientResult evaluate_from_active_space_gradient_result(
       const VbScfInput& input,

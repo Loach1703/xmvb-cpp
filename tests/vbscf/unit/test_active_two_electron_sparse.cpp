@@ -7,7 +7,8 @@
 
 #include <Eigen/Core>
 
-#include "vbscf/integrals/active/two_electron/construction/builder.hpp"
+#include "integrals/active/exact.hpp"
+#include "vbscf/orbitals/preparation/result.hpp"
 #include "integrals/response/adjoint.hpp"
 #include "integrals/response/directional.hpp"
 #include "integrals/response/internal.hpp"
@@ -263,8 +264,10 @@ int main() {
   integrals.pair_graph =
       xmvb::integrals::build_ao_pair_graph({0}, {0}, {2.0}, n_active);
 
-  const xmvb::vb::ActiveSpaceTwoElectronBuilder builder;
-  const auto result = builder.build(integrals, orbitals, n_active);
+  const auto result = xmvb::integrals::transform_exact_active_integrals(
+      integrals, orbitals.active_sparse_row_offsets,
+      orbitals.active_sparse_orbital_indices,
+      orbitals.active_sparse_values, n_active);
 
   require(
       result.dense_active_coefficients.rows() == n_active &&
@@ -286,7 +289,10 @@ int main() {
   // diagonal active-pair element: 2 * K(0,1) * B(0,0) * B(1,0) = 8.
   integrals.pair_graph = xmvb::integrals::build_ao_pair_graph({0}, {1}, {2.0}, n_active);
   orbitals.active_sparse_orbital_indices[1] = 0;
-  const auto mixed = builder.build(integrals, orbitals, n_active);
+  const auto mixed = xmvb::integrals::transform_exact_active_integrals(
+      integrals, orbitals.active_sparse_row_offsets,
+      orbitals.active_sparse_orbital_indices,
+      orbitals.active_sparse_values, n_active);
   require(mixed.dense_ao_pair_products.size() == 0,
           "mixed-pair regression did not exercise sparse construction");
   if (std::abs(mixed.packed_active_two_electron_integrals.front() - 8.0) >= 1e-14)
@@ -305,7 +311,10 @@ int main() {
   xmvb::integrals::AoIntegralInput large_integrals;
   large_integrals.n_basis_functions = large_active;
   large_integrals.pair_graph = xmvb::integrals::build_ao_pair_graph({0}, {1}, {2.0}, large_active);
-  const auto large_result = builder.build(large_integrals, large_orbitals, large_active);
+  const auto large_result = xmvb::integrals::transform_exact_active_integrals(
+      large_integrals, large_orbitals.active_sparse_row_offsets,
+      large_orbitals.active_sparse_orbital_indices,
+      large_orbitals.active_sparse_values, large_active);
   require(large_result.dense_ao_pair_products.size() == 0 &&
           std::abs(large_result.packed_active_two_electron_integrals.front() - 8.0) < 1e-14,
           "bounded large sparse accumulator changed the active integral");

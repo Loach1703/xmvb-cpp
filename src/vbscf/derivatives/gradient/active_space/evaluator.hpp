@@ -9,11 +9,7 @@
 #include "vbscf/core/contracts/eigensolver.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
-#include "vbscf/integrals/active/preparation/space.hpp"
-#include "integrals/active/one_electron.hpp"
-#include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/builder.hpp"
-#include "vbscf/integrals/ao/one_electron/builder.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "vbscf/derivatives/gradient/active_space/result.hpp"
 
 
@@ -84,21 +80,7 @@ struct ActiveSpaceFixedStructureGradient {
  */
 class ActiveSpaceGradientEvaluator {
 public:
-  /**
-   * @brief Creates an evaluator with default helper components.
-   */
-  ActiveSpaceGradientEvaluator();
-
-  /**
-   * @brief Creates an evaluator with explicit helper components.
-   */
-  ActiveSpaceGradientEvaluator(
-      ActiveSpaceOrbitalPreparer orbital_preparer,
-      AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
-      xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
-      ActiveSpaceTwoElectronBuilder active_space_two_electron_builder,
-      FullDeterminantStructureHamiltonianOverlapBuilder structure_builder,
-      xmvb::linalg::GeneralizedEigensolver generalized_eigensolver);
+  ActiveSpaceGradientEvaluator() = default;
 
   /**
    * @brief Evaluates the ground-state active-space analytic gradient.
@@ -178,21 +160,7 @@ public:
       const AcceptedPointContext& accepted_point_context,
       double nuclear_repulsion_energy = 0.0) const;
 
-  /**
-   * @brief Rebuilds only the orbital-dependent prepared active-space layer.
-   *
-   * Matrix-free probe paths can combine this fresh orbital-dependent context
-   * with accepted-point active-space adjoints without materializing a full
-   * `ActiveSpaceGradientResult`.
-   */
-  TimedPreparedActiveSpaceContext prepare_timed_active_space_context_for_probe(
-      const VbScfInput& input) const;
-
 private:
-  ActiveSpaceOrbitalPreparer orbital_preparer_;
-  AoEffectiveOneElectronBuilder ao_effective_one_electron_builder_;
-  xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder_;
-  ActiveSpaceTwoElectronBuilder active_space_two_electron_builder_;
   FullDeterminantStructureHamiltonianOverlapBuilder structure_builder_;
   xmvb::linalg::GeneralizedEigensolver generalized_eigensolver_;
 };

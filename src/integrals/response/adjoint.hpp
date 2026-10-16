@@ -10,6 +10,15 @@
 
 namespace xmvb::integrals {
 
+/** @brief Pull back packed ERI adjoints without constructing HVP-only images.
+ * Borrows accepted coefficients and optional pair products. Missing pair
+ * products are consumed through the same bounded tiles as response actions.
+ */
+Eigen::MatrixXd backpropagate_exact_packed_active_two_electron_gradient(
+    const std::vector<double>& packed_gradient,
+    const AoIntegralInput& ao,
+    const ActiveSpaceTwoElectronResult& accepted);
+
 /**
  * @brief Projects L(W C^T + C W^T) onto accepted active orbitals.
  *
