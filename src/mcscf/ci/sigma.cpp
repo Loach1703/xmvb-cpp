@@ -862,11 +862,12 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_columns(
 Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
     const Eigen::Ref<const Eigen::MatrixXd>& left,
     std::initializer_list<DirectCiStreamedGeneratorRequest> requests,
-    bool symmetric_sum) const {
+    bool symmetric_sum, bool spin_exchange_reduced) const {
   profiling::ScopedPhase phase(profiling::Phase::CiGeneratorAdjoint);
   const Eigen::Index cols=left.cols();
   if (first<0 || cols<=0 || cols>n_beta_ || first>n_beta_-cols ||
-      left.rows()!=n_alpha_ || requests.size()==0)
+      left.rows()!=n_alpha_ || requests.size()==0 ||
+      (spin_exchange_reduced && distinct_beta_))
     throw std::invalid_argument("invalid streamed generator panel");
   for (const auto& request:requests)
     if (!request.read || !request.column || !std::isfinite(request.scale))
@@ -879,13 +880,13 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
   const int n_requests=static_cast<int>(requests.size());
   const bool retained=std::all_of(requests.begin(),requests.end(),
       [](const DirectCiStreamedGeneratorRequest& request) { return request.retained_columns; });
-  const int spectator_width=retained ? n_beta_:tile_width;
+  const int spectator_width=spin_exchange_reduced ? 0:(retained ? n_beta_:tile_width);
   std::vector<int> rows(n_alpha_);
   std::iota(rows.begin(),rows.end(),0);
   std::size_t beta_work=0;
   const auto& graph=beta_connections();
-  for (int b=0;b<cols;++b)
-    beta_work+=graph.singles(first+b).size();
+  if (!spin_exchange_reduced)
+    for (int b=0;b<cols;++b) beta_work+=graph.singles(first+b).size();
   const int workers=coarse_openmp_thread_count(
       cooperative_openmp_thread_count(),
       static_cast<std::size_t>(n_alpha_)*cols+beta_work);
@@ -934,6 +935,13 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
       }
     };
 
+    if (spin_exchange_reduced) {
+      // For full equal-parity carriers P L=s L, P R=s R and
+      // P E_alpha P=E_beta. Sum the alpha panels once, with multiplicity two.
+      // Do not apply this identity to an isolated panel as a standalone action.
+      cooperative_openmp_for(workers,workers,alpha_contract);
+      continue;
+    }
     events.clear();
     for (int local=0;local<width;++local) {
       const int b=first+offset+local;
@@ -1023,6 +1031,7 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
   }
   Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_);
   for (const auto& density:partials) result+=density;
+  if (spin_exchange_reduced) result*=2.0;
   if (symmetric_sum) {
     result=(result+result.transpose()).eval();
     result.triangularView<Eigen::StrictlyLower>().setZero();

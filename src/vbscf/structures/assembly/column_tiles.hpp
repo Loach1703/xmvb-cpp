@@ -5,6 +5,7 @@
 #include <list>
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include <Eigen/Core>
 
@@ -48,6 +49,44 @@ struct ColumnTile {
     return result;
   }
 };
+
+/** @brief Resolve a compact row; generated column rows are sorted exactly. */
+inline int column_row(const ColumnTile& tile,int column,int row) {
+  const int first=tile.pattern->offsets[column],last=tile.pattern->offsets[column+1];
+  if (tile.pattern->full) return first+row;
+  const int* begin=tile.pattern->rows.data()+first;
+  const int* end=tile.pattern->rows.data()+last;
+  const auto found=std::lower_bound(begin,end,row);
+  return found!=end && *found==row ? first+(found-begin):-1;
+}
+
+/** @brief In-place P_s image on complete resident panels of invariant support.
+ * Sigma emits weighted exchange representatives. Their projection has the
+ * same bilinear forms against parity-s states, but is itself a parity-s carrier.
+ * Each unordered product pair has one owner; only panel pointers are shared.
+ */
+inline void project_exchange(std::vector<ColumnTile*>& panels,int extent,int parity) {
+  profiling::ScopedPhase phase(profiling::Phase::CiProductProjection);
+  const int n_beta=(panels.size()-1)*extent+panels.back()->pattern->columns();
+  const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),
+      static_cast<std::size_t>(n_beta)*n_beta);
+  cooperative_openmp_for(n_beta,workers,[&](std::ptrdiff_t b) {
+    auto* tile=panels[b/extent];
+    if (!tile) return;
+    const int column=b%extent,first=tile->pattern->offsets[column];
+    for (int i=first;i<tile->pattern->offsets[column+1];++i) {
+      const int a=tile->pattern->full ? i-first:tile->pattern->rows[i];
+      if (a>b) break;
+      auto& other=*panels[a/extent];
+      const int j=column_row(other,a%extent,b);
+      for (int v=0;v<tile->values.cols();++v) {
+        const double value=0.5*(tile->values(i,v)+parity*other.values(j,v));
+        tile->values(i,v)=value;
+        other.values(j,v)=parity*value;
+      }
+    }
+  });
+}
 
 /** @brief Accepted Y/residual panels, retained only when a complete state fits the
  * shared payload budget. Compact support and transform extent are immutable.

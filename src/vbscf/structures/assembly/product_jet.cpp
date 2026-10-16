@@ -50,6 +50,15 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
   std::vector<std::weak_ptr<const detail::ColumnPattern>> patterns(panels);
   const auto pattern_at=[&](int panel) -> std::shared_ptr<const detail::ColumnPattern> {
     if (auto p=patterns[panel].lock()) return p;
+    // The support and panel geometry do not change with a direction or state.
+    // Borrow immutable accepted CSR metadata instead of traversing the support
+    // generator again. No new numerical cache or product-space array is made.
+    if (tangent && state.product_images && state.product_images->extent==extent &&
+        !state.product_images->states.empty() &&
+        !state.product_images->states.front().empty()) {
+      auto p=state.product_images->states.front()[panel].pattern;
+      if (p) { patterns[panel]=p; return p; }
+    }
     profiling::ScopedPhase phase(profiling::Phase::CiProductPattern);
     auto p=std::make_shared<detail::ColumnPattern>();
     const int count=std::min(extent,n_unique_beta_-panel*extent);
@@ -342,6 +351,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       const bool forcing=capture && delta_sigma;
       const int output_width=w+(forcing ? 1:0);
       bool retain=false;
+      bool exchange_reduced=false;
       detail::ColumnPanels output(cache_bytes,[&](int panel) {
         auto pattern=pattern_at(panel);
         return detail::ColumnTile{pattern,Eigen::MatrixXd::Zero(pattern->offsets[pattern->columns()],output_width)};
@@ -353,11 +363,12 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         if (weight!=0) {
           if (!tangent || cached)
             result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(first,h0,
-                {{y,y_column,1.0,false,cached}});
+                {{y,y_column,1.0,false,cached}},false,exchange_reduced);
           else {
-            result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(first,h0,{{dy,dy_column}});
             result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
-                first,images.middleCols((w-1)*count,count),{{y,y_column}});
+                first,h0,{{dy,dy_column}},false,exchange_reduced);
+            result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
+                first,images.middleCols((w-1)*count,count),{{y,y_column}},false,exchange_reduced);
           }
         }
         if (collect_images) {
@@ -428,8 +439,18 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         result.pair_kernel.noalias()+=(tangent ? 2*weight:weight)*gradient.pair_kernel;
         ++result.images.tiles.integral_adjoint_sweeps;
       }
-      if (!tangent && state.product_images && output.evictions==0)
+      if (output.evictions==0 && (spin_exchange_parity_ || (!tangent && state.product_images)))
         for (const int panel:reachable) output.get(panel);
+      if (spin_exchange_parity_ && output.evictions==0) {
+        // Resolve the weighted representative before using alpha=beta in
+        // generator contractions or retaining the accepted residual image.
+        std::vector<detail::ColumnTile*> tiles(panels,nullptr);
+        for (const int panel:reachable) tiles[panel]=&output.get(panel);
+        // The last reachable panel fixes the range; absent later columns are zero.
+        tiles.resize(reachable.back()+1);
+        detail::project_exchange(tiles,extent,spin_exchange_parity_);
+        exchange_reduced=true;
+      }
       if (!tangent && state.product_images && output.evictions==0 &&
           2*output.peak_bytes<=cache_bytes-state.product_images->bytes) {
         retain=true;
@@ -472,12 +493,14 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           // D(R,Z)=D(Z,R)^T: both accepted cotangents share the generated
           // Z panel and one spin-link traversal, without unpacking R first.
           if (cached) result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
-              first,dv,{{y,y_column,-energy,false,true},{residual_reader,residual_column,1.0,true,true}});
+              first,dv,{{y,y_column,-energy,false,true},{residual_reader,residual_column,1.0,true,true}},
+              false,spin_exchange_parity_!=0);
           else result.generator.noalias()-=2*weight*energy*
-              sigma.generator_adjoint_streamed(first,dv,{{y,y_column}},true);
+              sigma.generator_adjoint_streamed(first,dv,{{y,y_column}},true,spin_exchange_parity_!=0);
         }
         else {
-          const auto density=sigma.generator_adjoint_streamed(first,values,{{y,y_column}});
+          const auto density=sigma.generator_adjoint_streamed(
+              first,values,{{y,y_column}},false,spin_exchange_parity_!=0);
           result.generator.noalias()-=2*weight*energy*density;
           if (states==1 && state.product_images) state.product_images->density+=density;
         }

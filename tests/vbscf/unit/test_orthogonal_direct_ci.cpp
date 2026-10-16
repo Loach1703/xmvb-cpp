@@ -2031,6 +2031,58 @@ void check_streamed_generator_adjoint_requests() {
 #endif
 }
 
+void check_exchange_reduced_generator() {
+  constexpr int n=4;
+  const auto spin=complete_space(n,2);
+  const int u=spin.size(),pairs=n*(n+1)/2;
+  xmvb::vb::OrthogonalActiveIntegrals integrals;
+  integrals.one_electron=Eigen::MatrixXd::Zero(n,n);
+  integrals.pair_kernel=Eigen::MatrixXd::Zero(pairs,pairs);
+  const xmvb::mcscf::DirectCiSigmaAction action(spin,spin,integrals);
+  for (const int parity:{-1,1}) {
+    Eigen::MatrixXd left(u,u),right_a(u,u),right_b(u,u);
+    for (int b=0;b<u;++b)
+      for (int a=0;a<=b;++a) {
+        left(a,b)=std::sin(0.27*(a+2)*(b+1));
+        right_a(a,b)=std::cos(0.39*(a+1)*(b+3));
+        right_b(a,b)=(a+b)%3==0 ? 0.0:std::sin(0.13*(a+3)*(b+2));
+        left(b,a)=parity*left(a,b);
+        right_a(b,a)=parity*right_a(a,b);
+        right_b(b,a)=parity*right_b(a,b);
+        if (parity<0 && a==b) left(a,b)=right_a(a,b)=right_b(a,b)=0.0;
+      }
+    const auto request=[&](const Eigen::MatrixXd& right,double scale,bool transpose) {
+      const auto* carrier=&right;
+      xmvb::mcscf::DirectCiTileReader read=[carrier](const std::vector<int>& betas,
+          const std::vector<int>& rows,Eigen::Ref<Eigen::MatrixXd> values) {
+        for (int b=0;b<static_cast<int>(betas.size());++b)
+          for (int a=0;a<static_cast<int>(rows.size());++a)
+            values(a,b)=(*carrier)(rows[a],betas[b]);
+      };
+      xmvb::mcscf::DirectCiColumnReader column=[](int) -> xmvb::mcscf::DirectCiColumnView {
+        throw std::runtime_error("exchange reduction must not gather beta spectators");
+      };
+      return xmvb::mcscf::DirectCiStreamedGeneratorRequest{read,column,-scale,transpose,false};
+    };
+    Eigen::MatrixXd reference=-0.37*action.one_body_generator_adjoint(left,right_a)+
+        0.61*action.one_body_generator_adjoint(left,right_b).transpose();
+    for (const bool symmetric:{false,true}) {
+      Eigen::MatrixXd expected=reference;
+      if (symmetric) expected=(reference+reference.transpose()).eval();
+      expected.triangularView<Eigen::StrictlyLower>().setZero();
+      Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n,n);
+      // Incomplete panels intentionally have no exchange parity themselves.
+      for (int first=0;first<u;first+=2) {
+        const Eigen::MatrixXd panel=left.middleCols(first,std::min(2,u-first));
+        result+=action.generator_adjoint_streamed(first,panel,
+            {request(right_a,0.37,false),request(right_b,-0.61,true)},symmetric,true);
+      }
+      require((result-expected).norm()<3e-12,
+          "exchange-reduced panel sum differs from independent two-spin adjoint");
+    }
+  }
+}
+
 void check_demand_driven_structure_diagonal() {
   // Put one demanded pair in the first cell of a unique-spin space larger
   // than the forward matrix tile. A tile-backed diagonal lookup would evaluate
@@ -2715,6 +2767,7 @@ int main(int argc, char** argv) {
     check_sigma_tile_boundary();
     check_distinct_spin_sigma_action();
     check_streamed_generator_adjoint_requests();
+    check_exchange_reduced_generator();
     check_fused_spin_sectors();
     check_tiled_integral_direction();
     check_spin_sector_carrier_inverse();

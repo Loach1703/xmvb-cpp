@@ -303,11 +303,15 @@ public:
    * The caller bounds the left panel width. symmetric_sum returns
    * upper(D+D^T), after all requested orientations and scales. This is the
    * Cholesky pullback, not an oriented full one-body density.
+   * spin_exchange_reduced emits twice the alpha contribution and omits beta
+   * spectators. This is exact only after summing ALL left panels, when each
+   * full left/right pair has the same exchange parity in identical spin spaces.
+   * An individual panel need not have that parity or equal its unreduced image.
    */
   Eigen::MatrixXd generator_adjoint_streamed(int beta_begin,
       const Eigen::Ref<const Eigen::MatrixXd>& left,
       std::initializer_list<DirectCiStreamedGeneratorRequest> requests,
-      bool symmetric_sum=false) const;
+      bool symmetric_sum=false, bool spin_exchange_reduced=false) const;
 
   /** @brief Numerical matrices plus referenced links, not exclusively owned bytes. */
   std::size_t dynamic_bytes() const noexcept;
