@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <chrono>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -260,9 +261,21 @@ bool build_ciah_macro_step(
   CiahWorkspace workspace(problem, seed, ciah_options);
 
   const Eigen::MatrixXd c0 = context->selected_state_eigenvectors;
+  std::optional<CiTransportPoint> transported;
+  Eigen::VectorXd transported_step;
+  const auto transport_at = [&](const Eigen::VectorXd& displacement) -> const CiTransportPoint& {
+    // One immutable macro model: equal coordinates request the same map.
+    // Keyframe and macro-trial consumers share it without another Gram solve.
+    if (!transported || transported_step.size()!=displacement.size() ||
+        !(transported_step.array()==displacement.array()).all()) {
+      transported=transport->retract(displacement.head(no),displacement.tail(ns));
+      transported_step=displacement;
+    }
+    return *transported;
+  };
   const auto coefficients = [&](const Eigen::VectorXd& displacement) {
     Eigen::MatrixXd c = c0;
-    if (ns) c = transport->retract(displacement.head(no), displacement.tail(ns)).coefficients;
+    if (ns) c = transport_at(displacement).coefficients;
     return c;
   };
   const auto evaluate_keyframe = [&](const Eigen::VectorXd& displacement) {
@@ -271,7 +284,7 @@ bool build_ciah_macro_step(
         orbitals, chart, layout, displacement.head(no));
     Keyframe keyframe;
     if (ns) {
-      const auto point = transport->retract(displacement.head(no), displacement.tail(ns));
+      const auto& point = transport_at(displacement);
       const auto exact = objective->evaluate_coupled_keyframe(parameters, point.coefficients);
       keyframe.gradient = transport->gradient(point, exact);
       keyframe.energy = exact.energy;

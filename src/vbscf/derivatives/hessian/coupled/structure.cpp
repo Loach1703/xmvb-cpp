@@ -566,17 +566,18 @@ StructureTangentOperator::apply_inverse_augmented_hessian_diagonal(
   }
 
   if (metric_inverse_ && action_->supports_carrier_diagonal()) {
-    const auto riesz=[&](const Eigen::VectorXd& rhs) {
-      return core::solve_metric(rhs,
-          [this](const Eigen::VectorXd& x) {return apply_metric_coordinates(x);},
-          [this](const Eigen::VectorXd& x) {return apply_inverse_metric_model(x);});
-    };
-    // L=FZ, G_s=L^T L. The symmetric pulled-back inverse is
-    // G_s^-1 L^T D^-1 L G_s^-1, not a copied carrier diagonal.
-    const Eigen::MatrixXd coefficients=expand(riesz(covector)).scaled_coefficients;
-    const Eigen::MatrixXd image=action_->apply_inverse_carrier_diagonal(
-        coefficients,energies_,eigenvalue);
-    return riesz(project_coordinates(image));
+    // A=M^-1-C(C^T M C)^-1 C^T is the constrained inverse.
+    // A F^T D^-1 F A = P_L [M^-1 F^T D^-1 F M^-1] P_R,
+    // P_R=I-M C(C^T M C)^-1 C^T and P_L=P_R^T.
+    // Use the cached M C; no metric action or inverse solve remains.
+    const auto& mc=accepted_point_->selected_state_structure_images->overlap;
+    Eigen::MatrixXd rhs=expand(covector).scaled_coefficients;
+    Eigen::MatrixXd weights=selected_metric_inverse_*(selected_.transpose()*rhs);
+    rhs.noalias()-=mc*weights;
+    Eigen::MatrixXd image=metric_inverse_->apply_carrier_inverse(rhs,energies_,eigenvalue);
+    weights=selected_metric_inverse_*(mc.transpose()*image);
+    image.noalias()-=selected_*weights;
+    return project_coordinates(image);
   }
 
   Eigen::MatrixXd ambient = expand(covector).scaled_coefficients;

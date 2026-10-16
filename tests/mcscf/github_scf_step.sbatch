@@ -29,9 +29,12 @@ space=$1
 baseline=$(realpath "$2")
 current=$(realpath "$3")
 artifact="$source_dir/github-scf-step-$SLURM_JOB_ID"
+mode=${4:-paired}
+[[ $mode == paired || $mode == native || $mode == phases || $mode == vtune ]] || exit 64
 mkdir -p "$artifact"
 export LC_ALL=C OMP_NUM_THREADS=8 OMP_PLACES=cores OMP_PROC_BIND=close
 export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
+unset XMVB_PHASE_TIMING XMVB_NEO_TRACE
 export LD_LIBRARY_PATH="/home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib:${LD_LIBRARY_PATH:-}"
 hostname > "$artifact/node.txt"
 lscpu > "$artifact/cpu.txt"
@@ -39,8 +42,10 @@ module list > "$artifact/modules.txt" 2>&1
 env | sort > "$artifact/environment.txt"
 printf '%s\n' "$space" > "$artifact/space.txt"
 printf '%s\n' '946934570c096ba5072923effa7fb063736731f1' > "$artifact/baseline-commit.txt"
-printf '%s\n' '03919978 (same numerical source as e5ef2fe1)' > "$artifact/current-commit.txt"
-for variant in current baseline; do
+printf '%s\n' "${5:-03919978 (same numerical source as e5ef2fe1)}" > "$artifact/current-commit.txt"
+variants=(current)
+[[ $mode == paired ]] && variants+=(baseline)
+for variant in "${variants[@]}"; do
  run_dir="$artifact/$variant"
  mkdir -p "$run_dir"
  binary=$current
@@ -53,16 +58,32 @@ for variant in current baseline; do
  (
   cd "$run_dir"
   sha256sum input.xmi cc-pvdz.gbs xmvb-cpp.exe > hashes.sha256
+  launcher=()
+  if [[ $mode == phases || $mode == vtune ]]; then
+   export XMVB_PHASE_TIMING=1 XMVB_NEO_TRACE=scalar
+  fi
+  if [[ $mode == vtune ]]; then
+   profiler=/opt/intel/oneapi/vtune/latest/bin64/vtune
+   [[ -x $profiler ]] || exit 69
+   "$profiler" -version > profiler-version.txt 2>&1
+   launcher=("$profiler" -collect hotspots -knob sampling-mode=sw -result-dir "$run_dir/capture.vtune" --)
+  fi
   set +e
   srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
    /usr/bin/time -v -o resource.time \
    python3 "$source_dir/tests/mcscf/pin_ci.py" 8 "$artifact/affinity.jsonl" \
-   "$run_dir/xmvb-cpp.exe" input.xmi --optimizer-backend neo --eigensolver davidson \
+   "${launcher[@]}" "$run_dir/xmvb-cpp.exe" input.xmi --optimizer-backend neo --eigensolver davidson \
    --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 \
    --energy-tolerance 1e-7 --max-iterations 1 --neo-trace neo.tsv > output.out 2> run.err
   status=$?
   set -e
   printf '%s\n' "$status" > run.exit
+  if [[ $mode == vtune ]]; then
+   for report in hotspots summary; do
+    "$profiler" -report "$report" -r "$run_dir/capture.vtune" \
+     > "vtune-$report.txt" 2> "vtune-$report.err"
+   done
+  fi
  )
 done
 # Application exit 2 is expected only if output confirms max_iterations;

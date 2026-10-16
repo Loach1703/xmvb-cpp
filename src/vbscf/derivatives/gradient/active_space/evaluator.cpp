@@ -402,15 +402,12 @@ void solve_structure_problem(
         context->structure_metric_inverse = std::make_unique<StructureMetricInverse>(
             structure_action,alpha,beta,true,budget,budget);
         const auto* inverse = context->structure_metric_inverse.get();
-        // M=F^T F. Pull the carrier inverse back as M^-1 F^T D^-1 F M^-1;
-        // applying only F^T D^-1 F would confuse covectors with vectors.
-        residual_preconditioner = [&structure_action,inverse](
+        // Complete-sector identity cancels the interior F M^-1 maps;
+        // both Riesz maps are retained algebraically, not applied separately.
+        residual_preconditioner = [inverse](
             const Eigen::VectorXd& residual, double energy) {
-          const Eigen::MatrixXd riesz = inverse->apply(residual);
           const Eigen::VectorXd energies = Eigen::VectorXd::Constant(1,energy);
-          const Eigen::MatrixXd image = structure_action.apply_inverse_carrier_diagonal(
-              riesz,energies,0.0);
-          return Eigen::VectorXd(inverse->apply(image).col(0));
+          return Eigen::VectorXd(inverse->apply_carrier_inverse(residual,energies,0.0).col(0));
         };
         diagnostics::neo_trace("ciah_ci_preconditioner",
             "carrier=1,factor_bytes=%zu,blocks=%zu,max_block=%d",

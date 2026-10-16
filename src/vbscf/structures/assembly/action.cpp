@@ -943,28 +943,20 @@ bool StructureAction::supports_carrier_diagonal() const noexcept {
   return sizeof(double)*elements<=static_cast<double>(kStructureActionWorkspaceBytes);
 }
 
-Eigen::MatrixXd StructureAction::apply_inverse_carrier_diagonal(
-    const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+void StructureAction::divide_carrier_diagonal(Eigen::Ref<Eigen::MatrixXd> carrier,
     const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const {
-  if (!supports_carrier_diagonal() || vectors.rows()!=n_structures_ ||
-      vectors.cols()!=energies.size() || !energies.allFinite() || !std::isfinite(eigenvalue))
-    throw std::invalid_argument("invalid structure carrier diagonal inverse");
+  if (!supports_carrier_diagonal() || carrier.rows()!=n_unique_alpha_ ||
+      carrier.cols()!=energies.size()*n_unique_beta_ || !energies.allFinite() ||
+      !std::isfinite(eigenvalue))
+    throw std::invalid_argument("invalid carrier diagonal input");
   if (!direct_ci_->carrier_diagonal)
     direct_ci_->carrier_diagonal=direct_ci_->sigma.diagonal(direct_ci_->integrals.one_electron);
-  Eigen::MatrixXd result(n_structures_,vectors.cols());
-  for (Eigen::Index state=0;state<vectors.cols();++state) {
-    Eigen::MatrixXd carrier=orthogonalize_structure_block(vectors.col(state));
-    for (Eigen::Index j=0;j<carrier.cols();++j) for (Eigen::Index i=0;i<carrier.rows();++i) {
+  for (Eigen::Index state=0;state<energies.size();++state)
+    for (int j=0;j<n_unique_beta_;++j) for (int i=0;i<n_unique_alpha_;++i) {
       double denominator=(*direct_ci_->carrier_diagonal)(i,j)-energies[state]-eigenvalue;
-      // Same signed denominator protection as the existing CIAH inverse.
       if (std::abs(denominator)<1.0e-8) denominator=1.0e-8;
-      carrier(i,j)/=denominator;
+      carrier(i,state*n_unique_beta_+j)/=denominator;
     }
-    direct_ci_->beta_transform().apply_adjoint_right(&carrier);
-    direct_ci_->alpha_transform.apply_adjoint_left(&carrier);
-    result.col(state)=contract_spin_product_block(carrier).col(0);
-  }
-  return result;
 }
 
 StructureActionResult StructureAction::apply_streamed(

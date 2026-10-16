@@ -28,6 +28,8 @@ def summarize(root):
     node = (root / "node.txt").read_text().strip()
     for variant in ("baseline", "current"):
         run = root / variant
+        if not run.is_dir():
+            continue
         output = (run / "output.out").read_text() if (run / "output.out").exists() else ""
         resource = (run / "resource.time").read_text() if (run / "resource.time").exists() else ""
         trace = []

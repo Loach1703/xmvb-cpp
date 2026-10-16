@@ -1502,14 +1502,17 @@ void check_sigma_action() {
       inverse_d[a*beta.size()+b]=1.0/(diagonal(a,b)-root_energy);
   const Eigen::MatrixXd reference_p =
       inverse_m*f.transpose()*inverse_d.asDiagonal()*f*inverse_m;
-  const Eigen::MatrixXd riesz = full_metric.apply(metric_rhs.leftCols(1));
-  const Eigen::MatrixXd carrier_image = full_action.apply_inverse_carrier_diagonal(
-      riesz,Eigen::VectorXd::Constant(1,root_energy),0.0);
-  const Eigen::MatrixXd correction = full_metric.apply(carrier_image);
+  const Eigen::MatrixXd correction = full_metric.apply_carrier_inverse(
+      metric_rhs.leftCols(1),Eigen::VectorXd::Constant(1,root_energy),0.0);
   const Eigen::MatrixXd expected_correction = reference_p*metric_rhs.leftCols(1);
   require((correction-expected_correction).norm()<
               1e-10*std::max(1.0,expected_correction.norm()),
           "carrier Davidson inverse differs from the dense metric pullback");
+  const Eigen::MatrixXd cancelled = full_metric.apply_carrier_inverse(
+      metric_rhs,Eigen::VectorXd::Constant(metric_rhs.cols(),root_energy),0.0);
+  require((cancelled-reference_p*metric_rhs).norm()<
+              1e-10*std::max(1.0,(reference_p*metric_rhs).norm()),
+          "cancelled multi-RHS carrier inverse differs from the independent pullback");
   auto original_action = std::make_unique<xmvb::vb::StructureAction>(
       full_terms,product_dimension,topology,packed_overlap,
       one_electron,two_electron,n_orbitals,&full_diagonal);
@@ -2278,6 +2281,52 @@ void benchmark_structure_response() {
   }
 }
 
+/** @brief Complete singlet/triplet sectors are closed without spanning all M_S products. */
+void check_spin_sector_carrier_inverse() {
+  const auto spin=complete_space(3,1);
+  Eigen::Matrix3d r=Eigen::Matrix3d::Identity();
+  r(0,1)=0.17; r(0,2)=-0.09; r(1,2)=0.12;
+  const Eigen::Matrix3d s=r.transpose()*r;
+  const std::vector<double> overlap(s.data(),s.data()+s.size());
+  const Eigen::Matrix3d h=Eigen::Vector3d(-0.8,-0.3,0.2).asDiagonal();
+  xmvb::vb::ActiveSpaceTwoElectronResult eri;
+  eri.packed_active_two_electron_integrals.resize(xmvb::vb::packed_active_two_electron_integral_count(3),0.0);
+  const auto orth=xmvb::vb::orthogonalize_active_integrals(overlap,h,eri,3);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(spin,spin,orth);
+  const Eigen::MatrixXd diagonal=sigma.diagonal(orth.one_electron);
+  std::vector<std::vector<int>> pa,pb;
+  for (const auto& a:spin) for (const auto& b:spin) { pa.push_back(a); pb.push_back(b); }
+  const auto topology=xmvb::vb::build_same_spin_pair_topology(pa,pb,3);
+  for (int parity:{1,-1}) {
+    const int n=parity==1 ? 6:3;
+    std::vector<std::vector<xmvb::vb::StructureExpansionTerm>> terms(9);
+    int column=0;
+    for (int a=0;a<3;++a) for (int b=a+(parity<0);b<3;++b) {
+      const double scale=a==b ? 1.0:1/std::sqrt(2.0);
+      terms[3*a+b].push_back({column,scale});
+      if (a!=b) terms[3*b+a].push_back({column,parity*scale});
+      ++column;
+    }
+    const xmvb::vb::StructureAction action(terms,n,topology,overlap,h,eri,3,
+        nullptr,xmvb::vb::StructureActionMode::ActionOnly);
+    const xmvb::vb::StructureMetricInverse metric(action,spin,spin,true,65536,65536);
+    const auto carrier=action.orthogonalize_structure_block(Eigen::MatrixXd::Identity(n,n));
+    Eigen::MatrixXd f(9,n);
+    for (int j=0;j<n;++j) for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+      f(3*a+b,j)=carrier(a,3*j+b);
+    const Eigen::MatrixXd inverse=(f.transpose()*f).inverse();
+    Eigen::VectorXd dinv(9);
+    constexpr double energy=-3.0,shift=0.11;
+    for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+      dinv[3*a+b]=1/(diagonal(a,b)-energy-shift);
+    const Eigen::MatrixXd reference=inverse*f.transpose()*dinv.asDiagonal()*f*inverse;
+    const auto actual=metric.apply_carrier_inverse(Eigen::MatrixXd::Identity(n,n),
+        Eigen::VectorXd::Constant(n,energy),shift);
+    require((actual-reference).norm()<1e-11,
+        "complete spin-sector cancellation changed the carrier preconditioner");
+  }
+}
+
 /** @brief The streamed directional image and integral adjoint have separate oracles. */
 void check_tiled_integral_direction_case(
     const std::vector<std::vector<int>>& alpha,
@@ -2637,6 +2686,7 @@ int main(int argc, char** argv) {
     check_streamed_generator_adjoint_requests();
     check_fused_spin_sectors();
     check_tiled_integral_direction();
+    check_spin_sector_carrier_inverse();
     check_exchange_adjoint();
     check_demand_driven_structure_diagonal();
     std::cout << "orthogonal direct-CI planner and exterior transform: passed\n";

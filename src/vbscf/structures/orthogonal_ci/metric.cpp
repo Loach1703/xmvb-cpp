@@ -176,6 +176,24 @@ Eigen::MatrixXd StructureMetricInverse::apply(
   return result;
 }
 
+Eigen::MatrixXd StructureMetricInverse::apply_carrier_inverse(
+    const Eigen::Ref<const Eigen::MatrixXd>& rhs,
+    const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const {
+  if (rhs.rows()!=action_->n_structures_ || rhs.cols()<=0 ||
+      rhs.cols()!=energies.size() || !rhs.allFinite())
+    throw std::invalid_argument("invalid complete-sector carrier inverse RHS");
+  Eigen::MatrixXd result(rhs.rows(),rhs.cols());
+  for (Eigen::Index first=0;first<rhs.cols();first+=chunk_width_) {
+    const Eigen::Index count=std::min<Eigen::Index>(chunk_width_,rhs.cols()-first);
+    Eigen::MatrixXd carrier=action_->expand_structure_block(solve_spin(rhs.middleCols(first,count)));
+    action_->inverse_adjoint_orbital_transform(&carrier);
+    action_->divide_carrier_diagonal(carrier,energies.segment(first,count),eigenvalue);
+    action_->inverse_orbital_transform(&carrier);
+    result.middleCols(first,count)=solve_spin(action_->contract_spin_product_block(carrier));
+  }
+  return result;
+}
+
 Eigen::MatrixXd StructureMetricInverse::apply_at_transform(
     const Eigen::Ref<const Eigen::MatrixXd>& rhs,
     const ExteriorOrbitalTransform& alpha,

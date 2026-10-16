@@ -32,6 +32,15 @@ public:
   /** @brief Applies the overlap inverse, chunking RHS by the workspace budget. */
   Eigen::MatrixXd apply(const Eigen::Ref<const Eigen::MatrixXd>& rhs) const;
 
+  /** @brief Complete-sector M^-1 F^T D^-1 F M^-1 with cancelling maps removed.
+   * With F=T W and G=W^T W this is G^-1 W^T T^-1 D^-1 T^-T W G^-1.
+   * Uses the existing RHS workspace bound; arbitrary nonclosed selections
+   * must not use this complete-sector factorization.
+   */
+  Eigen::MatrixXd apply_carrier_inverse(
+      const Eigen::Ref<const Eigen::MatrixXd>& rhs,
+      const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const;
+
   /** @brief Trial metric inverse sharing immutable selected-sector factors. */
   Eigen::MatrixXd apply_at_transform(
       const Eigen::Ref<const Eigen::MatrixXd>& rhs,

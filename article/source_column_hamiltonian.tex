@@ -1466,6 +1466,95 @@ not a spin-product array. If original touched support is complete, $t$
 itself can equal $U_\alpha U_\beta$; this bound does not conceal that input
 cost. Accepted residency is shared across roots, never copied per worker.
 
+\section{Necessary projections and cancelling coordinate maps}
+\label{sec:necessary-maps}
+
+An overlap solve is not a physical observable. Its necessity depends on
+the coordinate map that the optimizer has chosen. Let
+$F(p)=\Ta(p)\Wa$ map selected structure coefficients into an orthogonal
+spin-string carrier at orbital displacement $p$. With an independent
+structure displacement $q$, write $\vv C_b=\vv C_0+Zq$, where $Z$ embeds
+the structure tangent. The current finite CI transport projects the target
+\begin{equation}
+ b(p,q)=F(0)\vv C_b+\dot F(0)[p]\vv C_0
+\end{equation}
+onto the selected space at the displaced orbitals. Its normal equation is
+\begin{equation}\label{eq:transport-normal}
+ M(p)\vv C(p,q)=F(p)\Tr b(p,q),\qquad M(p)=F(p)\Tr F(p).
+\end{equation}
+For a nonclosed selection this is a genuine restricted projection: replacing
+$M(p)$ by the identity, or using an inverse on a larger complete space,
+does not give the same transport. Its gradient pullback involves the adjoint
+solve with the same $M(p)$. These operations are necessary for this finite
+coordinate map, not for every possible VBSCF optimization framework.
+Changing the map requires deriving its derivatives consistently, rather
+than independently deleting the projection from a keyframe or an HVP.
+Two requests for exactly the same $(p,q)$ within one immutable macro model,
+however, solve exactly the same equation; the previously computed point is
+sufficient for both consumers.
+
+There is a stronger reduction when $\ran\Wa$ is a complete spin sector.
+Define its orthogonal projector $P$ and its orbital-independent Gram $G$ by
+\begin{equation}
+ G=\Wa^*\Wa,\qquad P=\Wa G^{-1}\Wa^*.
+\end{equation}
+The common spatial orbital transformation commutes with the total-spin
+projector. Thus $\Ta P=P\Ta$, as do its inverse and adjoint, and the
+Moore--Penrose inverse of $F=\Ta\Wa$ is
+\begin{equation}\label{eq:complete-left-inverse}
+ F^+=G^{-1}\Wa^*\Ta^{-1},\qquad
+ FM^{-1}=\Ta^{-*}\Wa G^{-1}.
+\end{equation}
+Indeed, the proposed left inverse times $F$ is the identity, while
+$FF^+=\Ta P\Ta^{-1}=P$ is an orthogonal projector. Completeness here
+means completeness of the selected spin sector, not merely completeness of
+the ambient alpha and beta string lists. Covalent-only and arbitrary
+selected spaces generally do not meet this hypothesis.
+
+Let $D$ be the existing carrier diagonal, including its root-energy shift
+and the unchanged denominator protection. The symmetric structure-space
+inverse preconditioner can therefore be evaluated as
+\begin{align}
+ M^{-1}F^*D^{-1}FM^{-1}
+ &=G^{-1}\Wa^*\Ta^{-1}D^{-1}\Ta^{-*}\Wa G^{-1}.
+ \label{eq:cancelled-carrier-inverse}
+\end{align}
+No commutation between $D$ and the spin projector is needed: the two outer
+structure maps retain the required projection. Equation~\eqref{eq:cancelled-carrier-inverse}
+removes the interior inverse/forward exterior maps and repeated expansion
+and contraction. It retains the same two Riesz maps algebraically; it does
+not replace covectors by coefficient vectors. Only one carrier workspace
+is live, with the original right-hand-side chunk bound. $G$ is factored by
+spatial occupation blocks, not as a global dense structure matrix.
+
+The normalization and selected-state constraints do not restore the need
+for repeated metric solves. If the columns of $C$ are the selected states,
+put $K=C\Tr MC$ and define
+\begin{equation}
+ A=M^{-1}-CK^{-1}C\Tr,\quad
+ P_R=I-MCK^{-1}C\Tr,\quad P_L=P_R\Tr.
+\end{equation}
+The exact constrained inverse preconditioner is
+\begin{equation}\label{eq:horizontal-carrier-inverse}
+ A F^*D^{-1}F A
+ =P_L\left[M^{-1}F^*D^{-1}FM^{-1}\right]P_R.
+\end{equation}
+Only the already available $MC$ and the small state Gram $K$ are needed
+for the two outer corrections. Thus two coordinate-metric CG solves in
+the composite evaluation are unnecessary. Multiplication by the independent
+horizontal coordinate basis before and after this expression gives the
+same constrained operator. The identity applies columnwise when different
+roots use different shifted carrier diagonals.
+
+The same closure identity permits direct evaluation of the complete-sector
+transport as $\vv C=G^{-1}\Wa^*\Ta(p)^{-1}b$. This does not license the
+corresponding replacement in Eq.~\eqref{eq:transport-normal} for a nonclosed
+selection. Moreover, CI transport used only as an initial guess for a later
+fully relaxed root solve is distinct from the transport used to define a
+keyframe objective: altering the former can change iteration cost and root
+tracking, while altering the latter also changes the finite model and its
+pullback. These two roles must not be conflated.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};
