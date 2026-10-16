@@ -544,27 +544,46 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           state.product_images->states[state_id][panel]=std::move(accepted);
         }
       });
+      struct OutputColumn { detail::ColumnTile* tile; int source,beta; };
+      std::vector<OutputColumn> output_columns;
       const auto writer=[&](int source_begin,int vectors,int destination_begin) -> mcscf::DirectCiTileWriter {
         return [&,source_begin,vectors,destination_begin](const std::vector<int>& betas,
           const std::vector<int>& rows,const mcscf::DirectCiColumnAccumulator& accumulate) {
-        for (int j=0;j<static_cast<int>(betas.size());) {
-          const int panel=betas[j]/extent;
-          int end=j+1;
-          while (end<static_cast<int>(betas.size()) && betas[end]/extent==panel) ++end;
-          if (!reachable_mask[panel]) { j=end; continue; }
-          auto& tile=output.get(panel);
-          const int workers=cooperative_openmp_thread_count(),chunks=std::min<int>(workers,rows.size());
-          const int columns=(end-j)*vectors;
+        const int workers=cooperative_openmp_thread_count(),chunks=std::min<int>(workers,rows.size());
+        int j=0;
+        while (j<static_cast<int>(betas.size())) {
+          output_columns.clear();
+          std::size_t bytes=0;
+          // Borrow only a budget-fitting group of panels. LRU entries touched
+          // here are newer than all unborrowed entries, so no get() in this
+          // group can evict an earlier borrowed panel. Tasks finish before
+          // the next group mutates the cache; only small pointers are shared.
+          while (j<static_cast<int>(betas.size())) {
+            const int panel=betas[j]/extent;
+            int end=j+1;
+            while (end<static_cast<int>(betas.size()) && betas[end]/extent==panel) ++end;
+            if (!reachable_mask[panel]) { j=end; continue; }
+            const auto pattern=pattern_at(panel);
+            const std::size_t payload=pattern->bytes()+sizeof(double)*
+                static_cast<std::size_t>(pattern->offsets[pattern->columns()])*output_width;
+            if (!output_columns.empty() &&
+                (payload>cache_bytes || bytes>cache_bytes-payload)) break;
+            auto& tile=output.get(panel);
+            for (;j<end;++j) output_columns.push_back({&tile,j,betas[j]%extent});
+            bytes+=payload;
+          }
+          const int columns=output_columns.size()*vectors;
           cooperative_openmp_for(columns*chunks,workers,[&](std::ptrdiff_t index) {
             const int column=index%columns,chunk=index/columns;
-            const int beta=j+column/vectors,v=column%vectors,b=betas[beta]%extent;
+            const auto& output_column=output_columns[column/vectors];
+            auto& tile=*output_column.tile;
+            const int beta=output_column.source,v=column%vectors,b=output_column.beta;
             const int offset=tile.pattern->offsets[b],length=tile.pattern->offsets[b+1]-offset;
             if (length==0) return;
             accumulate(beta,source_begin+v,rows.size()*chunk/chunks,rows.size()*(chunk+1)/chunks,
                 tile.values.col(destination_begin+v).data()+offset,
                 tile.pattern->full ? nullptr:tile.pattern->rows.data()+offset,tile.pattern->full ? 0:length);
           });
-          j=end;
         }
         };
       };

@@ -1333,13 +1333,31 @@ void check_exterior_team() {
     for (int i=0;i<size;++i) two_rhs(i,j)=std::cos(0.17*(i+1)*(j+2));
   for (const bool adjoint : {false,true}) {
     Eigen::MatrixXd reference=two_rhs,actual=two_rhs;
-    transform.apply_supported_left(&reference,support_offsets,support_rows,adjoint);
+    for (int first=0;first<two_rhs.cols();first+=size) {
+      Eigen::MatrixXd block=two_rhs.middleCols(first,size);
+      transform.apply_supported_left(&block,support_offsets,support_rows,adjoint);
+      reference.middleCols(first,size)=block;
+    }
 #pragma omp parallel num_threads(2)
 #pragma omp single
     transform.apply_supported_left(&actual,support_offsets,support_rows,adjoint);
     require((actual-reference).norm()<1e-13,
-            "two-RHS supported exterior action changed inside an existing team");
+            "shared supported exterior graph differs from independent RHS actions");
   }
+  // Zero primal shears are identities, but their directional coefficients
+  // need not vanish. Primal shortcuts must never remove those derivative edges.
+  const Eigen::MatrixXd identity=Eigen::MatrixXd::Identity(8,8);
+  const xmvb::vb::ExteriorOrbitalTransform at_identity(strings,identity);
+  const auto identity_direction=at_identity.direction(delta);
+  Eigen::MatrixXd primal=two_rhs,tangent=Eigen::MatrixXd::Zero(size,two_rhs.cols());
+  at_identity.apply_directional_left(identity_direction,&primal,&tangent);
+  constexpr double h=1e-5;
+  const xmvb::vb::ExteriorOrbitalTransform plus(strings,identity+h*delta),minus(strings,identity-h*delta);
+  Eigen::MatrixXd plus_image=two_rhs,minus_image=two_rhs;
+  plus.apply_left(&plus_image); minus.apply_left(&minus_image);
+  require((primal-two_rhs).norm()<1e-13 && tangent.norm()>1e-3 &&
+              (tangent-(plus_image-minus_image)/(2*h)).norm()<1e-8,
+          "zero primal shears lost a nonzero orbital derivative");
   Eigen::MatrixXd x=seed,dx=0.3*seed,y=x,dy=dx;
   transform.apply_directional_left(direction,&x,&dx);
 #pragma omp parallel num_threads(2)
@@ -1453,6 +1471,29 @@ void check_sigma_columns(const Fixture& fixture, int width) {
   require((tiled-ordinary).norm() < 2e-11*std::max(1.0,ordinary.norm()),
           "state-channel slab reuse corrupted the response sigma");
   check_adjoint(sigma.apply_tiled_with_adjoint(width,read,{},read_right),cross);
+  // Each response writer must finish before the next halo read starts.
+  // Include an adjoint-only middle request: it still consumes the common B,
+  // but has no image callback to synchronize or trigger the next reader.
+  tiled.setZero();
+  int completed_writes=0;
+  const xmvb::mcscf::DirectCiTileWriter ordered_add=[&](const auto& betas,
+      const auto& rows,const auto& accumulate) {
+    add(betas,rows,accumulate);
+    ++completed_writes;
+  };
+  const xmvb::mcscf::DirectCiTileReader next_read=[&](const auto& betas,
+      const auto& rows,Eigen::Ref<Eigen::MatrixXd> values) {
+    require(completed_writes>0,"next response read before its preceding writer");
+    read_right(betas,rows,values);
+  };
+  const xmvb::mcscf::DirectCiTileRequest sequence[]={
+      {read,ordered_add},{next_read,{}},{read,ordered_add}};
+  const auto sequence_adjoints=sigma.apply_tiled_responses(width,sequence,read_right);
+  check_adjoint(sequence_adjoints[0],cross);
+  check_adjoint(sequence_adjoints[1],sigma.integral_adjoint(right,right));
+  check_adjoint(sequence_adjoints[2],cross);
+  require((tiled-2*ordinary).norm()<4e-11*std::max(1.0,ordinary.norm()),
+          "temporal halo refill overwrote a live image or accepted channels");
   Eigen::MatrixXd orbital(fixture.n,fixture.n);
   for (int q=0;q<fixture.n;++q)
     for (int p=0;p<fixture.n;++p) orbital(p,q)=std::sin(0.29*(p+2)*(q+1));
@@ -1572,6 +1613,18 @@ void check_sigma_columns(const Fixture& fixture, int width) {
     }
     require(read_failed && write_failed && adjoint_read_failed,
             "tile callback exceptions did not propagate out of the OpenMP team");
+    bool next_read_failed=false;
+    const xmvb::mcscf::DirectCiTileRequest failing_sequence[]={
+      {read,add},
+      {[](const auto&,const auto&,Eigen::Ref<Eigen::MatrixXd>) {
+        throw std::runtime_error("next response reader failure");
+      },add}};
+    try {
+      sigma.apply_tiled_responses(width,failing_sequence,read_right);
+    } catch (const std::runtime_error& error) {
+      next_read_failed=std::string(error.what())=="next response reader failure";
+    }
+    require(next_read_failed,"next-reader exception did not leave the OpenMP team");
   }
 }
 

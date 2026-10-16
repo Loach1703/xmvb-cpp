@@ -278,6 +278,7 @@ void ExteriorOrbitalTransform::apply_adjoint_left_block(
     auto values = coefficients.col(column);
     for (int i = static_cast<int>(shears_.size()) - 1; i >= 0; --i) {
       const auto& shear = shears_[i];
+      if (shear.coefficient==0.0) continue;
       for (int j : projection.shear_pairs[i]) {
         const auto& pair = shear.pairs[j];
         values[pair.source] += shear.coefficient * pair.sign * values[pair.target];
@@ -328,6 +329,7 @@ void ExteriorOrbitalTransform::apply_supported_left(
         }
         for (int index = 0; index < n_shears; ++index) {
           const Shear& shear = shears_[adjoint ? n_shears - 1 - index : index];
+          if (shear.coefficient==0.0) continue;
           for (const auto& pair : shear.pairs) {
             if (!allowed[pair.source] || !allowed[pair.target]) continue;
             const int target = adjoint ? pair.source : pair.target;
@@ -478,6 +480,7 @@ void ExteriorOrbitalTransform::transform_left(
     }
     for (int index = 0; index < n_shears; ++index) {
       const Shear& shear = shears_[reverse ? n_shears - 1 - index : index];
+      if (shear.coefficient==0.0) continue;
       const double factor = inverse ? -shear.coefficient : shear.coefficient;
       for (const DeterminantPair& pair : shear.pairs) {
         const int target = adjoint ? pair.source : pair.target;
@@ -512,6 +515,7 @@ void ExteriorOrbitalTransform::transform_right(
     }
     for (int index = 0; index < n_shears; ++index) {
       const Shear& shear = shears_[reverse ? n_shears - 1 - index : index];
+      if (shear.coefficient==0.0) continue;
       const double factor = inverse ? -shear.coefficient : shear.coefficient;
       for (const DeterminantPair& pair : shear.pairs) {
         const int target = adjoint ? pair.source : pair.target;
