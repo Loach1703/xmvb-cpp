@@ -319,6 +319,32 @@ void check_case(const std::vector<std::vector<int>>& alpha,
 
   const Eigen::Vector3d dc(0.21,-0.13,0.31);
   const Eigen::MatrixXd zero=Eigen::Matrix4d::Zero();
+  {
+    const auto fused=overlap.transport_gradient(left,right,dr,x,y,dc,x+dc);
+    const auto base=overlap.adjoint(left,right,x,y);
+    const auto connection=overlap.adjoint_direction(left,right,zero,dr,x,dc);
+    const auto metric=overlap.adjoint(left,left,x,x+dc);
+    const auto origin=overlap.adjoint(left,right,x,dc);
+    const Eigen::MatrixXd expected=base.left+connection.left-metric.left-metric.right;
+    const Eigen::VectorXd image=reference_cross(right,left,w,alpha,beta)*x;
+    require(relative_error(fused.charts.left,expected)<3e-12 &&
+        relative_error(fused.charts.right,origin.right)<3e-12 &&
+        relative_error(fused.image,image)<3e-12,
+        "finite transport fusion lost a metric side or a chart connection");
+    const double origin_difference=(x.dot(reference_cross(left,right+h*dr,w,alpha,beta)*dc)-
+        x.dot(reference_cross(left,right-h*dr,w,alpha,beta)*dc))/(2*h);
+    require(std::abs(dot(fused.charts.right,dr)-origin_difference)<2e-8,
+        "finite transport origin pullback fails independent minor differences");
+    if (full_ambient) {
+      const ExteriorOrbitalTransform ca(alpha,left),cb(beta,left),oa(alpha,right),ob(beta,right);
+      const auto narrow=action.cross_overlap_transport_gradient(x,y,dc,x+dc,ca,cb,oa,ob,dr,
+          16*sizeof(double)*(alpha.size()+beta.size()));
+      require(relative_error(narrow.charts.left,fused.charts.left)<3e-12 &&
+          relative_error(narrow.charts.right,fused.charts.right)<3e-12 &&
+          relative_error(narrow.image,fused.image)<3e-12,
+          "one-column finite transport differs from broad moment order");
+    }
+  }
   for (const Eigen::MatrixXd& r : {left,Eigen::MatrixXd(identity)}) {
     const auto fused=overlap.transport_curvature(r,dr,x,y,dc);
     const auto expected_d=overlap.adjoint_direction(r,r,zero,dr,x,y);
@@ -455,6 +481,16 @@ void check_parallel_transport() {
             relative_error(fused.mixed,reference_q.right)<3e-12 &&
             relative_error(fused.image,reference_image)<3e-12,
             "parallel unequal-spin transport changed the selected contractions");
+        const auto finite=action.cross_overlap_transport_gradient(x,y,q,x+q,a,b,a,b,dr,
+            columns*16*sizeof(double)*(alpha.size()+beta.size()));
+        const auto base=action.cross_overlap_adjoint(x,y,a,b,a,b,nullptr,nullptr);
+        const auto connection=action.cross_overlap_adjoint(x,q,a,b,a,b,&zero,&dr);
+        const auto metric=action.cross_overlap_adjoint(x,x+q,a,b,a,b,nullptr,nullptr);
+        require(relative_error(finite.charts.left,
+            base.left+connection.left-metric.left-metric.right)<3e-12 &&
+            relative_error(finite.charts.right,reference_q.right)<3e-12 &&
+            relative_error(finite.image,action.cross_overlap(x,a,b,a,b))<3e-12,
+            "parallel finite transport changed the selected contractions");
       }
     }
   }

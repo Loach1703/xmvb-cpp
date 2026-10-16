@@ -29,6 +29,12 @@ struct OverlapTransportCurvature {
   Eigen::VectorXd image;
 };
 
+/** @brief Finite-transport chart cotangents and reference CI image. */
+struct OverlapTransportGradient {
+  UpperPair charts;
+  Eigen::VectorXd image;
+};
+
 /** Cross Gram action F(R_left)^T F(R_right), with F(R) = wedge(R) W.
  *
  * W is the immutable selected-structure expansion retained by `action`. The
@@ -121,6 +127,16 @@ public:
       const Eigen::Ref<const Eigen::VectorXd>& lambda,
       const Eigen::Ref<const Eigen::VectorXd>& coefficients,
       const Eigen::Ref<const Eigen::VectorXd>& coefficient_direction) const;
+
+  /** @brief Pull back the finite selected-space transport in one tile sweep. */
+  OverlapTransportGradient transport_gradient(
+      const Eigen::Ref<const Eigen::MatrixXd>& current,
+      const Eigen::Ref<const Eigen::MatrixXd>& origin,
+      const Eigen::Ref<const Eigen::MatrixXd>& origin_direction,
+      const Eigen::Ref<const Eigen::VectorXd>& lambda,
+      const Eigen::Ref<const Eigen::VectorXd>& base,
+      const Eigen::Ref<const Eigen::VectorXd>& reference,
+      const Eigen::Ref<const Eigen::VectorXd>& transported) const;
 
 private:
   const StructureAction* action_;

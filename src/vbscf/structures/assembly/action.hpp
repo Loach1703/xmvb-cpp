@@ -216,11 +216,14 @@ public:
   /** @brief Whether exact orthogonal direct-CI directional actions are available. */
   bool supports_integral_direction() const noexcept;
 
-  /** @brief Precomputes direction-independent selected-state adjoint data. */
+  /** @brief Precomputes direction-independent selected-state adjoint data.
+   * Optional H/M images are consumed from the same sigma sweep, not replayed.
+   */
   StructureAdjointState prepare_active_adjoint(
       const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
       const std::vector<double>& state_weights,
-      const std::vector<double>& state_energies) const;
+      const std::vector<double>& state_energies,
+      StructureActionResult* images = nullptr) const;
 
   /** @brief Pulls a prepared direct-CI adjoint back to active integrals. */
   StructureActiveIntegralAdjoint active_integral_adjoint(
@@ -373,6 +376,17 @@ public:
       const Eigen::VectorXd& coefficient_direction,
       const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
       const Eigen::MatrixXd& direction,
+      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
+
+  /** @brief Shared finite-transport VJP and reference coefficient image. */
+  OverlapTransportGradient cross_overlap_transport_gradient(
+      const Eigen::VectorXd& lambda, const Eigen::VectorXd& base,
+      const Eigen::VectorXd& reference, const Eigen::VectorXd& transported,
+      const ExteriorOrbitalTransform& current_alpha,
+      const ExteriorOrbitalTransform& current_beta,
+      const ExteriorOrbitalTransform& origin_alpha,
+      const ExteriorOrbitalTransform& origin_beta,
+      const Eigen::MatrixXd& origin_direction,
       std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
 
   /**

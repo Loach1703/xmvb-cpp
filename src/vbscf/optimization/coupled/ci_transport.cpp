@@ -139,16 +139,13 @@ Eigen::VectorXd CiTransport::gradient(const CiTransportPoint& point,
   profiling::ScopedPhase phase(profiling::Phase::CiTransportGradient);
   const Eigen::MatrixXd lambda = solve(point.upper, fixed.coefficient_gradient);
   Eigen::MatrixXd current_upper = zero_, origin_upper = zero_;
+  Eigen::MatrixXd structure_gradient(c0_.rows(),c0_.cols());
   for (Eigen::Index s = 0; s < c0_.cols(); ++s) {
-    const UpperPair base = overlap_.adjoint(point.upper, upper_, lambda.col(s),
-        point.base_coefficients.col(s),OverlapSide::Left);
-    const UpperPair origin = overlap_.adjoint(point.upper, upper_, lambda.col(s),
-        c0_.col(s),OverlapSide::Right);
-    const UpperPair connection = overlap_.adjoint_direction(point.upper, upper_,
-        zero_, point.origin_direction, lambda.col(s), c0_.col(s),OverlapSide::Left);
-    const UpperPair metric = overlap_.adjoint(point.upper, point.upper, lambda.col(s), point.coefficients.col(s));
-    current_upper += base.left + connection.left - metric.left - metric.right;
-    origin_upper += origin.right;
+    const auto pullback=overlap_.transport_gradient(point.upper,upper_,point.origin_direction,
+        lambda.col(s),point.base_coefficients.col(s),c0_.col(s),point.coefficients.col(s));
+    current_upper+=pullback.charts.left;
+    origin_upper+=pullback.charts.right;
+    structure_gradient.col(s)=pullback.image/coordinate_scale_;
   }
   const OrbitalOverlapPullback current_pullback(point.input, point.prepared, layout_);
   Eigen::VectorXd orbital = fixed.orbital_gradient +
@@ -156,8 +153,7 @@ Eigen::VectorXd CiTransport::gradient(const CiTransportPoint& point,
       origin_pullback_.gradient(overlap_upper_gradient(upper_, origin_upper));
   Eigen::VectorXd result(chart_.reduced_size() + structure_.tangent_size());
   result.head(chart_.reduced_size()) = chart_.project_reduced_gradient(orbital);
-  result.tail(structure_.tangent_size()) = structure_.project_coordinates(
-      overlap_.apply(upper_, point.upper, lambda) / coordinate_scale_);
+  result.tail(structure_.tangent_size()) = structure_.project_coordinates(structure_gradient);
   return result;
 }
 

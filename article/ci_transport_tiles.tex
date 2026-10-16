@@ -148,4 +148,86 @@ evaluated cross-Gram derivatives, explicit occupied-minor finite differences,
 and Eq.~\eqref{eq:duality}, including unequal spins, restricted supports,
 nonclosed selections, zero directions and singular occupied minors.
 
+\section{Finite-keyframe pullback in one sweep}
+
+Let $R$ and $R_0$ denote the current and reference charts, respectively, and
+let $\dot R_0$ be the accumulated reference direction. For a single state, write
+\begin{equation}
+ y_\lambda=F(R)\lambda,\quad y_c=F(R)c,\quad
+ y_0=F(R_0)c_0,\quad
+ z=F(R_0)b+DF(R_0)[\dot R_0]c_0-y_c.
+\end{equation}
+Here $b$ is the reference coefficient plus its independent CI displacement;
+$c$ is the projected transported coefficient, not an assumption that the
+target lies in the selected space. With $\lambda$ and these coefficients held
+fixed, the two cotangents consumed by the finite transport are
+\begin{align}
+ \langle G_R,\delta R\rangle
+ &=\langle DF(R)[\delta R]\lambda,z\rangle
+   -\langle y_\lambda,DF(R)[\delta R]c\rangle,\\
+ \langle G_0,\delta R_0\rangle
+ &=\langle y_\lambda,DF(R_0)[\delta R_0]c_0\rangle.
+\end{align}
+The first line contains \emph{both} sides of the current metric derivative.
+The second is the cotangent of the reference direction used in the transport
+map; it does not differentiate the reference chart of the entire first line.
+The CI-gradient consumer additionally requires
+\begin{equation}
+ t=F(R_0)\T y_\lambda.
+\end{equation}
+
+For an original beta tile $J$, form
+\begin{align}
+ U_0&=T_{0\alpha}X_{c_0}E_J,&V_0&=T_{0\beta}E_J,\\
+ \dot U_0&=\dot T_{0\alpha}X_{c_0}E_J,&\dot V_0&=\dot T_{0\beta}E_J,\\
+ U_b&=T_{0\alpha}X_bE_J+\dot U_0,&
+ U_c&=T_\alpha X_cE_J,&V_c&=T_\beta E_J.
+\end{align}
+The target is the sum of $U_bV_0\T$, $U_0\dot V_0\T$, and
+$-U_cV_c\T$. For any of these pairs $(U,V)$, common current-chart seeds are
+\begin{equation}
+ Z_\alpha=T_\alpha X_\lambda T_\beta\T V,\qquad
+ Z_\beta=T_\beta X_\lambda\T T_\alpha\T U.
+\end{equation}
+The first pair's $Z_\alpha$ and the second pair's $Z_\beta$ also supply
+$G_0$. Applying $T_{0\alpha}\T$ to that first $Z_\alpha$ and sampling only
+the original touched entries supplies $t$. Thus the reference cotangent and
+CI image need no independent cross-Gram sweep.
+
+The factor planner conservatively allows sixteen alpha-plus-beta panels per
+tile within the existing 64 MiB overlap allowance. There is one shared
+$W\lambda$ vector, no pair-squared Gram or worker-owned panel replicas.
+Complete broad support retains a moment contraction when five shared product
+images fit that same allowance; otherwise the identical operator is streamed.
+
+\section{Fixed-state energy and adjoint sharing}
+
+For $m$ equally weighted prescribed states, define
+\begin{equation}
+ G=C\T M C,\qquad K=C\T H C,\qquad
+ E=w\operatorname{Tr}(G^{-1}K),\qquad w=1/m.
+\end{equation}
+Only $MC$ is needed before normalization. Factor $G=L L\T$, set
+$V=L^{-\mathsf T}$, and let $\widetilde C=CV$. A single shared sigma/adjoint
+sweep produces $H\widetilde C$ and the unshifted integral cotangents. With
+$\widetilde K=\widetilde C\T H\widetilde C$, the fixed-coefficient variation is
+\begin{equation}
+ \delta E=w\operatorname{Tr}(\widetilde C\T\delta H\widetilde C)
+ -w\operatorname{Tr}(\widetilde K\widetilde C\T\delta M\widetilde C).
+\end{equation}
+The complete multiplier $-\widetilde K$, including its off-diagonal entries,
+therefore completes the overlap cotangent after the same sweep. No second
+Hamiltonian action is necessary. A small state-space Ritz transformation may
+subsequently provide individual energies and representatives; equal-weight
+energy and orbital cotangents are invariant under that transformation.
+The derivative in the original coefficient frame is
+\begin{equation}
+ \nabla_C E=2w\big(H\widetilde C-M\widetilde C\widetilde K\big)V\T.
+\end{equation}
+All matrices inverted or diagonalized in this normalization are $m$ by $m$,
+not full structure-space matrices. The implementation is in
+\texttt{assembly/states.*}; bounded finite-transport contractions are in
+\texttt{assembly/transport\_tiles.cpp}. Neither operation changes the selected
+VB space, its spin carrier, the optimizer strategy, or its accuracy criteria.
+
 \end{document}

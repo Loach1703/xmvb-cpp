@@ -1370,7 +1370,8 @@ Eigen::MatrixXd StructureAction::source_generator_adjoint(
 StructureAdjointState StructureAction::prepare_active_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
     const std::vector<double>& state_weights,
-    const std::vector<double>& state_energies) const {
+    const std::vector<double>& state_energies,
+    StructureActionResult* images) const {
   if (!direct_ci_) {
     throw std::logic_error(
         "active-integral adjoint requires orthogonal direct CI");
@@ -1399,14 +1400,19 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
       n_pairs, n_pairs);
   result.generator_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);
+  if (images) {
+    images->hamiltonian = Eigen::MatrixXd::Zero(n_structures_, n_states);
+    images->overlap = Eigen::MatrixXd::Zero(n_structures_, n_states);
+  }
 
   if (!result.source_factors) {
     result.product_images=std::make_shared<detail::ProductImages>();
-    const auto sweep=product_jet(result,nullptr,nullptr,nullptr,direct_ci_->alpha_transform,
-        direct_ci_->beta_transform(),direct_ci_->sigma,false);
+    auto sweep=product_jet(result,nullptr,nullptr,nullptr,direct_ci_->alpha_transform,
+        direct_ci_->beta_transform(),direct_ci_->sigma,images != nullptr);
     result.one_electron_gradient=sweep.one_electron;
     result.pair_kernel_gradient=sweep.pair_kernel;
     result.generator_gradient=sweep.generator;
+    if (images) *images = std::move(sweep.images);
   }
   for (int state = 0; state < n_states; ++state) {
     const double state_weight = state_weights[state];
@@ -1414,7 +1420,7 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
         !std::isfinite(state_energies[state])) {
       throw std::invalid_argument("invalid selected-state adjoint input");
     }
-    if (state_weight==0 || !result.source_factors) continue;
+    if (!result.source_factors || (state_weight==0 && !images)) continue;
     const Eigen::VectorXd values = expand_support(structure_coefficients.col(state));
     const auto y = sources_->orthogonal_source(spin_products_,values,
         direct_ci_->alpha_transform,direct_ci_->beta_transform());
@@ -1423,8 +1429,18 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
     const auto integral = mcscf::factor_integral_adjoint(direct_ci_->sigma,physical,y);
     result.one_electron_gradient.noalias() += state_weight*integral.one_electron;
     result.pair_kernel_gradient.noalias() += state_weight*integral.pair_kernel;
-    result.generator_gradient.noalias() += 2*state_weight*mcscf::factor_residual_generator_adjoint(
-        direct_ci_->sigma,physical,y,state_energies[state]);
+    if (images) {
+      // The image generator already visits H Y. Consume its structure
+      // projection here, rather than replaying sigma in a separate H/M call.
+      auto image = project_source_adjoint(y,y,direct_ci_->alpha_transform,
+          direct_ci_->beta_transform(),direct_ci_->sigma,nullptr,true,state_energies[state]);
+      result.generator_gradient.noalias() += 2*state_weight*image.generator;
+      images->hamiltonian.col(state) = image.images.hamiltonian.col(0);
+      images->overlap.col(state) = image.images.overlap.col(0);
+    } else {
+      result.generator_gradient.noalias() += 2*state_weight*mcscf::factor_residual_generator_adjoint(
+          direct_ci_->sigma,physical,y,state_energies[state]);
+    }
   }
 
   for (std::size_t i = 0; i < result.weights.size(); ++i)

@@ -1,0 +1,8 @@
+job,node,space,variant,actual_threads,exit_code,termination,structures,recorded_accepted_steps,orbital_hvp,structure_response,initial_Eh,after_step_Eh,scf_s,application_s,process_s,cpu_s,rss_kib,cpu_percent,last_ci_actions
+github-scf-step-1263333,anode50,COV,current,8,0,neo_projected_gradient_tolerance,132,4,36,36,-398.533053417516,-399.106646267332,67.355929,71.236984,71.48,507.84000000000003,2632084,710,9
+github-scf-step-1263716,anode50,COV,current,8,0,neo_projected_gradient_tolerance,132,4,36,36,-398.533053417516,-399.106646267331,60.480704,64.93827,65.18,471.77000000000004,2627804,723,9
+github-scf-step-1263892,anode50,COV,current,8,0,neo_projected_gradient_tolerance,132,4,36,36,-398.533053417516,-399.106646267332,52.317433,56.832422,57.08,417.81,2644728,731,9
+github-scf-step-1263912,anode50,COV,current,8,0,neo_projected_gradient_tolerance,132,4,36,36,-398.533053417516,-399.106646267331,50.668144,54.978049,55.19,403.8,2626596,731,9
+github-scf-step-1263914,anode50,FULL,current,8,2,max_iterations,226512,1,8,8,-398.880685140388,-399.32236641677,49.641343,55.088173,72.34,311.67,3546856,430,27
+github-scf-step-1262623,anode50,FULL,baseline,8,2,max_iterations,226512,1,8,8,-398.880685140388,-399.322429054264,74.965957,80.973591,93.77000000000001,446.71,3536844,476,39
+github-scf-step-1263111,anode50,FULL,current,8,2,max_iterations,226512,1,8,8,-398.880685140388,-399.32236641676,57.644907,63.529981,80.84,365.21999999999997,3533880,451,27

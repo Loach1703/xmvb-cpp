@@ -12,6 +12,8 @@
 #include <sys/resource.h>
 
 #include <Eigen/Core>
+#include <Eigen/Cholesky>
+#include <Eigen/Eigenvalues>
 
 #include "core/pair_index.hpp"
 #include "mcscf/ci/sigma.hpp"
@@ -19,6 +21,7 @@
 #include "mcscf/ci/product_support.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/assembly/states.hpp"
 #include "vbscf/structures/assembly/column_tiles.hpp"
 #include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
@@ -290,6 +293,47 @@ void check_images(const xmvb::vb::StructureActionResult& actual,
           "structure Hamiltonian differs from direct-CI reference");
   require(s_error <= 2e-11 * std::max(1.0, expected.overlap.norm()),
           "structure overlap differs from carrier reference");
+}
+
+/** @brief Compare fused fixed states against independent action/adjoint calls. */
+void check_fixed_states(const xmvb::vb::StructureAction& action) {
+  const int count=std::min(2,action.n_structures());
+  const Eigen::MatrixXd c=test_vectors(action.n_structures(),count);
+  const std::vector<double> weights(count,1.0/count);
+  const auto actual=xmvb::vb::evaluate_fixed_states(action,c,weights);
+  const auto images=action.apply(c);
+  const Eigen::MatrixXd gram=c.transpose()*images.overlap;
+  const Eigen::LLT<Eigen::MatrixXd> metric(gram);
+  const Eigen::MatrixXd white=metric.matrixU().solve(Eigen::MatrixXd::Identity(count,count));
+  const Eigen::MatrixXd projected=white.transpose()*(c.transpose()*images.hamiltonian)*white;
+  const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(projected);
+  const Eigen::MatrixXd transform=white*spectrum.eigenvectors();
+  const Eigen::MatrixXd normalized=c*transform;
+  std::vector<double> energies(count);
+  for (int s=0;s<count;++s)
+    energies[s]=normalized.col(s).dot(images.hamiltonian*transform.col(s));
+  const auto prepared=action.prepare_active_adjoint(normalized,weights,energies);
+  const auto expected=action.active_integral_adjoint(prepared);
+  const auto& adjoint=actual.integral_adjoint.value();
+  require((adjoint.overlap-expected.overlap).norm()<3e-11 &&
+      (adjoint.one_electron-expected.one_electron).norm()<3e-11 &&
+      (adjoint.pair_kernel-expected.pair_kernel).norm()<3e-11,
+      "fused fixed-state adjoint lost normalization or off-diagonal state multipliers");
+  const Eigen::MatrixXd residual=(images.hamiltonian*transform)-
+      (images.overlap*transform)*Eigen::Map<const Eigen::VectorXd>(energies.data(),count).asDiagonal();
+  require((actual.coefficient_gradient-(2.0/count)*residual*transform.transpose()).norm()<3e-11,
+      "fused fixed-state coefficient gradient uses the wrong input frame");
+  require((actual.residuals.colwise().norm()-residual.colwise().norm()).norm()<3e-11,
+      "fused fixed-state residual differs from separate H/M action");
+  // Exercise the optional image consumer independently of Rayleigh normalization.
+  xmvb::vb::StructureActionResult fused_images;
+  const auto fused=action.prepare_active_adjoint(c,weights,energies,&fused_images);
+  check_images(fused_images,images);
+  const auto separate=action.prepare_active_adjoint(c,weights,energies);
+  require((fused.generator_gradient-separate.generator_gradient).norm()<3e-11 &&
+      (fused.one_electron_gradient-separate.one_electron_gradient).norm()<3e-11 &&
+      (fused.pair_kernel_gradient-separate.pair_kernel_gradient).norm()<3e-11,
+      "requesting shared sigma images changed the accepted adjoint");
 }
 
 void check_rumer_case(int n) {
@@ -673,6 +717,7 @@ void check_factor_structure_response(int parity, bool unequal = false) {
   const xmvb::vb::StructureAction action(expansion.terms,2,cache,fixture.overlap,
       fixture.one_electron,fixture.two_electron,fixture.n,nullptr,
       xmvb::vb::StructureActionMode::ActionOnly);
+  check_fixed_states(action);
   const Eigen::MatrixXd c = (Eigen::Matrix2d() << 0.7,0.2,-0.3,0.8).finished();
   const Eigen::MatrixXd q = (Eigen::Matrix2d() << 0.02,-0.03,0.04,0.01).finished();
   const Eigen::MatrixXd mu = (Eigen::Matrix2d() << 0.01,0.02,-0.03,0.005).finished();
@@ -781,6 +826,7 @@ void check_product_response(int parity,bool unequal) {
   const xmvb::vb::StructureAction action(terms,ns,cache,fixture.overlap,
       fixture.one_electron,fixture.two_electron,fixture.n,nullptr,
       xmvb::vb::StructureActionMode::ActionOnly);
+  check_fixed_states(action);
   const Eigen::MatrixXd c=test_vectors(ns,2),q=0.02*c.array().cos().matrix();
   const Eigen::MatrixXd mu=(Eigen::Matrix2d()<<0.01,0.02,-0.03,0.005).finished();
   for (const auto& weights:{std::vector<double>{0.3,0.7},std::vector<double>{1.0,0.0}}) {
@@ -1822,6 +1868,7 @@ void check_covalent_subset(int selected_count, bool add_ionic) {
   const xmvb::vb::StructureAction action(expansion.terms, n_structures, cache,
       fixture.overlap, fixture.one_electron, fixture.two_electron, 8, nullptr,
       xmvb::vb::StructureActionMode::ActionOnly);
+  check_fixed_states(action);
   require(action.storage().orthogonal_direct_ci, "selected covalent fixture missed direct CI");
   const auto vectors = test_vectors(n_structures, 2);
   const auto expected = reference_images(fixture, expansion.terms,

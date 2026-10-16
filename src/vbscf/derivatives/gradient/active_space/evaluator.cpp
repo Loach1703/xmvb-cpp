@@ -25,6 +25,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/backward.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/assembly/states.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
 #include "vbscf/diagnostics/performance/neo_trace.hpp"
@@ -1188,36 +1189,12 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       std::chrono::steady_clock::now() - structure_start_time).count();
 
   const auto action_start_time = std::chrono::steady_clock::now();
-  StructureActionResult images =
-      context.structure_action->apply(structure_coefficients);
-  for (const double weight : normalized_weights)
-    if (std::abs(weight - normalized_weights.front()) >
-        64.0 * std::numeric_limits<double>::epsilon())
-      throw std::invalid_argument("fixed-state keyframes require equal weights");
-  // E = w Tr[(C^T M C)^-1 C^T H C]. Independent column normalization
-  // is insufficient: finite transported states are not mutually orthogonal.
-  const Eigen::MatrixXd gram = structure_coefficients.transpose() * images.overlap;
-  Eigen::LLT<Eigen::MatrixXd> gram_factor(gram);
-  if (gram_factor.info() != Eigen::Success)
-    throw std::runtime_error("fixed structure keyframe has a singular state Gram matrix");
-  const Eigen::MatrixXd white = gram_factor.matrixU().solve(
-      Eigen::MatrixXd::Identity(n_states, n_states));
-  const Eigen::MatrixXd projected_h = white.transpose() *
-      (structure_coefficients.transpose() * images.hamiltonian) * white;
-  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(projected_h);
-  if (spectrum.info() != Eigen::Success)
-    throw std::runtime_error("fixed structure keyframe state diagonalization failed");
-  const Eigen::MatrixXd transform = white * spectrum.eigenvectors();
-  context.selected_state_eigenvectors = structure_coefficients * transform;
-  images.hamiltonian = (images.hamiltonian * transform).eval();
-  images.overlap = (images.overlap * transform).eval();
-  context.selected_state_energies.resize(n_states);
+  auto states = evaluate_fixed_states(*context.structure_action,structure_coefficients,normalized_weights);
+  context.selected_state_eigenvectors = std::move(states.coefficients);
+  context.selected_state_energies = std::move(states.energies);
   double electronic_energy = 0.0;
-  for (int state = 0; state < n_states; ++state) {
-    context.selected_state_energies[static_cast<std::size_t>(state)] =
-        context.selected_state_eigenvectors.col(state).dot(images.hamiltonian.col(state));
+  for (int state = 0; state < n_states; ++state)
     electronic_energy += normalized_weights[state] * context.selected_state_energies[state];
-  }
   const double action_seconds = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - action_start_time).count();
 
@@ -1225,12 +1202,11 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
   initialize_active_space_derivatives(input, context, &fixed.gradient);
   fixed.gradient.scf_result.total_energy = electronic_energy +
       prepared.one_electron_reference_energy + nuclear_repulsion_energy;
-  accumulate_active_space_gradient(
-      input,
-      selected_state_indices,
-      normalized_weights,
-      context,
-      &fixed.gradient);
+  if (states.integral_adjoint)
+    write_direct_ci_active_gradient(*states.integral_adjoint,
+        input.orbital_preparation_input.n_active_orbitals,&fixed.gradient);
+  else
+    accumulate_active_space_gradient(input,selected_state_indices,normalized_weights,context,&fixed.gradient);
   fixed.gradient.total_wall_time_seconds = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - total_start_time).count();
   if (diagnostics::neo_event_trace_enabled()) diagnostics::neo_trace("ciah_keyframe_active_cost",
@@ -1239,12 +1215,8 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       action_seconds, fixed.gradient.adjoint_wall_time_seconds,
       context.structure_action->storage().diagonal_bytes);
   fixed.normalized_coefficients = context.selected_state_eigenvectors;
-  fixed.structure_residuals = std::move(images.hamiltonian);
-  fixed.structure_residuals.noalias() -=
-      images.overlap * Eigen::Map<const Eigen::VectorXd>(
-          context.selected_state_energies.data(), n_states).asDiagonal();
-  fixed.coefficient_gradient =
-      (2.0 * normalized_weights.front()) * fixed.structure_residuals * transform.transpose();
+  fixed.structure_residuals = std::move(states.residuals);
+  fixed.coefficient_gradient = std::move(states.coefficient_gradient);
   return fixed;
 }
 
