@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <initializer_list>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -101,6 +102,27 @@ struct ProductImages {
   Eigen::MatrixXd density;
 };
 
+/** @brief Gather borrowed columns directly onto exact structural coordinates. */
+template<class Column>
+ColumnTile gather_columns(int n_alpha,int width,Column&& column,
+    std::shared_ptr<const ColumnPattern> pattern) {
+  const int cols=pattern->columns();
+  ColumnTile result{pattern,Eigen::MatrixXd(pattern->offsets[cols],width)};
+  const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),
+      static_cast<std::size_t>(n_alpha)*cols*width);
+  cooperative_openmp_for(cols*width,workers,[&](std::ptrdiff_t packed) {
+    const int b=packed%cols,v=packed/cols;
+    const auto source=column(b,v);
+    if (pattern->full) {
+      result.values.col(v).segment(b*n_alpha,n_alpha)=source;
+      return;
+    }
+    for (int i=pattern->offsets[b];i<pattern->offsets[b+1];++i)
+      result.values(i,v)=source[pattern->rows[i]];
+  });
+  return result;
+}
+
 /** @brief Pack structural coordinates, never an amplitude-thresholded sparse view. */
 inline ColumnTile pack_columns(Eigen::MatrixXd dense,std::shared_ptr<const ColumnPattern> pattern) {
   profiling::ScopedPhase phase(profiling::Phase::CiProductPack);
@@ -109,14 +131,21 @@ inline ColumnTile pack_columns(Eigen::MatrixXd dense,std::shared_ptr<const Colum
     dense.resize(pattern->offsets[cols],width);
     return {std::move(pattern),std::move(dense)};
   }
-  ColumnTile result{pattern,Eigen::MatrixXd(pattern->offsets[cols],width)};
-  const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),dense.size());
-  cooperative_openmp_for(cols*width,workers,[&](std::ptrdiff_t packed) {
-    const int b=packed%cols,v=packed/cols;
-    for (int i=pattern->offsets[b];i<pattern->offsets[b+1];++i)
-      result.values(i,v)=dense(pattern->rows[i],packed);
-  });
-  return result;
+  return gather_columns(dense.rows(),width,[&](int b,int v) {
+    return dense.col(v*cols+b);
+  },std::move(pattern));
+}
+
+/** @brief Pack independent RHS panels without a concatenated dense temporary.
+ * Each panel has n_alpha rows and pattern->columns() columns. Only pointer
+ * metadata is borrowed; the common gather finishes before these owners die.
+ */
+inline ColumnTile pack_columns(std::initializer_list<const Eigen::MatrixXd*> panels,
+    std::shared_ptr<const ColumnPattern> pattern) {
+  profiling::ScopedPhase phase(profiling::Phase::CiProductPack);
+  return gather_columns((*panels.begin())->rows(),panels.size(),[&](int b,int v) {
+    return panels.begin()[v]->col(b);
+  },std::move(pattern));
 }
 
 /** @brief Bounded compact panels; eviction consumes partial images linearly. */

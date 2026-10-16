@@ -14,6 +14,27 @@
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
 namespace xmvb::vb {
+namespace {
+
+/** @brief Embed a fully written reader in one interleaved RHS lane.
+ * Only unused lanes need clearing; clearing the selected lane would write
+ * the same halo twice. The borrowed reader must outlive this adapter.
+ */
+mcscf::DirectCiTileReader interleaved_reader(
+    const mcscf::DirectCiTileReader& reader,int width,int lane) {
+  return [&reader,width,lane](const std::vector<int>& betas,
+      const std::vector<int>& rows,Eigen::Ref<Eigen::MatrixXd> values) {
+    using View=Eigen::Map<Eigen::MatrixXd,0,Eigen::OuterStride<>>;
+    const Eigen::OuterStride<> stride(values.outerStride()*width);
+    for (int v=0;v<width;++v)
+      if (v!=lane)
+        View(values.data()+v*values.outerStride(),rows.size(),betas.size(),stride).setZero();
+    View selected(values.data()+lane*values.outerStride(),rows.size(),betas.size(),stride);
+    reader(betas,rows,selected);
+  };
+}
+
+} // namespace
 
 StructureResponseSweep StructureAction::product_jet(const StructureAdjointState& state,
     const Eigen::MatrixXd* response,const Eigen::MatrixXd* delta_upper,
@@ -159,10 +180,13 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       const auto pattern=pattern_at(panel);
       const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);
       const auto rows=(!anchored || response) ? beta.row_block(first,count):nullptr;
-      Eigen::MatrixXd values=Eigen::MatrixXd::Zero(n_unique_alpha_,
-          (cached ? 1+(joint ? 1:0):input_width)*count);
-      Eigen::MatrixXd primal=anchored ? Eigen::MatrixXd{}:Eigen::MatrixXd::Zero(n_unique_alpha_,count);
-      Eigen::MatrixXd dy=Eigen::MatrixXd::Zero(n_unique_alpha_,count);
+      Eigen::MatrixXd primal=cached ? Eigen::MatrixXd{}:Eigen::MatrixXd::Zero(n_unique_alpha_,count);
+      const bool generator_only=anchored && (!response || joint);
+      Eigen::MatrixXd dy;
+      if (tangent) {
+        if (generator_only) dy.resize(n_unique_alpha_,count);
+        else dy=Eigen::MatrixXd::Zero(n_unique_alpha_,count);
+      }
       Eigen::MatrixXd dq=joint ? Eigen::MatrixXd::Zero(n_unique_alpha_,count):Eigen::MatrixXd{};
       auto& response_image=joint ? dq:dy;
       Eigen::MatrixXd dr;
@@ -186,10 +210,16 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
               {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
               {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())});
         }
-        auto generator_image=values.leftCols(count);
-        sigma.apply_one_body_generator_columns(first,accepted_column,generator,generator_image,
-            spin_exchange_parity_!=0);
-        dy.noalias()+=(spin_exchange_parity_ ? 2.0:1.0)*generator_image;
+        if (generator_only) {
+          sigma.apply_one_body_generator_columns(first,accepted_column,generator,dy,
+              spin_exchange_parity_!=0);
+          if (spin_exchange_parity_) dy*=2.0;
+        } else {
+          Eigen::MatrixXd generator_image(n_unique_alpha_,count);
+          sigma.apply_one_body_generator_columns(first,accepted_column,generator,generator_image,
+              spin_exchange_parity_!=0);
+          dy.noalias()+=(spin_exchange_parity_ ? 2.0:1.0)*generator_image;
+        }
       }
       else if (delta_upper) {
         alpha.apply_directional_left(da,&primal,&dy);
@@ -215,15 +245,12 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         }
       }
       if (cached) {
-        if (!joint) values=std::move(dy);
-        else { values.leftCols(count)=dy; values.rightCols(count)=dq; }
+        if (!joint) return detail::pack_columns(std::move(dy),pattern);
+        return detail::pack_columns({&dy,&dq},pattern);
       }
-      else {
-        values.leftCols(count)=primal;
-        if (tangent) values.middleCols(count,count)=dy;
-        if (joint) values.rightCols(count)=dq;
-      }
-      return detail::pack_columns(std::move(values),pattern);
+      if (!tangent) return detail::pack_columns(std::move(primal),pattern);
+      if (joint) return detail::pack_columns({&primal,&dy,&dq},pattern);
+      return detail::pack_columns({&primal,&dy},pattern);
     });
     if (anchored && spin_exchange_parity_) {
       // One component on the accepted two-component support fits the same
@@ -341,15 +368,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         dy(betas,rows,direction);
       }
     };
-    const mcscf::DirectCiTileReader right=[&](const std::vector<int>& betas,
-        const std::vector<int>& rows,Eigen::Ref<Eigen::MatrixXd> values) {
-      values.setZero();
-      const int offset=tangent && !cached ? 1:0;
-      Eigen::Map<Eigen::MatrixXd,0,Eigen::OuterStride<>> view(
-          values.data()+offset*values.outerStride(),rows.size(),betas.size(),
-          Eigen::OuterStride<>(values.outerStride()*sigma_width));
-      y(betas,rows,view);
-    };
+    const auto right=interleaved_reader(y,sigma_width,tangent && !cached ? 1:0);
     // C^T is linear: first sum emitted panels in bounded source-group tiles,
     // then visit the structure incidence once per completed/evicted tile.
     // Neither the full touched support nor per-thread structure arrays are
@@ -555,15 +574,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         // so the channel kernel reuses its scatter; apply the weight outside.
         mcscf::DirectCiIntegralAdjoint gradient;
         if (joint) {
-          const mcscf::DirectCiTileReader ci_read=[&](const std::vector<int>& betas,
-              const std::vector<int>& rows,Eigen::Ref<Eigen::MatrixXd> values) {
-            if (w==1) { q_reader(betas,rows,values); return; }
-            values.setZero();
-            Eigen::Map<Eigen::MatrixXd,0,Eigen::OuterStride<>> last(
-                values.data()+(w-1)*values.outerStride(),rows.size(),betas.size(),
-                Eigen::OuterStride<>(values.outerStride()*w));
-            q_reader(betas,rows,last);
-          };
+          const auto ci_read=interleaved_reader(q_reader,w,w-1);
           const mcscf::DirectCiTileRequest requests[]={
             {ci_read,writer(w-1,1,q_slot)},
             {read,add,delta_sigma,forcing ? writer(w-1,1,forcing_slot):mcscf::DirectCiTileWriter{}}

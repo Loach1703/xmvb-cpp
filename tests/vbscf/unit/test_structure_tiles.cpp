@@ -1362,6 +1362,14 @@ void check_exterior_team() {
   auto tile=xmvb::vb::detail::pack_columns(dense,pattern);
   require(tile.values.rows()==3 && tile.values.cols()==2 &&
       (tile.unpack(5).array()==dense.array()).all(),"compact columns changed structural zeros or tiny entries");
+  const Eigen::MatrixXd left=dense.leftCols(3),right=dense.rightCols(3);
+  const auto lanes=xmvb::vb::detail::pack_columns({&left,&right},pattern);
+  require((lanes.values.array()==tile.values.array()).all(),
+      "direct lane packing changed compact RHS order or tiny entries");
+  auto full=std::make_shared<xmvb::vb::detail::ColumnPattern>();
+  full->full=true; full->offsets.resize(4); full->offsets<<0,5,10,15;
+  require((xmvb::vb::detail::pack_columns({&left,&right},full).unpack(5).array()==dense.array()).all(),
+      "direct lane packing changed a full column block");
 }
 
 void check_sigma_columns(const Fixture& fixture, int width) {

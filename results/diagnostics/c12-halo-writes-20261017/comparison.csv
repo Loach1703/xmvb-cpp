@@ -1,0 +1,5 @@
+variant,job,steps,hvp,structure_responses,energy_Eh,scf_s,application_s,process_s,rss_MiB,termination
+saved_parent,1264818,4,36,36,-399.106646267330,21.020280,23.819179,24.06,2704.8125,ciah_projected_gradient_tolerance
+single_write_reader,1264867,4,36,36,-399.106646267330,20.209089,22.874827,23.06,2702.171875,ciah_projected_gradient_tolerance
+omit_unused_panels,1264868,4,36,36,-399.106646267329,20.379011,23.310588,23.54,2673.27734375,ciah_projected_gradient_tolerance
+direct_lane_gather,1264871,4,36,36,-399.106646267329,19.845801,22.626016,22.85,2687.15625,ciah_projected_gradient_tolerance
