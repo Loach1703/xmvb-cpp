@@ -47,6 +47,10 @@ void check_fused_response(
   const auto fused = action.apply_with_adjoint(response, state);
   const auto sigma = action.apply(response);
   const auto adjoint = action.integral_adjoint(response, state);
+  const Eigen::MatrixXd moment=action.one_body_generator_adjoint(response,state);
+  const Eigen::MatrixXd density=0.5*(moment+moment.transpose()).eval();
+  require((fused.integrals.one_electron-density).norm()<3e-12*std::max(1.0,density.norm()),
+          "one-electron integral adjoint differs from the symmetrized generator density");
   require((fused.sigma - sigma).norm() < 3e-12 * std::max(1.0, sigma.norm()),
           "fused response sigma differs from separate action");
   require((fused.integrals.one_electron - adjoint.one_electron).norm() <

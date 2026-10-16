@@ -63,8 +63,9 @@ as excluded experimental evidence. Final numerical sweeps remain 165, batches
 3109 and logical source elements 1,964,120,314. No measured cache-traffic or
 sampling-profiler claim is made from phase timers.
 
-Remaining memory investigation: callbacks run in `omp single` sections, whose
-owning thread can vary. A controlled primary-thread ownership experiment can
-test allocator/workspace reuse without changing arithmetic. It must preserve
-the existing barriers and task completion, and must be accepted or rejected
-by native time/RSS rather than presumed faster.
+Follow-up memory experiment: job 1264637 fixed all callbacks to the primary
+thread with the same barriers. It passed 9 tests and measured owner min=max=0,
+but native wall increased to 32.613109s and phase wall to 33.024193s. Native
+RSS fell to 2714.836MiB and phase RSS to 2603.371MiB. This is not an attractive
+end-to-end tradeoff, and does not isolate allocator behavior from placement or
+task scheduling. It was removed; no primary-owner requirement remains.
