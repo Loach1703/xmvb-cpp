@@ -114,6 +114,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
   std::vector<std::weak_ptr<const ColumnPattern>> patterns(count);
   const auto pattern_at=[&](int panel)->std::shared_ptr<const ColumnPattern> {
     if (auto pattern=patterns[panel].lock()) return pattern;
+    profiling::ScopedPhase phase(profiling::Phase::CiProductPattern);
     auto pattern=std::make_shared<ColumnPattern>();
     const int cols=std::min(extent,n_unique_beta_-panel*extent);
     pattern->offsets.resize(cols+1);
@@ -157,6 +158,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(collect_images && collect_overlap ? spin_products_.size():0, width);
     const auto project = [&](int panel, const Eigen::MatrixXd& rows,
                              Eigen::MatrixXd& image, Eigen::MatrixXd& target) {
+      profiling::ScopedPhase phase(profiling::Phase::CiProductProjection);
       // C^T (T_alpha^T image T_beta): only touched original spin products
       // are sampled. This is exact for any selected structure subspace.
       const auto pattern=pattern_at(panel);
@@ -195,6 +197,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
 
     std::vector<bool> overlap_consumed(count, !collect_overlap);
     ColumnPanels input(cache_bytes, [&](int panel) -> ColumnTile {
+      profiling::ScopedPhase phase(profiling::Phase::CiProductGenerate);
       ++result.tiles.input_panels;
       const auto pattern=pattern_at(panel);
       const auto row_tile = beta_rows(panel);

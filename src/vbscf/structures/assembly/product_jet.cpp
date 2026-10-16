@@ -50,6 +50,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
   std::vector<std::weak_ptr<const detail::ColumnPattern>> patterns(panels);
   const auto pattern_at=[&](int panel) -> std::shared_ptr<const detail::ColumnPattern> {
     if (auto p=patterns[panel].lock()) return p;
+    profiling::ScopedPhase phase(profiling::Phase::CiProductPattern);
     auto p=std::make_shared<detail::ColumnPattern>();
     const int count=std::min(extent,n_unique_beta_-panel*extent);
     p->full=!support || support->full(); p->offsets.resize(count+1); p->offsets[0]=0;
@@ -118,6 +119,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     Eigen::VectorXd q;
     if (response && !resident_input) q=expand_support(response->col(state_id));
     detail::ColumnPanels input(cache_bytes,[&](int panel) {
+      profiling::ScopedPhase phase(profiling::Phase::CiProductGenerate);
       ++result.images.tiles.input_panels;
       const auto pattern=pattern_at(panel);
       const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);

@@ -290,6 +290,7 @@ void ExteriorOrbitalTransform::apply_adjoint_left_block(
 void ExteriorOrbitalTransform::apply_supported_left(
     Eigen::MatrixXd* coefficients, std::span<const int> offsets,
     std::span<const int> rows, bool adjoint) const {
+  xmvb::profiling::ScopedPhase validation(xmvb::profiling::Phase::CiSupportedValidation);
   if (!coefficients || offsets.size() < 2 || offsets.front() != 0 ||
       offsets.back() != static_cast<int>(rows.size()))
     throw std::invalid_argument("invalid supported exterior column pattern");
@@ -306,6 +307,7 @@ void ExteriorOrbitalTransform::apply_supported_left(
   for (const int alpha:rows)
     if (alpha<0 || alpha>=dimension())
       throw std::invalid_argument("supported exterior row is outside the spin space");
+  validation.stop();
   const int workers = bounded_openmp_thread_count(
       coarse_openmp_thread_count(cooperative_openmp_thread_count(), coefficients->size()),
       beta_count);
@@ -730,6 +732,7 @@ Eigen::MatrixXd ExteriorOrbitalTransform::generator_pullback(
     const Eigen::MatrixXd& seed, const Eigen::MatrixXd& image,
     const Eigen::MatrixXd* delta_seed, const Eigen::MatrixXd* delta_image,
     const Eigen::MatrixXd* delta_upper) const {
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiExteriorGeneratorPullback);
   const bool directional = delta_upper != nullptr;
   if (seed.rows() != image.rows() || seed.cols() != image.cols() ||
       image.rows() != dimension() ||
@@ -767,6 +770,7 @@ Eigen::MatrixXd ExteriorOrbitalTransform::generator_pullback(
 Eigen::MatrixXd ExteriorOrbitalTransform::moment_pullback(
     const Eigen::Ref<const Eigen::MatrixXd>& moment,
     const Eigen::MatrixXd* delta_moment,const Eigen::MatrixXd* delta_upper) const {
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiExteriorMomentPullback);
   const Eigen::MatrixXd inverse = orbital_transform_.triangularView<Eigen::Upper>()
       .solve(Eigen::MatrixXd::Identity(n_orbitals_, n_orbitals_)).transpose();
   Eigen::MatrixXd result;

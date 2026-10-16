@@ -169,6 +169,12 @@ bool build_ciah_macro_step(
       structure_image.tail(ns) = ci.hessian_coordinates;
       const auto transport_start=std::chrono::steady_clock::now();
       const auto curvature = transport->curvature(x.head(no), x.tail(ns));
+      if (mcscf::diagnostics::ciah_event_trace_enabled())
+        mcscf::diagnostics::ciah_trace("ciah_transport_magnitude",
+            "orbital_model=%.17g,structure_model=%.17g,transport_oo=%.17g,transport_oc=%.17g,transport_co=%.17g",
+            image.head(no).norm(), image.tail(ns).norm(),
+            curvature.orbital_from_orbital.norm(), curvature.orbital_from_structure.norm(),
+            curvature.structure_from_orbital.norm());
       image.head(no) += curvature.orbital_from_orbital + curvature.orbital_from_structure;
       image.tail(ns) += curvature.structure_from_orbital;
       orbital_image.head(no) += curvature.orbital_from_orbital;

@@ -9,6 +9,7 @@
 #include <Eigen/Core>
 
 #include "parallel/openmp.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::vb::detail {
 
@@ -63,6 +64,7 @@ struct ProductImages {
 
 /** @brief Pack structural coordinates, never an amplitude-thresholded sparse view. */
 inline ColumnTile pack_columns(Eigen::MatrixXd dense,std::shared_ptr<const ColumnPattern> pattern) {
+  profiling::ScopedPhase phase(profiling::Phase::CiProductPack);
   const int cols=pattern->columns(),width=dense.cols()/cols;
   if (pattern->full) {
     dense.resize(pattern->offsets[cols],width);
