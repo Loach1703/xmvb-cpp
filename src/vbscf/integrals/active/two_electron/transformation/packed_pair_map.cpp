@@ -9,7 +9,7 @@
 #include <omp.h>
 #endif
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 
 namespace xmvb::vb {
 namespace {

@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"

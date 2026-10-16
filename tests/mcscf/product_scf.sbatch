@@ -43,5 +43,5 @@ cp "$artifact/native/full/"{input.xmi,cc-pvdz.gbs} "$artifact/phases/full/"
 cd "$artifact/phases/full"
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  env XMVB_PHASE_TIMING=1 /usr/bin/time -v -o resource.time "$artifact/xmvb-cpp.exe" input.xmi \
- --optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal \
- --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --neo-trace neo.tsv > output.out 2> run.err
+ --optimizer-backend ciah --eigensolver davidson --orbital-preconditioner hessian-diagonal \
+ --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --ciah-trace neo.tsv > output.out 2> run.err

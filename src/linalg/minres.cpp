@@ -1,4 +1,4 @@
-#include "mcscf/optimization/krylov/minres.hpp"
+#include "linalg/minres.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-namespace xmvb::mcscf {
+namespace xmvb::linalg {
 namespace {
 
 Eigen::VectorXd apply_checked(
@@ -254,4 +254,4 @@ MinresResult solve_symmetric_minres(
   return result;
 }
 
-}  // namespace xmvb::mcscf
+}  // namespace xmvb::linalg

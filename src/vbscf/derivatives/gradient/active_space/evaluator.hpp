@@ -5,7 +5,7 @@
 
 #include <Eigen/Core>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "vbscf/core/contracts/eigensolver.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
@@ -98,7 +98,7 @@ public:
       ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
       ActiveSpaceTwoElectronBuilder active_space_two_electron_builder,
       FullDeterminantStructureHamiltonianOverlapBuilder structure_builder,
-      xmvb::core::GeneralizedEigensolver generalized_eigensolver);
+      xmvb::linalg::GeneralizedEigensolver generalized_eigensolver);
 
   /**
    * @brief Evaluates the ground-state active-space analytic gradient.
@@ -194,7 +194,7 @@ private:
   ActiveSpaceOneElectronBuilder active_space_one_electron_builder_;
   ActiveSpaceTwoElectronBuilder active_space_two_electron_builder_;
   FullDeterminantStructureHamiltonianOverlapBuilder structure_builder_;
-  xmvb::core::GeneralizedEigensolver generalized_eigensolver_;
+  xmvb::linalg::GeneralizedEigensolver generalized_eigensolver_;
 };
 
 }  // namespace xmvb::vb

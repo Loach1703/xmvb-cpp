@@ -26,8 +26,8 @@ bool core_backend_reports_projected_gradient(
   switch (backend) {
     case xmvb::vb::VbScfOptimizerBackend::Lbfgs:
       return false;
-    case xmvb::vb::VbScfOptimizerBackend::BlockLbfgs:
-    case xmvb::vb::VbScfOptimizerBackend::Neo:
+    case xmvb::vb::VbScfOptimizerBackend::Plbfgs:
+    case xmvb::vb::VbScfOptimizerBackend::Ciah:
     case xmvb::vb::VbScfOptimizerBackend::NonredundantProjectedGradient:
     case xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton:
       return true;
@@ -40,8 +40,8 @@ const char* gradient_tolerance_metric_name(
   switch (backend) {
     case xmvb::vb::VbScfOptimizerBackend::Lbfgs:
       return "raw |g|_2";
-    case xmvb::vb::VbScfOptimizerBackend::BlockLbfgs:
-    case xmvb::vb::VbScfOptimizerBackend::Neo:
+    case xmvb::vb::VbScfOptimizerBackend::Plbfgs:
+    case xmvb::vb::VbScfOptimizerBackend::Ciah:
     case xmvb::vb::VbScfOptimizerBackend::NonredundantProjectedGradient:
     case xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton:
       return "projected |g|_inf";
@@ -54,10 +54,10 @@ const char* optimizer_report_name(
   switch (options.backend) {
     case xmvb::vb::VbScfOptimizerBackend::Lbfgs:
       return "L-BFGS (XMVB-compatible raw-coordinate method)";
-    case xmvb::vb::VbScfOptimizerBackend::BlockLbfgs:
-      return "block-LBFGS (nonredundant orbital-block inverse)";
-    case xmvb::vb::VbScfOptimizerBackend::Neo:
-      return "NEO (matrix-free projected structure response)";
+    case xmvb::vb::VbScfOptimizerBackend::Plbfgs:
+      return "P-LBFGS (nonredundant orbital-block inverse)";
+    case xmvb::vb::VbScfOptimizerBackend::Ciah:
+      return "CIAH (matrix-free projected structure response)";
     case xmvb::vb::VbScfOptimizerBackend::NonredundantProjectedGradient:
       return "nonredundant projected gradient";
     case xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton:
@@ -235,7 +235,7 @@ void print_header(
       load_result,
       optimizer_report_name(options),
       options.max_iterations);
-  if (options.backend == xmvb::vb::VbScfOptimizerBackend::Neo) {
+  if (options.backend == xmvb::vb::VbScfOptimizerBackend::Ciah) {
     print_log_field(
         "Orbital preconditioner",
         orbital_preconditioner_name(options.orbital_preconditioner));
@@ -371,14 +371,14 @@ void print_summary(
     print_log_field("Molden output", molden_output_path->string());
   }
   print_log_field("Gradient metric", gradient_tolerance_metric_name(options.backend));
-  if (options.backend == vb::VbScfOptimizerBackend::Neo) {
+  if (options.backend == vb::VbScfOptimizerBackend::Ciah) {
     print_log_field("Orbital coordinates", "unwhitened quotient");
     print_log_field("Projected infinity norm", "reference coordinates for stopping/final report");
   }
   const bool certifies_physical_gradient = input.complete_active_space &&
       input.orbital_preparation_input.orbital_type == vb::kOrbitalTypeOeo &&
-      (options.backend == vb::VbScfOptimizerBackend::BlockLbfgs ||
-       options.backend == vb::VbScfOptimizerBackend::Neo ||
+      (options.backend == vb::VbScfOptimizerBackend::Plbfgs ||
+       options.backend == vb::VbScfOptimizerBackend::Ciah ||
        options.backend == vb::VbScfOptimizerBackend::NonredundantTruncatedNewton);
   if (certifies_physical_gradient) {
     print_log_field("Additional stationarity metric", "physical |g|_(G^-1)");

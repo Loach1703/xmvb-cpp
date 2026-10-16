@@ -3,9 +3,9 @@
 #include <functional>
 
 #include <Eigen/Core>
-#include "mcscf/optimization/actions.hpp"
+#include "linalg/actions.hpp"
 
-namespace xmvb::mcscf {
+namespace xmvb::linalg {
 
 /** @brief Termination state of a symmetric MINRES solve. */
 enum class MinresStopReason {
@@ -73,4 +73,4 @@ MinresResult solve_symmetric_minres(
     const VectorAction& apply_inverse_preconditioner = {},
     const Eigen::VectorXd& initial_guess = Eigen::VectorXd());
 
-}  // namespace xmvb::mcscf
+}  // namespace xmvb::linalg

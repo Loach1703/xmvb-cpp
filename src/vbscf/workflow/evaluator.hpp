@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/structures/evaluation/evaluator.hpp"
 #include "vbscf/core/contracts/result.hpp"
@@ -30,7 +30,7 @@ public:
    */
   VbScfEvaluator(
       StructureMatrixEvaluator matrix_evaluator,
-      xmvb::core::GeneralizedEigensolver generalized_eigensolver);
+      xmvb::linalg::GeneralizedEigensolver generalized_eigensolver);
 
   /**
    * @brief Evaluates the ground-state VBSCF step.
@@ -60,7 +60,7 @@ public:
 
 private:
   StructureMatrixEvaluator matrix_evaluator_;
-  xmvb::core::GeneralizedEigensolver generalized_eigensolver_;
+  xmvb::linalg::GeneralizedEigensolver generalized_eigensolver_;
 };
 
 }  // namespace xmvb::vb

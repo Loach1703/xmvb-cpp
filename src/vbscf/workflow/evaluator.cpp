@@ -64,7 +64,7 @@ VbScfEvaluator::VbScfEvaluator()
 
 VbScfEvaluator::VbScfEvaluator(
     StructureMatrixEvaluator matrix_evaluator,
-    xmvb::core::GeneralizedEigensolver generalized_eigensolver)
+    xmvb::linalg::GeneralizedEigensolver generalized_eigensolver)
     : matrix_evaluator_(std::move(matrix_evaluator)),
       generalized_eigensolver_(std::move(generalized_eigensolver)) {}
 

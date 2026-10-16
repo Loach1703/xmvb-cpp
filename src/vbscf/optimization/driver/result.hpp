@@ -83,13 +83,13 @@ struct TnhvpIterationRecord {
 };
 
 /**
- * @brief Solver diagnostics for one accepted NEO outer iteration.
+ * @brief Solver diagnostics for one accepted CIAH outer iteration.
  *
  * Microiteration and coupled-block-action counts include every trust-region
  * trial solved from the same accepted-point quadratic model. Residuals and
  * model scalars describe the trial that produced the accepted step.
  */
-struct NeoIterationRecord {
+struct CiahIterationRecord {
   int accepted_iteration_index = 0;
   /** Exact-gradient keyframes accepted inside this nonlinear macro step. */
   int keyframes = 0;
@@ -116,7 +116,7 @@ struct NeoIterationRecord {
 
   /** Source reduced-gradient L2 norm, before the accepted step. */
   double source_gradient_norm = 0.0;
-  /** Physical dual norms, evaluated only when a live NEO observer is present. */
+  /** Physical dual norms, evaluated only when a live CIAH observer is present. */
   double source_physical_gradient_norm = 0.0;
   double physical_orbital_kkt_norm = 0.0;
   double accepted_physical_gradient_norm = 0.0;
@@ -205,7 +205,7 @@ struct VbScfAcceptedIterationSnapshot {
   bool has_projected_gradient = false;
 
   /** @brief Progress infinity norm in the current chart.
-   * NEO reports unwhitened components here; stopping/terminal infinity norms
+   * CIAH reports unwhitened components here; stopping/terminal infinity norms
    * use the established reference coordinates, without whitening step bases.
    */
   double projected_gradient_inf_norm = 0.0;
@@ -322,8 +322,8 @@ struct VbScfOptimizerResult {
   /** Lightweight per-accepted-step diagnostics for the TNHVP backend. */
   std::vector<TnhvpIterationRecord> tnhvp_iteration_trace;
 
-  /** Lightweight per-accepted-step diagnostics for the NEO backend. */
-  std::vector<NeoIterationRecord> neo_iteration_trace;
+  /** Lightweight per-accepted-step diagnostics for the CIAH backend. */
+  std::vector<CiahIterationRecord> ciah_iteration_trace;
 
   /**
    * @brief Explicitly requested accepted-iterate trace.

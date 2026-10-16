@@ -16,7 +16,7 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/optimization/backends/lbfgs.hpp"
-#include "vbscf/optimization/backends/neo.hpp"
+#include "vbscf/optimization/backends/ciah.hpp"
 #include "vbscf/optimization/backends/projected_gradient.hpp"
 #include "vbscf/optimization/backends/truncated_newton.hpp"
 #include "vbscf/optimization/driver/session.hpp"
@@ -187,9 +187,9 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
         break;
       }
 
-      case VbScfOptimizerBackend::BlockLbfgs: {
+      case VbScfOptimizerBackend::Plbfgs: {
         const auto backend_result =
-            optimizer_detail::run_block_lbfgs_backend(
+            optimizer_detail::run_plbfgs_backend(
                 &objective,
                 parameter_view,
                 options_,
@@ -202,9 +202,9 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
         break;
       }
 
-      case VbScfOptimizerBackend::Neo: {
+      case VbScfOptimizerBackend::Ciah: {
         const auto backend_result =
-            optimizer_detail::run_neo_backend(
+            optimizer_detail::run_ciah_backend(
                 &objective,
                 parameter_view,
                 options_,
@@ -260,7 +260,7 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
     // Reporting uses only geometry and the physical metric, not curvature.
     const OrbitalChart final_space = optimizer_detail::build_orbital_geometry(
         objective, parameter_view,
-        options_.backend == VbScfOptimizerBackend::Neo
+        options_.backend == VbScfOptimizerBackend::Ciah
             ? OrbitalChart::Coordinates::Unwhitened : OrbitalChart::Coordinates::Whitened);
     const Eigen::VectorXd final_packed_gradient =
         parameter_view.gather_from_full(

@@ -5,7 +5,7 @@
 #include <limits>
 #include <stdexcept>
 
-#include "core/eigen_response.hpp"
+#include "linalg/eigen_response.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -42,7 +42,7 @@ void validate_weights(const std::vector<double>& weights) {
 }  // namespace
 
 ScaledStructureCoupling scale_equal_weight_structure_coupling(
-    const xmvb::core::EqualWeightEigenCoupling& coupling,
+    const xmvb::linalg::EqualWeightEigenCoupling& coupling,
     const std::vector<double>& normalized_state_weights) {
   validate_weights(normalized_state_weights);
   const Eigen::Index n_states =

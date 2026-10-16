@@ -7,7 +7,7 @@
 #include <optional>
 #include <stdexcept>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/pair_index.hpp"
 #include "core/timing.hpp"
 #include "mcscf/ci/product_support.hpp"

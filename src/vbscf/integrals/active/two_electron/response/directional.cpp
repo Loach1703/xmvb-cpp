@@ -7,7 +7,7 @@
 
 #include <Eigen/Core>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/integrals/active/two_electron/response/internal.hpp"
 #include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"

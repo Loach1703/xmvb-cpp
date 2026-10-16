@@ -1,4 +1,4 @@
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -121,14 +121,14 @@ bool run_case(
     double eigenvector_tolerance,
     bool identity_overlap = false) {
   const int dimension = static_cast<int>(problem.hamiltonian.rows());
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        xmvb::core::GeneralizedEigenActionResult images;
+        xmvb::linalg::GeneralizedEigenActionResult images;
         images.hamiltonian.noalias() = problem.hamiltonian * vectors;
         if (!identity_overlap) images.overlap.noalias() = problem.overlap * vectors;
         return images;
       };
-  xmvb::core::DavidsonOptions options{
+  xmvb::linalg::DavidsonOptions options{
       n_roots,
       4 * dimension,
       std::min(dimension, std::max(128, 24 * n_roots)),
@@ -137,7 +137,7 @@ bool run_case(
       2.0e-8};
   options.identity_overlap=identity_overlap;
 
-  const xmvb::core::GeneralizedEigensolver solver;
+  const xmvb::linalg::GeneralizedEigensolver solver;
   const auto reference = solver.solve_dense(
       flatten(problem.hamiltonian),
       flatten(problem.overlap),
@@ -203,21 +203,21 @@ bool run_recycled_case() {
   constexpr int dimension = 160;
   constexpr int n_roots = 4;
   const DenseProblem problem = make_nonorthogonal_problem(dimension);
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        xmvb::core::GeneralizedEigenActionResult images;
+        xmvb::linalg::GeneralizedEigenActionResult images;
         images.hamiltonian.noalias() = problem.hamiltonian * vectors;
         images.overlap.noalias() = problem.overlap * vectors;
         return images;
       };
-  const xmvb::core::DavidsonOptions options{
+  const xmvb::linalg::DavidsonOptions options{
       n_roots,
       4 * dimension,
       128,
       1.0,
       2.0e-8,
       2.0e-8};
-  const xmvb::core::GeneralizedEigensolver solver;
+  const xmvb::linalg::GeneralizedEigensolver solver;
   const auto cold = solver.solve_davidson(
       action,
       problem.hamiltonian.diagonal(),
@@ -257,16 +257,16 @@ bool run_residual_preconditioner_case() {
   constexpr int dimension = 160;
   constexpr int n_roots = 4;
   const DenseProblem problem = make_nonorthogonal_problem(dimension);
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             problem.hamiltonian * vectors,
             problem.overlap * vectors};
       };
-  const xmvb::core::GeneralizedEigensolver solver;
+  const xmvb::linalg::GeneralizedEigensolver solver;
   const auto reference = solver.solve_dense(
       flatten(problem.hamiltonian), flatten(problem.overlap), dimension);
-  xmvb::core::DavidsonOptions options{
+  xmvb::linalg::DavidsonOptions options{
       n_roots, 4 * dimension, 128, 1.0, 2.0e-8, 2.0e-8};
   const auto diagonal = solver.solve_davidson(
       action, problem.hamiltonian.diagonal(),
@@ -363,18 +363,18 @@ bool run_residual_preconditioner_case() {
 bool run_invalid_residual_preconditioner_cases() {
   constexpr int dimension = 8;
   const DenseProblem problem = make_tridiagonal_problem(dimension);
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             problem.hamiltonian * vectors,
             problem.overlap * vectors};
       };
   Eigen::MatrixXd initial = Eigen::MatrixXd::Zero(dimension, 2);
   initial(0, 0) = 1.0;
   initial(1, 1) = 1.0;
-  auto options = xmvb::core::make_davidson_options(
+  auto options = xmvb::linalg::make_davidson_options(
       dimension, 1, 1.0e-7, 1.0e-8, 1.0e-8);
-  const xmvb::core::GeneralizedEigensolver solver;
+  const xmvb::linalg::GeneralizedEigensolver solver;
   auto rejects = [&](auto inverse) {
     options.residual_preconditioner = inverse;
     try {
@@ -408,21 +408,21 @@ bool run_physical_residual_case() {
   const Eigen::Vector3d energies(1.0, 2.0, 4.0);
   const Eigen::Matrix3d h = scale * scale * energies.asDiagonal();
   const Eigen::Matrix3d m = scale * scale * Eigen::Matrix3d::Identity();
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [h, m](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{h * vectors, m * vectors};
+        return xmvb::linalg::GeneralizedEigenActionResult{h * vectors, m * vectors};
       };
   Eigen::Matrix<double, 3, 2> initial;
   initial << 1.0 / scale, 0.0,
              1.0e-4 / scale, 0.0,
              0.0, 1.0 / scale;
-  auto options = xmvb::core::make_davidson_options(3, 1, 1e-7, 1e-3, 1e-7);
+  auto options = xmvb::linalg::make_davidson_options(3, 1, 1e-7, 1e-3, 1e-7);
   const auto physical_residual = [energies, scale](const Eigen::VectorXd& coefficients, double energy) {
     const Eigen::VectorXd state = scale * coefficients;
     return (energies.array() * state.array() - energy * state.array()).matrix().norm() /
         state.norm();
   };
-  const xmvb::core::GeneralizedEigensolver solver;
+  const xmvb::linalg::GeneralizedEigensolver solver;
   const auto algebraic = solver.solve_davidson(action, h.diagonal(), m.diagonal(), initial, options);
   const Eigen::Map<const Eigen::VectorXd> old_root(algebraic.eigenpairs.eigenvector_matrix.data(), 3);
   const double old_error = physical_residual(old_root, algebraic.eigenpairs.eigenvalues[0]);
@@ -445,20 +445,20 @@ bool run_outer_accuracy_case() {
   constexpr int dimension = 400;
   constexpr int n_roots = 2;
   const DenseProblem problem = make_tridiagonal_problem(dimension);
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             problem.hamiltonian * vectors,
             problem.overlap * vectors};
       };
-  const xmvb::core::DavidsonOptions options{
+  const xmvb::linalg::DavidsonOptions options{
       n_roots,
       2 * dimension,
       128,
       1.0e-7,
       1.0e-3,
       1.0e-7};
-  const xmvb::core::GeneralizedEigensolver solver;
+  const xmvb::linalg::GeneralizedEigensolver solver;
   const auto reference = solver.solve_dense(
       flatten(problem.hamiltonian),
       flatten(problem.overlap),
@@ -494,13 +494,13 @@ bool run_bounded_multiroot_restart_case(bool identity_overlap = false) {
   constexpr int dimension = 600;
   constexpr int n_roots = 3;
   const DenseProblem problem = make_tridiagonal_problem(dimension);
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             problem.hamiltonian * vectors,
             identity_overlap ? Eigen::MatrixXd{} : Eigen::MatrixXd(problem.overlap * vectors)};
       };
-  xmvb::core::DavidsonOptions options{
+  xmvb::linalg::DavidsonOptions options{
       n_roots,
       300,
       128,
@@ -508,7 +508,7 @@ bool run_bounded_multiroot_restart_case(bool identity_overlap = false) {
       2.0e-8,
       2.0e-8};
   options.identity_overlap=identity_overlap;
-  const xmvb::core::GeneralizedEigensolver solver;
+  const xmvb::linalg::GeneralizedEigensolver solver;
   const auto reference = solver.solve_dense(
       flatten(problem.hamiltonian),
       flatten(problem.overlap),
@@ -537,9 +537,9 @@ bool run_bounded_multiroot_restart_case(bool identity_overlap = false) {
 
 bool run_default_option_cases() {
   const auto small =
-      xmvb::core::make_davidson_options(3, 2, 1.0e-7, 1.0e-3, 1.0e-7);
+      xmvb::linalg::make_davidson_options(3, 2, 1.0e-7, 1.0e-3, 1.0e-7);
   const auto large =
-      xmvb::core::make_davidson_options(10000, 4, 1.0e-7, 1.0e-3, 1.0e-7);
+      xmvb::linalg::make_davidson_options(10000, 4, 1.0e-7, 1.0e-3, 1.0e-7);
   const bool passed =
       small.n_roots == 2 &&
       small.max_subspace_dimension == 3 &&
@@ -566,16 +566,16 @@ bool run_stationarity_case() {
   initial(2, 1) = 1.0;
   Eigen::MatrixXd derivative = Eigen::MatrixXd::Zero(dimension, dimension);
   derivative(0, 1) = derivative(1, 0) = 1000.0;
-  const auto options = xmvb::core::make_davidson_options(
+  const auto options = xmvb::linalg::make_davidson_options(
       dimension, 1, 1.0e-7, 1.0e-3, 1.0e-7);
-  const xmvb::core::GeneralizedEigensolver solver;
+  const xmvb::linalg::GeneralizedEigensolver solver;
   bool passed = true;
   for (double shift : {0.0, -2000.0}) {
     Eigen::MatrixXd h = Eigen::MatrixXd::Zero(dimension, dimension);
     h.diagonal() << shift, shift + 0.1, shift + 1.0, shift + 2.0;
     const auto result = solver.solve_davidson(
         [&h](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-          return xmvb::core::GeneralizedEigenActionResult{h * vectors, vectors};
+          return xmvb::linalg::GeneralizedEigenActionResult{h * vectors, vectors};
         },
         h.diagonal(), Eigen::VectorXd::Ones(dimension), initial, options);
     const Eigen::Map<const Eigen::VectorXd> c(

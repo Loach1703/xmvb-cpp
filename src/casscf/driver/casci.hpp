@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <vector>
 #include "casscf/integrals/active.hpp"
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 
 namespace xmvb::casscf {
 
@@ -18,7 +18,7 @@ struct CasciOptions {
 
 struct CasciResult {
   /** Active-space eigenpairs; images and eigenvalues exclude core_energy. */
-  core::DavidsonResult active_ci;
+  linalg::DavidsonResult active_ci;
   double core_energy = 0.0;
   std::vector<double> spin_squared;
   /** @brief Total Born--Oppenheimer energy, including inactive and nuclear terms. */

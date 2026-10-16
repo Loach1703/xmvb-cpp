@@ -56,7 +56,7 @@ srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores bash -c \
   > affinity.txt
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores /usr/bin/time -v -o resource.time \
   "$source_dir/build/src/xmvb-cpp.exe" input.xmi \
-  --optimizer-backend neo --eigensolver davidson \
+  --optimizer-backend ciah --eigensolver davidson \
   --orbital-preconditioner hessian-diagonal \
   --gradient-tolerance 1e-3 --energy-tolerance 1e-7 \
-  --exact-exchange-memory-mib 256 --neo-trace neo.tsv > stdout.txt 2> stderr.txt
+  --exact-exchange-memory-mib 256 --ciah-trace neo.tsv > stdout.txt 2> stderr.txt

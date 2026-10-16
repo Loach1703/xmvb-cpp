@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "core/eigen_response.hpp"
-#include "core/eigensolver.hpp"
+#include "linalg/eigen_response.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
@@ -320,7 +320,7 @@ int main(int argc, char** argv) {
     const auto compact_action_end = std::chrono::high_resolution_clock::now();
     const auto compact_diagonal =
         compact_structure_action.preconditioner_diagonal();
-    xmvb::core::GeneralizedEigensolver eigensolver;
+    xmvb::linalg::GeneralizedEigensolver eigensolver;
     const auto dense_eigensolve_start = std::chrono::high_resolution_clock::now();
     const auto dense_eigenpairs = eigensolver.solve_dense(
         fast_result.hamiltonian_matrix,
@@ -328,7 +328,7 @@ int main(int argc, char** argv) {
         n_structures);
     const auto dense_eigensolve_end = std::chrono::high_resolution_clock::now();
     double davidson_action_seconds = 0.0;
-    const xmvb::core::GeneralizedEigenAction davidson_action =
+    const xmvb::linalg::GeneralizedEigenAction davidson_action =
         [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
           const auto action_call_start =
               std::chrono::high_resolution_clock::now();
@@ -336,11 +336,11 @@ int main(int argc, char** argv) {
           davidson_action_seconds += std::chrono::duration<double>(
               std::chrono::high_resolution_clock::now() - action_call_start)
                                          .count();
-          return xmvb::core::GeneralizedEigenActionResult{
+          return xmvb::linalg::GeneralizedEigenActionResult{
               std::move(images.hamiltonian),
               std::move(images.overlap)};
         };
-    const xmvb::core::DavidsonOptions davidson_options{
+    const xmvb::linalg::DavidsonOptions davidson_options{
         1,
         2 * n_structures,
         std::min(n_structures, 128),
@@ -374,7 +374,7 @@ int main(int argc, char** argv) {
         compact_structure_action.apply(selected_vector).overlap;
     const auto response_start = std::chrono::high_resolution_clock::now();
     const auto matrix_free_response =
-        xmvb::core::solve_generalized_eigen_response(
+        xmvb::linalg::solve_generalized_eigen_response(
             davidson_action,
             compact_diagonal.hamiltonian,
             compact_diagonal.overlap,
@@ -383,7 +383,7 @@ int main(int argc, char** argv) {
             selected_overlap,
             delta_hamiltonian_selected,
             delta_overlap_selected,
-            xmvb::core::EigenResponseOptions{
+            xmvb::linalg::EigenResponseOptions{
                 n_structures + 1,
                 1.0e-8});
     const auto response_end = std::chrono::high_resolution_clock::now();

@@ -9,7 +9,7 @@
 
 #include <Eigen/Core>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
@@ -136,7 +136,7 @@ double evaluate_total_energy_from_active_space(
       input.orbital_preparation_input.n_active_orbitals,
       packed_active_two_electron_integrals,
       input.structure_data.n_structures);
-  xmvb::core::GeneralizedEigensolver generalized_eigensolver;
+  xmvb::linalg::GeneralizedEigensolver generalized_eigensolver;
   const auto eigen_result = generalized_eigensolver.solve_dense(
       structure_matrices.hamiltonian_matrix,
       structure_matrices.overlap_matrix,

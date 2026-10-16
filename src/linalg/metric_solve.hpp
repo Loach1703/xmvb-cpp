@@ -9,7 +9,7 @@
 
 #include <Eigen/Core>
 
-namespace xmvb::core {
+namespace xmvb::linalg {
 
 /** @brief Optional accounting; never changes the certified stopping rule. */
 struct MetricSolveStats {
@@ -257,4 +257,4 @@ private:
   MetricImage last_image_;
 };
 
-}  // namespace xmvb::core
+}  // namespace xmvb::linalg

@@ -9,18 +9,18 @@
 namespace xmvb::mcscf {
 
 /**
- * @brief Immutable quadratic model used by norm-extended optimization.
+ * @brief Immutable quadratic model shared by CIAH and trust-region solvers.
  *
  * The Hessian maps a coordinate increment to a gradient covector. The metric
  * defines the physical trust-region norm, and the supplied dual norm measures
  * KKT covectors in the corresponding physical units. An optional SPD
  * preconditioner may accelerate subspace growth, but it is not part of the
- * NEO equations.
+ * model equations.
  */
-class NeoProblem {
+class QuadraticProblem {
 public:
   /**
-   * @brief Constructs a matrix-free generalized-metric NEO problem.
+   * @brief Constructs a matrix-free generalized-metric quadratic problem.
    *
    * @param gradient Gradient covector at the accepted point.
    * @param apply_hessian Symmetric Hessian action.
@@ -30,12 +30,12 @@ public:
    * @param hessian_lower_bound Optional certified lower bound on every
    * generalized Hessian eigenvalue. An estimate is not sufficient.
    */
-  NeoProblem(
+  QuadraticProblem(
       Eigen::VectorXd gradient,
-      VectorAction apply_hessian,
-      VectorAction apply_metric,
+      linalg::VectorAction apply_hessian,
+      linalg::VectorAction apply_metric,
       DualNorm dual_norm,
-      VectorAction apply_preconditioner = {},
+      linalg::VectorAction apply_preconditioner = {},
       std::optional<double> hessian_lower_bound = std::nullopt);
 
   /** @brief Number of optimization coordinates. */
@@ -68,15 +68,15 @@ public:
 
 private:
   Eigen::VectorXd apply_checked(
-      const VectorAction& action,
+      const linalg::VectorAction& action,
       const Eigen::VectorXd& vector,
       const char* name) const;
 
   const Eigen::VectorXd gradient_;
-  const VectorAction apply_hessian_;
-  const VectorAction apply_metric_;
+  const linalg::VectorAction apply_hessian_;
+  const linalg::VectorAction apply_metric_;
   const DualNorm dual_norm_;
-  const VectorAction apply_preconditioner_;
+  const linalg::VectorAction apply_preconditioner_;
   const std::optional<double> hessian_lower_bound_;
 };
 

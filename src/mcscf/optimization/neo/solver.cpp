@@ -13,7 +13,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "mcscf/optimization/trust_region/spectral.hpp"
-#include "mcscf/optimization/neo/symmetry.hpp"
+#include "linalg/symmetry.hpp"
 #include "mcscf/optimization/neo/globalization.hpp"
 
 namespace xmvb::mcscf {
@@ -26,7 +26,7 @@ struct Basis {
 };
 
 Eigen::VectorXd residual_direction(
-    const NeoProblem& problem,
+    const QuadraticProblem& problem,
     const Eigen::VectorXd& residual) {
   return problem.has_preconditioner()
       ? problem.apply_preconditioner(residual)
@@ -34,7 +34,7 @@ Eigen::VectorXd residual_direction(
 }
 
 bool append_direction(
-    const NeoProblem& problem,
+    const QuadraticProblem& problem,
     Eigen::VectorXd direction,
     Basis* basis,
     int* hessian_actions) {
@@ -90,7 +90,7 @@ Eigen::VectorXd generic_probe(Eigen::Index size) {
 }
 
 void set_augmented_certificate(
-    const NeoProblem& problem,
+    const QuadraticProblem& problem,
     const Eigen::VectorXd& minimum_ritz_vector,
     NeoResult* result) {
   result->augmented_eigenvalue = -result->shift;
@@ -117,7 +117,7 @@ void set_augmented_certificate(
 }  // namespace
 
 NeoResult solve_neo(
-    const NeoProblem& problem, const NeoOptions& options,
+    const QuadraticProblem& problem, const NeoOptions& options,
     bool allow_early_trial) {
   if (!(options.trust_radius > 0.0) ||
       !std::isfinite(options.trust_radius) ||
@@ -189,7 +189,7 @@ NeoResult solve_neo(
     const double metric_threshold = symmetry_factor * metric_scale;
     if (metric_skew.norm() > metric_threshold &&
         metric_skew.norm() > metric_threshold +
-            neo_detail::projection_skew_roundoff(q, mq, projected_metric_action)) {
+            linalg::projection_skew_roundoff(q, mq, projected_metric_action)) {
       throw std::runtime_error("NEO metric action is not symmetric");
     }
     const Eigen::MatrixXd projected_metric = 0.5 *
@@ -208,7 +208,7 @@ NeoResult solve_neo(
     const double hessian_scale = std::max(1.0, projected_action.norm());
     const double base_threshold = symmetry_factor * hessian_scale;
     const double projection_roundoff = projected_skew.norm() > base_threshold
-        ? neo_detail::projection_skew_roundoff(q, hq, projected_action)
+        ? linalg::projection_skew_roundoff(q, hq, projected_action)
         : 0.0;
     if (projected_skew.norm() > base_threshold + projection_roundoff) {
       // Re-evaluate the worst pair only on failure. This distinguishes a

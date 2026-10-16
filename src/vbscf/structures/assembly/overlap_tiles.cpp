@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 #include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"

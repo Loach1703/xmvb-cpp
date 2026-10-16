@@ -1,6 +1,6 @@
 # Common solver tests must link without the VBSCF or CASSCF model libraries.
 set(_xmvb_mcscf_tests
-  block_inverse_bfgs ciah minres neo neo_globalization orthonormal_hvp_basis
+  block_inverse_bfgs ciah neo neo_globalization
   positive_ritz_secants shifted_metric_preconditioner state_weights)
 foreach(name IN LISTS _xmvb_mcscf_tests)
   add_executable(test_${name} ${CMAKE_CURRENT_LIST_DIR}/unit/test_${name}.cpp)

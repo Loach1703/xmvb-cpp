@@ -10,7 +10,7 @@
 #include <omp.h>
 #endif
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 #include "vbscf/diagnostics/performance/workers.hpp"
 

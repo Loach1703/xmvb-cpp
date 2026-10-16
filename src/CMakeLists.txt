@@ -31,6 +31,11 @@ find_path(EIGEN3_INCLUDE_DIR Eigen/Core
 
 include(vbscf/sources.cmake)
 
+set(XMVB_LINALG_SOURCES
+  linalg/eigensolver.cpp
+  linalg/eigen_response.cpp
+  linalg/minres.cpp)
+
 set(XMVB_MCSCF_SOURCES
   mcscf/ci/sigma.cpp
   mcscf/ci/sigma_tiles.cpp
@@ -42,11 +47,10 @@ set(XMVB_MCSCF_SOURCES
   mcscf/ci/strings.cpp
   mcscf/ci/spin.cpp
   mcscf/states/weights.cpp
-  mcscf/optimization/neo/ciah.cpp
+  mcscf/optimization/ciah/solver.cpp
   mcscf/optimization/neo/globalization.cpp
-  mcscf/optimization/neo/problem.cpp
+  mcscf/optimization/problem.cpp
   mcscf/optimization/neo/solver.cpp
-  mcscf/optimization/krylov/minres.cpp
   mcscf/optimization/preconditioners/block_inverse_bfgs.cpp
   mcscf/optimization/preconditioners/coarse.cpp
   mcscf/optimization/preconditioners/shifted_metric.cpp)
@@ -88,7 +92,7 @@ set(XMVB_OUTPUT_SOURCES
   output/text/sections.cpp
   output/text/structure.cpp
   output/trace/accepted_iteration.cpp
-  output/trace/neo.cpp
+  output/trace/ciah.cpp
   output/trace/tnhvp.cpp
 )
 
@@ -102,6 +106,7 @@ file(
   "${CMAKE_CURRENT_SOURCE_DIR}/input/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/output/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/casscf/*.cpp")
 set(_xmvb_declared_component_sources
@@ -110,6 +115,7 @@ set(_xmvb_declared_component_sources
   ${XMVB_GUESS_SOURCES}
   ${XMVB_INPUT_SOURCES}
   ${XMVB_OUTPUT_SOURCES}
+  ${XMVB_LINALG_SOURCES}
   ${XMVB_MCSCF_SOURCES}
   ${XMVB_CASSCF_SOURCES})
 list(SORT _xmvb_declared_component_sources)
@@ -171,15 +177,17 @@ function(xmvb_add_component target_name)
       ${CINT_INCLUDE})
 endfunction()
 
+xmvb_add_component(xmvb_linalg ${XMVB_LINALG_SOURCES})
+target_compile_features(xmvb_linalg PUBLIC cxx_std_20)
+if (XMVB_ENABLE_EIGEN_BLAS_BACKEND)
+  target_compile_definitions(xmvb_linalg PUBLIC EIGEN_USE_BLAS=1 EIGEN_USE_LAPACKE=1)
+endif()
+target_link_libraries(xmvb_linalg PUBLIC ${LAPACKE_LIB} ${LAPACK_LIB} xmvb_openmp m)
+
 xmvb_add_component(xmvb_mcscf
-  core/eigensolver.cpp
-  core/eigen_response.cpp
   core/pair_index.cpp
   ${XMVB_MCSCF_SOURCES})
-if (XMVB_ENABLE_EIGEN_BLAS_BACKEND)
-  target_compile_definitions(xmvb_mcscf PUBLIC EIGEN_USE_BLAS=1 EIGEN_USE_LAPACKE=1)
-endif()
-target_link_libraries(xmvb_mcscf PUBLIC ${LAPACKE_LIB} ${LAPACK_LIB} xmvb_openmp m)
+target_link_libraries(xmvb_mcscf PUBLIC xmvb_linalg)
 target_link_libraries(xmvb_vbscf PUBLIC xmvb_mcscf)
 
 xmvb_add_component(xmvb_casscf ${XMVB_CASSCF_SOURCES})
@@ -187,6 +195,8 @@ target_link_libraries(xmvb_casscf PUBLIC xmvb_mcscf)
 
 # The common CI and orthogonal model must never depend on VB representations.
 file(GLOB_RECURSE _xmvb_common_headers CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/parallel/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/casscf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/casscf/*.cpp")
 foreach(_xmvb_common_file IN LISTS _xmvb_common_headers)
@@ -195,13 +205,28 @@ foreach(_xmvb_common_file IN LISTS _xmvb_common_headers)
   if (_xmvb_vb_includes)
     message(FATAL_ERROR "Common/CASSCF source depends on VBSCF: ${_xmvb_common_file}")
   endif()
+  if (_xmvb_common_file MATCHES "/(linalg|parallel)/")
+    file(STRINGS "${_xmvb_common_file}" _xmvb_model_includes
+      REGEX "^[ \t]*#[ \t]*include[ \t]*\"(mcscf|casscf)/")
+    if (_xmvb_model_includes)
+      message(FATAL_ERROR "Numerical utility depends on an electronic model: ${_xmvb_common_file}")
+    endif()
+  endif()
 endforeach()
 unset(_xmvb_common_headers)
 unset(_xmvb_common_file)
 unset(_xmvb_vb_includes)
+unset(_xmvb_model_includes)
 
 if (XMVB_BUILD_DEV_TARGETS)
+  include(${CMAKE_SOURCE_DIR}/tests/linalg/targets.cmake)
   include(${CMAKE_SOURCE_DIR}/tests/mcscf/targets.cmake)
+  add_executable(test_openmp ${CMAKE_SOURCE_DIR}/tests/parallel/test_openmp.cpp)
+  target_include_directories(test_openmp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(test_openmp PRIVATE xmvb_openmp)
+  if (BUILD_TESTING)
+    add_test(NAME openmp COMMAND test_openmp)
+  endif()
   add_executable(test_ci_factors ${CMAKE_SOURCE_DIR}/tests/mcscf/test_factors.cpp)
   target_link_libraries(test_ci_factors PRIVATE xmvb_mcscf)
   add_executable(test_casci ${CMAKE_SOURCE_DIR}/tests/mcscf/test_casci.cpp)

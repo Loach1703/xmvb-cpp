@@ -41,7 +41,7 @@ sha256sum "$source_dir/src/vbscf/derivatives/gradient/active_space/evaluator.cpp
  "$source_dir/src/vbscf/derivatives/hessian/exact/apply.cpp" \
  "$source_dir/src/vbscf/determinants/pairs/same_spin_cache.cpp" >> "$artifact/sources.sha256"
 sha256sum "$source_dir/src/core/"{eigen_response.cpp,eigen_response.hpp} \
- "$source_dir/src/core/openmp.hpp" \
+ "$source_dir/src/parallel/openmp.hpp" \
  "$source_dir/src/vbscf/structures/orthogonal_ci/exterior_transform.cpp" \
  "$source_dir/src/vbscf/derivatives/hessian/coupled/"{coupling.cpp,coupling.hpp} \
  "$source_dir/src/vbscf/derivatives/hessian/exact/"{operator.cpp,operator.hpp,state_internal.hpp} \
@@ -109,8 +109,8 @@ if [[ ${1:-} == --production || ${1:-} == --selected-scf ]]; then
    sha256sum input.xmi cc-pvdz.gbs > input.sha256
    srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
     /usr/bin/time -v -o resource.time "$source_dir/build/src/xmvb-cpp.exe" input.xmi \
-    --optimizer-backend neo --eigensolver "$solver" --orbital-preconditioner hessian-diagonal \
-    --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --neo-trace neo.tsv \
+    --optimizer-backend ciah --eigensolver "$solver" --orbital-preconditioner hessian-diagonal \
+    --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --ciah-trace neo.tsv \
     > output.out 2> run.err
   done
  done

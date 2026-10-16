@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "mcscf/ci/factors_internal.hpp"
 
 namespace xmvb::vb {

@@ -46,8 +46,8 @@ for mode in native phases; do
  [[ $mode == phases ]] && export XMVB_PHASE_TIMING=1
  set +e
  /usr/bin/time -v -o resource.time "$FULL32_ROOT/xmvb-cpp.exe" input.xmi \
-  --optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal \
-  --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --neo-trace neo.tsv > output.out 2> run.err
+  --optimizer-backend ciah --eigensolver davidson --orbital-preconditioner hessian-diagonal \
+  --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --ciah-trace neo.tsv > output.out 2> run.err
  status=$?
  set -e
  printf '%s\n' "$status" > run.exit
@@ -64,7 +64,7 @@ fi
 set +e
 if [[ $available == 1 ]]; then
  perf record -o "$FULL32_ROOT/perf.data" -F 199 -e cpu-clock:u --call-graph fp -- \
-  "$FULL32_ROOT/xmvb-cpp.exe" input.xmi --optimizer-backend neo --eigensolver davidson \
+  "$FULL32_ROOT/xmvb-cpp.exe" input.xmi --optimizer-backend ciah --eigensolver davidson \
   --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 --energy-tolerance 1e-7 \
   > capture.out 2> capture.err
  status=$?
@@ -74,7 +74,7 @@ elif [[ -x /opt/intel/oneapi/vtune/latest/bin64/vtune ]]; then
  profiler=/opt/intel/oneapi/vtune/latest/bin64/vtune
  "$profiler" -version > profiler-version.txt 2>&1
  "$profiler" -collect hotspots -knob sampling-mode=sw -result-dir "$FULL32_ROOT/vtune" -- \
-  "$FULL32_ROOT/xmvb-cpp.exe" input.xmi --optimizer-backend neo --eigensolver davidson \
+  "$FULL32_ROOT/xmvb-cpp.exe" input.xmi --optimizer-backend ciah --eigensolver davidson \
   --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 --energy-tolerance 1e-7 \
   > capture.out 2> capture.err
  status=$?

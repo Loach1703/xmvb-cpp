@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <chrono>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 #include "mcscf/ci/factors.hpp"
 #include "mcscf/ci/product_support.hpp"

@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 #include "core/pair_index.hpp"
 #include "mcscf/ci/planner.hpp"

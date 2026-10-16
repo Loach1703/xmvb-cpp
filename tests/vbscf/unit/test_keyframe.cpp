@@ -14,7 +14,7 @@
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/expansion/expander.hpp"
-#include "vbscf/optimization/backends/ciah.hpp"
+#include "vbscf/optimization/backends/ciah_step.hpp"
 
 namespace {
 

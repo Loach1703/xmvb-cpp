@@ -7,7 +7,7 @@
 #include <optional>
 #include <stdexcept>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 #include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/determinants/pairs/accepted_action.hpp"

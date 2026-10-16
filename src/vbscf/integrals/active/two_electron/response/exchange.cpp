@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 #include "vbscf/integrals/ao/contracts/input.hpp"
 

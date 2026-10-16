@@ -9,7 +9,7 @@
 #include <omp.h>
 #endif
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/core/storage/eigen.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "core/pair_index.hpp"

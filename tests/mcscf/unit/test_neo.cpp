@@ -11,14 +11,14 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/LU>
 
-#include "mcscf/optimization/neo/problem.hpp"
+#include "mcscf/optimization/problem.hpp"
 #include "mcscf/optimization/neo/solver.hpp"
-#include "mcscf/optimization/neo/symmetry.hpp"
+#include "linalg/symmetry.hpp"
 
 namespace {
 
 using xmvb::mcscf::NeoOptions;
-using xmvb::mcscf::NeoProblem;
+using xmvb::mcscf::QuadraticProblem;
 using xmvb::mcscf::NeoResult;
 using xmvb::mcscf::NeoStopReason;
 
@@ -50,14 +50,14 @@ double physical_dual_norm(
   return std::sqrt(covector.dot(metric.ldlt().solve(covector)));
 }
 
-xmvb::mcscf::NeoProblem dense_problem(
+xmvb::mcscf::QuadraticProblem dense_problem(
     const Eigen::MatrixXd& hessian,
     const Eigen::MatrixXd& metric,
     const Eigen::VectorXd& gradient,
     std::optional<double> hessian_lower_bound = std::nullopt) {
   const Eigen::MatrixXd metric_inverse = metric.ldlt().solve(
       Eigen::MatrixXd::Identity(metric.rows(), metric.cols()));
-  return xmvb::mcscf::NeoProblem(
+  return xmvb::mcscf::QuadraticProblem(
       gradient,
       [hessian](const Eigen::VectorXd& vector) {
         return hessian * vector;
@@ -147,7 +147,7 @@ void check_positive_definite_newton_limit() {
   xmvb::mcscf::NeoOptions options;
   options.trust_radius = radius;
   options.relative_residual_tolerance = 1.0e-12;
-  const xmvb::mcscf::NeoProblem problem = dense_problem(hessian, metric, gradient);
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(hessian, metric, gradient);
   require(!problem.has_preconditioner(),
           "dense reference unexpectedly installed a preconditioner");
   const xmvb::mcscf::NeoResult result = xmvb::mcscf::solve_neo(problem, options);
@@ -178,7 +178,7 @@ void check_generalized_metric_boundary() {
   xmvb::mcscf::NeoOptions options;
   options.trust_radius = radius;
   options.relative_residual_tolerance = 1.0e-12;
-  const xmvb::mcscf::NeoProblem problem = dense_problem(hessian, metric, gradient);
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(hessian, metric, gradient);
   require(!problem.has_preconditioner(),
           "generalized-metric reference unexpectedly requires a preconditioner");
   const xmvb::mcscf::NeoResult result = xmvb::mcscf::solve_neo(problem, options);
@@ -601,11 +601,11 @@ void check_projection_roundoff() {
   Eigen::MatrixXd images = 5.0 * q;
   images.col(1) += 1.14e-12 * q.col(0);
   const Eigen::MatrixXd projected = q.transpose() * images;
-  const double bound = xmvb::mcscf::neo_detail::projection_skew_roundoff(
+  const double bound = xmvb::linalg::projection_skew_roundoff(
       q, images, projected);
   require((projected - projected.transpose()).norm() < bound,
           "large-dimensional projection rejects a roundoff-sized defect");
-  const xmvb::mcscf::NeoProblem problem(
+  const xmvb::mcscf::QuadraticProblem problem(
       (q.col(0) + q.col(1)).eval(),
       [&q](const Eigen::VectorXd& v) -> Eigen::VectorXd {
         return 5.0 * v + 4.0 * q.col(1).dot(v) * q.col(1) +
@@ -622,7 +622,7 @@ void check_projection_roundoff() {
   images.col(1) += 1e-4 * q.col(0);
   const Eigen::MatrixXd invalid = q.transpose() * images;
   require((invalid - invalid.transpose()).norm() >
-              xmvb::mcscf::neo_detail::projection_skew_roundoff(q, images, invalid),
+              xmvb::linalg::projection_skew_roundoff(q, images, invalid),
           "roundoff bound hides a materially nonsymmetric action");
 }
 

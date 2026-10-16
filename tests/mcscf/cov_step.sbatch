@@ -42,9 +42,9 @@ set +e
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
  /usr/bin/time -v -o resource.time \
  python3 "$source_dir/tests/mcscf/pin_ci.py" 8 "$artifact/affinity.jsonl" \
- "$artifact/xmvb-cpp.exe" input.xmi --optimizer-backend neo --eigensolver davidson \
+ "$artifact/xmvb-cpp.exe" input.xmi --optimizer-backend ciah --eigensolver davidson \
  --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 \
- --energy-tolerance 1e-7 --max-iterations 1 --neo-trace neo.tsv > output.out 2> run.err
+ --energy-tolerance 1e-7 --max-iterations 1 --ciah-trace neo.tsv > output.out 2> run.err
 status=$?
 set -e
 printf '%s\n' "$status" > run.exit

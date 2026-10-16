@@ -10,7 +10,7 @@
 #include <omp.h>
 #endif
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/core/storage/eigen.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"

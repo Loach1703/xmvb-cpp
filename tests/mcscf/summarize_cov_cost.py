@@ -43,7 +43,7 @@ def summarize(root):
             phases[fields[1]] = int(fields[2]), float(fields[3])
         elif fields[0] == "XMVB_CPU" and fields[1] != "stage":
             cpu[fields[1]] = float(fields[2])
-        elif fields[0] == "NEO_DIAG" and fields[3] in (
+        elif fields[0] == "CIAH_DIAG" and fields[3] in (
             "ciah_diagonal_cost", "ciah_diagonal_sections", "ciah_forward_cost",
             "ciah_structure_cost", "ciah_keyframe_cost", "ciah_keyframe_active_cost",
         ):

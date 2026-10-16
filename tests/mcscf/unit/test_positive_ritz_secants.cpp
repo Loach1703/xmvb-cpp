@@ -3,7 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 
-#include "mcscf/optimization/krylov/positive_ritz_secants.hpp"
+#include "mcscf/optimization/preconditioners/ritz_secants.hpp"
 #include "mcscf/optimization/preconditioners/block_inverse_bfgs.hpp"
 
 namespace {

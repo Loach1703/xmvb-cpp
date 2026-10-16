@@ -39,9 +39,9 @@ lscpu > cpu.txt
 module list > modules.txt 2>&1
 env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|SLURM_|XMVB_)' > environment.txt
 sha256sum "$bundle/xmvb-cpp.exe" input.xmi cc-pvdz.gbs > hashes.txt
-command=("$bundle/xmvb-cpp.exe" input.xmi --optimizer-backend neo
+command=("$bundle/xmvb-cpp.exe" input.xmi --optimizer-backend ciah
  --eigensolver davidson --orbital-preconditioner hessian-diagonal
- --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --neo-trace neo.tsv)
+ --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --ciah-trace neo.tsv)
 printf '%q ' "${command[@]}" > command.txt
 printf '\n' >> command.txt
 srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \

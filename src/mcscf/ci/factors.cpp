@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 
 namespace xmvb::mcscf {

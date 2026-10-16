@@ -5,7 +5,7 @@
 
 #include <Eigen/Core>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/core/storage/eigen.hpp"
 #include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
 #include "vbscf/integrals/ao/one_electron/ri_operator.hpp"

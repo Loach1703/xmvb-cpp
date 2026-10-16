@@ -4,7 +4,7 @@
 #include <limits>
 #include <stdexcept>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 
 namespace xmvb::mcscf::detail {
 

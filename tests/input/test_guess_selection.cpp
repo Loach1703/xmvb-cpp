@@ -3,6 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "input/deck/keywords.hpp"
 #include "input/deck/model.hpp"
@@ -70,12 +71,17 @@ int main() {
         explicit_unit.metadata.guess_type == xmvb::vb::kGuessTypeUnit,
         "explicit GUESS=UNIT must override the $GUS default");
 
-    const auto neo_path = root / "neo.xmi";
-    write_deck(neo_path, "iscf=9");
-    const auto neo = xmvb::vb::parse_input_deck_model(neo_path.string());
-    require(
-        neo.metadata.scf_optimizer == xmvb::vb::InputScfOptimizer::Neo,
-        "ISCF=9 must select NEO");
+    using xmvb::vb::InputScfOptimizer;
+    const std::pair<int, InputScfOptimizer> optimizers[] = {
+        {5, InputScfOptimizer::Lbfgs}, {7, InputScfOptimizer::Tnhvp},
+        {8, InputScfOptimizer::Plbfgs}, {9, InputScfOptimizer::Ciah}};
+    for (const auto& [iscf, expected] : optimizers) {
+      const auto path = root / ("iscf" + std::to_string(iscf) + ".xmi");
+      write_deck(path, "iscf=" + std::to_string(iscf));
+      const auto deck = xmvb::vb::parse_input_deck_model(path.string());
+      require(deck.metadata.scf_optimizer == expected,
+          "numeric ISCF mapping changed during optimizer rename");
+    }
 
     const auto state_average_path = root / "state-average.xmi";
     write_deck(state_average_path, "nstate=3");

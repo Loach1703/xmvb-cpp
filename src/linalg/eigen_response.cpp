@@ -1,4 +1,4 @@
-#include "core/eigen_response.hpp"
+#include "linalg/eigen_response.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -11,7 +11,7 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/SVD>
 
-namespace xmvb::core {
+namespace xmvb::linalg {
 namespace {
 
 void validate_response_columns(
@@ -2168,4 +2168,4 @@ evaluate_frozen_equal_weight_generalized_eigen_subspace_response(
       external_overlap_images, block_actions);
 }
 
-}  // namespace xmvb::core
+}  // namespace xmvb::linalg

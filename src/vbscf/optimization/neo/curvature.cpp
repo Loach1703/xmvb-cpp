@@ -15,7 +15,7 @@ mcscf::NeoResult probe_neo_curvature(
     const OrbitalChart& chart) {
   const Eigen::Index n_orbital = chart.reduced_size();
   const Eigen::Index n_structure = structure_hessian.tangent_size();
-  const mcscf::NeoProblem problem(
+  const mcscf::QuadraticProblem problem(
       Eigen::VectorXd::Zero(n_orbital + n_structure),
       [&](const Eigen::VectorXd& vector) -> Eigen::VectorXd {
         const auto orbital = orbital_hessian.apply_orbital_coupling(

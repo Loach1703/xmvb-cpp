@@ -21,7 +21,7 @@ BackendRunResult run_xmvb_lbfgs_backend(
     double initial_energy,
     VbScfOptimizerResult* result);
 
-BackendRunResult run_block_lbfgs_backend(
+BackendRunResult run_plbfgs_backend(
     VbScfObjective* objective,
     const SparseParameterLayout& parameter_view,
     const VbScfOptimizerOptions& options,

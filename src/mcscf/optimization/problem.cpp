@@ -1,4 +1,4 @@
-#include "mcscf/optimization/neo/problem.hpp"
+#include "mcscf/optimization/problem.hpp"
 
 #include <cmath>
 #include <stdexcept>
@@ -6,12 +6,12 @@
 
 namespace xmvb::mcscf {
 
-NeoProblem::NeoProblem(
+QuadraticProblem::QuadraticProblem(
     Eigen::VectorXd gradient,
-    VectorAction apply_hessian,
-    VectorAction apply_metric,
+    linalg::VectorAction apply_hessian,
+    linalg::VectorAction apply_metric,
     DualNorm dual_norm,
-    VectorAction apply_preconditioner,
+    linalg::VectorAction apply_preconditioner,
     std::optional<double> hessian_lower_bound)
     : gradient_(std::move(gradient)),
       apply_hessian_(std::move(apply_hessian)),
@@ -20,23 +20,23 @@ NeoProblem::NeoProblem(
       apply_preconditioner_(std::move(apply_preconditioner)),
       hessian_lower_bound_(hessian_lower_bound) {
   if (gradient_.size() == 0 || !gradient_.allFinite()) {
-    throw std::invalid_argument("NEO requires a finite nonempty gradient");
+    throw std::invalid_argument("quadratic model requires a finite nonempty gradient");
   }
   if (!apply_hessian_ || !apply_metric_ || !dual_norm_) {
     throw std::invalid_argument(
-        "NEO requires Hessian, metric, and dual-norm actions");
+        "quadratic model requires Hessian, metric, and dual-norm actions");
   }
   if (hessian_lower_bound_ && !std::isfinite(*hessian_lower_bound_)) {
-    throw std::invalid_argument("NEO Hessian lower bound must be finite");
+    throw std::invalid_argument("quadratic model Hessian lower bound must be finite");
   }
 }
 
-Eigen::VectorXd NeoProblem::apply_checked(
-    const VectorAction& action,
+Eigen::VectorXd QuadraticProblem::apply_checked(
+    const linalg::VectorAction& action,
     const Eigen::VectorXd& vector,
     const char* name) const {
   if (vector.size() != size() || !vector.allFinite()) {
-    throw std::invalid_argument("invalid vector passed to NEO operator");
+    throw std::invalid_argument("invalid vector passed to quadratic model operator");
   }
   Eigen::VectorXd result = action(vector);
   if (result.size() != size() || !result.allFinite()) {
@@ -45,37 +45,37 @@ Eigen::VectorXd NeoProblem::apply_checked(
   return result;
 }
 
-Eigen::VectorXd NeoProblem::apply_hessian(
+Eigen::VectorXd QuadraticProblem::apply_hessian(
     const Eigen::VectorXd& direction) const {
   return apply_checked(
-      apply_hessian_, direction, "NEO Hessian action returned an invalid vector");
+      apply_hessian_, direction, "quadratic model Hessian action returned an invalid vector");
 }
 
-Eigen::VectorXd NeoProblem::apply_metric(
+Eigen::VectorXd QuadraticProblem::apply_metric(
     const Eigen::VectorXd& direction) const {
   return apply_checked(
-      apply_metric_, direction, "NEO metric action returned an invalid vector");
+      apply_metric_, direction, "quadratic model metric action returned an invalid vector");
 }
 
-double NeoProblem::dual_norm(const Eigen::VectorXd& covector) const {
+double QuadraticProblem::dual_norm(const Eigen::VectorXd& covector) const {
   if (covector.size() != size() || !covector.allFinite()) {
-    throw std::invalid_argument("invalid covector passed to NEO dual norm");
+    throw std::invalid_argument("invalid covector passed to quadratic model dual norm");
   }
   const double norm = dual_norm_(covector);
   if (!std::isfinite(norm) || norm < 0.0) {
-    throw std::runtime_error("NEO dual norm returned an invalid value");
+    throw std::runtime_error("quadratic model dual norm returned an invalid value");
   }
   return norm;
 }
 
-Eigen::VectorXd NeoProblem::apply_preconditioner(
+Eigen::VectorXd QuadraticProblem::apply_preconditioner(
     const Eigen::VectorXd& covector) const {
   if (!apply_preconditioner_) {
-    throw std::logic_error("NEO problem has no residual preconditioner");
+    throw std::logic_error("quadratic model problem has no residual preconditioner");
   }
   return apply_checked(
       apply_preconditioner_, covector,
-      "NEO preconditioner returned an invalid vector");
+      "quadratic model preconditioner returned an invalid vector");
 }
 
 }  // namespace xmvb::mcscf

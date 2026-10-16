@@ -132,7 +132,7 @@ BackendRunResult run_xmvb_lbfgs_backend(
   return run_result;
 }
 
-BackendRunResult run_block_lbfgs_backend(
+BackendRunResult run_plbfgs_backend(
     VbScfObjective* objective,
     const SparseParameterLayout& parameter_view,
     const VbScfOptimizerOptions& options,
@@ -168,7 +168,7 @@ BackendRunResult run_block_lbfgs_backend(
         orbital_gradient_converged(*objective, parameter_view, current_space,
             current_projection.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
-      result->termination_reason = "block_lbfgs_initial_tolerance";
+      result->termination_reason = "plbfgs_initial_tolerance";
       run_result.final_gradient_l2_norm =
           current_projection.reduced_gradient.norm();
       break;
@@ -222,7 +222,7 @@ BackendRunResult run_block_lbfgs_backend(
     if (!std::isfinite(directional_derivative) ||
         directional_derivative >= 0.0) {
       result->termination_reason =
-          "block_lbfgs_non_descent_direction";
+          "plbfgs_non_descent_direction";
       run_result.final_gradient_l2_norm =
           current_projection.reduced_gradient.norm();
       break;
@@ -252,7 +252,7 @@ BackendRunResult run_block_lbfgs_backend(
             &accepted_parameters,
             &accepted_gradient,
             &accepted_energy)) {
-      result->termination_reason = "block_lbfgs_line_search_failed";
+      result->termination_reason = "plbfgs_line_search_failed";
       run_result.final_gradient_l2_norm =
           current_projection.reduced_gradient.norm();
       break;
@@ -309,7 +309,7 @@ BackendRunResult run_block_lbfgs_backend(
         sync_result_from_objective(*objective, result);
         run_result.final_gradient_l2_norm = current_gradient.norm();
         result->termination_reason =
-            "block_lbfgs_line_search_stalled";
+            "plbfgs_line_search_stalled";
         break;
       }
       next_space = build_orbital_chart(*objective, parameter_view);
@@ -337,7 +337,7 @@ BackendRunResult run_block_lbfgs_backend(
             next_projection.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason =
-          "block_lbfgs_projected_gradient_tolerance";
+          "plbfgs_projected_gradient_tolerance";
       run_result.final_gradient_l2_norm = next_projection.reduced_gradient.norm();
       break;
     }

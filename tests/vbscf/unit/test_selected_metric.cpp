@@ -10,7 +10,7 @@
 #include <Eigen/Cholesky>
 #include <Eigen/LU>
 
-#include "core/metric_solve.hpp"
+#include "linalg/metric_solve.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
 #include "vbscf/structures/assembly/action.hpp"
@@ -145,8 +145,8 @@ void compare_dense(Fixture& fixture) {
   const Eigen::VectorXd diagonal = metric.diagonal();
   Eigen::MatrixXd solution(rhs.rows(), rhs.cols());
   for (int col = 0; col < rhs.cols(); ++col) {
-    xmvb::core::MetricSolveStats stats;
-    solution.col(col) = xmvb::core::solve_metric(
+    xmvb::linalg::MetricSolveStats stats;
+    solution.col(col) = xmvb::linalg::solve_metric(
         Eigen::VectorXd(rhs.col(col)),
         [&](const Eigen::VectorXd& x) {
           return Eigen::VectorXd(prepared_metric(x).col(0));
@@ -173,7 +173,7 @@ void compare_dense(Fixture& fixture) {
   const auto trial_action = representation.prepare_metric(trial);
   const Eigen::MatrixXd trial_metric = trial_action(identity);
   for (int col = 0; col < rhs.cols(); ++col) {
-    const Eigen::VectorXd x = xmvb::core::solve_metric(
+    const Eigen::VectorXd x = xmvb::linalg::solve_metric(
         Eigen::VectorXd(rhs.col(col)),
         [&](const Eigen::VectorXd& v) {
           return Eigen::VectorXd(trial_action(v).col(0));

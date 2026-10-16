@@ -1,11 +1,13 @@
 #pragma once
 
+#include <span>
+
 #include <functional>
 #include <vector>
 
 #include <Eigen/Core>
 
-namespace xmvb::core {
+namespace xmvb::linalg {
 
 /**
  * @brief Result of a symmetric generalized eigenvalue problem.
@@ -131,14 +133,16 @@ public:
   /**
    * @brief Solves the generalized eigenvalue problem.
    *
+   * Input spans borrow storage; LAPACK receives private writable copies.
+   *
    * @param hamiltonian_matrix Column-major symmetric Hamiltonian matrix.
    * @param overlap_matrix Column-major symmetric positive-definite overlap matrix.
    * @param dimension Matrix dimension.
    * @return GeneralizedEigenResult Eigenvalues and eigenvectors.
    */
   GeneralizedEigenResult solve_dense(
-      const std::vector<double>& hamiltonian_matrix,
-      const std::vector<double>& overlap_matrix,
+      std::span<const double> hamiltonian_matrix,
+      std::span<const double> overlap_matrix,
       int dimension) const;
 
   /**
@@ -148,8 +152,8 @@ public:
    * trial-point screening where only selected-state energies are needed.
    */
   std::vector<double> solve_dense_eigenvalues(
-      const std::vector<double>& hamiltonian_matrix,
-      const std::vector<double>& overlap_matrix,
+      std::span<const double> hamiltonian_matrix,
+      std::span<const double> overlap_matrix,
       int dimension) const;
 
   /**
@@ -182,4 +186,4 @@ public:
       const DavidsonOptions& options) const;
 };
 
-}  // namespace xmvb::core
+}  // namespace xmvb::linalg

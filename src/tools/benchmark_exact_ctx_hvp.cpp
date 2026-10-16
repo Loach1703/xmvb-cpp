@@ -19,7 +19,7 @@
 #include <Eigen/QR>
 
 #include "vbscf/diagnostics/orbitals/curvature.hpp"
-#include "mcscf/optimization/krylov/orthonormal_basis.hpp"
+#include "linalg/orthonormal_basis.hpp"
 #include "mcscf/optimization/trust_region/spectral.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
 #include "vbscf/diagnostics/hessian/reduced_reference.hpp"
@@ -534,7 +534,7 @@ void run_spectral_audit(
        iteration < std::min<Eigen::Index>(maximum_dimension, dimension);
        ++iteration) {
     Eigen::VectorXd candidate_image;
-    if (!xmvb::mcscf::append_orthonormal_hvp_direction(
+    if (!xmvb::linalg::append_orthonormal_hvp_direction(
             candidate,
             [&](const Eigen::VectorXd& direction) {
               return exact_operator.apply_reduced(direction);
@@ -663,7 +663,7 @@ void run_curvature_audit(const AcceptedPointBenchmarkContext& context, int budge
     for (int j = 0; j < std::min<int>(budget, g.size()); ++j) {
       const Eigen::VectorXd p = space.apply_inverse_reduced_block_preconditioner(sample.residual);
       Eigen::VectorXd hp;
-      if (!xmvb::mcscf::append_orthonormal_hvp_direction(p, action, &q, &hq, &hp)) break;
+      if (!xmvb::linalg::append_orthonormal_hvp_direction(p, action, &q, &hq, &hp)) break;
       sample.q.resize(g.size(), q.size()); sample.hq.resize(g.size(), q.size());
       for (std::size_t k = 0; k < q.size(); ++k) {
         sample.q.col(k) = q[k]; sample.hq.col(k) = hq[k];

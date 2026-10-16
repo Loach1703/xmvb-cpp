@@ -6,9 +6,9 @@
 
 #include <Eigen/Core>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 
-namespace xmvb::core {
+namespace xmvb::linalg {
 
 /**
  * @brief Accuracy and work limit for matrix-free generalized-eigen response.
@@ -328,4 +328,4 @@ solve_equal_weight_generalized_eigen_subspace_response_from_full_spectrum(
     const Eigen::Ref<const Eigen::MatrixXd>& delta_overlap_selected,
     double relative_residual_tolerance);
 
-}  // namespace xmvb::core
+}  // namespace xmvb::linalg

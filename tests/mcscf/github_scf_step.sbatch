@@ -34,7 +34,7 @@ mode=${4:-paired}
 mkdir -p "$artifact"
 export LC_ALL=C OMP_NUM_THREADS=8 OMP_PLACES=cores OMP_PROC_BIND=close
 export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
-unset XMVB_PHASE_TIMING XMVB_NEO_TRACE
+unset XMVB_PHASE_TIMING XMVB_CIAH_TRACE
 export LD_LIBRARY_PATH="/home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib:${LD_LIBRARY_PATH:-}"
 hostname > "$artifact/node.txt"
 lscpu > "$artifact/cpu.txt"
@@ -67,7 +67,7 @@ for variant in "${variants[@]}"; do
   iterations=(--max-iterations 1)
   [[ $mode == converge || $mode == converge-phases ]] && iterations=()
   if [[ $mode == phases || $mode == converge-phases || $mode == vtune ]]; then
-   export XMVB_PHASE_TIMING=1 XMVB_NEO_TRACE=scalar
+   export XMVB_PHASE_TIMING=1 XMVB_CIAH_TRACE=scalar
   fi
   if [[ $mode == vtune ]]; then
    profiler=/opt/intel/oneapi/vtune/latest/bin64/vtune
@@ -79,9 +79,9 @@ for variant in "${variants[@]}"; do
   srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
    /usr/bin/time -v -o resource.time \
    python3 "$source_dir/tests/mcscf/pin_ci.py" 8 "$artifact/affinity.jsonl" \
-   "${launcher[@]}" "$run_dir/xmvb-cpp.exe" input.xmi --optimizer-backend neo --eigensolver davidson \
+   "${launcher[@]}" "$run_dir/xmvb-cpp.exe" input.xmi --optimizer-backend ciah --eigensolver davidson \
    --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 \
-   --energy-tolerance 1e-7 "${iterations[@]}" --neo-trace neo.tsv > output.out 2> run.err
+   --energy-tolerance 1e-7 "${iterations[@]}" --ciah-trace neo.tsv > output.out 2> run.err
   status=$?
   set -e
   printf '%s\n' "$status" > run.exit

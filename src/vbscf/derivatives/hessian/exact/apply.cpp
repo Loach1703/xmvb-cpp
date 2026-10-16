@@ -18,7 +18,7 @@
 #include <Eigen/Core>
 #include <Eigen/LU>
 
-#include "core/eigen_response.hpp"
+#include "linalg/eigen_response.hpp"
 #include "vbscf/derivatives/hessian/coupled/coupling.hpp"
 #include "vbscf/integrals/active/two_electron/response/adjoint.hpp"
 #include "core/pair_index.hpp"
@@ -657,8 +657,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
         if (build_orbital_coupling) {
           const auto& eigen = outer_response_context()
               .selected_state_eigen_response_operator;
-          const xmvb::core::EqualWeightEigenCoupling coupling =
-              xmvb::core::prepare_equal_weight_generalized_eigen_coupling(
+          const xmvb::linalg::EqualWeightEigenCoupling coupling =
+              xmvb::linalg::prepare_equal_weight_generalized_eigen_coupling(
                   eigen.selected_eigenvalues,
                   eigen.selected_eigenvectors,
                   eigen.overlap_selected,

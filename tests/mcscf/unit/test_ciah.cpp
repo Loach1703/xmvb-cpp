@@ -11,7 +11,7 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/LU>
 
-#include "mcscf/optimization/neo/ciah.hpp"
+#include "mcscf/optimization/ciah/solver.hpp"
 #include "mcscf/optimization/preconditioners/coarse.hpp"
 
 namespace {
@@ -20,7 +20,7 @@ using xmvb::mcscf::CiahOptions;
 using xmvb::mcscf::CiahOriginRay;
 using xmvb::mcscf::CiahResult;
 using xmvb::mcscf::CiahWorkspace;
-using xmvb::mcscf::NeoProblem;
+using xmvb::mcscf::QuadraticProblem;
 
 void require(bool condition, const std::string& message) {
   if (!condition) throw std::runtime_error(message);
@@ -39,11 +39,11 @@ double dual_norm(
   return std::sqrt(covector.dot(metric.ldlt().solve(covector)));
 }
 
-xmvb::mcscf::NeoProblem dense_problem(
+xmvb::mcscf::QuadraticProblem dense_problem(
     const Eigen::MatrixXd& hessian, const Eigen::MatrixXd& metric,
     const Eigen::VectorXd& gradient, int* actions = nullptr,
     int* metrics = nullptr, int* norms = nullptr) {
-  return xmvb::mcscf::NeoProblem(
+  return xmvb::mcscf::QuadraticProblem(
       gradient,
       [hessian, actions](const Eigen::VectorXd& vector) {
         if (actions) ++*actions;
@@ -129,7 +129,7 @@ void check_anisotropic_spd() {
             0.0, 0.2, 2.0e2;
   const Eigen::Vector3d gradient(0.3, -1.2, 0.7);
   int actions = 0;
-  const xmvb::mcscf::NeoProblem problem = dense_problem(hessian, metric, gradient, &actions);
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(hessian, metric, gradient, &actions);
   xmvb::mcscf::CiahOptions options;
   int observed = 0;
   options.observe_images = [&](const Eigen::VectorXd& v,const Eigen::VectorXd& gv) {
@@ -178,7 +178,7 @@ void check_indefinite_root_selection() {
   hessian.diagonal() << -100.0, 2.0, 4.0;
   const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
   const Eigen::Vector3d gradient(0.0, 1.0, 0.0);
-  const xmvb::mcscf::NeoProblem problem = dense_problem(hessian, metric, gradient);
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(hessian, metric, gradient);
   xmvb::mcscf::CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(3, 0));
   xmvb::mcscf::CiahResult result;
   do {
@@ -216,7 +216,7 @@ void check_cached_origin_ray() {
         1, curvature > 0.0 ? 1.0 : 0.001);
     int h_calls = 0, g_calls = 0, full_norm_calls = 0;
     int preconditioner_calls = 0, coordinate_norm_calls = 0;
-    const xmvb::mcscf::NeoProblem problem = dense_problem(
+    const xmvb::mcscf::QuadraticProblem problem = dense_problem(
         hessian, metric, gradient, &h_calls, &g_calls, &full_norm_calls);
     xmvb::mcscf::CiahOptions options;
     options.coordinate_norm = [&](const Eigen::VectorXd& v) {
@@ -260,7 +260,7 @@ void check_cached_origin_ray() {
   const Eigen::Matrix2d two_metric = Eigen::Matrix2d::Identity();
   const Eigen::Vector2d gradient(0.0, 1.0);
   int h_calls = 0, g_calls = 0, full_norm_calls = 0;
-  const xmvb::mcscf::NeoProblem problem = dense_problem(
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(
       hessian, two_metric, gradient, &h_calls, &g_calls, &full_norm_calls);
   xmvb::mcscf::CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 0));
   const xmvb::mcscf::CiahResult usual = workspace.next(gradient);
@@ -282,7 +282,7 @@ void check_cached_origin_ray() {
   const Eigen::Matrix2d positive_metric =
       Eigen::Vector2d(2.0, 1.0).asDiagonal();
   const Eigen::Vector2d oblique_gradient(1.0, 1.0);
-  const xmvb::mcscf::NeoProblem oblique_problem = dense_problem(
+  const xmvb::mcscf::QuadraticProblem oblique_problem = dense_problem(
       positive_hessian, positive_metric, oblique_gradient);
   xmvb::mcscf::CiahWorkspace oblique(oblique_problem, Eigen::VectorXd::Unit(2, 0));
   oblique.next(oblique_gradient);
@@ -297,7 +297,7 @@ void check_origin_ray_macro_energy() {
   const Eigen::MatrixXd hessian = Eigen::MatrixXd::Constant(1, 1, -20.0 / 3.0);
   const Eigen::MatrixXd metric = Eigen::MatrixXd::Identity(1, 1);
   const Eigen::VectorXd gradient = Eigen::VectorXd::Ones(1);
-  const xmvb::mcscf::NeoProblem problem = dense_problem(hessian, metric, gradient);
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(hessian, metric, gradient);
   xmvb::mcscf::CiahWorkspace workspace(problem, gradient);
   workspace.next(gradient);
   const auto ray = workspace.origin_ray(gradient);
@@ -339,7 +339,7 @@ void check_gradient_refresh_and_preconditioner() {
         last_eigenvalue = eigenvalue;
         return Eigen::VectorXd(residual);
       };
-  const xmvb::mcscf::NeoProblem problem = dense_problem(
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(
       hessian, metric, old_gradient, &actions, &metric_calls, &norm_calls);
   xmvb::mcscf::CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 0), options);
   const xmvb::mcscf::CiahResult first = workspace.next(old_gradient);
@@ -384,7 +384,7 @@ void check_fixed_rhs_forcing_and_reprojection() {
   const Eigen::Matrix2d metric = Eigen::Matrix2d::Identity();
   const Eigen::Vector2d gradient(epsilon, 0.0);
   int actions = 0, metric_calls = 0, norm_calls = 0;
-  const xmvb::mcscf::NeoProblem problem = dense_problem(hessian, metric, gradient,
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(hessian, metric, gradient,
       &actions, &metric_calls, &norm_calls);
   xmvb::mcscf::CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 0));
   const xmvb::mcscf::CiahResult early = workspace.next(gradient);
@@ -429,7 +429,7 @@ void check_fixed_rhs_forcing_and_reprojection() {
 
   // Waiting on the original fixed RHS gives the independent dense AH oracle.
   int original_actions = 0;
-  const xmvb::mcscf::NeoProblem original = dense_problem(
+  const xmvb::mcscf::QuadraticProblem original = dense_problem(
       hessian, metric, gradient, &original_actions);
   xmvb::mcscf::CiahWorkspace fixed(original, Eigen::VectorXd::Unit(2, 0));
   const xmvb::mcscf::CiahResult unresolved = fixed.next(gradient);
@@ -461,7 +461,7 @@ void check_rhs_reset_clears_expansion_exhaustion() {
   const Eigen::Vector2d old_gradient(0.2, 0.5);
   const Eigen::Vector2d new_gradient(0.3, 0.4);
   int actions = 0;
-  const xmvb::mcscf::NeoProblem problem = dense_problem(hessian, metric, old_gradient, &actions);
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(hessian, metric, old_gradient, &actions);
   bool dependent = true;
   xmvb::mcscf::CiahOptions options;
   options.residual_preconditioner =
@@ -570,7 +570,7 @@ void check_metric_validation() {
   Eigen::Matrix2d metric = Eigen::Matrix2d::Zero();
   metric(0, 0) = 1.0;
   const Eigen::Vector2d gradient(1.0, 0.0);
-  const xmvb::mcscf::NeoProblem problem = dense_problem(hessian, metric, gradient);
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(hessian, metric, gradient);
   xmvb::mcscf::CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 1));
   bool rejected = false;
   try {
@@ -589,7 +589,7 @@ void check_accumulated_microstep_images() {
   const Eigen::Vector3d initial(0.3, -0.2, 0.1);
   const Eigen::Vector3d correction(0.01, 0.02, -0.03);
   int actions = 0;
-  const xmvb::mcscf::NeoProblem problem = dense_problem(hessian, metric, initial, &actions);
+  const xmvb::mcscf::QuadraticProblem problem = dense_problem(hessian, metric, initial, &actions);
   xmvb::mcscf::CiahWorkspace workspace(problem, initial);
   Eigen::VectorXd displacement = Eigen::VectorXd::Zero(3);
   Eigen::VectorXd image = displacement;

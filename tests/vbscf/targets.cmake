@@ -20,8 +20,6 @@ set(_xmvb_vbscf_unit_targets
   test_selected_ci_transport
   test_orbital_step_geometry
   test_curvature_decomposition
-  test_davidson
-  test_eigen_response
   test_localized_representative_selector
   test_normalized_orbital_curvature
   test_oeo_normalization_pullback
@@ -75,13 +73,9 @@ if (BUILD_TESTING)
   add_test(NAME coupled_structure COMMAND test_coupled_structure)
   set_tests_properties(coupled_structure PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME davidson COMMAND test_davidson)
-  add_test(NAME eigen_response COMMAND test_eigen_response)
   add_test(
     NAME localized_representative_selector
     COMMAND test_localized_representative_selector)
-  set_tests_properties(davidson PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   set_tests_properties(oeo_normalization_pullback PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
 
@@ -186,36 +180,36 @@ if (BUILD_TESTING)
     PASS_REGULAR_EXPRESSION "xmvb_lbfgs_dual_tolerance")
 
   add_test(
-    NAME block_lbfgs_f2
+    NAME plbfgs_f2
     COMMAND
       xmvb
       ${CMAKE_SOURCE_DIR}/testdata/vbscf/F2.xmi
-      --optimizer-backend block_lbfgs
+      --optimizer-backend plbfgs
       --eigensolver davidson
       --max-iterations 40
       --gradient-tolerance 1e-3
       --energy-tolerance 1e-7)
-  set_tests_properties(block_lbfgs_f2 PROPERTIES
+  set_tests_properties(plbfgs_f2 PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     ENVIRONMENT
       "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;GOTO_NUM_THREADS=1;MKL_NUM_THREADS=1"
-    PASS_REGULAR_EXPRESSION "block_lbfgs_projected_gradient_tolerance")
+    PASS_REGULAR_EXPRESSION "plbfgs_projected_gradient_tolerance")
 
   add_test(
-    NAME neo_f2
+    NAME ciah_f2
     COMMAND
       xmvb
       ${CMAKE_SOURCE_DIR}/testdata/vbscf/F2.xmi
-      --optimizer-backend neo
+      --optimizer-backend ciah
       --eigensolver davidson
       --max-iterations 30
       --gradient-tolerance 1e-3
       --energy-tolerance 1e-7)
-  set_tests_properties(neo_f2 PROPERTIES
+  set_tests_properties(ciah_f2 PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     ENVIRONMENT
       "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;GOTO_NUM_THREADS=1;MKL_NUM_THREADS=1"
-    PASS_REGULAR_EXPRESSION "neo_projected_gradient_tolerance")
+    PASS_REGULAR_EXPRESSION "ciah_projected_gradient_tolerance")
 
   foreach(_xmvb_orbital_type IN ITEMS hao oeo)
     if (_xmvb_orbital_type STREQUAL "hao")
@@ -228,12 +222,12 @@ if (BUILD_TESTING)
     foreach(_xmvb_integral_mode IN ITEMS exact ri)
       if (_xmvb_integral_mode STREQUAL "ri")
         set(_xmvb_hessian_diagonal_test
-          neo_hessian_diagonal_ri_f2_${_xmvb_orbital_type})
+          ciah_hessian_diagonal_ri_f2_${_xmvb_orbital_type})
         set(_xmvb_hessian_diagonal_mode_args
           --standard-two-electron-mode ri)
       else()
         set(_xmvb_hessian_diagonal_test
-          neo_hessian_diagonal_f2_${_xmvb_orbital_type})
+          ciah_hessian_diagonal_f2_${_xmvb_orbital_type})
         set(_xmvb_hessian_diagonal_mode_args)
       endif()
       add_test(
@@ -241,7 +235,7 @@ if (BUILD_TESTING)
         COMMAND
           xmvb
           ${_xmvb_hessian_diagonal_input}
-          --optimizer-backend neo
+          --optimizer-backend ciah
           --orbital-preconditioner hessian-diagonal
           ${_xmvb_hessian_diagonal_mode_args}
           --eigensolver davidson
@@ -253,7 +247,7 @@ if (BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         ENVIRONMENT
           "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;GOTO_NUM_THREADS=1;MKL_NUM_THREADS=1"
-        PASS_REGULAR_EXPRESSION "neo_projected_gradient_tolerance")
+        PASS_REGULAR_EXPRESSION "ciah_projected_gradient_tolerance")
     endforeach()
   endforeach()
   unset(_xmvb_hessian_diagonal_input)
@@ -263,14 +257,14 @@ if (BUILD_TESTING)
   unset(_xmvb_orbital_type)
 
   add_test(
-    NAME neo_pyscf_reference_f2
+    NAME ciah_pyscf_reference_f2
     COMMAND
       ${CMAKE_COMMAND}
       -DXMVB_EXE=$<TARGET_FILE:xmvb>
       -DXMVB_INPUT=${CMAKE_SOURCE_DIR}/testdata/vbscf/F2_OEO_PYSCF_LOW.xmi
-      -DTRACE_FILE=${CMAKE_CURRENT_BINARY_DIR}/neo_pyscf_reference_f2.tsv
-      -P ${CMAKE_SOURCE_DIR}/tests/vbscf/check_neo_pyscf_reference.cmake)
-  set_tests_properties(neo_pyscf_reference_f2 PROPERTIES
+      -DTRACE_FILE=${CMAKE_CURRENT_BINARY_DIR}/ciah_pyscf_reference_f2.tsv
+      -P ${CMAKE_SOURCE_DIR}/tests/vbscf/check_ciah_reference.cmake)
+  set_tests_properties(ciah_pyscf_reference_f2 PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
   add_test(

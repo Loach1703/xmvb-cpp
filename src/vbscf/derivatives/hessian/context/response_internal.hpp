@@ -7,7 +7,7 @@
 
 #include <Eigen/Core>
 
-#include "core/eigen_response.hpp"
+#include "linalg/eigen_response.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
@@ -54,7 +54,7 @@ struct AcceptedSelectedStateGeneralizedEigenResponseOperator {
   bool use_equal_weight_subspace_response = false;
   double relative_residual_tolerance = 0.0;
   /** Same accepted-point response spaces, one for each selected root. */
-  mutable std::vector<xmvb::core::EigenResponseRecycleSpace>
+  mutable std::vector<xmvb::linalg::EigenResponseRecycleSpace>
       response_recycle_spaces;
   /** @brief Budgeted complete-space metric factors shared by all isolated RHS. */
   const StructureMetricInverse* metric_inverse = nullptr;

@@ -44,7 +44,7 @@ struct ActiveSpaceGradientForwardContext {
   std::unique_ptr<StructureMetricInverse> structure_metric_inverse;
   std::optional<StructureAdjointState> structure_adjoint_state;
   StructureAccumulationResult structure_matrices;
-  xmvb::core::GeneralizedEigenResult eigen_result;
+  xmvb::linalg::GeneralizedEigenResult eigen_result;
   Eigen::VectorXd structure_overlap_diagonal;
   bool structure_overlap_diagonal_exact = false;
   Eigen::MatrixXd overlap_eigenvectors;
@@ -153,21 +153,21 @@ void retain_structure_action(
       precomputed_diagonal ? &*precomputed_diagonal : nullptr);
 }
 
-xmvb::core::DavidsonResult solve_selected_structure_roots(
-    const xmvb::core::GeneralizedEigenAction& action,
+xmvb::linalg::DavidsonResult solve_selected_structure_roots(
+    const xmvb::linalg::GeneralizedEigenAction& action,
     const Eigen::Ref<const Eigen::VectorXd>& hamiltonian_diagonal,
     const Eigen::Ref<const Eigen::VectorXd>& overlap_diagonal,
     int n_structures,
     int n_roots,
     StructureSolveAccuracy structure_solve_accuracy,
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors,
-    const xmvb::core::GeneralizedEigensolver& generalized_eigensolver,
+    const xmvb::linalg::GeneralizedEigensolver& generalized_eigensolver,
     std::function<double(const Eigen::VectorXd&, double)> physical_residual_norm = {},
     std::function<Eigen::VectorXd(const Eigen::VectorXd&, double)> residual_preconditioner = {},
     bool identity_overlap = false) {
   structure_solve_accuracy.validate();
-  xmvb::core::DavidsonOptions options =
-      xmvb::core::make_davidson_options(
+  xmvb::linalg::DavidsonOptions options =
+      xmvb::linalg::make_davidson_options(
           n_structures,
           n_roots,
           structure_solve_accuracy.energy_tolerance,
@@ -176,12 +176,12 @@ xmvb::core::DavidsonResult solve_selected_structure_roots(
   options.physical_residual_norm = std::move(physical_residual_norm);
   options.residual_preconditioner = std::move(residual_preconditioner);
   options.identity_overlap=identity_overlap;
-  if (mcscf::diagnostics::neo_event_trace_enabled()) {
+  if (mcscf::diagnostics::ciah_event_trace_enabled()) {
     options.observe_iteration = [](int iteration, int dimension,
         double energy, double residual) {
       // Existing quantities only; no additional action or certification.
       if (iteration == 1 || iteration % 32 == 0)
-        mcscf::diagnostics::neo_trace("ciah_ci_iteration",
+        mcscf::diagnostics::ciah_trace("ciah_ci_iteration",
             "iteration=%d,basis=%d,energy=%.17g,relative_residual=%.17g",
             iteration,dimension,energy,residual);
     };
@@ -207,7 +207,7 @@ xmvb::core::DavidsonResult solve_selected_structure_roots(
 }
 
 void retain_davidson_result(
-    xmvb::core::DavidsonResult davidson,
+    xmvb::linalg::DavidsonResult davidson,
     ActiveSpaceGradientForwardContext* context) {
   context->davidson_diagnostics = DavidsonDiagnostics{
       davidson.iterations,
@@ -227,25 +227,25 @@ void retain_davidson_result(
 }
 
 /** @brief Same-dimensional FULL solve; orbital maps occur only at its boundary. */
-core::DavidsonResult solve_complete_structure_roots(
+linalg::DavidsonResult solve_complete_structure_roots(
     const StructureAction& action,
     const StructureMetricInverse& coordinates,
     int n_roots,
     StructureSolveAccuracy accuracy,
     const Eigen::Ref<const Eigen::MatrixXd>& initial,
-    const core::GeneralizedEigensolver& solver) {
+    const linalg::GeneralizedEigensolver& solver) {
   const auto& diagonal=action.preconditioner_diagonal();
   const int n=action.n_structures();
   const bool recycled=initial.rows()==n && initial.cols()>=n_roots && initial.allFinite();
-  const auto options=core::make_davidson_options(n,n_roots,accuracy.energy_tolerance,
+  const auto options=linalg::make_davidson_options(n,n_roots,accuracy.energy_tolerance,
       accuracy.gradient_tolerance,accuracy.stationarity_tolerance());
   const Eigen::MatrixXd seeds=recycled ? Eigen::MatrixXd(initial.leftCols(n_roots)) :
-      core::make_davidson_initial_vectors(diagonal.hamiltonian,diagonal.overlap,
+      linalg::make_davidson_initial_vectors(diagonal.hamiltonian,diagonal.overlap,
           std::min(options.max_subspace_dimension,2*n_roots));
   const Eigen::MatrixXd guess=coordinates.to_ci_coordinates(seeds);
   auto result=solve_selected_structure_roots(
       [&coordinates](const Eigen::Ref<const Eigen::MatrixXd>& x) {
-        return core::GeneralizedEigenActionResult{
+        return linalg::GeneralizedEigenActionResult{
             coordinates.apply_ci_hamiltonian(x),{}};
       },diagonal.hamiltonian,diagonal.overlap,n,n_roots,accuracy,guess,solver,{},
       [&coordinates](const Eigen::VectorXd& r,double energy) {
@@ -284,12 +284,12 @@ std::shared_ptr<SelectedCiMetric> selected_ci_metric(const StructureAction& acti
   result->factor.compute(result->overlap);
   if (result->factor.info()!=Eigen::Success)
     throw std::runtime_error("selected CI metric is not positive definite");
-  if (mcscf::diagnostics::neo_event_trace_enabled()) {
+  if (mcscf::diagnostics::ciah_event_trace_enabled()) {
     const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(metric.selected_matrix(),Eigen::EigenvaluesOnly);
     const Eigen::VectorXd scale=action.preconditioner_diagonal().overlap.array().rsqrt();
     const Eigen::MatrixXd scaled=scale.asDiagonal()*metric.selected_matrix()*scale.asDiagonal();
     const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> normalized(scaled,Eigen::EigenvaluesOnly);
-    mcscf::diagnostics::neo_trace("ciah_ci_selected_metric",
+    mcscf::diagnostics::ciah_trace("ciah_ci_selected_metric",
         "dimension=%d,condition=%.17g,diagonal_scaled_condition=%.17g,factor_bytes=%zu",
         action.n_structures(),spectrum.eigenvalues().tail(1)[0]/spectrum.eigenvalues()[0],
         normalized.eigenvalues().tail(1)[0]/normalized.eigenvalues()[0],
@@ -333,7 +333,7 @@ void solve_structure_problem(
     StructureSolveAccuracy structure_solve_accuracy,
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors,
     const FullDeterminantStructureHamiltonianOverlapBuilder& structure_builder,
-    const xmvb::core::GeneralizedEigensolver& generalized_eigensolver,
+    const xmvb::linalg::GeneralizedEigensolver& generalized_eigensolver,
     ActiveSpaceGradientForwardContext* context) {
   const auto& prepared = context->timed_active_space_context.prepared_active_space;
   const int n_structures = input.structure_data.n_structures;
@@ -382,10 +382,10 @@ void solve_structure_problem(
           context->structure_matrices.overlap_matrix.data(),
           n_structures,
           n_structures);
-      const xmvb::core::GeneralizedEigenAction matrix_action =
+      const xmvb::linalg::GeneralizedEigenAction matrix_action =
           [&hamiltonian, &overlap](
               const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-            return xmvb::core::GeneralizedEigenActionResult{
+            return xmvb::linalg::GeneralizedEigenActionResult{
                 hamiltonian * vectors,
                 overlap * vectors};
           };
@@ -442,10 +442,10 @@ void solve_structure_problem(
     }
     context->average_structure_overlap =
         context->structure_overlap_diagonal.mean();
-    const xmvb::core::GeneralizedEigenAction action =
+    const xmvb::linalg::GeneralizedEigenAction action =
         [&structure_action](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
           StructureActionResult images = structure_action.apply(vectors);
-          return xmvb::core::GeneralizedEigenActionResult{
+          return xmvb::linalg::GeneralizedEigenActionResult{
               std::move(images.hamiltonian),
               std::move(images.overlap)};
         };
@@ -455,7 +455,7 @@ void solve_structure_problem(
       physical_residual = [&structure_action](const Eigen::VectorXd& coefficients, double energy) {
         const auto start = std::chrono::steady_clock::now();
         const double norm = structure_action.complete_space_residual_norm(coefficients, energy);
-        mcscf::diagnostics::neo_trace("ciah_ci_physical_residual", "seconds=%.17g",
+        mcscf::diagnostics::ciah_trace("ciah_ci_physical_residual", "seconds=%.17g",
             std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
         return norm;
       };
@@ -467,10 +467,10 @@ void solve_structure_problem(
         const auto inverse_start = std::chrono::steady_clock::now();
         context->structure_metric_inverse = std::make_unique<StructureMetricInverse>(
             structure_action,alpha,beta,true,budget,budget);
-        mcscf::diagnostics::neo_trace("ciah_ci_inverse_setup", "seconds=%.17g",
+        mcscf::diagnostics::ciah_trace("ciah_ci_inverse_setup", "seconds=%.17g",
             std::chrono::duration<double>(std::chrono::steady_clock::now()-inverse_start).count());
         const auto* inverse = context->structure_metric_inverse.get();
-        mcscf::diagnostics::neo_trace("ciah_ci_preconditioner",
+        mcscf::diagnostics::ciah_trace("ciah_ci_preconditioner",
             "carrier=1,factor_bytes=%zu,blocks=%zu,max_block=%d",
             inverse->factor_bytes(),inverse->block_count(),inverse->max_block_size());
       }
@@ -489,7 +489,7 @@ void solve_structure_problem(
       std::function<Eigen::VectorXd(const Eigen::VectorXd&,double)> preconditioner;
       if (metric) {
         selected_action=[&structure_action,metric](const Eigen::Ref<const Eigen::MatrixXd>& v) {
-          return core::GeneralizedEigenActionResult{
+          return linalg::GeneralizedEigenActionResult{
               structure_action.apply_hamiltonian(v),metric->overlap*v};
         };
         preconditioner=[metric](const Eigen::VectorXd& r,double) {
@@ -528,7 +528,7 @@ ActiveSpaceGradientForwardContext build_active_space_gradient_forward_context(
     const ActiveSpaceOneElectronBuilder& active_space_one_electron_builder,
     const ActiveSpaceTwoElectronBuilder& active_space_two_electron_builder,
     const FullDeterminantStructureHamiltonianOverlapBuilder& structure_builder,
-    const xmvb::core::GeneralizedEigensolver& generalized_eigensolver) {
+    const xmvb::linalg::GeneralizedEigensolver& generalized_eigensolver) {
   ActiveSpaceGradientForwardContext context;
   context.timed_active_space_context =
       prepare_timed_active_space_context(
@@ -562,7 +562,7 @@ ActiveSpaceGradientForwardContext build_active_space_gradient_forward_context(
     StructureSolveAccuracy structure_solve_accuracy,
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors,
     const FullDeterminantStructureHamiltonianOverlapBuilder& structure_builder,
-    const xmvb::core::GeneralizedEigensolver& generalized_eigensolver) {
+    const xmvb::linalg::GeneralizedEigensolver& generalized_eigensolver) {
   ActiveSpaceGradientForwardContext context;
   context.timed_active_space_context = std::move(timed_active_space_context);
 
@@ -762,7 +762,7 @@ void initialize_active_space_derivatives(
       forward_context.structure_matrix_wall_time_seconds;
   result->eigensolver_wall_time_seconds =
       forward_context.eigensolver_wall_time_seconds;
-  mcscf::diagnostics::neo_trace("ciah_forward_cost",
+  mcscf::diagnostics::ciah_trace("ciah_forward_cost",
       "orbital=%.17g,ao_effective=%.17g,active_one=%.17g,active_two=%.17g,"
       "structure_setup=%.17g,ci_solve=%.17g",
       result->orbital_preparation_wall_time_seconds,
@@ -980,7 +980,7 @@ ActiveSpaceGradientEvaluator::ActiveSpaceGradientEvaluator(
     ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
     ActiveSpaceTwoElectronBuilder active_space_two_electron_builder,
     FullDeterminantStructureHamiltonianOverlapBuilder structure_builder,
-    xmvb::core::GeneralizedEigensolver generalized_eigensolver)
+    xmvb::linalg::GeneralizedEigensolver generalized_eigensolver)
     : orbital_preparer_(std::move(orbital_preparer)),
       ao_effective_one_electron_builder_(std::move(ao_effective_one_electron_builder)),
       active_space_one_electron_builder_(std::move(active_space_one_electron_builder)),
@@ -1192,7 +1192,7 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
     accumulate_active_space_gradient(input,selected_state_indices,normalized_weights,context,&fixed.gradient);
   fixed.gradient.total_wall_time_seconds = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - total_start_time).count();
-  if (mcscf::diagnostics::neo_event_trace_enabled()) mcscf::diagnostics::neo_trace("ciah_keyframe_active_cost",
+  if (mcscf::diagnostics::ciah_event_trace_enabled()) mcscf::diagnostics::ciah_trace("ciah_keyframe_active_cost",
       "seconds=%.17g,setup=%.17g,action=%.17g,adjoint=%.17g,actions=1,diagonal_bytes=%zu",
       fixed.gradient.total_wall_time_seconds, context.structure_matrix_wall_time_seconds,
       action_seconds, fixed.gradient.adjoint_wall_time_seconds,

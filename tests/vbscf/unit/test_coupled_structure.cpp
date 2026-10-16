@@ -22,7 +22,7 @@
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
-#include "core/metric_solve.hpp"
+#include "linalg/metric_solve.hpp"
 
 namespace {
 
@@ -43,10 +43,10 @@ void check_metric_recycling() {
   const auto inverse = [&](const Eigen::VectorXd& x) {
     return (x.array() / metric.diagonal().array()).matrix().eval();
   };
-  xmvb::core::MetricSolveWorkspace workspace(3);
+  xmvb::linalg::MetricSolveWorkspace workspace(3);
   const Eigen::VectorXd a = Eigen::VectorXd::LinSpaced(n, -0.37, 0.62);
   const Eigen::VectorXd b = Eigen::VectorXd::LinSpaced(n, 0.29, -0.43);
-  xmvb::core::MetricSolveStats stats;
+  xmvb::linalg::MetricSolveStats stats;
   const auto xa = workspace.solve(a, action, inverse, &stats);
   const auto xb = workspace.solve(b, action, inverse, &stats);
   const Eigen::VectorXd rhs = 0.4 * a - 0.7 * b;
@@ -66,7 +66,7 @@ void check_metric_recycling() {
   }
   const auto zero = workspace.solve(Eigen::VectorXd::Zero(n), action, inverse, &stats);
   require(zero.isZero() && stats.actions == 0, "zero covector requires no metric action");
-  xmvb::core::MetricSolveWorkspace observed(2);
+  xmvb::linalg::MetricSolveWorkspace observed(2);
   const Eigen::VectorXd direction = Eigen::VectorXd::LinSpaced(n,-0.42,0.73);
   observed.observe(direction, action(direction));
   const auto known = observed.solve(action(direction), action, inverse, &stats);
@@ -76,7 +76,7 @@ void check_metric_recycling() {
       "an existing AH metric image relaunched CG");
 
   // The captured component is exactly zero, but the complete residual is large.
-  xmvb::core::MetricSolveWorkspace decisions(2);
+  xmvb::linalg::MetricSolveWorkspace decisions(2);
   Eigen::Matrix3d diagonal = Eigen::Vector3d(2.0, 0.001, 7.0).asDiagonal();
   const Eigen::VectorXd e0 = Eigen::VectorXd::Unit(3, 0);
   decisions.observe(e0, diagonal * e0);
@@ -502,8 +502,8 @@ void check_metric_factorization(const StructureFixture& fixture) {
         "complete horizontal overlap inverse differs from its dense reference");
     require(std::abs(structure.dual_norm(rhs)-std::sqrt(rhs.dot(expected))) < 1e-12,
         "factorized structure norm changed the physical metric");
-    xmvb::core::MetricSolveStats stats;
-    const auto certified = xmvb::core::solve_metric(rhs,
+    xmvb::linalg::MetricSolveStats stats;
+    const auto certified = xmvb::linalg::solve_metric(rhs,
         [&](const Eigen::VectorXd& x) { return structure.apply_metric_coordinates(x); },
         [&](const Eigen::VectorXd& x) { return structure.apply_inverse_metric_model(x); }, &stats);
     require(stats.iterations <= 2 && stats.certifications >= 1 &&

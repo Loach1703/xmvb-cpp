@@ -10,7 +10,7 @@ namespace xmvb::mcscf {
 namespace {
 
 Eigen::VectorXd checked_action(
-    const VectorAction& action,
+    const linalg::VectorAction& action,
     const Eigen::VectorXd& vector,
     const char* message) {
   Eigen::VectorXd image = action(vector);
@@ -26,9 +26,9 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
     const Eigen::VectorXd& covector,
     double shift,
     double relative_residual_target,
-    const VectorAction& apply_model,
-    const VectorAction& apply_metric,
-    const VectorAction& apply_block_inverse) {
+    const linalg::VectorAction& apply_model,
+    const linalg::VectorAction& apply_metric,
+    const linalg::VectorAction& apply_block_inverse) {
   if (covector.size() == 0 || !covector.allFinite() ||
       !(shift >= 0.0) || !std::isfinite(shift) ||
       !(relative_residual_target >= 0.0) ||
@@ -38,7 +38,7 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
   }
   if (covector.isZero()) return Eigen::VectorXd::Zero(covector.size());
   if (shift == 0.0 || relative_residual_target >= 1.0) {
-    diagnostics::neo_trace("precondition", "iterations=0,shift=%.17g,budget=%.17g,reason=block",
+    diagnostics::ciah_trace("precondition", "iterations=0,shift=%.17g,budget=%.17g,reason=block",
         shift, relative_residual_target);
     return checked_action(
         apply_block_inverse, covector,
@@ -91,7 +91,7 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
   double best_residual = residual_norm(
       covector - apply_shifted(best_solution));
   if (best_residual <= target) {
-    diagnostics::neo_trace("precondition", "iterations=0,shift=%.17g,budget=%.17g,residual_ratio=%.17g,reason=initial",
+    diagnostics::ciah_trace("precondition", "iterations=0,shift=%.17g,budget=%.17g,residual_ratio=%.17g,reason=initial",
         shift, relative_residual_target, best_residual / rhs_norm);
     return best_solution;
   }
@@ -125,7 +125,7 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
       best_solution = solution;
     }
     if (current_residual_norm <= target) {
-      diagnostics::neo_trace("precondition", "iterations=%ld,shift=%.17g,budget=%.17g,residual_ratio=%.17g,reason=converged",
+      diagnostics::ciah_trace("precondition", "iterations=%ld,shift=%.17g,budget=%.17g,residual_ratio=%.17g,reason=converged",
           static_cast<long>(iteration + 1), shift, relative_residual_target,
           current_residual_norm / rhs_norm);
       return solution;
@@ -140,7 +140,7 @@ Eigen::VectorXd apply_shifted_metric_preconditioner(
   }
   // Preconditioning is not an acceptance test. Return the best positive
   // model direction even if the outer target was unreachable here.
-  diagnostics::neo_trace("precondition", "iterations=%ld,shift=%.17g,budget=%.17g,residual_ratio=%.17g,reason=dimension",
+  diagnostics::ciah_trace("precondition", "iterations=%ld,shift=%.17g,budget=%.17g,residual_ratio=%.17g,reason=dimension",
       static_cast<long>(covector.size()), shift, relative_residual_target,
       best_residual / rhs_norm);
   return best_solution;

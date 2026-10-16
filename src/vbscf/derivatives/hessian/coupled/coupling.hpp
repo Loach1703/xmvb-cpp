@@ -6,7 +6,7 @@
 
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 
-namespace xmvb::core {
+namespace xmvb::linalg {
 struct EqualWeightEigenCoupling;
 }
 
@@ -36,7 +36,7 @@ struct ScaledStructureCoupling {
  * Gauge-only input has an empty horizontal forcing; it remains empty.
  */
 ScaledStructureCoupling scale_equal_weight_structure_coupling(
-    const xmvb::core::EqualWeightEigenCoupling& coupling,
+    const xmvb::linalg::EqualWeightEigenCoupling& coupling,
     const std::vector<double>& normalized_state_weights);
 
 }  // namespace xmvb::vb

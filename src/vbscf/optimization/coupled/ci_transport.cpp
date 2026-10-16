@@ -2,7 +2,7 @@
 
 #include <cmath>
 #include <chrono>
-#include "core/metric_solve.hpp"
+#include "linalg/metric_solve.hpp"
 #include "core/timing.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
@@ -89,10 +89,10 @@ Eigen::MatrixXd CiTransport::solve(const Eigen::MatrixXd& upper,
   int actions = 0, iterations = 0, certifications = 0;
   double residual = 0.0;
   for (Eigen::Index s = 0; s < rhs.cols(); ++s) {
-    core::MetricSolveStats stats;
+    linalg::MetricSolveStats stats;
     Eigen::VectorXd seed;
     if (initial) seed = initial->col(s);
-    result.col(s) = core::solve_metric(rhs.col(s),
+    result.col(s) = linalg::solve_metric(rhs.col(s),
       [&](const Eigen::VectorXd& x) {
         const auto action_start = timed ? Clock::now() : Clock::time_point{};
         Eigen::VectorXd image = (*prepared_metric_)(x).col(0);

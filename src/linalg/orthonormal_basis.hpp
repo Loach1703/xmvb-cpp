@@ -8,7 +8,7 @@
 
 #include <Eigen/Core>
 
-namespace xmvb::mcscf {
+namespace xmvb::linalg {
 
 // Accepted-point Euclidean coordinates only. Orthogonalize the direction
 // BEFORE applying H: subtracting nearly equal HVPs and dividing by a small
@@ -131,4 +131,4 @@ int append_orthonormal_hvp_block(
   return static_cast<int>(admitted.size());
 }
 
-}  // namespace xmvb::mcscf
+}  // namespace xmvb::linalg

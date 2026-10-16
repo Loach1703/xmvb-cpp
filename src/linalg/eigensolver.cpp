@@ -1,4 +1,4 @@
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -11,13 +11,13 @@
 #include <Eigen/Core>
 #include "lapacke.h"
 
-namespace xmvb::core {
+namespace xmvb::linalg {
 
 namespace {
 
 void validate_generalized_eigenproblem_inputs(
-    const std::vector<double>& hamiltonian_matrix,
-    const std::vector<double>& overlap_matrix,
+    std::span<const double> hamiltonian_matrix,
+    std::span<const double> overlap_matrix,
     int dimension) {
   if (dimension <= 0) {
     throw std::invalid_argument("dimension must be positive");
@@ -348,15 +348,15 @@ DavidsonOptions make_davidson_options(
 }
 
 GeneralizedEigenResult GeneralizedEigensolver::solve_dense(
-    const std::vector<double>& hamiltonian_matrix,
-    const std::vector<double>& overlap_matrix,
+    std::span<const double> hamiltonian_matrix,
+    std::span<const double> overlap_matrix,
     int dimension) const {
   validate_generalized_eigenproblem_inputs(
       hamiltonian_matrix, overlap_matrix, dimension);
 
   GeneralizedEigenResult result;
-  std::vector<double> H_copy = hamiltonian_matrix;
-  std::vector<double> S_copy = overlap_matrix;
+  std::vector<double> H_copy(hamiltonian_matrix.begin(), hamiltonian_matrix.end());
+  std::vector<double> S_copy(overlap_matrix.begin(), overlap_matrix.end());
   result.eigenvalues.resize(static_cast<std::size_t>(dimension));
   const lapack_int info = LAPACKE_dsygvd(
       LAPACK_COL_MAJOR, 1, 'V', 'U', dimension,
@@ -368,14 +368,14 @@ GeneralizedEigenResult GeneralizedEigensolver::solve_dense(
 }
 
 std::vector<double> GeneralizedEigensolver::solve_dense_eigenvalues(
-    const std::vector<double>& hamiltonian_matrix,
-    const std::vector<double>& overlap_matrix,
+    std::span<const double> hamiltonian_matrix,
+    std::span<const double> overlap_matrix,
     int dimension) const {
   validate_generalized_eigenproblem_inputs(
       hamiltonian_matrix, overlap_matrix, dimension);
 
-  std::vector<double> H_copy = hamiltonian_matrix;
-  std::vector<double> S_copy = overlap_matrix;
+  std::vector<double> H_copy(hamiltonian_matrix.begin(), hamiltonian_matrix.end());
+  std::vector<double> S_copy(overlap_matrix.begin(), overlap_matrix.end());
   std::vector<double> eigenvalues(static_cast<std::size_t>(dimension));
   const lapack_int info = LAPACKE_dsygvd(
       LAPACK_COL_MAJOR, 1, 'N', 'U', dimension,
@@ -694,4 +694,4 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
   throw std::runtime_error(message.str());
 }
 
-}  // namespace xmvb::core
+}  // namespace xmvb::linalg

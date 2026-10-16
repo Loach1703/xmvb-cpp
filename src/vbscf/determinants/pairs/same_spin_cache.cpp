@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <utility>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "mcscf/ci/strings.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/determinants/pairs/accepted_tile.hpp"

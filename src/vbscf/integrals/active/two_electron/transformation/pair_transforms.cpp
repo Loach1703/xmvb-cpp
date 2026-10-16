@@ -7,7 +7,7 @@
 
 #include <Eigen/Core>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/integrals/active/two_electron/transformation/packed_pair_map.hpp"
 

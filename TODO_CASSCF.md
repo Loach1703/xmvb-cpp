@@ -7,7 +7,9 @@ VB macro driver, construct VB structures for CASSCF, or introduce compatibility
 headers. The initial scope is real, state-specific, full-CAS, exact integrals.
 
 - `mcscf/ci`: physical active integrals, spin strings, sigma/adjoint and spin.
-- `mcscf/optimization`: shared NEO/CIAH subspace solvers and algebraic
+- `linalg`: eigensolvers, eigen response, metric solves and Krylov algebra.
+- `parallel`: shared-buffer OpenMP execution and work partitioning.
+- `mcscf/optimization`: shared CIAH and norm-extended subspace solvers and algebraic
   preconditioners; vector actions and dual norms are supplied by each model.
 - `mcscf/states`: one implementation of state-weight normalization.
 - `casscf/integrals`: inactive energy and active-Hamiltonian construction.

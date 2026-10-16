@@ -7,7 +7,7 @@
 #include "mcscf/ci/factors.hpp"
 #include "mcscf/ci/factors_internal.hpp"
 #include "mcscf/ci/strings.hpp"
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 
 namespace {
 

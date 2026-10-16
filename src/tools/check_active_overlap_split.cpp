@@ -9,7 +9,7 @@
 
 #include <Eigen/Core>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/determinants/algebra/overlap.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
@@ -129,7 +129,7 @@ double evaluate_ground_state_energy(
     const std::vector<double>& hamiltonian_matrix,
     const std::vector<double>& overlap_matrix,
     int n_structures) {
-  xmvb::core::GeneralizedEigensolver eigensolver;
+  xmvb::linalg::GeneralizedEigensolver eigensolver;
   return eigensolver.solve_dense(hamiltonian_matrix, overlap_matrix, n_structures).eigenvalues.front();
 }
 

@@ -6,7 +6,7 @@
 #include <Eigen/Core>
 #include <Eigen/QR>
 
-namespace xmvb::core { class MetricSolveWorkspace; struct MetricImage; }
+namespace xmvb::linalg { class MetricSolveWorkspace; struct MetricImage; }
 
 namespace xmvb::vb {
 
@@ -188,12 +188,12 @@ public:
    * epsilon), matching the orbital metric's numerical accuracy contract.
    */
   double dual_norm(const Eigen::VectorXd& covector,
-      core::MetricSolveWorkspace* workspace = nullptr) const;
+      linalg::MetricSolveWorkspace* workspace = nullptr) const;
 
   /** @brief Complete structure Riesz image, optionally refining a propagated image. */
-  core::MetricImage metric_image(const Eigen::VectorXd& covector,
-      core::MetricSolveWorkspace* workspace = nullptr,
-      const core::MetricImage* initial = nullptr) const;
+  linalg::MetricImage metric_image(const Eigen::VectorXd& covector,
+      linalg::MetricSolveWorkspace* workspace = nullptr,
+      const linalg::MetricImage* initial = nullptr) const;
 
   /** @brief Positive Jacobi Riesz preconditioner, not a dual-norm substitute. */
   Eigen::VectorXd apply_inverse_metric_diagonal(const Eigen::VectorXd& covector) const;

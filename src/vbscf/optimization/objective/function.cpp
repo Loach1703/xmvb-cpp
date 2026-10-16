@@ -191,7 +191,7 @@ VbScfObjective::evaluate_coupled_keyframe(
   result.structure_residuals = std::move(fixed.structure_residuals);
   result.coefficient_gradient = std::move(fixed.coefficient_gradient);
   result.energy = fixed.gradient.scf_result.total_energy;
-  mcscf::diagnostics::neo_trace("ciah_keyframe_cost",
+  mcscf::diagnostics::ciah_trace("ciah_keyframe_cost",
       "seconds=%.17g,active=%.17g,two_electron_backward=%.17g,ao_backward=%.17g,orbital_backward=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
       fixed.gradient.active_space_gradient_wall_time_seconds,

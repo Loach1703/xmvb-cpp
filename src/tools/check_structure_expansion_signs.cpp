@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "vbscf/integrals/active/preparation/space.hpp"
@@ -424,7 +424,7 @@ int main(int argc, char** argv) {
             active_space_two_electron_builder)
             .prepared_active_space;
 
-    xmvb::core::GeneralizedEigensolver generalized_eigensolver;
+    xmvb::linalg::GeneralizedEigensolver generalized_eigensolver;
     xmvb::vb::FullDeterminantStructureHamiltonianOverlapBuilder structure_builder;
 
     std::cout << std::setprecision(12);

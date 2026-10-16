@@ -11,8 +11,8 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/Cholesky>
 
-#include "mcscf/optimization/krylov/orthonormal_basis.hpp"
-#include "mcscf/optimization/krylov/positive_ritz_secants.hpp"
+#include "linalg/orthonormal_basis.hpp"
+#include "mcscf/optimization/preconditioners/ritz_secants.hpp"
 #include "mcscf/optimization/preconditioners/block_inverse_bfgs.hpp"
 #include "mcscf/optimization/trust_region/spectral.hpp"
 #include "vbscf/optimization/driver/checks.hpp"
@@ -993,7 +993,7 @@ TruncatedNewtonStepResult solve_nonredundant_truncated_newton_step(
     }
 
     const std::size_t previous_basis_size = basis.size();
-    const int admitted = mcscf::append_orthonormal_hvp_block(
+    const int admitted = linalg::append_orthonormal_hvp_block(
         candidate_block,
         [&](const Eigen::Ref<const Eigen::MatrixXd>& directions) {
           return hvp->apply_batch(directions);

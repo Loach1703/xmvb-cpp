@@ -6,7 +6,7 @@
 
 #include <Eigen/Core>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/derivatives/hessian/responses/opposite_spin/pair_response_internal.hpp"

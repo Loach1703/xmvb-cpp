@@ -7,7 +7,7 @@
 #include <memory>
 #include <stdexcept>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 
 namespace xmvb::mcscf {

@@ -8,7 +8,7 @@
 
 #include <Eigen/Core>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 
 namespace xmvb::vb::detail {
 

@@ -7,7 +7,7 @@
 #include <Eigen/Core>
 #include <Eigen/LU>
 
-#include "mcscf/optimization/krylov/minres.hpp"
+#include "linalg/minres.hpp"
 
 namespace {
 
@@ -28,9 +28,9 @@ void require_close(
 
 int main() {
   try {
-    using xmvb::mcscf::MinresOptions;
-    using xmvb::mcscf::MinresStopReason;
-    using xmvb::mcscf::solve_symmetric_minres;
+    using xmvb::linalg::MinresOptions;
+    using xmvb::linalg::MinresStopReason;
+    using xmvb::linalg::solve_symmetric_minres;
 
     // A symmetric-indefinite system exercises both signs of curvature.
     Eigen::MatrixXd h(5, 5);
@@ -42,9 +42,9 @@ int main() {
     const Eigen::VectorXd rhs =
         (Eigen::VectorXd(5) << 1.0, -2.0, 0.5, 3.0, -1.0).finished();
     const Eigen::VectorXd reference = h.fullPivLu().solve(rhs);
-    xmvb::mcscf::MinresOptions strict;
+    xmvb::linalg::MinresOptions strict;
     strict.relative_residual_tolerance = 1.0e-12;
-    const auto indefinite = xmvb::mcscf::solve_symmetric_minres(
+    const auto indefinite = xmvb::linalg::solve_symmetric_minres(
         [&](const Eigen::VectorXd& vector) { return h * vector; }, rhs, strict);
     require(indefinite.converged(), "indefinite MINRES did not converge");
     require_close(indefinite.solution, reference, 1.0e-11,
@@ -77,7 +77,7 @@ int main() {
     block_matrix.bottomRightCorner<3, 3>() = c;
     const Eigen::VectorXd block_rhs =
         (Eigen::VectorXd(5) << -1.0, 0.7, 0.0, 0.0, 0.0).finished();
-    const auto block_result = xmvb::mcscf::solve_symmetric_minres(
+    const auto block_result = xmvb::linalg::solve_symmetric_minres(
         [&](const Eigen::VectorXd& vector) {
           Eigen::VectorXd image(5);
           const Eigen::Vector2d p = vector.head<2>();
@@ -99,7 +99,7 @@ int main() {
     // A positive inverse preconditioner is valid even though A is indefinite.
     const Eigen::VectorXd inverse_diagonal =
         h.diagonal().cwiseAbs().cwiseMax(0.5).cwiseInverse();
-    const auto preconditioned = xmvb::mcscf::solve_symmetric_minres(
+    const auto preconditioned = xmvb::linalg::solve_symmetric_minres(
         [&](const Eigen::VectorXd& vector) { return h * vector; },
         rhs,
         strict,
@@ -113,12 +113,12 @@ int main() {
     require(preconditioned.preconditioner_actions > 0,
             "inverse preconditioner was not applied");
 
-    xmvb::mcscf::MinresOptions limited = strict;
+    xmvb::linalg::MinresOptions limited = strict;
     limited.maximum_iterations = 1;
-    const auto incomplete = xmvb::mcscf::solve_symmetric_minres(
+    const auto incomplete = xmvb::linalg::solve_symmetric_minres(
         [&](const Eigen::VectorXd& vector) { return h * vector; }, rhs, limited);
     require(!incomplete.converged() &&
-                incomplete.stop_reason == xmvb::mcscf::MinresStopReason::IterationLimit,
+                incomplete.stop_reason == xmvb::linalg::MinresStopReason::IterationLimit,
             "work-limited MINRES reported false convergence");
     require_close(incomplete.residual, rhs - h * incomplete.solution, 1.0e-15,
                   "work-limited MINRES residual is not explicit");

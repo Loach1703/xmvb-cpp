@@ -68,8 +68,8 @@ if (NOT iscf8_status EQUAL 0)
     "ISCF=8 selection run failed with status ${iscf8_status}:\n${iscf8_errors}")
 endif()
 if (NOT iscf8_report MATCHES
-    "VBSCF algorithm: block-LBFGS [(]nonredundant orbital-block inverse[)]")
-  message(FATAL_ERROR "ISCF=8 did not select block-LBFGS")
+    "VBSCF algorithm: P-LBFGS [(]nonredundant orbital-block inverse[)]")
+  message(FATAL_ERROR "ISCF=8 did not select P-LBFGS")
 endif()
 
 string(

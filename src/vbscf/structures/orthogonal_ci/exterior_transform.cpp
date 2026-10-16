@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 #include "mcscf/ci/product_support.hpp"
 

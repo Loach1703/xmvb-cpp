@@ -13,8 +13,8 @@
 
 #include <Eigen/Core>
 
-#include "core/eigen_response.hpp"
-#include "core/openmp.hpp"
+#include "linalg/eigen_response.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/derivatives/hessian/coupled/coupling.hpp"
 #include "vbscf/derivatives/hessian/responses/active_space/local_tile_accumulator_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/orbital/preparation.hpp"
@@ -441,8 +441,8 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
         if (build_orbital_coupling) {
           const auto& eigen = outer_response_context()
               .selected_state_eigen_response_operator;
-          const xmvb::core::EqualWeightEigenCoupling coupling =
-              xmvb::core::prepare_equal_weight_generalized_eigen_coupling(
+          const xmvb::linalg::EqualWeightEigenCoupling coupling =
+              xmvb::linalg::prepare_equal_weight_generalized_eigen_coupling(
                   eigen.selected_eigenvalues,
                   eigen.selected_eigenvectors,
                   eigen.overlap_selected,

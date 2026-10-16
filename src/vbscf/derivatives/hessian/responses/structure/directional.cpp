@@ -166,7 +166,7 @@ build_selected_structure_direction(
             accepted_point.selected_state_energies);
   }
   StructureIntegralDirection direct_ci_direction;
-  direct_ci_direction.capture_connection = mcscf::diagnostics::neo_trace_enabled();
+  direct_ci_direction.capture_connection = mcscf::diagnostics::ciah_trace_enabled();
   const StructureActionResult direct_direction =
       structure_action->apply_integral_direction(
           *accepted_point.structure_adjoint_state,

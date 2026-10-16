@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 
 namespace xmvb::vb {

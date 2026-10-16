@@ -8,7 +8,7 @@
 #include <Eigen/Core>
 #include <Eigen/LU>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "guess/closed_shell_fock.hpp"
 #include "vbscf/core/storage/eigen.hpp"
 
@@ -302,7 +302,7 @@ RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve_impl(
   const auto symmetric_core_hamiltonian =
       symmetrize_matrix(core_hamiltonian_matrix);
 
-  core::GeneralizedEigensolver eigensolver;
+  linalg::GeneralizedEigensolver eigensolver;
   ClosedShellFockBuilder fock_builder;
   const auto build_fock = [&](
       const Eigen::Ref<const Eigen::MatrixXd>& density) {

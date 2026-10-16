@@ -14,5 +14,5 @@ set -eo pipefail
 module load gcc/14.1.0
 artifact="$SLURM_SUBMIT_DIR/ionic-proof-$SLURM_JOB_ID"
 mkdir "$artifact"
-g++ -O3 -std=c++17 -I src tests/mcscf/audit_ionic_support.cpp -o "$artifact/proof"
+g++ -O3 -std=c++20 -I src tests/mcscf/audit_ionic_support.cpp -o "$artifact/proof"
 srun --exact --ntasks=1 --cpus-per-task=1 --cpu-bind=cores "$artifact/proof" > "$artifact/result.txt"

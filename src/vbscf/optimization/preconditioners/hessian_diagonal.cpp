@@ -9,7 +9,7 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/optimization/preconditioners/density.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "mcscf/optimization/trace.hpp"
@@ -369,7 +369,7 @@ Eigen::MatrixXd build_analytic_rotation_hessian_diagonal(
 AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
     const VbScfInput& input,
     const AcceptedPointContext& accepted) {
-  const bool trace = mcscf::diagnostics::neo_event_trace_enabled();
+  const bool trace = mcscf::diagnostics::ciah_event_trace_enabled();
   const auto start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   const auto& orbital_input = input.orbital_preparation_input;
@@ -578,9 +578,9 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
           .localized_representative_selector
           .inactive_inverse_transpose_right_transform.transpose();
   result.active_inverse_transform = inverse_active_transform;
-  if (trace) mcscf::diagnostics::neo_trace("ciah_diagonal_cost", "seconds=%.17g",
+  if (trace) mcscf::diagnostics::ciah_trace("ciah_diagonal_cost", "seconds=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
-  if (trace) mcscf::diagnostics::neo_trace("ciah_diagonal_sections",
+  if (trace) mcscf::diagnostics::ciah_trace("ciah_diagonal_sections",
       "frame_active_seconds=%.17g,active_density_seconds=%.17g,density_contraction_seconds=%.17g,core_pair_seconds=%.17g,core_projection_seconds=%.17g,core_exchange_seconds=%.17g,projection_workers=%d,projection_worker_bytes=%zu",
       std::chrono::duration<double>(active_end-start).count(),
       std::chrono::duration<double>(density_end-active_end).count(),

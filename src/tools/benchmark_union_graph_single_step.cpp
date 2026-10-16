@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "vbscf/structures/reference/overlap.hpp"
@@ -162,7 +162,7 @@ SolverSummary solve_ground_state(
   SolverSummary summary;
   const auto started_at = std::chrono::steady_clock::now();
   try {
-    xmvb::core::GeneralizedEigensolver generalized_eigensolver;
+    xmvb::linalg::GeneralizedEigensolver generalized_eigensolver;
     const auto result = generalized_eigensolver.solve_dense(
         hamiltonian_matrix,
         overlap_matrix,

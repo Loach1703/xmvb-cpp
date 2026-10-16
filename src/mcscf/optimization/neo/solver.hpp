@@ -2,7 +2,7 @@
 
 #include <Eigen/Core>
 
-#include "mcscf/optimization/neo/problem.hpp"
+#include "mcscf/optimization/problem.hpp"
 
 namespace xmvb::mcscf {
 
@@ -121,7 +121,7 @@ struct NeoResult {
  * keyframe and disable this heuristic near final stationarity.
  */
 NeoResult solve_neo(
-    const NeoProblem& problem, const NeoOptions& options,
+    const QuadraticProblem& problem, const NeoOptions& options,
     bool allow_early_trial = false);
 
 }  // namespace xmvb::mcscf

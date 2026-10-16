@@ -1,4 +1,4 @@
-#include "output/trace/neo.hpp"
+#include "output/trace/ciah.hpp"
 
 #include <filesystem>
 #include <iomanip>
@@ -8,10 +8,10 @@
 
 namespace xmvb::output {
 
-NeoTraceWriter::NeoTraceWriter(const std::filesystem::path& output_path)
+CiahTraceWriter::CiahTraceWriter(const std::filesystem::path& output_path)
     : output_path_(output_path) {
   if (output_path.empty()) {
-    throw std::invalid_argument("NEO trace path must not be empty");
+    throw std::invalid_argument("CIAH trace path must not be empty");
   }
   if (!output_path.parent_path().empty()) {
     std::filesystem::create_directories(output_path.parent_path());
@@ -20,7 +20,7 @@ NeoTraceWriter::NeoTraceWriter(const std::filesystem::path& output_path)
   stream_.open(output_path);
   if (!stream_) {
     throw std::runtime_error(
-        "failed to open NEO trace: " + output_path.string());
+        "failed to open CIAH trace: " + output_path.string());
   }
   stream_
       << "iteration\tkeyframes\tmodel_dimension\tmicro_iterations"
@@ -41,11 +41,11 @@ NeoTraceWriter::NeoTraceWriter(const std::filesystem::path& output_path)
   stream_.flush();
   if (!stream_) {
     throw std::runtime_error(
-        "failed to write NEO trace: " + output_path.string());
+        "failed to write CIAH trace: " + output_path.string());
   }
 }
 
-void NeoTraceWriter::write(const vb::NeoIterationRecord& step) {
+void CiahTraceWriter::write(const vb::CiahIterationRecord& step) {
   stream_
       << step.accepted_iteration_index << '\t'
       << step.keyframes << '\t'
@@ -79,7 +79,7 @@ void NeoTraceWriter::write(const vb::NeoIterationRecord& step) {
   stream_.flush();
   if (!stream_) {
     throw std::runtime_error(
-        "failed to write NEO trace: " + output_path_.string());
+        "failed to write CIAH trace: " + output_path_.string());
   }
 }
 

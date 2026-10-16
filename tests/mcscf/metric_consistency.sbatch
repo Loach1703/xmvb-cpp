@@ -32,7 +32,7 @@ cmake --build "$source_dir/build" --target test_metric_point test_sparse_orbital
  test_orthogonal_direct_ci test_support_preserving_gauge test_keyframe -j8 > "$artifact/build.log" 2>&1
 cp "$source_dir/build/CMakeCache.txt" "$artifact/"
 sha256sum "$source_dir/src/vbscf/orbitals/charts/physical_metric."{cpp,hpp} \
- "$source_dir/src/vbscf/optimization/backends/neo.cpp" \
+ "$source_dir/src/vbscf/optimization/backends/ciah.cpp" \
  "$source_dir/src/vbscf/derivatives/gradient/active_space/evaluator.cpp" \
  "$source_dir/tests/vbscf/diagnostics/metric_point.cpp" > "$artifact/sources.sha256"
 sha256sum "$source_dir/build/src/test_metric_point" > "$artifact/binary.sha256"
@@ -59,8 +59,8 @@ if [[ ${2:-} == --span-regression ]]; then
  sha256sum input.xmi def2-tzvp.gbs > input.sha256
  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
   /usr/bin/time -v -o resource.time "$source_dir/build/src/xmvb-cpp.exe" input.xmi \
-  --optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal \
-  --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --neo-trace neo.tsv \
+  --optimizer-backend ciah --eigensolver davidson --orbital-preconditioner hessian-diagonal \
+  --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --ciah-trace neo.tsv \
   > output.out 2> run.err
 elif [[ ${2:-} == --regression ]]; then
  bash "$source_dir/tests/mcscf/source_cover.sbatch" --production "$3"

@@ -14,7 +14,7 @@
 #include "output/molden/writer.hpp"
 #include "output/orbitals/writer.hpp"
 #include "output/trace/accepted_iteration.hpp"
-#include "output/trace/neo.hpp"
+#include "output/trace/ciah.hpp"
 #include "output/trace/tnhvp.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/optimization/driver/optimizer.hpp"
@@ -29,7 +29,7 @@ int run(Options command_line) {
   auto& options = command_line.optimizer;
   const std::string& dump_trace_dir = command_line.trace_directory;
   const std::string& tnhvp_trace_path = command_line.tnhvp_trace_path;
-  const std::string& neo_trace_path = command_line.neo_trace_path;
+  const std::string& ciah_trace_path = command_line.ciah_trace_path;
   const std::string& dump_final_orbital_value_table_bin =
       command_line.final_orbitals_path;
   const bool user_specified_max_iterations =
@@ -50,11 +50,11 @@ int run(Options command_line) {
         options.backend =
             xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton;
         break;
-      case xmvb::vb::InputScfOptimizer::BlockLbfgs:
-        options.backend = xmvb::vb::VbScfOptimizerBackend::BlockLbfgs;
+      case xmvb::vb::InputScfOptimizer::Plbfgs:
+        options.backend = xmvb::vb::VbScfOptimizerBackend::Plbfgs;
         break;
-      case xmvb::vb::InputScfOptimizer::Neo:
-        options.backend = xmvb::vb::VbScfOptimizerBackend::Neo;
+      case xmvb::vb::InputScfOptimizer::Ciah:
+        options.backend = xmvb::vb::VbScfOptimizerBackend::Ciah;
         break;
       case xmvb::vb::InputScfOptimizer::Unspecified:
         break;
@@ -98,13 +98,13 @@ int run(Options command_line) {
         });
   }
 
-  std::shared_ptr<xmvb::output::NeoTraceWriter> neo_trace_writer;
-  if (!neo_trace_path.empty()) {
-    neo_trace_writer =
-        std::make_shared<xmvb::output::NeoTraceWriter>(neo_trace_path);
-    options.neo_iteration_callback =
-        [neo_trace_writer](const xmvb::vb::NeoIterationRecord& record) {
-          neo_trace_writer->write(record);
+  std::shared_ptr<xmvb::output::CiahTraceWriter> ciah_trace_writer;
+  if (!ciah_trace_path.empty()) {
+    ciah_trace_writer =
+        std::make_shared<xmvb::output::CiahTraceWriter>(ciah_trace_path);
+    options.ciah_iteration_callback =
+        [ciah_trace_writer](const xmvb::vb::CiahIterationRecord& record) {
+          ciah_trace_writer->write(record);
         };
   }
 

@@ -14,7 +14,7 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
-#include "core/metric_solve.hpp"
+#include "linalg/metric_solve.hpp"
 #include "mcscf/optimization/trace.hpp"
 
 namespace xmvb::vb {
@@ -140,7 +140,7 @@ StructureTangentOperator::StructureTangentOperator(
   }
   constraint_qr_.compute(selected_images.overlap);
   metric_inverse_ = accepted_point_->metric_inverse(action);
-  if (metric_inverse_) mcscf::diagnostics::neo_trace("ciah_metric_factors",
+  if (metric_inverse_) mcscf::diagnostics::ciah_trace("ciah_metric_factors",
       "bytes=%zu,blocks=%zu,max_block=%d,carrier_diagonal=%d", metric_inverse_->factor_bytes(),
       metric_inverse_->block_count(), metric_inverse_->max_block_size(),
       static_cast<int>(action_->supports_carrier_diagonal()));
@@ -486,33 +486,33 @@ Eigen::VectorXd StructureTangentOperator::apply_inverse_metric_model(
 }
 
 double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector,
-    core::MetricSolveWorkspace* workspace) const {
+    linalg::MetricSolveWorkspace* workspace) const {
   return metric_image(covector, workspace).norm(covector);
 }
 
-core::MetricImage StructureTangentOperator::metric_image(const Eigen::VectorXd& covector,
-    core::MetricSolveWorkspace* workspace, const core::MetricImage* initial) const {
+linalg::MetricImage StructureTangentOperator::metric_image(const Eigen::VectorXd& covector,
+    linalg::MetricSolveWorkspace* workspace, const linalg::MetricImage* initial) const {
   if (covector.size() != tangent_size() || !covector.allFinite())
     throw std::invalid_argument("invalid structure metric covector");
-  const bool trace = mcscf::diagnostics::neo_event_trace_enabled();
+  const bool trace = mcscf::diagnostics::ciah_event_trace_enabled();
   const auto start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
-  core::MetricSolveStats stats;
+  linalg::MetricSolveStats stats;
   const auto action = [this](const Eigen::VectorXd& x) { return apply_metric_coordinates(x); };
   const auto precondition = [this](const Eigen::VectorXd& x) { return apply_inverse_metric_model(x); };
   // A complete-space inverse already solves in one CG step; recycle only the
   // selected-space solves that otherwise repeat long Krylov traversals.
-  core::MetricImage result;
+  linalg::MetricImage result;
   if (workspace) {
     result = workspace->image(covector, action, precondition, trace ? &stats : nullptr,
         initial, !metric_inverse_);
   } else {
     Eigen::VectorXd image;
-    result.inverse = core::solve_metric(covector, action, precondition,
+    result.inverse = linalg::solve_metric(covector, action, precondition,
         trace ? &stats : nullptr, initial ? &initial->inverse : nullptr, &image);
     result.residual = covector - image;
   }
-  if (trace) mcscf::diagnostics::neo_trace("ciah_structure_norm",
+  if (trace) mcscf::diagnostics::ciah_trace("ciah_structure_norm",
       "seconds=%.17g,iterations=%d,actions=%d,certifications=%d,relative_residual=%.17g,cache_hit=%d,seeded=%d,propagated_residual=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
       stats.iterations, stats.actions, stats.certifications, stats.relative_residual,

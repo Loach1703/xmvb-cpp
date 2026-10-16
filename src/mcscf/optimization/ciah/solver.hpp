@@ -7,7 +7,7 @@
 
 #include <Eigen/Core>
 
-#include "mcscf/optimization/neo/problem.hpp"
+#include "mcscf/optimization/problem.hpp"
 
 namespace xmvb::mcscf {
 
@@ -173,7 +173,7 @@ private:
 /**
  * Davidson iteration for the generalized augmented Hessian of one fixed model.
  *
- * The NeoProblem must outlive this workspace. Call `reset_rhs` before supplying
+ * The QuadraticProblem must outlive this workspace. Call `reset_rhs` before supplying
  * a changed gradient to `next`. All admitted directions and their Hessian/metric
  * images remain attached to the same immutable problem.
  */
@@ -191,11 +191,11 @@ public:
   CiahInverseSpectrum inverse_spectrum(double shift,
       const std::function<Eigen::VectorXd(const Eigen::VectorXd&)>& inverse) const;
   explicit CiahWorkspace(
-      const NeoProblem& problem,
+      const QuadraticProblem& problem,
       std::optional<Eigen::VectorXd> initial_direction = std::nullopt,
       CiahOptions options = {});
 
-  explicit CiahWorkspace(const NeoProblem& problem, CiahOptions options)
+  explicit CiahWorkspace(const QuadraticProblem& problem, CiahOptions options)
       : CiahWorkspace(problem, std::nullopt, std::move(options)) {}
 
   /** @brief Mark a changed RHS for a cached-space Ritz solve before expansion.
@@ -233,7 +233,7 @@ private:
       const Eigen::VectorXd* residual = nullptr,
       double residual_norm = 0.0, double shift = 0.0);
 
-  const NeoProblem& problem_;
+  const QuadraticProblem& problem_;
   CiahOptions options_;
   std::optional<Eigen::VectorXd> initial_direction_;
   std::optional<Eigen::VectorXd> pending_residual_;

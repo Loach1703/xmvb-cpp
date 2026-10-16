@@ -12,8 +12,8 @@ enum class InputScfOptimizer {
   Unspecified,
   Lbfgs,
   Tnhvp,
-  BlockLbfgs,
-  Neo,
+  Plbfgs,
+  Ciah,
 };
 
 /**

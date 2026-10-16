@@ -48,7 +48,7 @@ for index in 0 1 2 3 4; do
  sha256sum input.xmi cc-pvdz.gbs > input.sha256
  srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores \
   /usr/bin/time -v -o resource.time "$artifact/bundle/xmvb-cpp.exe" input.xmi \
-  --optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal \
-  --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --neo-trace neo.tsv > output.out 2> run.err
+  --optimizer-backend ciah --eigensolver davidson --orbital-preconditioner hessian-diagonal \
+  --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --ciah-trace neo.tsv > output.out 2> run.err
  printf '0\n' > run.exit
 done

@@ -32,7 +32,7 @@ CasciResult solve_casci(const CasIntegrals& integrals, int electrons,
     throw std::length_error("CASCI exceeds its solver-workspace budget");
   const auto available=(options.workspace_bytes-sigma_bytes)/bytes_per_vector-fixed_vectors;
   const int maximum_basis=static_cast<int>(std::min<std::size_t>(dimension,available/4));
-  auto budget=core::make_davidson_options(dimension,options.n_roots,
+  auto budget=linalg::make_davidson_options(dimension,options.n_roots,
       options.energy_tolerance,options.residual_tolerance,options.stationarity_tolerance);
   mcscf::SpinSpace space(n,na,nb);
   const int spin_dimension=space.dimension(spin);
@@ -76,18 +76,18 @@ CasciResult solve_casci(const CasIntegrals& integrals, int electrons,
     denominator=denominator.cwiseMax(floor);
     return project(r.cwiseQuotient(denominator));
   };
-  const core::GeneralizedEigenAction action=[&](const Eigen::Ref<const Eigen::MatrixXd>& x) {
+  const linalg::GeneralizedEigenAction action=[&](const Eigen::Ref<const Eigen::MatrixXd>& x) {
     const Eigen::Map<const Eigen::MatrixXd> carrier(x.data(),space.alpha().size(),
         space.beta().size()*x.cols());
     const Eigen::MatrixXd hx=sigma.apply(carrier);
-    core::GeneralizedEigenActionResult images;
+    linalg::GeneralizedEigenActionResult images;
     images.hamiltonian=Eigen::Map<const Eigen::MatrixXd>(hx.data(),dimension,x.cols());
     images.overlap=x;
     return images;
   };
   CasciResult result;
   result.core_energy=integrals.core_energy;
-  result.active_ci=core::GeneralizedEigensolver{}.solve_davidson(action,hdiag,sdiag,initial,budget);
+  result.active_ci=linalg::GeneralizedEigensolver{}.solve_davidson(action,hdiag,sdiag,initial,budget);
   const auto& vectors=result.active_ci.eigenpairs.eigenvector_matrix;
   for (int root=0; root<options.n_roots; ++root) {
     const Eigen::Map<const Eigen::MatrixXd> x(vectors.data()+root*dimension,

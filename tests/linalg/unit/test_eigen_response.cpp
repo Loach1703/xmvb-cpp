@@ -1,4 +1,4 @@
-#include "core/eigen_response.hpp"
+#include "linalg/eigen_response.hpp"
 
 #include <algorithm>
 #include <array>
@@ -96,23 +96,23 @@ bool test_conservative_preconditioner_bound() {
   roots(0, 0) = 1.0;
   Eigen::MatrixXd forcing(4, 1);
   forcing.col(0) << 0.0, 1.0, 0.4, -0.3;
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
-  const xmvb::core::EigenResponsePreconditioner preconditioner{
+  const xmvb::linalg::EigenResponsePreconditioner preconditioner{
       [](const Eigen::Ref<const Eigen::VectorXd>& rhs, Eigen::Index) -> Eigen::VectorXd {
         return rhs;
       }, 1.0e-30};
-  const xmvb::core::EigenResponseOptions options{1, 0.05};
-  const auto result = xmvb::core::solve_generalized_eigen_response(
+  const xmvb::linalg::EigenResponseOptions options{1, 0.05};
+  const auto result = xmvb::linalg::solve_generalized_eigen_response(
       action, hamiltonian.diagonal(), overlap.diagonal(), energies,
       roots, roots, forcing, Eigen::MatrixXd::Zero(4, 1), options,
       {}, nullptr, &preconditioner);
   const Eigen::Vector4d residual =
       hamiltonian * result.eigenvector_response.col(0) + forcing.col(0);
-  const xmvb::core::EigenResponsePreconditioner anisotropic{
+  const xmvb::linalg::EigenResponsePreconditioner anisotropic{
       [](const Eigen::Ref<const Eigen::VectorXd>& rhs, Eigen::Index) -> Eigen::VectorXd {
         Eigen::VectorXd image = rhs;
         image[1] *= 1.0e12;
@@ -120,7 +120,7 @@ bool test_conservative_preconditioner_bound() {
       }, 1.0};
   bool rejected_false_estimate = false;
   try {
-    (void)xmvb::core::solve_generalized_eigen_response(
+    (void)xmvb::linalg::solve_generalized_eigen_response(
         action, hamiltonian.diagonal(), overlap.diagonal(), energies,
         roots, roots, forcing, Eigen::MatrixXd::Zero(4, 1), options,
         {}, nullptr, &anisotropic);
@@ -151,13 +151,13 @@ bool test_cancelling_metric_gauge() {
       31.0 * basis.col(1) + 7.0 * basis.col(2) + 2.0 * basis.col(3);
   const Eigen::MatrixXd roots = basis.leftCols(1) / 1.0e4;
   const Eigen::MatrixXd forcing = -hamiltonian * reference;
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
-  const xmvb::core::EigenResponseOptions options{8, 1.0e-5};
-  const auto result = xmvb::core::solve_generalized_eigen_response(
+  const xmvb::linalg::EigenResponseOptions options{8, 1.0e-5};
+  const auto result = xmvb::linalg::solve_generalized_eigen_response(
       action, hamiltonian.diagonal(), overlap.diagonal(),
       Eigen::VectorXd::Zero(1), roots, overlap * roots,
       forcing, Eigen::MatrixXd::Zero(4, 1), options);
@@ -207,9 +207,9 @@ bool test_ill_conditioned_selected_roots() {
       0.003 * metric_sqrt * directional_test_matrix(n) * metric_sqrt;
   const Eigen::MatrixXd delta_overlap =
       0.0001 * metric_sqrt * directional_test_matrix(n) * metric_sqrt;
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
   const Eigen::MatrixXd complete_vectors =
@@ -252,7 +252,7 @@ bool test_ill_conditioned_selected_roots() {
   std::cout << "soft_spectrum_reference_bordered_residual="
             << reference_bordered_relative_residual << '\n';
   try {
-    const auto response = xmvb::core::solve_generalized_eigen_response(
+    const auto response = xmvb::linalg::solve_generalized_eigen_response(
         action, hamiltonian.diagonal(), overlap.diagonal(),
         selected_energies, selected_vectors, overlap * selected_vectors,
         delta_hamiltonian * selected_vectors,
@@ -290,13 +290,13 @@ bool test_inexact_ritz_root() {
       symmetric_test_matrix(n, 0.17);
   const Eigen::MatrixXd delta_overlap =
       0.03 * symmetric_test_matrix(n, 0.0);
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
   try {
-    const auto response = xmvb::core::solve_generalized_eigen_response(
+    const auto response = xmvb::linalg::solve_generalized_eigen_response(
         action, hamiltonian.diagonal(), overlap.diagonal(),
         selected_energy, selected_root, overlap * selected_root,
         delta_hamiltonian * selected_root,
@@ -312,7 +312,7 @@ bool test_inexact_ritz_root() {
     Eigen::MatrixXd exact_root(n, 1);
     exact_root.col(0) = eigensolver.eigenvectors().col(0);
     const auto exact_response =
-        xmvb::core::solve_generalized_eigen_response_from_full_spectrum(
+        xmvb::linalg::solve_generalized_eigen_response_from_full_spectrum(
             action, eigensolver.eigenvalues(), eigensolver.eigenvectors(),
             {0}, exact_energy, exact_root, overlap * exact_root,
             delta_hamiltonian * exact_root, delta_overlap * exact_root,
@@ -362,13 +362,13 @@ bool test_solvable_ill_conditioned_overlap() {
       0.003 * metric_sqrt * directional_test_matrix(n) * metric_sqrt;
   const Eigen::MatrixXd delta_overlap =
       0.0001 * metric_sqrt * directional_test_matrix(n) * metric_sqrt;
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
   try {
-    const auto response = xmvb::core::solve_generalized_eigen_response(
+    const auto response = xmvb::linalg::solve_generalized_eigen_response(
         action, hamiltonian.diagonal(), overlap.diagonal(),
         selected_energy, root, overlap * root,
         delta_hamiltonian * root, delta_overlap * root,
@@ -400,21 +400,21 @@ bool test_repeated_root_bordered_candidate() {
   delta_hamiltonian.col(0) << 1.0, -1.0, 1.0;
   delta_hamiltonian.col(1) << 0.0, 0.0, 1.0;
   const Eigen::MatrixXd delta_overlap = Eigen::MatrixXd::Zero(n, 2);
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
   constexpr double tolerance = 1.0e-11;
   try {
-    std::vector<xmvb::core::EigenResponseRecycleSpace> storage(2);
-    std::vector<xmvb::core::EigenResponseRecycleSpace*> spaces{
+    std::vector<xmvb::linalg::EigenResponseRecycleSpace> storage(2);
+    std::vector<xmvb::linalg::EigenResponseRecycleSpace*> spaces{
         &storage[0], &storage[1]};
-    const auto response = xmvb::core::solve_generalized_eigen_response(
+    const auto response = xmvb::linalg::solve_generalized_eigen_response(
         action, hamiltonian.diagonal(), overlap.diagonal(),
         selected_energy, selected_root, overlap * selected_root,
         delta_hamiltonian, delta_overlap, {n + 1, tolerance}, spaces);
-    const auto recycled = xmvb::core::solve_generalized_eigen_response(
+    const auto recycled = xmvb::linalg::solve_generalized_eigen_response(
         action, hamiltonian.diagonal(), overlap.diagonal(),
         selected_energy, selected_root, overlap * selected_root,
         delta_hamiltonian, delta_overlap, {n + 1, tolerance}, spaces);
@@ -505,37 +505,37 @@ bool test_equal_weight_subspace_response() {
       delta_hamiltonian * selected_vectors;
   const Eigen::MatrixXd delta_overlap_selected =
       delta_overlap * selected_vectors;
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
-  const xmvb::core::EigenResponseOptions options{n + 1, 1.0e-9};
+  const xmvb::linalg::EigenResponseOptions options{n + 1, 1.0e-9};
   try {
-    std::vector<xmvb::core::EigenResponseRecycleSpace> recycle_storage(2);
-    std::vector<xmvb::core::EigenResponseRecycleSpace*> recycle_spaces{
+    std::vector<xmvb::linalg::EigenResponseRecycleSpace> recycle_storage(2);
+    std::vector<xmvb::linalg::EigenResponseRecycleSpace*> recycle_spaces{
         &recycle_storage[0], &recycle_storage[1]};
     const auto response =
-        xmvb::core::solve_equal_weight_generalized_eigen_subspace_response(
+        xmvb::linalg::solve_equal_weight_generalized_eigen_subspace_response(
             action, hamiltonian.diagonal(), overlap.diagonal(),
             selected_energies, selected_vectors,
             overlap * selected_vectors, delta_hamiltonian_selected,
             delta_overlap_selected, options, recycle_spaces);
     const auto recycled_response =
-        xmvb::core::solve_equal_weight_generalized_eigen_subspace_response(
+        xmvb::linalg::solve_equal_weight_generalized_eigen_subspace_response(
             action, hamiltonian.diagonal(), overlap.diagonal(),
             selected_energies, selected_vectors,
             overlap * selected_vectors, delta_hamiltonian_selected,
             delta_overlap_selected, options, recycle_spaces);
     const auto spectral =
-        xmvb::core::
+        xmvb::linalg::
             solve_equal_weight_generalized_eigen_subspace_response_from_full_spectrum(
                 action, energies, full_vectors, roots, selected_energies,
                 selected_vectors, overlap * selected_vectors,
                 delta_hamiltonian_selected, delta_overlap_selected,
                 options.relative_residual_tolerance);
     const auto isolated =
-        xmvb::core::solve_generalized_eigen_response_from_full_spectrum(
+        xmvb::linalg::solve_generalized_eigen_response_from_full_spectrum(
             action, energies, full_vectors, roots, selected_energies,
             selected_vectors, overlap * selected_vectors,
             delta_hamiltonian_selected, delta_overlap_selected,
@@ -607,19 +607,19 @@ bool test_equal_weight_subspace_response() {
         metric_sqrt * degenerate_energies.asDiagonal() * metric_sqrt;
     const Eigen::VectorXd degenerate_selected_energies =
         degenerate_energies.segment(1, 2);
-    const xmvb::core::GeneralizedEigenAction degenerate_action =
+    const xmvb::linalg::GeneralizedEigenAction degenerate_action =
         [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-          return xmvb::core::GeneralizedEigenActionResult{
+          return xmvb::linalg::GeneralizedEigenActionResult{
               degenerate_hamiltonian * vectors, overlap * vectors};
         };
     const auto degenerate_response =
-        xmvb::core::solve_equal_weight_generalized_eigen_subspace_response(
+        xmvb::linalg::solve_equal_weight_generalized_eigen_subspace_response(
             degenerate_action, degenerate_hamiltonian.diagonal(),
             overlap.diagonal(), degenerate_selected_energies,
             selected_vectors, overlap * selected_vectors,
             delta_hamiltonian_selected, delta_overlap_selected, options);
     const auto degenerate_spectral =
-        xmvb::core::
+        xmvb::linalg::
             solve_equal_weight_generalized_eigen_subspace_response_from_full_spectrum(
                 degenerate_action, degenerate_energies, full_vectors, roots,
                 degenerate_selected_energies, selected_vectors,
@@ -675,7 +675,7 @@ bool test_equal_weight_subspace_response() {
 }
 
 bool test_unconditional_indefinite_galerkin_application() {
-  xmvb::core::EigenResponseRecycleSpace inconsistent_space;
+  xmvb::linalg::EigenResponseRecycleSpace inconsistent_space;
   const Eigen::Vector2d first_direction(1.0, 0.0);
   const Eigen::Vector2d first_image(-0.1, 10.0);
   const Eigen::Vector2d second_direction(0.0, 1.0);
@@ -686,7 +686,7 @@ bool test_unconditional_indefinite_galerkin_application() {
     return false;
   }
 
-  xmvb::core::EigenResponseRecycleSpace space;
+  xmvb::linalg::EigenResponseRecycleSpace space;
   const Eigen::Vector2d direction(1.0, 0.0);
   const Eigen::Vector2d image(-0.1, 10.0);
   if (space.revision() != 0 || !space.append(direction, image) ||
@@ -783,7 +783,7 @@ bool test_finite_ritz_frozen_isolated_response() {
 
   const Eigen::Matrix4d projector = Eigen::Matrix4d::Identity() -
       overlap_root * overlap_root.transpose() / overlap_root.squaredNorm();
-  xmvb::core::EigenResponseRecycleSpace space;
+  xmvb::linalg::EigenResponseRecycleSpace space;
   for (int direction = 0; direction < 2; ++direction) {
     const Eigen::Vector4d particular =
         root * gauge[direction];  // c^T S c = 1.
@@ -812,31 +812,31 @@ bool test_finite_ritz_frozen_isolated_response() {
     delta_h_selected.col(direction) = delta_h * root;
     delta_s_selected.col(direction) = delta_s * root;
   }
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
-  std::vector<xmvb::core::EigenResponseRecycleSpace> iterative_storage(3);
-  std::vector<xmvb::core::EigenResponseRecycleSpace*> iterative_spaces{
+  std::vector<xmvb::linalg::EigenResponseRecycleSpace> iterative_storage(3);
+  std::vector<xmvb::linalg::EigenResponseRecycleSpace*> iterative_spaces{
       &iterative_storage[0], &iterative_storage[1], &iterative_storage[2]};
-  const auto iterative = xmvb::core::solve_generalized_eigen_response(
+  const auto iterative = xmvb::linalg::solve_generalized_eigen_response(
       action, hamiltonian.diagonal(), overlap.diagonal(), energies, roots,
       overlap_roots, delta_h_selected, delta_s_selected, {2 * n, 1.0e-11},
       iterative_spaces, &residuals);
   const auto iterative_recycled =
-      xmvb::core::solve_generalized_eigen_response(
+      xmvb::linalg::solve_generalized_eigen_response(
           action, hamiltonian.diagonal(), overlap.diagonal(), energies, roots,
           overlap_roots, delta_h_selected, delta_s_selected,
           {2 * n, 1.0e-11}, iterative_spaces, &residuals);
-  const std::vector<const xmvb::core::EigenResponseRecycleSpace*> spaces(
+  const std::vector<const xmvb::linalg::EigenResponseRecycleSpace*> spaces(
       3, &space);
   const auto response =
-      xmvb::core::evaluate_frozen_generalized_eigen_response(
+      xmvb::linalg::evaluate_frozen_generalized_eigen_response(
           action, energies, roots, overlap_roots,
           delta_h_selected, delta_s_selected, spaces, &residuals);
 
-  xmvb::core::EigenResponseRecycleSpace incomplete_space;
+  xmvb::linalg::EigenResponseRecycleSpace incomplete_space;
   const Eigen::Vector4d first_particular = root * gauge[0];
   const Eigen::Vector4d first_external =
       reference_dc[0] - first_particular;
@@ -845,10 +845,10 @@ bool test_finite_ritz_frozen_isolated_response() {
           hamiltonian * first_external, overlap * first_external)) {
     return false;
   }
-  const std::vector<const xmvb::core::EigenResponseRecycleSpace*>
+  const std::vector<const xmvb::linalg::EigenResponseRecycleSpace*>
       incomplete_spaces(3, &incomplete_space);
   const auto incomplete =
-      xmvb::core::evaluate_frozen_generalized_eigen_response(
+      xmvb::linalg::evaluate_frozen_generalized_eigen_response(
           action, energies, roots, overlap_roots,
           delta_h_selected, delta_s_selected, incomplete_spaces,
           &residuals);
@@ -934,13 +934,13 @@ bool test_frozen_isolated_root_response() {
   delta_overlap_selected(0, 0) = 0.2;
   Eigen::MatrixXd delta_hamiltonian_selected(n, 1);
   delta_hamiltonian_selected.col(0) << 0.3, 0.4, -0.2;
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
 
-  xmvb::core::EigenResponseRecycleSpace space;
+  xmvb::linalg::EigenResponseRecycleSpace space;
   Eigen::Vector3d external_response(0.0, -0.2, 0.05);
   Eigen::Vector3d projected_rhs(0.0, -0.4, 0.2);
   if (!space.append_generalized(
@@ -949,21 +949,21 @@ bool test_frozen_isolated_root_response() {
     return false;
   }
   const std::uint64_t frozen_revision = space.revision();
-  const std::vector<const xmvb::core::EigenResponseRecycleSpace*> spaces{
+  const std::vector<const xmvb::linalg::EigenResponseRecycleSpace*> spaces{
       &space};
   const Eigen::MatrixXd selected_residuals = Eigen::MatrixXd::Zero(n, 1);
   const auto response =
-      xmvb::core::evaluate_frozen_generalized_eigen_response(
+      xmvb::linalg::evaluate_frozen_generalized_eigen_response(
           action, energies, roots, overlap * roots,
           delta_hamiltonian_selected, delta_overlap_selected, spaces,
           &selected_residuals);
   const Eigen::Vector3d reference(-0.1, -0.2, 0.05);
 
-  xmvb::core::EigenResponseRecycleSpace empty_space;
-  const std::vector<const xmvb::core::EigenResponseRecycleSpace*>
+  xmvb::linalg::EigenResponseRecycleSpace empty_space;
+  const std::vector<const xmvb::linalg::EigenResponseRecycleSpace*>
       empty_spaces{&empty_space};
   const auto unresolved =
-      xmvb::core::evaluate_frozen_generalized_eigen_response(
+      xmvb::linalg::evaluate_frozen_generalized_eigen_response(
           action, energies, roots, overlap * roots,
           delta_hamiltonian_selected, delta_overlap_selected, empty_spaces,
           &selected_residuals);
@@ -999,13 +999,13 @@ bool test_frozen_equal_weight_response() {
   const Eigen::MatrixXd delta_hamiltonian_selected =
       delta_hamiltonian * roots;
   const Eigen::MatrixXd delta_overlap_selected = delta_overlap * roots;
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
 
-  std::vector<xmvb::core::EigenResponseRecycleSpace> storage(2);
+  std::vector<xmvb::linalg::EigenResponseRecycleSpace> storage(2);
   Eigen::Vector4d response0(0.0, 0.0, -0.1, 1.0 / 30.0);
   Eigen::Vector4d rhs0(0.0, 0.0, -0.2, 0.1);
   Eigen::Vector4d response1(0.0, 0.0, 0.1, -0.1);
@@ -1016,10 +1016,10 @@ bool test_frozen_equal_weight_response() {
           response1, rhs1, hamiltonian * response1, overlap * response1)) {
     return false;
   }
-  const std::vector<const xmvb::core::EigenResponseRecycleSpace*> spaces{
+  const std::vector<const xmvb::linalg::EigenResponseRecycleSpace*> spaces{
       &storage[0], &storage[1]};
   const Eigen::MatrixXd selected_residuals = Eigen::MatrixXd::Zero(n, 2);
-  const auto response = xmvb::core::
+  const auto response = xmvb::linalg::
       evaluate_frozen_equal_weight_generalized_eigen_subspace_response(
           action, energies, roots, overlap * roots,
           delta_hamiltonian_selected, delta_overlap_selected, spaces,
@@ -1030,10 +1030,10 @@ bool test_frozen_equal_weight_response() {
       (roots.transpose() * overlap * response.eigenvector_response -
        gauge_target).norm();
 
-  std::vector<xmvb::core::EigenResponseRecycleSpace> empty_storage(2);
-  const std::vector<const xmvb::core::EigenResponseRecycleSpace*>
+  std::vector<xmvb::linalg::EigenResponseRecycleSpace> empty_storage(2);
+  const std::vector<const xmvb::linalg::EigenResponseRecycleSpace*>
       empty_spaces{&empty_storage[0], &empty_storage[1]};
-  const auto unresolved = xmvb::core::
+  const auto unresolved = xmvb::linalg::
       evaluate_frozen_equal_weight_generalized_eigen_subspace_response(
           action, energies, roots, overlap * roots,
           delta_hamiltonian_selected, delta_overlap_selected, empty_spaces,
@@ -1118,7 +1118,7 @@ bool test_finite_ritz_frozen_equal_weight_response() {
       Eigen::MatrixXd::Identity(n, states);
   const Eigen::MatrixXd projector = Eigen::MatrixXd::Identity(n, n) -
       selected_units * selected_units.transpose();
-  std::vector<xmvb::core::EigenResponseRecycleSpace> storage(states);
+  std::vector<xmvb::linalg::EigenResponseRecycleSpace> storage(states);
   for (int state = 0; state < states; ++state) {
     for (int direction = 0; direction < 2; ++direction) {
       const Eigen::Matrix2d internal =
@@ -1133,32 +1133,32 @@ bool test_finite_ritz_frozen_equal_weight_response() {
               overlap * external)) return false;
     }
   }
-  const std::vector<const xmvb::core::EigenResponseRecycleSpace*> spaces{
+  const std::vector<const xmvb::linalg::EigenResponseRecycleSpace*> spaces{
       &storage[0], &storage[1]};
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors, overlap * vectors};
       };
-  std::vector<xmvb::core::EigenResponseRecycleSpace> iterative_storage(
+  std::vector<xmvb::linalg::EigenResponseRecycleSpace> iterative_storage(
       states);
-  std::vector<xmvb::core::EigenResponseRecycleSpace*> iterative_spaces{
+  std::vector<xmvb::linalg::EigenResponseRecycleSpace*> iterative_spaces{
       &iterative_storage[0], &iterative_storage[1]};
-  const auto iterative = xmvb::core::
+  const auto iterative = xmvb::linalg::
       solve_equal_weight_generalized_eigen_subspace_response(
           action, hamiltonian.diagonal(), overlap.diagonal(), energies, roots,
           overlap_roots, delta_hamiltonians[0] * roots,
           delta_overlaps[0] * roots, {2 * n, 1.0e-11}, iterative_spaces,
           &ritz_residuals);
-  const auto iterative_recycled = xmvb::core::
+  const auto iterative_recycled = xmvb::linalg::
       solve_equal_weight_generalized_eigen_subspace_response(
           action, hamiltonian.diagonal(), overlap.diagonal(), energies, roots,
           overlap_roots, delta_hamiltonians[0] * roots,
           delta_overlaps[0] * roots, {2 * n, 1.0e-11}, iterative_spaces,
           &ritz_residuals);
-  std::array<xmvb::core::EigenSubspaceResponseResult, 2> response;
+  std::array<xmvb::linalg::EigenSubspaceResponseResult, 2> response;
   for (int direction = 0; direction < 2; ++direction) {
-    response[direction] = xmvb::core::
+    response[direction] = xmvb::linalg::
         evaluate_frozen_equal_weight_generalized_eigen_subspace_response(
             action, energies, roots, overlap_roots,
             delta_hamiltonians[direction] * roots,
@@ -1228,9 +1228,9 @@ bool test_orbital_gauge_projection() {
   const Eigen::MatrixXd residual = h * states - overlap * energies.asDiagonal();
   const Eigen::MatrixXd dh = directional_test_matrix(n) * states;
   const Eigen::MatrixXd dm = symmetric_test_matrix(n, 0.0) * states;
-  const auto full = xmvb::core::prepare_equal_weight_generalized_eigen_coupling(
+  const auto full = xmvb::linalg::prepare_equal_weight_generalized_eigen_coupling(
       energies, states, overlap, residual, dh, dm);
-  const auto orbital = xmvb::core::prepare_equal_weight_generalized_eigen_coupling(
+  const auto orbital = xmvb::linalg::prepare_equal_weight_generalized_eigen_coupling(
       energies, states, overlap, residual, dh, dm, false);
   const double error =
       (full.gauge_selected_matrix_response - orbital.gauge_selected_matrix_response).norm() +
@@ -1282,17 +1282,17 @@ int main(int argc, char** argv) {
       delta_overlap * eigenvectors;
 
   int widest_action = 0;
-  const xmvb::core::GeneralizedEigenAction action =
+  const xmvb::linalg::GeneralizedEigenAction action =
       [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
         widest_action = std::max(widest_action, static_cast<int>(vectors.cols()));
-        return xmvb::core::GeneralizedEigenActionResult{
+        return xmvb::linalg::GeneralizedEigenActionResult{
             hamiltonian * vectors,
             overlap * vectors};
       };
-  const xmvb::core::EigenResponseOptions options{
+  const xmvb::linalg::EigenResponseOptions options{
       n + 1,
       1.0e-8};
-  const auto response = xmvb::core::solve_generalized_eigen_response(
+  const auto response = xmvb::linalg::solve_generalized_eigen_response(
       action,
       hamiltonian.diagonal(),
       overlap.diagonal(),
@@ -1306,13 +1306,13 @@ int main(int argc, char** argv) {
   // removed gauge. Excited roots also check an indefinite response operator;
   // no ground-state-only PCG assumption enters this MINRES interface.
   const Eigen::MatrixXd inverse_overlap = overlap.partialPivLu().inverse();
-  const xmvb::core::EigenResponsePreconditioner metric_preconditioner{
+  const xmvb::linalg::EigenResponsePreconditioner metric_preconditioner{
       [&](const Eigen::Ref<const Eigen::VectorXd>& rhs, Eigen::Index state) -> Eigen::VectorXd {
         const auto c = eigenvectors.col(state);
         return inverse_overlap * rhs - c * c.dot(rhs) / c.dot(overlap * c);
       },
       1.0 / overlap.trace()};
-  const auto metric_response = xmvb::core::solve_generalized_eigen_response(
+  const auto metric_response = xmvb::linalg::solve_generalized_eigen_response(
       action, hamiltonian.diagonal(), overlap.diagonal(), eigenvalues,
       eigenvectors, overlap * eigenvectors, delta_hamiltonian_selected,
       delta_overlap_selected, options, {}, nullptr, &metric_preconditioner);
@@ -1325,7 +1325,7 @@ int main(int argc, char** argv) {
   invalid_preconditioner.minimum_eigenvalue = 0.0;
   bool rejected_bound = false;
   try {
-    xmvb::core::solve_generalized_eigen_response(
+    xmvb::linalg::solve_generalized_eigen_response(
         action, hamiltonian.diagonal(), overlap.diagonal(), eigenvalues,
         eigenvectors, overlap * eigenvectors, delta_hamiltonian_selected,
         delta_overlap_selected, options, {}, nullptr, &invalid_preconditioner);
@@ -1333,20 +1333,20 @@ int main(int argc, char** argv) {
     rejected_bound = true;
   }
   if (!rejected_bound) return 1;
-  std::vector<xmvb::core::EigenResponseRecycleSpace> recycle_storage(
+  std::vector<xmvb::linalg::EigenResponseRecycleSpace> recycle_storage(
       roots.size());
-  std::vector<xmvb::core::EigenResponseRecycleSpace*> recycle_spaces;
+  std::vector<xmvb::linalg::EigenResponseRecycleSpace*> recycle_spaces;
   recycle_spaces.reserve(roots.size());
   for (auto& space : recycle_storage) recycle_spaces.push_back(&space);
-  const auto cache_seed = xmvb::core::solve_generalized_eigen_response(
+  const auto cache_seed = xmvb::linalg::solve_generalized_eigen_response(
       action, hamiltonian.diagonal(), overlap.diagonal(), eigenvalues,
       eigenvectors, overlap * eigenvectors, delta_hamiltonian_selected,
       delta_overlap_selected, options, recycle_spaces);
-  const auto recycled_response = xmvb::core::solve_generalized_eigen_response(
+  const auto recycled_response = xmvb::linalg::solve_generalized_eigen_response(
       action, hamiltonian.diagonal(), overlap.diagonal(), eigenvalues,
       eigenvectors, overlap * eigenvectors, delta_hamiltonian_selected,
       delta_overlap_selected, options, recycle_spaces);
-  const auto recycled_metric_response = xmvb::core::solve_generalized_eigen_response(
+  const auto recycled_metric_response = xmvb::linalg::solve_generalized_eigen_response(
       action, hamiltonian.diagonal(), overlap.diagonal(), eigenvalues,
       eigenvectors, overlap * eigenvectors, delta_hamiltonian_selected,
       delta_overlap_selected, options, recycle_spaces, nullptr, &metric_preconditioner);
@@ -1369,7 +1369,7 @@ int main(int argc, char** argv) {
       return 1;
   }
   const auto spectral_response =
-      xmvb::core::solve_generalized_eigen_response_from_full_spectrum(
+      xmvb::linalg::solve_generalized_eigen_response_from_full_spectrum(
           action,
           eigensolver.eigenvalues(),
           eigensolver.eigenvectors(),

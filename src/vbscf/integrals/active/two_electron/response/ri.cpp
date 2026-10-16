@@ -12,7 +12,7 @@
 #include <omp.h>
 #endif
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "core/pair_index.hpp"
 
 namespace xmvb::vb {

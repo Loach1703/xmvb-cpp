@@ -18,12 +18,12 @@ void apply_optimizer_backend_argument(
     options->backend = xmvb::vb::VbScfOptimizerBackend::Lbfgs;
     return;
   }
-  if (backend_name == "block_lbfgs") {
-    options->backend = xmvb::vb::VbScfOptimizerBackend::BlockLbfgs;
+  if (backend_name == "plbfgs") {
+    options->backend = xmvb::vb::VbScfOptimizerBackend::Plbfgs;
     return;
   }
-  if (backend_name == "neo") {
-    options->backend = xmvb::vb::VbScfOptimizerBackend::Neo;
+  if (backend_name == "ciah") {
+    options->backend = xmvb::vb::VbScfOptimizerBackend::Ciah;
     return;
   }
   if (backend_name == "nonredundant_projected_gradient") {
@@ -125,7 +125,7 @@ void apply_standard_two_electron_mode_argument(
 
 void print_usage() {
   std::cerr << "usage: xmvb-cpp.exe <input.xmi> "
-               "[--optimizer-backend lbfgs|block_lbfgs|neo|nonredundant_projected_gradient|nonredundant_truncated_newton]"
+               "[--optimizer-backend lbfgs|plbfgs|ciah|nonredundant_projected_gradient|nonredundant_truncated_newton]"
                " [--max-iterations <count>]"
                " [--eigensolver davidson|dense]"
                " [--orbital-preconditioner auto|identity|one-electron|hessian-diagonal]"
@@ -139,9 +139,9 @@ void print_usage() {
                " [--raw-structure-selection full|covalent]"
                " [--dump-trace-dir <dataset_root>]"
                " [--tnhvp-trace <path.tsv>]"
-               " [--neo-trace <path.tsv>]"
+               " [--ciah-trace <path.tsv>]"
                " [--dump-final-orbital-value-table-bin <path>]\n"
-               "input optimizer: ISCF=5 selects XMVB L-BFGS; ISCF=7 selects TNHVP; ISCF=8 selects block-LBFGS; ISCF=9 selects NEO\n"
+               "input optimizer: ISCF=5 selects XMVB L-BFGS; ISCF=7 selects TNHVP; ISCF=8 selects P-LBFGS; ISCF=9 selects CIAH\n"
                "input eigensolver: EIGENSOLVER=DAVIDSON|DENSE (default DAVIDSON)\n";
 }
 
@@ -173,7 +173,7 @@ std::optional<Options> parse_options(int argc, char** argv) {
   options.history_size = 100;
   std::string dump_trace_dir;
   std::string tnhvp_trace_path;
-  std::string neo_trace_path;
+  std::string ciah_trace_path;
   std::string dump_final_orbital_value_table_bin;
   bool user_specified_optimizer_backend = false;
   bool user_specified_structure_eigensolver = false;
@@ -217,8 +217,8 @@ std::optional<Options> parse_options(int argc, char** argv) {
         dump_trace_dir = argument_value;
       } else if (argument_name == "--tnhvp-trace") {
         tnhvp_trace_path = argument_value;
-      } else if (argument_name == "--neo-trace") {
-        neo_trace_path = argument_value;
+      } else if (argument_name == "--ciah-trace") {
+        ciah_trace_path = argument_value;
       } else if (argument_name == "--dump-final-orbital-value-table-bin") {
         dump_final_orbital_value_table_bin = argument_value;
       } else {
@@ -238,7 +238,7 @@ std::optional<Options> parse_options(int argc, char** argv) {
   parsed.optimizer = std::move(options);
   parsed.trace_directory = std::move(dump_trace_dir);
   parsed.tnhvp_trace_path = std::move(tnhvp_trace_path);
-  parsed.neo_trace_path = std::move(neo_trace_path);
+  parsed.ciah_trace_path = std::move(ciah_trace_path);
   parsed.final_orbitals_path = std::move(dump_final_orbital_value_table_bin);
   parsed.optimizer_backend_explicit = user_specified_optimizer_backend;
   parsed.structure_eigensolver_explicit =

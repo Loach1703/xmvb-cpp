@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <Eigen/Eigenvalues>
 #include <Eigen/QR>
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "mcscf/optimization/trace.hpp"
 #include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
@@ -125,7 +125,7 @@ DensityDiagonals density_diagonal_channels(const VbScfInput& input,
     // Both layouts are exact. The row consumer no longer pays for an AO
     // response/staging image, so choose by actual ERI visits within its budget.
     const bool row_selected=row_reads<stream_reads;
-    mcscf::diagnostics::neo_trace("ciah_diagonal_layout_plan",
+    mcscf::diagnostics::ciah_trace("ciah_diagonal_layout_plan",
         "row_width=%d,stream_width=%d,row_records=%.0Lf,stream_records=%.0Lf,row_workspace_bytes=%zu,row_selected=%d",
         width,stream_width,row_reads,stream_reads,base+width*per_channel,static_cast<int>(row_selected));
     if (row_selected) {
@@ -164,7 +164,7 @@ DensityDiagonals density_diagonal_channels(const VbScfInput& input,
             2.0*j_active*active_weights.middleCols(begin+core_count-n_core,active_count)-
             exchange.rightCols(active_count);
     }
-    mcscf::diagnostics::neo_trace("ciah_diagonal_density_batch",
+    mcscf::diagnostics::ciah_trace("ciah_diagonal_density_batch",
         "channels=%d,width=%d,workers=%d,workspace_bytes=%zu,budget_bytes=%zu,row_owned=1,active_exchange_only=1",
         channels,width,workers,base+width*per_channel,budget);
     return {result.leftCols(n_core),result.rightCols(active_weights.cols()),std::move(core_coulomb)};
@@ -199,7 +199,7 @@ DensityDiagonals density_diagonal_channels(const VbScfInput& input,
       result.col(begin+j)=(mo.array()*scratch.array()).colwise().sum().transpose();
     }
   }
-  mcscf::diagnostics::neo_trace("ciah_diagonal_density_batch",
+  mcscf::diagnostics::ciah_trace("ciah_diagonal_density_batch",
       "channels=%d,width=%d,workers=%d,workspace_bytes=%zu,budget_bytes=%zu",
       channels,width,workers,matrix_bytes+active_temp+width*channel_bytes,budget);
   return {result.leftCols(n_core),result.rightCols(active_weights.cols()),{}};

@@ -10,7 +10,7 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/SVD>
 #include "mcscf/optimization/trace.hpp"
-#include "mcscf/optimization/neo/symmetry.hpp"
+#include "linalg/symmetry.hpp"
 
 namespace xmvb::mcscf {
 
@@ -37,10 +37,10 @@ void CoarsePreconditioner::observe(const Eigen::VectorXd& direction,
   const double initial = v.stableNorm();
   if (!(initial > 0)) return;
   Eigen::VectorXd coefficients = Eigen::VectorXd::Zero(size_);
-  if (diagnostics::neo_event_trace_enabled() && size_) {
+  if (diagnostics::ciah_event_trace_enabled() && size_) {
     const Eigen::VectorXd forward = basis_.leftCols(size_).transpose()*image;
     const Eigen::VectorXd backward = images_.leftCols(size_).transpose()*direction;
-    diagnostics::neo_trace("coarse_source_reciprocity",
+    diagnostics::ciah_trace("coarse_source_reciprocity",
         "size=%d,direction_norm=%.17g,image_norm=%.17g,skew=%.17g",
         size_,initial,image.norm(),(forward-backward).norm());
   }
@@ -53,7 +53,7 @@ void CoarsePreconditioner::observe(const Eigen::VectorXd& direction,
       g.noalias() -= coefficient*metrics_.col(i);
     }
   const double norm = v.stableNorm();
-  if (diagnostics::neo_event_trace_enabled()) diagnostics::neo_trace(
+  if (diagnostics::ciah_event_trace_enabled()) diagnostics::ciah_trace(
       "coarse_sample_condition","size=%d,remaining_fraction=%.17g,source_image=%.17g,transformed_image=%.17g",
       size_,norm/initial,image.norm(),norm > 0.0 ? h.norm()/norm : 0.0);
   // Certify the entire original sample Gram, not just the new column
@@ -68,9 +68,9 @@ void CoarsePreconditioner::observe(const Eigen::VectorXd& direction,
   const double singular_ratio = spectrum.singularValues().tail(1)[0]/
       spectrum.singularValues()[0];
   const double ratio = singular_ratio*singular_ratio;
-  diagnostics::neo_trace("coarse_sample_gram","size=%d,gram_ratio=%.17g",size_,ratio);
+  diagnostics::ciah_trace("coarse_sample_gram","size=%d,gram_ratio=%.17g",size_,ratio);
   if (!(ratio > lindep_)) {
-    diagnostics::neo_trace("coarse_sample_rank_rejected",
+    diagnostics::ciah_trace("coarse_sample_rank_rejected",
         "size=%d,remaining_fraction=%.17g,gram_ratio=%.17g,rank_tolerance=%.17g",
         size_,norm/initial,ratio,lindep_);
     return;
@@ -94,10 +94,10 @@ Eigen::VectorXd CoarsePreconditioner::apply(const Eigen::VectorXd& residual,
   const double skew_bound = 256*std::numeric_limits<double>::epsilon()*size_*
       std::max(1.0,raw.norm())+action_accuracy_*v.norm()*images_.leftCols(size_).norm();
   if ((raw-raw.transpose()).norm() > skew_bound) {
-    diagnostics::neo_trace("coarse_symmetry_failure",
+    diagnostics::ciah_trace("coarse_symmetry_failure",
         "size=%d,skew=%.17g,bound=%.17g,projection_roundoff=%.17g,image_norm=%.17g",
         size_,(raw-raw.transpose()).norm(),skew_bound,
-        neo_detail::projection_skew_roundoff(v,lv,raw),lv.norm());
+        linalg::projection_skew_roundoff(v,lv,raw),lv.norm());
     throw std::runtime_error("coarse sampled shifted operator is not symmetric");
   }
   const Eigen::MatrixXd e = 0.5*(raw+raw.transpose());

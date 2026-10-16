@@ -1,4 +1,4 @@
-#include "mcscf/optimization/neo/ciah.hpp"
+#include "mcscf/optimization/ciah/solver.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -61,7 +61,7 @@ bool CiahResult::resolved(double rhs_norm, double relative_accuracy) const noexc
 }
 
 CiahWorkspace::CiahWorkspace(
-    const NeoProblem& problem,
+    const QuadraticProblem& problem,
     std::optional<Eigen::VectorXd> initial_direction,
     CiahOptions options)
     : problem_(problem),
@@ -99,7 +99,7 @@ void CiahWorkspace::reset_rhs() noexcept {
 Eigen::VectorXd CiahWorkspace::precondition(
     const Eigen::VectorXd& residual, double eigenvalue) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::NeoPreconditioner);
-  const bool trace = diagnostics::neo_event_trace_enabled();
+  const bool trace = diagnostics::ciah_event_trace_enabled();
   const auto start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   Eigen::VectorXd direction = options_.residual_preconditioner
@@ -110,7 +110,7 @@ Eigen::VectorXd CiahWorkspace::precondition(
   if (direction.size() != problem_.size() || !direction.allFinite()) {
     throw std::runtime_error("CIAH preconditioner returned an invalid vector");
   }
-  if (trace) diagnostics::neo_trace("ciah_precondition_cost",
+  if (trace) diagnostics::ciah_trace("ciah_precondition_cost",
       "basis=%d,seconds=%.17g", basis_size(),
       std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
   return direction;
@@ -124,7 +124,7 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
   }
   const double initial_norm = direction.stableNorm();
   if (!(initial_norm > 0.0)) return false;
-  const bool trace = diagnostics::neo_event_trace_enabled();
+  const bool trace = diagnostics::ciah_event_trace_enabled();
   const auto start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   // Euclidean two-pass orthogonalization avoids another Hessian action.
@@ -161,7 +161,7 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
     hessian_image = problem_.apply_hessian(direction);
   }
   images_phase.stop();
-  if (diagnostics::neo_trace_enabled() && residual) {
+  if (diagnostics::ciah_trace_enabled() && residual) {
     // Audit BEFORE observe_images learns this direction. Afterwards coarse
     // exactness would make the inverse test tautological on its new samples.
     // This is diagnostic-only: reuse Lq, add one inverse/metric action, never
@@ -176,7 +176,7 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
     const Eigen::VectorXd error_metric = problem_.apply_metric(error);
     const double squared = error.dot(error_metric);
     const double q_squared = direction.dot(metric_image);
-    diagnostics::neo_trace("ciah_unlearned_inverse",
+    diagnostics::ciah_trace("ciah_unlearned_inverse",
         "basis=%d,shift=%.17g,relative_physical_error=%.17g,error_euclidean=%.17g,complement_euclidean=%.17g,curvature=%.17g,seconds=%.17g",
         basis_size()+1,shift,std::sqrt(std::max(0.0,squared)/q_squared),
         error.norm(),complement.norm(),direction.dot(shifted_image),
@@ -189,13 +189,13 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
     const double metric_squared = direction.dot(metric_image);
     const double work = residual->dot(direction);
     const double curvature = direction.dot(hessian_image) - shift * metric_squared;
-    diagnostics::neo_trace("ciah_expansion_geometry",
+    diagnostics::ciah_trace("ciah_expansion_geometry",
         "basis=%d,residual_coordinate_norm=%.17g,coordinate_cosine=%.17g,metric_squared=%.17g,shifted_curvature=%.17g,physical_rayleigh=%.17g,remaining_fraction_estimate=%.17g",
         basis_size()+1,residual_norm,
         work/(residual_norm*direction.norm()),metric_squared,
         curvature,curvature/metric_squared,norm/initial_norm);
   }
-  if (trace) diagnostics::neo_trace("ciah_expansion_cost",
+  if (trace) diagnostics::ciah_trace("ciah_expansion_cost",
       "basis=%d,remaining_fraction=%.17g,orthogonalize_seconds=%.17g,metric_seconds=%.17g,hvp_seconds=%.17g",
       basis_size()+1, norm/initial_norm,
       std::chrono::duration<double>(metric_start-start).count(),
@@ -223,7 +223,7 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
   basis_squared_norm_ += basis_[j].squaredNorm();
   hessian_squared_norm_ += hessian_images_[j].squaredNorm();
   metric_squared_norm_ += metric_images_[j].squaredNorm();
-  if (trace) diagnostics::neo_trace("ciah_projection_update_cost",
+  if (trace) diagnostics::ciah_trace("ciah_projection_update_cost",
       "basis=%d,seconds=%.17g", basis_size(),
       std::chrono::duration<double>(std::chrono::steady_clock::now()-projection_start).count());
   return true;
@@ -397,7 +397,7 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   }
   pending_residual_.reset();
 
-  const bool trace = diagnostics::neo_event_trace_enabled();
+  const bool trace = diagnostics::ciah_event_trace_enabled();
   const auto projection_start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   const Eigen::Index m = basis_size();
@@ -491,7 +491,7 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
     Eigen::VectorXd projected_residual(m);
     for (Eigen::Index i = 0; i < m; ++i)
       projected_residual[i] = basis_[i].dot(result.residual);
-    diagnostics::neo_trace("ciah_ritz_cost",
+    diagnostics::ciah_trace("ciah_ritz_cost",
       "basis=%d,projection_seconds=%.17g,spectrum_image_seconds=%.17g,norm_seconds=%.17g,gradient_euclidean=%.17g,residual_euclidean=%.17g,galerkin_residual=%.17g",
       basis_size(), std::chrono::duration<double>(spectrum_start - projection_start).count(),
       std::chrono::duration<double>(norm_start - spectrum_start).count(),

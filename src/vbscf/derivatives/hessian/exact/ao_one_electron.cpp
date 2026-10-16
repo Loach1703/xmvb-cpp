@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/integrals/ao/contracts/input.hpp"
 #include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
 #include "vbscf/integrals/active/two_electron/response/adjoint.hpp"

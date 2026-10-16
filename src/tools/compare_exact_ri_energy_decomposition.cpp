@@ -6,7 +6,7 @@
 
 #include <Eigen/Core>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
@@ -50,7 +50,7 @@ double evaluate_active_eigenvalue(
       packed_active_eri,
       input.structure_data.n_structures);
 
-  xmvb::core::GeneralizedEigensolver generalized_eigensolver;
+  xmvb::linalg::GeneralizedEigensolver generalized_eigensolver;
   const auto eigen_result = generalized_eigensolver.solve_dense(
       structure_matrices.hamiltonian_matrix,
       structure_matrices.overlap_matrix,

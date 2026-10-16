@@ -247,17 +247,17 @@ void apply_ctrl_assignment(
       return;
     }
     if (iscf == 8) {
-      metadata->scf_optimizer = InputScfOptimizer::BlockLbfgs;
+      metadata->scf_optimizer = InputScfOptimizer::Plbfgs;
       return;
     }
     if (iscf == 9) {
-      metadata->scf_optimizer = InputScfOptimizer::Neo;
+      metadata->scf_optimizer = InputScfOptimizer::Ciah;
       return;
     }
     throw std::invalid_argument(
         "unsupported ISCF value " + raw_value +
         "; use ISCF=5 for XMVB L-BFGS, ISCF=7 for TNHVP, or "
-        "ISCF=8 for block-LBFGS, or ISCF=9 for NEO");
+        "ISCF=8 for P-LBFGS, or ISCF=9 for CIAH");
   }
   if (key == "EIGENSOLVER") {
     if (value_upper == "DAVIDSON") {

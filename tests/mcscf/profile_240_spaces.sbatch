@@ -54,8 +54,8 @@ for mode in native phases; do
   unset XMVB_PHASE_TIMING
   if [[ $mode == phases ]]; then export XMVB_PHASE_TIMING=1; fi
   /usr/bin/time -v -o resource.time "$AUDIT_BUNDLE/xmvb-cpp.exe" input.xmi \
-   --optimizer-backend neo --eigensolver davidson --orbital-preconditioner hessian-diagonal \
-   --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --neo-trace neo.tsv > output.out 2> run.err
+   --optimizer-backend ciah --eigensolver davidson --orbital-preconditioner hessian-diagonal \
+   --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --ciah-trace neo.tsv > output.out 2> run.err
  done
 done
 unset XMVB_PHASE_TIMING
@@ -68,7 +68,7 @@ fi
 if [[ $available == 1 ]]; then
  cd "$AUDIT_ROOT/phases/ion03"
  perf record -o "$AUDIT_ROOT/perf.data" -F 199 -e cpu-clock:u --call-graph fp -- \
-  "$AUDIT_BUNDLE/xmvb-cpp.exe" input.xmi --optimizer-backend neo --eigensolver davidson \
+  "$AUDIT_BUNDLE/xmvb-cpp.exe" input.xmi --optimizer-backend ciah --eigensolver davidson \
   --orbital-preconditioner hessian-diagonal --gradient-tolerance 1e-3 --energy-tolerance 1e-7 \
   > "$AUDIT_ROOT/capture.out" 2> "$AUDIT_ROOT/capture.err"
  perf report -i "$AUDIT_ROOT/perf.data" --stdio --children > "$AUDIT_ROOT/perf-report.txt"

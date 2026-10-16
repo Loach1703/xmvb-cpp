@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
 #include "vbscf/core/storage/eigen.hpp"
@@ -230,7 +230,7 @@ double evaluate_total_energy_from_auxiliary(
       active_space_two_electron_result.packed_active_two_electron_integrals,
       input.structure_data.n_structures);
 
-  xmvb::core::GeneralizedEigensolver generalized_eigensolver;
+  xmvb::linalg::GeneralizedEigensolver generalized_eigensolver;
   const auto eigen_result = generalized_eigensolver.solve_dense(
       structure_matrices.hamiltonian_matrix,
       structure_matrices.overlap_matrix,

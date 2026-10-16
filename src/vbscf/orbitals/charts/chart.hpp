@@ -29,7 +29,7 @@ class RawTangentMetric;
  */
 class OrbitalChart {
 public:
-  /** @brief NEO uses Unwhitened; existing TN/L-BFGS charts use Whitened. */
+  /** @brief CIAH uses Unwhitened; existing TN/L-BFGS charts use Whitened. */
   enum class Coordinates { Whitened, Unwhitened };
   /** @brief Positive blocks for TN/L-BFGS, or signed AH inverse only. */
   enum class CurvatureUse { PositiveBlock, AugmentedHessian };
@@ -209,7 +209,7 @@ private:
     std::vector<int> flat_indices;
     std::vector<int> packed_indices;
     std::vector<int> block_rows;
-    // S-horizontal representative of the support-admissible quotient. NEO
+    // S-horizontal representative of the support-admissible quotient. CIAH
     // leaves its AO coordinate metric explicit; TN/L-BFGS normalize it.
     Eigen::MatrixXd tangent_basis;
     // Inverse of L^T S_local L. Vectors use this with L^T S_local;

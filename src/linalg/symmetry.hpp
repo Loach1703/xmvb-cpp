@@ -4,7 +4,7 @@
 
 #include <Eigen/Core>
 
-namespace xmvb::mcscf::neo_detail {
+namespace xmvb::linalg {
 
 /**
  * @brief Frobenius roundoff bound for the skew of Q^T Y.
@@ -31,4 +31,4 @@ inline double projection_skew_roundoff(
   return error.stableNorm();
 }
 
-}  // namespace xmvb::mcscf::neo_detail
+}  // namespace xmvb::linalg

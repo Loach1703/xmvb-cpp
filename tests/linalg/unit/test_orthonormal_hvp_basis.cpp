@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "mcscf/optimization/krylov/orthonormal_basis.hpp"
+#include "linalg/orthonormal_basis.hpp"
 
 namespace {
 void require(bool condition, const char* message) {
@@ -46,7 +46,7 @@ int main() {
       // Highly dependent directions with widely different raw amplitudes.
       candidate *= std::pow(10.0, j % 2 == 0 ? 80.0 : -80.0);
       Eigen::VectorXd image;
-      require(xmvb::mcscf::append_orthonormal_hvp_direction(
+      require(xmvb::linalg::append_orthonormal_hvp_direction(
                   candidate, action, &basis, &images, &image),
               "independent direction was rejected");
       const Eigen::VectorXd reference = h * candidate;
@@ -69,10 +69,10 @@ int main() {
             "projected Hessian lost symmetry");
 
     Eigen::VectorXd image;
-    require(!xmvb::mcscf::append_orthonormal_hvp_direction(
+    require(!xmvb::linalg::append_orthonormal_hvp_direction(
                 7.0 * basis.front(), action, &basis, &images, &image),
             "dependent direction was admitted");
-    require(!xmvb::mcscf::append_orthonormal_hvp_direction(
+    require(!xmvb::linalg::append_orthonormal_hvp_direction(
                 Eigen::VectorXd::Zero(dimension), action,
                 &basis, &images, &image),
             "zero direction was admitted");
@@ -89,7 +89,7 @@ int main() {
     block_candidates.col(3) = directions.col(11);
     int block_calls = 0;
     int block_width = 0;
-    const int admitted = xmvb::mcscf::append_orthonormal_hvp_block(
+    const int admitted = xmvb::linalg::append_orthonormal_hvp_block(
         block_candidates,
         [&](const Eigen::Ref<const Eigen::MatrixXd>& q_block) {
           ++block_calls;
