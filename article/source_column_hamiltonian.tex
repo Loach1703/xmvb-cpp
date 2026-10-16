@@ -1688,6 +1688,84 @@ Independent spin-dependent orbital maps also use that order, since
 Eq.~\eqref{eq:cross-moment-adjoint} combines the two spins only for a
 common spatial chart. Neither schedule changes the selected VB space.
 
+\subsection{One final beta adjoint for image jets}
+\label{sec:final-beta-adjoint}
+
+Let $Z$ be an orthogonal spin-string Hamiltonian or overlap image with
+$A$ alpha rows and $B$ beta columns. Its selected-space projection is
+\begin{equation}
+ \mathcal P(Z)=\Wa\Tr\operatorname{vec}(T_\alpha\Tr ZT_\beta).
+ \label{eq:image-projection}
+\end{equation}
+Here $\operatorname{vec}$ denotes the same fixed product ordering as the
+structure expansion. Its directional derivative is
+\begin{align}
+ \delta\mathcal P
+ &=\Wa\Tr\operatorname{vec}(P T_\beta+Q\,\delta T_\beta),\\
+ P&=T_\alpha\Tr\delta Z+(\delta T_\alpha)\Tr Z,
+ \qquad Q=T_\alpha\Tr Z.
+ \label{eq:image-projection-jet}
+\end{align}
+These equations allow all alpha-pulled column contributions to accumulate
+before applying the beta adjoint. An ordinary image contributes to $P$;
+a left-representation derivative contributes to both $P$ and $Q$.
+One ordered directional exterior sweep then returns
+$P T_\beta+Q\delta T_\beta$, after which the structure incidences are
+contracted once. The rule applies independently to each requested image,
+including the separate integral and representation forcing diagnostics.
+It does not assume that the selected structure space closes under $T$.
+
+The source-panel alternative samples the transformed beta columns at the
+original touched products. Over all output panels of width $t$, this takes
+$O(|\Omega|B)$ beta reconstruction work, since $B/t$ panels each evaluate
+length-$t$ dots at $|\Omega|$ products. For broad support this is $O(AB^2)$.
+The final elementary exterior adjoint instead requires
+$O(n_{\rm act}^2 AB)$ work plus the structure incidence contraction.
+The older bounded group accumulator already avoids repeated incidence
+scans when resident; the reduction here concerns beta reconstruction,
+not an assertion that it always rescanned every structure per output tile.
+
+This contraction order uses one shared $A\times B$ array per ordinary
+target and two per directional target. It replaces, rather than supplements,
+the group-projection payload and is admitted only when all target arrays fit
+its existing workspace quarter. Numerical residency and tile width are not
+increased. Narrow support or larger jets retain the exact bounded panel
+schedule. Integral sigma and adjoint sweeps, state weights and their
+spin-exchange multiplicities are unchanged; no approximate derivative or
+modified optimization tolerance is introduced.
+
+\subsection{Generated input jets without beta-row reconstruction}
+
+The input side admits the same ordering reduction. Reshape $\Wa c$ into
+$X\in\mathbb R^{A\times B}$ and an independent coefficient direction
+$\Wa q$ into $\delta X$. Then
+\begin{align}
+ Y&=T_\alpha X T_\beta\Tr,\\
+ \delta Y&=(\delta T_\alpha)X T_\beta\Tr
+       +T_\alpha\delta X T_\beta\Tr
+       +T_\alpha X(\delta T_\beta)\Tr.
+ \label{eq:input-exterior-jet}
+\end{align}
+Apply the ordered elementary exterior jet first on the alpha side, then
+on the beta side, to evaluate these expressions in two shared arrays.
+Generated sigma readers borrow their columns directly; they do not build
+another copy of each requested panel. The cost is
+$O(\operatorname{nnz}\Wa+n_{\rm act}^2 AB)$ instead of rebuilding every
+input beta panel in $O(|\Omega|B)$ work. For a coefficient-only direction
+with accepted $Y$ already available, only $\delta X$ is transformed;
+the accepted primal and residual panels remain shared with all consumers.
+For orbital directions the primal needed by the ordered jet is discarded
+after the derivative is formed when accepted panels already own $Y$.
+
+The identity $\delta Y=\hat E(\delta R R^{-1})Y$ for a pure orbital
+direction is algebraically equivalent. The implementation uses
+Eq.~\eqref{eq:input-exterior-jet}, not an additional orbital inverse, so
+no new inverse-conditioned cancellation is introduced into the derivative.
+Its one or two arrays replace the original input-panel payload inside the
+same workspace quarter. Narrow support and arrays exceeding that budget
+use the existing exact generated-panel order. No assumption about closure
+of the selected structure space or any amplitude cutoff is needed.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};

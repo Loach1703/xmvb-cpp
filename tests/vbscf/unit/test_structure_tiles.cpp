@@ -823,6 +823,96 @@ void check_product_response(int parity,bool unequal) {
   }
 }
 
+/** @brief Broad selected support: one final projection, independent of closure. */
+void check_broad_product_projection(bool unequal) {
+  const auto fixture=unequal ? make_fixture(5,2,1):make_fixture(4,2,2);
+  Terms terms;
+  Strings alpha,beta;
+  for (int a=0;a<static_cast<int>(fixture.alpha.size());++a)
+    for (int b=0;b<static_cast<int>(fixture.beta.size());++b) {
+      alpha.push_back(fixture.alpha[a]); beta.push_back(fixture.beta[b]);
+      terms.push_back({{0,0.1*std::sin(a+2*b+1)},
+                       {1,0.2*std::cos(2*a+b+1)},
+                       {2,0.15*std::sin(3*a+b+2)}});
+    }
+  const auto cache=topology(fixture,alpha,beta);
+  const auto build=[&](const Fixture& f) {
+    return xmvb::vb::StructureAction(terms,3,cache,f.overlap,f.one_electron,
+        f.two_electron,f.n,nullptr,xmvb::vb::StructureActionMode::ActionOnly);
+  };
+  const auto action=build(fixture);
+  const Eigen::MatrixXd c=test_vectors(3,2),q=0.02*c.array().cos().matrix();
+  auto wide=action.prepare_active_adjoint(c,{0.4,0.6},{-1.1,-0.7});
+  wide.source_factors=false;
+  wide.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
+  auto narrow=wide;
+  narrow.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
+  narrow.product_images->budget=128;
+  const auto response=action.apply_response(wide,q);
+  check_images(response.images,reference_images(fixture,terms,alpha,beta,q));
+  check_images(response.images,action.apply_response(narrow,q).images);
+  require(response.images.tiles.structure_projections==2*c.cols(),
+          "broad response repeated its final structure projection");
+  const Eigen::MatrixXd ds=0.001*Eigen::MatrixXd::Ones(fixture.n,fixture.n);
+  const Eigen::MatrixXd dh=-0.002*Eigen::MatrixXd::Identity(fixture.n,fixture.n);
+  const std::vector<double> overlap(ds.data(),ds.data()+ds.size());
+  const std::vector<double> one(dh.data(),dh.data()+dh.size());
+  const std::vector<double> two(fixture.two_electron.packed_active_two_electron_integrals.size(),0.0001);
+  xmvb::vb::StructureIntegralDirection dw,dn;
+  dw.capture_connection=dn.capture_connection=true;
+  const auto image=action.apply_integral_direction(wide,overlap,one,two,&dw);
+  check_images(image,action.apply_integral_direction(narrow,overlap,one,two,&dn));
+  require(image.tiles.structure_projections==5*c.cols(),
+          "broad orbital jet repeated its final structure projection");
+  require((dw.generator_direction-dn.generator_direction).norm()<3e-11 &&
+          (dw.connection->integral_forcing-dn.connection->integral_forcing).norm()<3e-11 &&
+          (dw.connection->representation_forcing-dn.connection->representation_forcing).norm()<3e-11 &&
+          (dw.connection->overlap-dn.connection->overlap).norm()<3e-11,
+          "one final beta adjoint changed the generator or connection jet");
+  // Independently populate immutable accepted Y/(H-E)Y panels. This exercises
+  // accepted-state jet reuse without generating it through the implementation.
+  const auto oracle=explicit_product_state(fixture,cache,action,wide);
+  auto resident=wide;
+  resident.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
+  resident.product_images->extent=fixture.beta.size();
+  resident.product_images->states.resize(c.cols());
+  for (int s=0;s<c.cols();++s) {
+    auto pattern=std::make_shared<xmvb::vb::detail::ColumnPattern>();
+    pattern->full=true; pattern->offsets.resize(fixture.beta.size()+1);
+    for (int b=0;b<=static_cast<int>(fixture.beta.size());++b)
+      pattern->offsets[b]=b*fixture.alpha.size();
+    Eigen::MatrixXd values(oracle.orthogonal_coefficients[s].size(),2);
+    values.col(0)=Eigen::Map<const Eigen::VectorXd>(
+        oracle.orthogonal_coefficients[s].data(),values.rows());
+    values.col(1)=Eigen::Map<const Eigen::VectorXd>(oracle.residuals[s].data(),values.rows());
+    resident.product_images->states[s].push_back({pattern,std::move(values)});
+    resident.product_images->bytes+=resident.product_images->states[s][0].bytes();
+  }
+  xmvb::vb::StructureIntegralDirection dcached;
+  dcached.capture_connection=true;
+  const auto cached_image=action.apply_integral_direction(resident,overlap,one,two,&dcached);
+  check_images(cached_image,image);
+  require((dcached.generator_direction-dw.generator_direction).norm()<3e-11 &&
+          (dcached.connection->representation_forcing-dw.connection->representation_forcing).norm()<3e-11 &&
+          (dcached.connection->overlap-dw.connection->overlap).norm()<3e-11 &&
+          (dcached.connection->squared_norm-dw.connection->squared_norm).norm()<3e-11 &&
+          cached_image.tiles.input_resident_bytes<=resident.product_images->budget,
+          "accepted-state jet reuse changed the derivative or exceeded its shared input budget");
+  constexpr double step=2e-5;
+  const auto shifted=[&](double scale) {
+    auto f=fixture;
+    for (int i=0;i<ds.size();++i) f.overlap[i]+=scale*ds.data()[i];
+    f.one_electron+=scale*dh;
+    for (int i=0;i<static_cast<int>(two.size());++i)
+      f.two_electron.packed_active_two_electron_integrals[i]+=scale*two[i];
+    return build(f).apply(c);
+  };
+  const auto plus=shifted(step),minus=shifted(-step);
+  require(((plus.hamiltonian-minus.hamiltonian)/(2*step)-image.hamiltonian).norm()<2e-7 &&
+          ((plus.overlap-minus.overlap)/(2*step)-image.overlap).norm()<2e-7,
+          "broad orbital jet disagrees with independent H/M differences");
+}
+
 /** @brief Production accepted gradient keeps the nonstationary carrier term. */
 void check_factor_accepted_gradient(bool sparse = false) {
   const int n = sparse ? 5 : 8;
@@ -2562,6 +2652,8 @@ int main(int argc, char** argv) {
       check_factor_structure_response(0,true);
       for (int parity:{0,1,-1}) check_product_response(parity,false);
       check_product_response(0,true);
+      check_broad_product_projection(false);
+      check_broad_product_projection(true);
       check_factor_accepted_gradient();
       check_factor_accepted_gradient(true);
       check_factor_state_average();
