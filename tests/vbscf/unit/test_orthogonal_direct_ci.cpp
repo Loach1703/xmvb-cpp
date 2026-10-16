@@ -1848,6 +1848,162 @@ void check_distinct_spin_sigma_action() {
   }
 }
 
+void check_streamed_generator_adjoint_requests() {
+  constexpr int n_orbitals = 4;
+  const auto alpha = complete_space(n_orbitals, 1);
+  const auto beta = complete_space(n_orbitals, 2);
+  const int n_alpha = static_cast<int>(alpha.size());
+  const int n_beta = static_cast<int>(beta.size());
+  constexpr int first = 2;
+  constexpr int count = 3;
+  xmvb::vb::OrthogonalActiveIntegrals integrals;
+  integrals.one_electron = Eigen::MatrixXd::Zero(n_orbitals, n_orbitals);
+  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  integrals.pair_kernel = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
+  const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
+
+  Eigen::MatrixXd left(n_alpha, count), right_a(n_alpha, n_beta),
+      right_b(n_alpha, n_beta);
+  for (int b = 0; b < n_beta; ++b)
+    for (int a = 0; a < n_alpha; ++a) {
+      right_a(a, b) = (b == n_beta - 1 || (a + b) % 3 == 0)
+          ? 0.0 : std::sin(0.31 * (a + 1) * (b + 2));
+      right_b(a, b) = std::cos(0.19 * (a + 2) * (b + 1));
+    }
+  for (int b = 0; b < count; ++b)
+    for (int a = 0; a < n_alpha; ++a)
+      left(a, b) = (a == 1 && b == 1) ? 0.0 :
+          std::sin(0.27 * (a + 2) * (b + 1));
+
+  // Both readers borrow this storage. Every tile or column request overwrites
+  // it, including requests belonging to the other right argument.
+  std::vector<double> borrowed_values(n_alpha);
+  std::vector<int> borrowed_rows;
+  const auto request = [&](const Eigen::MatrixXd& right, double scale,
+                           bool transpose, bool compact)
+      -> xmvb::mcscf::DirectCiStreamedGeneratorRequest {
+    const Eigen::MatrixXd* carrier = &right;
+    xmvb::mcscf::DirectCiTileReader read =
+        [&, carrier](const std::vector<int>& betas,
+                     const std::vector<int>& rows,
+                     Eigen::Ref<Eigen::MatrixXd> values) {
+          borrowed_values.assign(n_alpha, -97.0);
+          borrowed_rows.clear();
+          for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+            for (int a = 0; a < static_cast<int>(rows.size()); ++a)
+              values(a, b) = (*carrier)(rows[a], betas[b]);
+        };
+    xmvb::mcscf::DirectCiColumnReader column =
+        [&, carrier, compact](int beta_column)
+            -> xmvb::mcscf::DirectCiColumnView {
+          borrowed_values.assign(n_alpha, -97.0);
+          borrowed_rows.clear();
+          if (compact) {
+            int used = 0;
+            for (int a = 0; a < n_alpha; ++a)
+              if ((*carrier)(a, beta_column) != 0.0) {
+                borrowed_rows.push_back(a);
+                borrowed_values[used++] = (*carrier)(a, beta_column);
+              }
+            return {borrowed_values.data(), borrowed_rows.data(), used};
+          }
+          for (int a = 0; a < n_alpha; ++a)
+            borrowed_values[a] = (*carrier)(a, beta_column);
+          return {borrowed_values.data(), nullptr, n_alpha};
+        };
+    return {read, column, scale, transpose, false};
+  };
+
+  constexpr double scale_a = -0.37;
+  constexpr double scale_b = 0.61;
+  Eigen::MatrixXd padded_left = Eigen::MatrixXd::Zero(n_alpha, n_beta);
+  padded_left.middleCols(first, count) = left;
+  const Eigen::MatrixXd expected_full =
+      scale_a * action.one_body_generator_adjoint(padded_left, right_a) +
+      scale_b * action.one_body_generator_adjoint(padded_left, right_b).transpose();
+  Eigen::MatrixXd expected_upper = expected_full;
+  expected_upper.triangularView<Eigen::StrictlyLower>().setZero();
+  const Eigen::MatrixXd columns_upper = action.generator_adjoint_columns(
+      first, count, left,
+      {{right_a, scale_a, false}, {right_b, scale_b, true}}, true);
+  require((columns_upper - expected_upper).norm() < 2e-12,
+          "column-panel generator reference differs from the full adjoint");
+  const auto streamed = [&](const Eigen::MatrixXd& panel, bool symmetric_sum) {
+    return action.generator_adjoint_streamed(first, panel,
+        {request(right_a, scale_a, false, true),
+         request(right_b, scale_b, true, false)}, symmetric_sum);
+  };
+  require((streamed(left, false) - expected_upper).norm() < 2e-12,
+          "fused streamed generator differs from oriented upper adjoints");
+  Eigen::MatrixXd expected_symmetric =
+      (expected_full + expected_full.transpose()).eval();
+  expected_symmetric.triangularView<Eigen::StrictlyLower>().setZero();
+  require((streamed(left, true) - expected_symmetric).norm() < 2e-12,
+          "fused streamed generator symmetric sum differs from full adjoints");
+  const Eigen::MatrixXd zero = Eigen::MatrixXd::Zero(n_alpha, count);
+  require(streamed(zero, false).cwiseAbs().maxCoeff() == 0.0 &&
+              streamed(zero, true).cwiseAbs().maxCoeff() == 0.0,
+          "zero streamed generator panel produced a nonzero adjoint");
+
+  // Retained columns own fixed storage for the entire contraction. The first
+  // right argument uses sparse sorted rows; the second borrows dense Eigen
+  // columns directly. Neither reader changes a returned column or row list.
+  std::vector<std::vector<double>> retained_values(n_beta);
+  std::vector<std::vector<int>> retained_rows(n_beta);
+  for (int b = 0; b < n_beta; ++b)
+    for (int a = 0; a < n_alpha; ++a)
+      if (right_a(a, b) != 0.0) {
+        retained_rows[b].push_back(a);
+        retained_values[b].push_back(right_a(a, b));
+      }
+  const auto retained_request = [&](const Eigen::MatrixXd& right, double scale,
+                                    bool transpose, bool compact)
+      -> xmvb::mcscf::DirectCiStreamedGeneratorRequest {
+    const Eigen::MatrixXd* carrier = &right;
+    xmvb::mcscf::DirectCiTileReader read =
+        [carrier](const std::vector<int>& betas,
+                  const std::vector<int>& rows,
+                  Eigen::Ref<Eigen::MatrixXd> values) {
+          for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+            for (int a = 0; a < static_cast<int>(rows.size()); ++a)
+              values(a, b) = (*carrier)(rows[a], betas[b]);
+        };
+    xmvb::mcscf::DirectCiColumnReader column =
+        [&, carrier, compact](int b) -> xmvb::mcscf::DirectCiColumnView {
+          if (compact)
+            return {retained_values[b].data(), retained_rows[b].data(),
+                    static_cast<int>(retained_values[b].size())};
+          return {carrier->col(b).data(), nullptr, n_alpha};
+        };
+    return {read, column, scale, transpose, true};
+  };
+  const auto retained = [&](bool symmetric_sum) {
+    return action.generator_adjoint_streamed(first, left,
+        {retained_request(right_a, scale_a, false, true),
+         retained_request(right_b, scale_b, true, false)}, symmetric_sum);
+  };
+  require((retained(false) - expected_upper).norm() < 2e-12 &&
+              (retained(true) - expected_symmetric).norm() < 2e-12,
+          "retained streamed columns differ from oriented generator adjoints");
+#ifdef _OPENMP
+  Eigen::MatrixXd nested, nested_retained, nested_retained_symmetric;
+#pragma omp parallel num_threads(2)
+  {
+#pragma omp single
+    {
+      nested = streamed(left, true);
+      nested_retained = retained(false);
+      nested_retained_symmetric = retained(true);
+    }
+  }
+  require((nested - expected_symmetric).norm() < 2e-12,
+          "streamed generator differs inside an existing OpenMP team");
+  require((nested_retained - expected_upper).norm() < 2e-12 &&
+              (nested_retained_symmetric - expected_symmetric).norm() < 2e-12,
+          "retained streamed columns differ inside an existing OpenMP team");
+#endif
+}
+
 void check_demand_driven_structure_diagonal() {
   // Put one demanded pair in the first cell of a unique-spin space larger
   // than the forward matrix tile. A tile-backed diagonal lookup would evaluate
@@ -2291,6 +2447,7 @@ int main(int argc, char** argv) {
     check_sigma_action();
     check_sigma_tile_boundary();
     check_distinct_spin_sigma_action();
+    check_streamed_generator_adjoint_requests();
     check_fused_spin_sectors();
     check_exchange_adjoint();
     check_demand_driven_structure_diagonal();

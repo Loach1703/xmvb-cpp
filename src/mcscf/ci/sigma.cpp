@@ -860,69 +860,168 @@ Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_columns(
 }
 
 Eigen::MatrixXd DirectCiSigmaAction::generator_adjoint_streamed(int first,
-    const Eigen::Ref<const Eigen::MatrixXd>& left,const DirectCiTileReader& read,
-    const DirectCiColumnReader& column,bool symmetric_sum) const {
+    const Eigen::Ref<const Eigen::MatrixXd>& left,
+    std::initializer_list<DirectCiStreamedGeneratorRequest> requests,
+    bool symmetric_sum) const {
   profiling::ScopedPhase phase(profiling::Phase::CiGeneratorAdjoint);
-  const int cols=left.cols();
-  if (first<0 || cols<=0 || first+cols>n_beta_ || left.rows()!=n_alpha_)
+  const Eigen::Index cols=left.cols();
+  if (first<0 || cols<=0 || cols>n_beta_ || first>n_beta_-cols ||
+      left.rows()!=n_alpha_ || requests.size()==0)
     throw std::invalid_argument("invalid streamed generator panel");
-  std::vector<int> rows(n_alpha_),betas(cols);
+  for (const auto& request:requests)
+    if (!request.read || !request.column || !std::isfinite(request.scale))
+      throw std::invalid_argument("invalid streamed generator request");
+
+  // The caller already supplies a bounded panel. Reuse its width for both
+  // generated rows and spectator batches instead of fragmenting it again.
+  // All requests share the team; no worker owns a numerical panel copy.
+  const int tile_width=static_cast<int>(cols);
+  const int n_requests=static_cast<int>(requests.size());
+  const bool retained=std::all_of(requests.begin(),requests.end(),
+      [](const DirectCiStreamedGeneratorRequest& request) { return request.retained_columns; });
+  const int spectator_width=retained ? n_beta_:tile_width;
+  std::vector<int> rows(n_alpha_);
   std::iota(rows.begin(),rows.end(),0);
-  std::iota(betas.begin(),betas.end(),first);
-  Eigen::MatrixXd values(n_alpha_,cols);
-  read(betas,rows,values);
-  const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),
-      static_cast<std::size_t>(n_alpha_)*cols);
-  std::vector<Eigen::MatrixXd> partials(workers,Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_));
-  // Stay in the existing sigma team. A nested parallel region serializes
-  // this contraction when OMP_MAX_ACTIVE_LEVELS=1.
-  cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
-    auto& density=partials[part];
-    for (int a=n_alpha_*part/workers;a<n_alpha_*(part+1)/workers;++a) {
-      if ((left.row(a).array()==0.0).all()) continue;
-      const double diagonal=left.row(a).dot(values.row(a));
-      for (const int p:alpha_->occupied(a)) density(p,p)+=diagonal;
-      for (const auto& link:alpha_->singles(a))
-        if (symmetric_sum || link.created<=link.annihilated)
-          density(link.created,link.annihilated)+=link.sign*
-              left.row(a).dot(values.row(link.source));
-    }
-  });
-  Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_);
+  std::size_t beta_work=0;
   const auto& graph=beta_connections();
-  struct Event { int source,local,p,q; double sign; };
+  for (int b=0;b<cols;++b)
+    beta_work+=graph.singles(first+b).size();
+  const int workers=coarse_openmp_thread_count(
+      cooperative_openmp_thread_count(),
+      static_cast<std::size_t>(n_alpha_)*cols+beta_work);
+  std::vector<Eigen::MatrixXd> partials(workers,Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_));
+  std::vector<Eigen::MatrixXd> values(n_requests);
+  struct Event { int source,local,p,q,slot; double sign; };
   std::vector<Event> events;
-  for (int b=0;b<cols;++b) {
-    if ((left.col(b).array()==0.0).all()) continue;
-    const double diagonal=left.col(b).dot(values.col(b));
-    for (const int p:graph.occupied(first+b))
-      result(p,p)+=diagonal;
-    for (const auto& link:graph.singles(first+b))
-      if (symmetric_sum || link.created<=link.annihilated)
-        events.push_back({link.source,b,link.created,link.annihilated,link.sign});
-  }
-  std::sort(events.begin(),events.end(),[](const Event& a,const Event& b) { return a.source<b.source; });
-  // Borrow spectator columns directly. Copying every neighboring column
-  // into dense slabs repeats an O(U_alpha) read even when it has few entries.
-  // A view is consumed before the next LRU access; it cannot outlive eviction.
-  for (std::size_t begin=0;begin<events.size();) {
-    const int source=events[begin].source;
-    std::size_t end=begin+1;
-    while (end<events.size() && events[end].source==source) ++end;
-    const auto right=column(source);
-    if (right.count==0) { begin=end; continue; }
-    for (auto event=begin;event<end;++event) {
-      const auto& e=events[event];
-      double moment=0;
-      if (right.rows) {
-        const double* target=left.col(e.local).data();
-#pragma omp simd reduction(+:moment)
-        for (int a=0;a<right.count;++a) moment+=target[right.rows[a]]*right.values[a];
-      } else moment=left.col(e.local).dot(Eigen::Map<const Eigen::VectorXd>(right.values,right.count));
-      result(e.p,e.q)+=e.sign*moment;
+  struct OwnedColumn {
+    std::vector<double> values;
+    std::vector<int> rows;
+    DirectCiColumnView view{nullptr,nullptr,0};
+  };
+  std::vector<std::vector<OwnedColumn>> gathered(n_requests,
+      std::vector<OwnedColumn>(spectator_width));
+  std::vector<int> sources(spectator_width);
+
+  for (int offset=0;offset<cols;offset+=tile_width) {
+    const int width=std::min<int>(tile_width,cols-offset);
+    std::vector<int> betas(width);
+    std::iota(betas.begin(),betas.end(),first+offset);
+    for (int r=0;r<n_requests;++r) {
+      values[r].resize(n_alpha_,width);
+      requests.begin()[r].read(betas,rows,values[r]);
     }
-    begin=end;
+    // One metadata traversal serves every generated right argument. Tasks
+    // only read the completed tiles and own their small orbital reductions.
+    const auto alpha_contract=[&](std::ptrdiff_t part) {
+      auto& density=partials[part];
+      for (int a=n_alpha_*part/workers;a<n_alpha_*(part+1)/workers;++a) {
+        if ((left.row(a).segment(offset,width).array()==0.0).all()) continue;
+        double diagonal=0;
+        for (int r=0;r<n_requests;++r)
+          diagonal+=requests.begin()[r].scale*
+              left.row(a).segment(offset,width).dot(values[r].row(a));
+        for (const int p:alpha_->occupied(a)) density(p,p)+=diagonal;
+        for (const auto& link:alpha_->singles(a)) {
+          for (int r=0;r<n_requests;++r) {
+            const auto& request=requests.begin()[r];
+            const int p=request.transpose ? link.annihilated:link.created;
+            const int q=request.transpose ? link.created:link.annihilated;
+            if (!symmetric_sum && p>q) continue;
+            density(p,q)+=request.scale*link.sign*
+                left.row(a).segment(offset,width).dot(values[r].row(link.source));
+          }
+        }
+      }
+    };
+
+    events.clear();
+    for (int local=0;local<width;++local) {
+      const int b=first+offset+local;
+      if ((left.col(offset+local).array()==0.0).all()) continue;
+      double diagonal=0;
+      for (int r=0;r<n_requests;++r)
+        diagonal+=requests.begin()[r].scale*
+            left.col(offset+local).dot(values[r].col(local));
+      for (const int p:graph.occupied(b)) partials[0](p,p)+=diagonal;
+      for (const auto& link:graph.singles(b)) {
+        const bool used=symmetric_sum || std::any_of(requests.begin(),requests.end(),
+            [&](const DirectCiStreamedGeneratorRequest& request) {
+              return request.transpose ? link.annihilated<=link.created:
+                  link.created<=link.annihilated;
+            });
+        if (used) events.push_back({link.source,offset+local,link.created,
+                                   link.annihilated,0,link.sign});
+      }
+    }
+    std::sort(events.begin(),events.end(),[](const Event& a,const Event& b) {
+      return a.source<b.source;
+    });
+    if (events.empty()) cooperative_openmp_for(workers,workers,alpha_contract);
+
+    // Accepted immutable panels need only borrowed view metadata. Transient
+    // LRU views are copied before the next request can evict their owner.
+    // Only the latter need numerical slabs, bounded by the left panel width.
+    for (std::size_t begin=0;begin<events.size();) {
+      std::size_t end=begin;
+      int slots=0;
+      while (end<events.size()) {
+        if (end==begin || events[end].source!=events[end-1].source) {
+          if (slots==spectator_width) break;
+          sources[slots++]=events[end].source;
+        }
+        events[end].slot=slots-1;
+        ++end;
+      }
+      for (int r=0;r<n_requests;++r)
+        for (int slot=0;slot<slots;++slot) {
+          const auto view=requests.begin()[r].column(sources[slot]);
+          if (view.count<0 || view.count>n_alpha_ ||
+              (view.count>0 && (!view.values || (!view.rows && view.count!=n_alpha_))))
+            throw std::invalid_argument("invalid streamed generator spectator");
+          auto& copy=gathered[r][slot];
+          if (requests.begin()[r].retained_columns) { copy.view=view; continue; }
+          copy.values.clear();
+          copy.rows.clear();
+          if (view.count>0) {
+            copy.values.assign(view.values,view.values+view.count);
+            if (view.rows) copy.rows.assign(view.rows,view.rows+view.count);
+          }
+          copy.view={copy.values.data(),view.rows ? copy.rows.data():nullptr,view.count};
+        }
+      cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
+        if (begin==0) alpha_contract(part);
+        auto& density=partials[part];
+        const std::size_t count=end-begin;
+        const std::size_t base=count/workers,extra=count%workers;
+        const std::size_t lo=begin+part*base+std::min<std::size_t>(part,extra);
+        const std::size_t hi=lo+base+(static_cast<std::size_t>(part)<extra);
+        for (std::size_t i=lo;i<hi;++i) {
+          const auto& e=events[i];
+          const double* target=left.col(e.local).data();
+          for (int r=0;r<n_requests;++r) {
+            const auto& request=requests.begin()[r];
+            const int p=request.transpose ? e.q:e.p;
+            const int q=request.transpose ? e.p:e.q;
+            if (!symmetric_sum && p>q) continue;
+            const auto& right=gathered[r][e.slot].view;
+            double moment=0;
+            if (right.rows) {
+#pragma omp simd reduction(+:moment)
+              for (int a=0;a<right.count;++a)
+                moment+=target[right.rows[a]]*right.values[a];
+            } else {
+#pragma omp simd reduction(+:moment)
+              for (int a=0;a<right.count;++a)
+                moment+=target[a]*right.values[a];
+            }
+            density(p,q)+=request.scale*e.sign*moment;
+          }
+        }
+      });
+      begin=end;
+    }
   }
+  Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n_orbitals_,n_orbitals_);
   for (const auto& density:partials) result+=density;
   if (symmetric_sum) {
     result=(result+result.transpose()).eval();

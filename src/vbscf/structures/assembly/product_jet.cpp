@@ -98,8 +98,9 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       Eigen::MatrixXd primal=Eigen::MatrixXd::Zero(n_unique_alpha_,count),dy=primal;
       Eigen::MatrixXd dr;
       if (delta_upper) dr=beta_directions.get(panel).unpack(n_unique_beta_).transpose();
-#pragma omp parallel for schedule(static) if(n_unique_alpha_>32)
-      for (int a=0;a<n_unique_alpha_;++a) {
+      const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),
+          static_cast<std::size_t>(n_unique_alpha_)*count);
+      cooperative_openmp_for(n_unique_alpha_,workers,[&](std::ptrdiff_t a) {
         const auto first_product=mcscf::product_index(a,0,n_unique_beta_);
         auto group=std::lower_bound(spin_products_.begin(),spin_products_.end(),first_product);
         for (;group!=spin_products_.end() && *group<first_product+n_unique_beta_;++group) {
@@ -108,7 +109,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           if (delta_upper) dy.row(a).noalias()+=coefficients[id]*dr.col(b).transpose();
           if (response) dy.row(a).noalias()+=q[id]*rows->col(b).transpose();
         }
-      }
+      });
       if (delta_upper) alpha.apply_directional_left(da,&primal,&dy);
       else {
         if (!cached) {
@@ -133,27 +134,43 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           const std::vector<int>& betas,const std::vector<int>& rows,
           Eigen::Ref<Eigen::MatrixXd> values) mutable {
         for (int a=0;a<static_cast<int>(rows.size());++a) position[rows[a]]=a;
+        const int component=cached ? (family==2 ? 1:0):family;
+        const auto copy_column=[&](int col,const detail::ColumnTile& tile) {
+          const int b=betas[col]%extent;
+          const int first=tile.pattern->offsets[b],last=tile.pattern->offsets[b+1];
+          if (tile.pattern->full) {
+            for (int a=0;a<static_cast<int>(rows.size());++a)
+              values(a,col)=tile.values(first+rows[a],component);
+          } else {
+            values.col(col).setZero();
+            for (int k=first;k<last;++k) {
+              const int a=position[tile.pattern->rows[k]];
+              if (a>=0) values(a,col)=tile.values(k,component);
+            }
+          }
+        };
+        if (cached && family!=1) {
+          // Immutable accepted panels span the entire requested column batch:
+          // use one shared team, not one task launch per source panel.
+          const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),
+              rows.size()*betas.size());
+          cooperative_openmp_for(betas.size(),workers,[&](std::ptrdiff_t col) {
+            const int panel=betas[col]/extent;
+            if (!reachable_mask[panel]) values.col(col).setZero();
+            else copy_column(col,state.product_images->states[state_id][panel]);
+          });
+          for (const int a:rows) position[a]=-1;
+          return;
+        }
         for (int j=0;j<static_cast<int>(betas.size());) {
           const int panel=betas[j]/extent;
           int end=j+1;
           while (end<static_cast<int>(betas.size()) && betas[end]/extent==panel) ++end;
           if (!reachable_mask[panel]) { values.middleCols(j,end-j).setZero(); j=end; continue; }
-          const auto& tile=cached && family==0 ? state.product_images->states[state_id][panel]:input.get(panel);
-          const int component=cached ? 0:family;
+          const auto& tile=input.get(panel);
           const int workers=bounded_openmp_thread_count(cooperative_openmp_thread_count(),end-j);
           cooperative_openmp_for(end-j,workers,[&](std::ptrdiff_t index) {
-            const int col=j+index,b=betas[col]%extent;
-            const int first=tile.pattern->offsets[b],last=tile.pattern->offsets[b+1];
-            if (tile.pattern->full) {
-              for (int a=0;a<static_cast<int>(rows.size());++a)
-                values(a,col)=tile.values(first+rows[a],component);
-            } else {
-              values.col(col).setZero();
-              for (int k=first;k<last;++k) {
-                const int a=position[tile.pattern->rows[k]];
-                if (a>=0) values(a,col)=tile.values(k,component);
-              }
-            }
+            copy_column(j+index,tile);
           });
           j=end;
         }
@@ -164,13 +181,15 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     const auto column=[&](int family) -> mcscf::DirectCiColumnReader {
       return [&,family](int b) -> mcscf::DirectCiColumnView {
         if (!reachable_mask[b/extent]) return {nullptr,nullptr,0};
-        const auto& tile=cached && family==0 ? state.product_images->states[state_id][b/extent]:input.get(b/extent);
+        const auto& tile=cached && family!=1 ? state.product_images->states[state_id][b/extent]:input.get(b/extent);
         const int offset=tile.pattern->offsets[b%extent],last=tile.pattern->offsets[b%extent+1];
-        return {tile.values.col(cached ? 0:family).data()+offset,
+        return {tile.values.col(cached ? (family==2 ? 1:0):family).data()+offset,
             tile.pattern->full ? nullptr:tile.pattern->rows.data()+offset,last-offset};
       };
     };
     const auto y_column=column(0),dy_column=column(tangent ? 1:0);
+    const auto residual_reader=reader(2);
+    const auto residual_column=column(2);
     const mcscf::DirectCiTileReader read=[&](const std::vector<int>& betas,
         const std::vector<int>& rows,Eigen::Ref<Eigen::MatrixXd> values) {
       if (cached) { dy(betas,rows,values); return; }
@@ -193,6 +212,34 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       y(betas,rows,view);
       view*=weight;
     };
+    // C^T is linear: first sum emitted panels in bounded source-group tiles,
+    // then visit the structure incidence once per completed/evicted tile.
+    // Neither the full touched support nor per-thread structure arrays are
+    // required. Diagnostic outputs share the same cache and payload budget.
+    const int projection_count=2+(capture ? 3:0);
+    const auto group_extent=std::max<std::size_t>(1,std::min<std::size_t>(
+        static_cast<std::size_t>(n_unique_alpha_)*extent,
+        cache_bytes/(sizeof(double)*projection_count)));
+    std::vector<double*> projection_targets;
+    detail::ColumnPanels projections(cache_bytes,[&](int block) {
+      const auto begin=static_cast<std::size_t>(block)*group_extent;
+      const auto count=std::min(group_extent,spin_products_.size()-begin);
+      auto pattern=std::make_shared<detail::ColumnPattern>();
+      pattern->full=true; pattern->offsets.resize(2); pattern->offsets<<0,count;
+      return detail::ColumnTile{pattern,Eigen::MatrixXd::Zero(count,projection_count)};
+    },[&](int block,detail::ColumnTile& tile) {
+      const auto begin=static_cast<std::size_t>(block)*group_extent;
+      for (int target=0;target<static_cast<int>(projection_targets.size());++target)
+        for (int local=0;local<tile.values.rows();++local) {
+          const double value=tile.values(local,target);
+          if (value==0.0) continue;
+          const auto g=begin+local;
+          for (auto t=spin_term_offsets_[g];t<spin_term_offsets_[g+1];++t) {
+            const auto& term=spin_terms_[t];
+            projection_targets[target][term.structure]+=term.coefficient*value;
+          }
+        }
+    });
     const auto project=[&](int panel,const Eigen::MatrixXd& image,
         Eigen::Ref<Eigen::VectorXd> target,bool differentiate=false) {
       const int first=panel*extent,count=image.cols();
@@ -205,21 +252,19 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       else alpha.apply_adjoint_left(&values);
       Eigen::MatrixXd dr;
       if (differentiate) dr=beta_directions.get(panel).unpack(n_unique_beta_).transpose();
-      Eigen::VectorXd products(spin_products_.size());
-#pragma omp parallel for schedule(static) if(spin_products_.size()>32)
-      for (int g=0;g<static_cast<int>(spin_products_.size());++g) {
-        const int a=spin_products_[g]/n_unique_beta_,b=spin_products_[g]%n_unique_beta_;
-        products[g]=differentiate ? dvalues.row(a).dot(rows->col(b))+values.row(a).dot(dr.col(b)):
-            values.row(a).dot(rows->col(b));
-      }
-#pragma omp parallel for schedule(static) if(n_structures_>32)
-      for (int s=0;s<n_structures_;++s) {
-        double value=0;
-        for (auto t=structure_term_offsets_[s];t<structure_term_offsets_[s+1];++t) {
-          const auto& term=spin_terms_[structure_term_indices_[t]];
-          value+=term.coefficient*products[term.group];
-        }
-        target[s]+=value;
+      auto found=std::find(projection_targets.begin(),projection_targets.end(),target.data());
+      const int target_id=found-projection_targets.begin();
+      if (found==projection_targets.end()) projection_targets.push_back(target.data());
+      for (std::size_t begin=0;begin<spin_products_.size();begin+=group_extent) {
+        auto& tile=projections.get(begin/group_extent);
+        const auto size=std::min(group_extent,spin_products_.size()-begin);
+        const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),size*count);
+        cooperative_openmp_for(size,workers,[&](std::ptrdiff_t local) {
+          const auto g=begin+local;
+          const int a=spin_products_[g]/n_unique_beta_,b=spin_products_[g]%n_unique_beta_;
+          tile.values(local,target_id)+=differentiate ? dvalues.row(a).dot(rows->col(b))+values.row(a).dot(dr.col(b)):
+              values.row(a).dot(rows->col(b));
+        });
       }
       ++result.images.tiles.structure_projections;
     };
@@ -236,11 +281,12 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         const Eigen::MatrixXd h0=images.leftCols(count);
         if (weight!=0) {
           if (integral || !tangent || cached)
-            result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(first,h0,y,y_column);
+            result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(first,h0,
+                {{y,y_column,1.0,false,cached}});
           else {
-            result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(first,h0,dy,dy_column);
+            result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(first,h0,{{dy,dy_column}});
             result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
-                first,images.rightCols(count),y,y_column);
+                first,images.rightCols(count),{{y,y_column}});
           }
         }
         if (collect_images) {
@@ -312,7 +358,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       result.images.tiles.output_evictions+=output.evictions;
       result.images.tiles.output_resident_bytes=std::max(result.images.tiles.output_resident_bytes,output.peak_bytes);
     };
-    if (cached) {
+    if (cached && collect_images && delta_upper) {
       // Reuse accepted Y/residual panels for all left-direction/backward consumers.
       // No per-HVP replay of the accepted sigma is needed when it is resident.
       const auto& images=state.product_images->states[state_id];
@@ -321,9 +367,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         const Eigen::MatrixXd values=images[panel].unpack(n_unique_alpha_);
         const int count=images[panel].pattern->columns();
         const Eigen::MatrixXd residual=values.rightCols(count);
-        if (weight!=0) result.generator.noalias()+=
-            2*weight*sigma.generator_adjoint_streamed(panel*extent,residual,dy,dy_column);
-        if (collect_images && delta_upper) {
+        {
           const Eigen::MatrixXd h=residual+energy*values.leftCols(count);
           project(panel,h,result.images.hamiltonian.col(state_id),true);
           if (capture) project(panel,h,diagnostic->connection->representation_forcing.col(state_id),true);
@@ -337,14 +381,23 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     for (const int panel:reachable) {
       const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);
       std::vector<int> betas(count); std::iota(betas.begin(),betas.end(),first);
-      Eigen::MatrixXd values(n_unique_alpha_,count),dv;
-      y(betas,all_rows,values);
+      Eigen::MatrixXd values,dv;
+      if (!tangent || delta_upper || capture) {
+        values.resize(n_unique_alpha_,count);
+        y(betas,all_rows,values);
+      }
       if (tangent) { dv.resize(n_unique_alpha_,count); dy(betas,all_rows,dv); }
       if (weight!=0) {
-        if (tangent) result.generator.noalias()-=2*weight*energy*
-            sigma.generator_adjoint_streamed(first,dv,y,y_column,!cached);
+        if (tangent) {
+          // D(R,Z)=D(Z,R)^T: both accepted cotangents share the generated
+          // Z panel and one spin-link traversal, without unpacking R first.
+          if (cached) result.generator.noalias()+=2*weight*sigma.generator_adjoint_streamed(
+              first,dv,{{y,y_column,-energy,false,true},{residual_reader,residual_column,1.0,true,true}});
+          else result.generator.noalias()-=2*weight*energy*
+              sigma.generator_adjoint_streamed(first,dv,{{y,y_column}},true);
+        }
         else {
-          const auto density=sigma.generator_adjoint_streamed(first,values,y,y_column);
+          const auto density=sigma.generator_adjoint_streamed(first,values,{{y,y_column}});
           result.generator.noalias()-=2*weight*energy*density;
           if (states==1 && state.product_images) state.product_images->density+=density;
         }
@@ -361,6 +414,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         norm+=values.squaredNorm(); parallel+=(values.array()*dv.array()).sum(); square+=dv.squaredNorm();
       }
     }
+    projections.finish();
     if (capture) {
       diagnostic->connection->squared_norm[state_id]=square-(norm>0 ? parallel*parallel/norm:0);
       diagnostic->connection->representation_forcing.col(state_id).noalias()-=energy*result.images.overlap.col(state_id);

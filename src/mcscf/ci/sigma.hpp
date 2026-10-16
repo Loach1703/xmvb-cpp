@@ -70,6 +70,20 @@ struct DirectCiGeneratorAdjointRequest {
   bool transpose = false;
 };
 
+/** @brief Generated right argument of a streamed generator contraction.
+ * read fills a requested beta/alpha tile. column borrows one beta spectator;
+ * its storage may be invalidated by the next read or column call, including
+ * a call through another request sharing the same backing cache.
+ */
+struct DirectCiStreamedGeneratorRequest {
+  DirectCiTileReader read;
+  DirectCiColumnReader column;
+  double scale = 1.0;
+  bool transpose = false;
+  /** Column storage and indices remain immutable throughout this call. */
+  bool retained_columns = false;
+};
+
 /**
  * @brief Exact Slater--Condon sigma action in an orthonormal active basis.
  */
@@ -263,15 +277,18 @@ public:
       std::initializer_list<DirectCiGeneratorAdjointRequest> requests,bool upper_only=false) const;
 
   /** @brief Upper orbital cotangent against generated right columns.
-   * Spectator columns are loaded in bounded batches, not a full right carrier.
-   * The reader has one RHS. symmetric_sum returns upper(D+D^T), reusing
-   * the transpose identity instead of traversing the other argument again.
-   * This is the Cholesky pullback, not a replacement
-   * for an oriented full one-body density.
+   * Each request adds scale*D(left,right), or its transpose. The requested
+   * right arguments share the link traversal and use bounded shared beta
+   * tiles and spectator gathers, never a full product carrier. Readers have
+   * one RHS and are called serially. Immutable retained columns are borrowed;
+   * transient views are copied before another read and parallel contraction.
+   * The caller bounds the left panel width. symmetric_sum returns
+   * upper(D+D^T), after all requested orientations and scales. This is the
+   * Cholesky pullback, not an oriented full one-body density.
    */
   Eigen::MatrixXd generator_adjoint_streamed(int beta_begin,
       const Eigen::Ref<const Eigen::MatrixXd>& left,
-      const DirectCiTileReader& right,const DirectCiColumnReader& right_column,
+      std::initializer_list<DirectCiStreamedGeneratorRequest> requests,
       bool symmetric_sum=false) const;
 
   /** @brief Numerical matrices plus referenced links, not exclusively owned bytes. */

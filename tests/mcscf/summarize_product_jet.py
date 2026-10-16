@@ -22,6 +22,8 @@ def main():
     parser.add_argument("run", type=Path)
     parser.add_argument("saved", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--parity", type=Path,
+                        help="separate current-binary complete-carrier accuracy checks")
     args = parser.parse_args()
     history=[]
     for name in ("source_response.csv","source_state_response.csv","link_layout_responses.csv"):
@@ -62,6 +64,17 @@ def main():
             speedup_over_best_saved=float(best["warm_seconds"])/new_time,
             hs_warm_s=float(action["warm_apply_seconds"]),
             hs_rss_mib=int(action["max_rss_kib"])/1024))
+    if args.parity:
+        for row in rows:
+            count=row["structures"]
+            hs=fields(args.parity / f"{count}-selected12-parity.out")
+            response=fields(args.parity / f"{count}-structure-response12-reference.out")
+            if hs["reference_checked"] != "1" or response["reference_checked"] != "1":
+                raise ValueError("requested parity run did not execute its oracle")
+            row.update(hamiltonian_reference_error=float(hs["hamiltonian_reference_error"]),
+                       overlap_reference_error=float(hs["overlap_reference_error"]),
+                       response_image_error=float(response["image_error"]),
+                       response_adjoint_error=float(response["adjoint_error"]))
     save(args.output, rows)
     for row in rows:
         print(row["structures"], "response", row["response_s"], "RSS", row["response_rss_mib"],
