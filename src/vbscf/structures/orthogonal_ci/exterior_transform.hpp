@@ -22,6 +22,15 @@ struct ExteriorProjection {
   std::vector<std::vector<int>> shear_pairs;
 };
 
+/** @brief Borrowed bilinear generator moment and optional directional panels. */
+struct ExteriorGeneratorTerm {
+  const Eigen::MatrixXd& seed;
+  const Eigen::MatrixXd& image;
+  double scale=1.0;
+  const Eigen::MatrixXd* delta_seed=nullptr;
+  const Eigen::MatrixXd* delta_image=nullptr;
+};
+
 /**
  * @brief Exterior-power action of an upper-triangular orbital transform.
  *
@@ -118,6 +127,13 @@ public:
       const Eigen::MatrixXd* delta_seed = nullptr,
       const Eigen::MatrixXd* delta_image = nullptr,
       const Eigen::MatrixXd* delta_upper = nullptr) const;
+  /** @brief Sum bilinear moments before a single upper-chart pullback.
+   * Terms share occupations and shear links, not carrier storage. Independent
+   * upper entries have exclusive owners; only diagonal orbital vectors are
+   * reduced between workers. Both orders of a metric derivative are retained.
+   */
+  Eigen::MatrixXd generator_pullback(std::span<const ExteriorGeneratorTerm> terms,
+      const Eigen::MatrixXd* delta_upper=nullptr) const;
   /** @brief Upper-chart pullback of an already contracted one-body moment. */
   Eigen::MatrixXd moment_pullback(
       const Eigen::Ref<const Eigen::MatrixXd>& moment,

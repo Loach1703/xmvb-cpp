@@ -105,9 +105,16 @@ OverlapTransportGradient StructureAction::cross_overlap_transport_gradient(
       // Z_b for the second term supplies the reference beta pullback.
       auto first=seeds(ub,v);
       auto second=seeds(u,dv);
-      result.charts.left+=ca.generator_pullback(ub,first.left)+
-          cb.generator_pullback(v,first.right)+ca.generator_pullback(u,second.left)+
-          cb.generator_pullback(dv,second.right);
+      const auto metric=seeds(uc,vc);
+      // Linearity permits one link traversal per current-spin chart. Both
+      // metric sides remain: they are different oriented bilinear moments.
+      // All factor panels, including these six seeds, fit the existing 16
+      // (U_alpha+U_beta)-column budget; no product carrier is introduced.
+      const ExteriorGeneratorTerm alpha_terms[]{
+          {ub,first.left},{u,second.left},{uc,metric.left,-1.0},{metric.left,uc,-1.0}};
+      const ExteriorGeneratorTerm beta_terms[]{
+          {v,first.right},{dv,second.right},{vc,metric.right,-1.0},{metric.right,vc,-1.0}};
+      result.charts.left+=ca.generator_pullback(alpha_terms)+cb.generator_pullback(beta_terms);
       result.charts.right+=oa.generator_pullback(first.left,u)+
           ob.generator_pullback(second.right,v);
       oa.apply_adjoint_left(&first.left);
@@ -120,11 +127,6 @@ OverlapTransportGradient StructureAction::cross_overlap_transport_gradient(
           }
         }
     }
-    const auto metric=seeds(uc,vc);
-    // Both derivatives of F_current^T F_current are needed, not just one side.
-    result.charts.left-=ca.generator_pullback(uc,metric.left)+
-        ca.generator_pullback(metric.left,uc)+cb.generator_pullback(vc,metric.right)+
-        cb.generator_pullback(metric.right,vc);
   }
   return result;
 }

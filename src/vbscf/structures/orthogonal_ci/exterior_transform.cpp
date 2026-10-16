@@ -732,38 +732,72 @@ Eigen::MatrixXd ExteriorOrbitalTransform::generator_pullback(
     const Eigen::MatrixXd& seed, const Eigen::MatrixXd& image,
     const Eigen::MatrixXd* delta_seed, const Eigen::MatrixXd* delta_image,
     const Eigen::MatrixXd* delta_upper) const {
+  const ExteriorGeneratorTerm terms[]{{seed,image,1.0,delta_seed,delta_image}};
+  return generator_pullback(terms,delta_upper);
+}
+
+Eigen::MatrixXd ExteriorOrbitalTransform::generator_pullback(
+    std::span<const ExteriorGeneratorTerm> terms,const Eigen::MatrixXd* delta_upper) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiExteriorGeneratorPullback);
   const bool directional = delta_upper != nullptr;
-  if (seed.rows() != image.rows() || seed.cols() != image.cols() ||
-      image.rows() != dimension() ||
-      directional != (delta_seed != nullptr) || directional != (delta_image != nullptr))
-    throw std::invalid_argument("invalid generator pullback panels");
+  if (terms.empty()) throw std::invalid_argument("empty generator pullback terms");
+  std::size_t columns=0;
+  for (const auto& term:terms) {
+    if (term.seed.rows()!=dimension() || term.image.rows()!=dimension() ||
+        term.seed.cols()!=term.image.cols() || !std::isfinite(term.scale) ||
+        directional!=(term.delta_seed!=nullptr) || directional!=(term.delta_image!=nullptr))
+      throw std::invalid_argument("invalid generator pullback panels");
+    if (directional && (term.delta_seed->rows()!=dimension() ||
+        term.delta_image->rows()!=dimension() || term.delta_seed->cols()!=term.seed.cols() ||
+        term.delta_image->cols()!=term.image.cols()))
+      throw std::invalid_argument("invalid directional generator panels");
+    columns+=term.seed.cols();
+  }
   Eigen::MatrixXd g = Eigen::MatrixXd::Zero(n_orbitals_, n_orbitals_);
   Eigen::MatrixXd dg = g;
   const auto contract = [&](int target, int source, bool tangent) -> double {
-    if (tangent) return delta_seed->row(target).dot(image.row(source)) +
-        seed.row(target).dot(delta_image->row(source));
-    return seed.row(target).dot(image.row(source));
+    double value=0;
+    for (const auto& term:terms)
+      value+=term.scale*(tangent ?
+          term.delta_seed->row(target).dot(term.image.row(source))+
+              term.seed.row(target).dot(term.delta_image->row(source)):
+          term.seed.row(target).dot(term.image.row(source)));
+    return value;
   };
-  for (int string = 0; string < dimension(); ++string) {
-    const double value = contract(string, string, false);
-    const double derivative = directional ? contract(string, string, true) : 0.0;
-    for (int orbital = 0; orbital < n_orbitals_; ++orbital)
-      if ((masks_[string] >> orbital) & 1) {
-        g(orbital, orbital) += value;
-        dg(orbital, orbital) += derivative;
+  const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),
+      columns*(static_cast<std::size_t>(dimension())+shear_pair_count()));
+  std::vector<Eigen::MatrixXd> diagonals(workers,
+      Eigen::MatrixXd::Zero(n_orbitals_,directional ? 2:1));
+  cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
+    auto& diagonal=diagonals[part];
+    for (int string=dimension()*part/workers;string<dimension()*(part+1)/workers;++string) {
+      const double value=contract(string,string,false);
+      const double derivative=directional ? contract(string,string,true):0.0;
+      for (int orbital=0;orbital<n_orbitals_;++orbital)
+        if ((masks_[string]>>orbital)&1) {
+          diagonal(orbital,0)+=value;
+          if (directional) diagonal(orbital,1)+=derivative;
+        }
+    }
+    // Every upper generator owns one shear list and one output entry. Unlike
+    // carrier rows, these outputs need neither atomics nor n_orbital^2 copies.
+    int shear=0;
+    for (int removed=1;removed<n_orbitals_;++removed)
+      for (int inserted=removed-1;inserted>=0;--inserted,++shear) {
+        if (shear%workers!=part) continue;
+        double value=0,derivative=0;
+        for (const auto& pair:shears_[shear].pairs) {
+          value+=pair.sign*contract(pair.target,pair.source,false);
+          if (directional) derivative+=pair.sign*contract(pair.target,pair.source,true);
+        }
+        g(inserted,removed)=value;
+        if (directional) dg(inserted,removed)=derivative;
       }
+  });
+  for (const auto& diagonal:diagonals) {
+    g.diagonal()+=diagonal.col(0);
+    if (directional) dg.diagonal()+=diagonal.col(1);
   }
-  // The shear topology contains every upper one-body excitation exactly once.
-  // No lower generator can contribute to an upper-triangular chart derivative.
-  int shear = 0;
-  for (int removed = 1; removed < n_orbitals_; ++removed)
-    for (int inserted = removed - 1; inserted >= 0; --inserted, ++shear)
-      for (const auto& pair : shears_[shear].pairs) {
-        g(inserted, removed) += pair.sign * contract(pair.target, pair.source, false);
-        if (directional)
-          dg(inserted, removed) += pair.sign * contract(pair.target, pair.source, true);
-      }
   return moment_pullback(g,directional ? &dg:nullptr,delta_upper);
 }
 

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <span>
 #include <stdexcept>
 #include <vector>
 
@@ -506,10 +507,90 @@ void check_parallel_transport() {
 #endif
 }
 
+/** @brief Shared exterior moments preserve each scaled, directional term. */
+void check_fused_exterior_generator_pullback() {
+  const std::vector<std::vector<int>> spin = {
+      {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+  const Eigen::MatrixXd chart = upper(0.06, 0.24);
+  const Eigen::MatrixXd dchart = upper_direction(-0.17);
+  const ExteriorOrbitalTransform transform(spin, chart);
+  const int rows = transform.dimension();
+  const auto panel = [rows](int width, double phase) {
+    Eigen::MatrixXd values(rows, width);
+    for (int j = 0; j < width; ++j)
+      for (int i = 0; i < rows; ++i)
+        values(i, j) = std::sin(phase * (i + 1) * (j + 2)) +
+                       0.23 * std::cos((phase + 0.19) * (i + 2) * (j + 1));
+    return values;
+  };
+  const Eigen::MatrixXd seed_a = panel(2, 0.17), image_a = panel(2, 0.31);
+  const Eigen::MatrixXd seed_b = panel(3, -0.23), image_b = panel(3, 0.41);
+  const Eigen::MatrixXd seed_zero = panel(1, 0.37), image_zero = panel(1, -0.29);
+  const Eigen::MatrixXd dseed_a = panel(2, 0.13), dimage_a = panel(2, -0.27);
+  const Eigen::MatrixXd dseed_b = panel(3, 0.43), dimage_b = panel(3, 0.21);
+  const Eigen::MatrixXd dseed_zero = panel(1, -0.11), dimage_zero = panel(1, 0.47);
+  constexpr double scale_a = 0.71, scale_b = -1.23;
+  const ExteriorGeneratorTerm terms[] = {
+      {seed_a, image_a, scale_a},
+      {seed_b, image_b, scale_b},
+      {seed_zero, image_zero, 0.0}};
+  const ExteriorGeneratorTerm directional_terms[] = {
+      {seed_a, image_a, scale_a, &dseed_a, &dimage_a},
+      {seed_b, image_b, scale_b, &dseed_b, &dimage_b},
+      {seed_zero, image_zero, 0.0, &dseed_zero, &dimage_zero}};
+  const auto fused = transform.generator_pullback(
+      std::span<const ExteriorGeneratorTerm>(terms));
+  const Eigen::MatrixXd separate =
+      scale_a * transform.generator_pullback(seed_a, image_a) +
+      scale_b * transform.generator_pullback(seed_b, image_b);
+  require(relative_error(fused, separate) < 2e-12,
+          "fused exterior generator differs from independent scaled pullbacks");
+  require(transform.generator_pullback(
+              std::span<const ExteriorGeneratorTerm>(terms + 2, 1)).isZero(),
+          "zero-scaled exterior generator term produced a chart cotangent");
+
+  const auto fused_direction = transform.generator_pullback(
+      std::span<const ExteriorGeneratorTerm>(directional_terms), &dchart);
+  const Eigen::MatrixXd separate_direction =
+      scale_a * transform.generator_pullback(
+          seed_a, image_a, &dseed_a, &dimage_a, &dchart) +
+      scale_b * transform.generator_pullback(
+          seed_b, image_b, &dseed_b, &dimage_b, &dchart);
+  require(relative_error(fused_direction, separate_direction) < 2e-12,
+          "fused directional exterior generator differs from independent jets");
+  constexpr double h = 1e-6;
+  const auto shifted = [&](double step) {
+    const ExteriorOrbitalTransform moved(spin, chart + step * dchart);
+    return (scale_a * moved.generator_pullback(
+                seed_a + step * dseed_a, image_a + step * dimage_a) +
+            scale_b * moved.generator_pullback(
+                seed_b + step * dseed_b, image_b + step * dimage_b)).eval();
+  };
+  require(relative_error(fused_direction,
+                         (shifted(h) - shifted(-h)) / (2.0 * h)) < 2e-7,
+          "fused directional exterior generator fails finite differences");
+#ifdef _OPENMP
+  Eigen::MatrixXd nested, nested_direction;
+#pragma omp parallel num_threads(2)
+  {
+#pragma omp single
+    {
+      nested = transform.generator_pullback(std::span<const ExteriorGeneratorTerm>(terms));
+      nested_direction = transform.generator_pullback(
+          std::span<const ExteriorGeneratorTerm>(directional_terms), &dchart);
+    }
+  }
+  require(relative_error(nested, separate) < 2e-12 &&
+          relative_error(nested_direction, separate_direction) < 2e-12,
+          "fused exterior generator differs inside an existing OpenMP team");
+#endif
+}
+
 }  // namespace
 
 int main() {
   try {
+    check_fused_exterior_generator_pullback();
     check_broad_moment_budget();
     check_parallel_transport();
     const std::vector<std::vector<int>> full_alpha = {

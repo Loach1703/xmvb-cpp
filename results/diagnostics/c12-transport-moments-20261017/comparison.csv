@@ -1,0 +1,5 @@
+variant,job,steps,hvp,structure_responses,energy_Eh,scf_s,application_s,process_s,rss_MiB,termination
+saved_scatter,1264636,4,36,36,-399.106646267331,28.207024,30.863387,31.1,2824.67578125,ciah_projected_gradient_tolerance
+saved_temporal,1264713,4,36,36,-399.106646267330,26.043647,29.009265,29.23,2725.6796875,ciah_projected_gradient_tolerance
+saved_shared_right,1264759,4,36,36,-399.106646267333,25.845468,28.868012,29.1,2682.65625,ciah_projected_gradient_tolerance
+transport_moments,1264773,4,36,36,-399.106646267328,24.749263,27.623396,27.85,2679.74609375,ciah_projected_gradient_tolerance
