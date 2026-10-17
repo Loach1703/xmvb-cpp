@@ -31,6 +31,7 @@ struct ExteriorTransformDirection;
 struct OrthogonalActiveIntegrals;
 
 class StructureMetricInverse;
+class SpinMetric;
 struct SpinSources;
 
 /** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
@@ -509,6 +510,7 @@ private:
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       bool collect_images) const;
   friend class StructureMetricInverse;
+  friend class SpinMetric;
   /** @brief Sigma in the orthogonal carrier; inner contraction remains tiled. */
   Eigen::MatrixXd apply_carrier_hamiltonian(const Eigen::Ref<const Eigen::MatrixXd>& carrier) const;
   void adjoint_orbital_transform(Eigen::MatrixXd* carrier) const;

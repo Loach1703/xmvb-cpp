@@ -88,9 +88,16 @@ def prepare(source, bundle):
 
 
 def summarize(root):
+    # FULL can print hundreds of MiB of structure weights. Read only scalar
+    # diagnostics, never retain those coefficient tables in the report parser.
+    labels = ("Number of structures:", "Termination reason", "Initial total energy",
+              "Final total energy", "End-to-end wall time", "SCF iteration wall time")
     for label in LABELS:
         run = root / label
-        text = (run / "output.out").read_text() if (run / "output.out").exists() else ""
+        text = ""
+        if (run / "output.out").exists():
+            with (run / "output.out").open() as stream:
+                text = "".join(line.lstrip() for line in stream if line.lstrip().startswith(labels))
         resource = (run / "resource.time").read_text() if (run / "resource.time").exists() else ""
         trace = []
         if (run / "ciah.tsv").exists():
@@ -98,13 +105,18 @@ def summarize(root):
                 trace = list(csv.DictReader(stream, delimiter="\t"))
         reason = field(text, r"^Termination reason\s*:\s*(\S+)")
         done = (run / "run.exit").exists()
+        exit_code = (run / "run.exit").read_text().strip() if done else None
         rss = field(resource, r"Maximum resident set size \(kbytes\):\s*(\d+)", int)
+        accepted_hvp = sum(int(r["orbital_hvp_actions"]) for r in trace)
+        errors = (run / "run.err").read_text() if (run / "run.err").exists() else ""
+        failed_hvp = sum(map(int, re.findall(r"^CIAH_FAILURE,[^\n]*,hvp=(\d+)", errors, re.M)))
         yield dict(space=label,
-            status="converged" if reason == "ciah_projected_gradient_tolerance" else
+            status="converged" if done and exit_code == "0" and reason == "ciah_projected_gradient_tolerance" else
                    "finished_without_convergence" if done else "running" if text else "pending",
-            termination=reason, exit_code=(run / "run.exit").read_text().strip() if done else None,
+            termination=reason, exit_code=exit_code,
             structures=field(text, r"Number of structures:\s*(\d+)", int),
-            steps=len(trace), hvp=sum(int(r["orbital_hvp_actions"]) for r in trace),
+            steps=len(trace), hvp=accepted_hvp + failed_hvp,
+            accepted_hvp=accepted_hvp, failed_hvp=failed_hvp,
             responses=sum(int(r["structure_response_actions"]) for r in trace),
             initial_Eh=field(text, r"^Initial total energy\s*:\s*([-\d.]+)"),
             final_Eh=field(text, r"^Final total energy\s*:\s*([-\d.]+)"),
@@ -112,6 +124,25 @@ def summarize(root):
             scf_s=field(text, r"^SCF iteration wall time\s*:\s*([\d.]+)", float),
             process_s=elapsed_seconds(resource), rss_GiB=rss / 1048576 if rss is not None else None,
             node=(run / "node.txt").read_text().strip() if (run / "node.txt").exists() else None)
+
+
+def compare(control, current):
+    """Compare identical inputs; partial records never produce speedups."""
+    baseline = {row["space"]: row for row in summarize(control)}
+    for row in summarize(current):
+        old = baseline[row["space"]]
+        paths = [root / row["space"] / "input.xmi" for root in (control, current)]
+        if all(path.exists() for path in paths):
+            if paths[0].read_bytes() != paths[1].read_bytes():
+                raise ValueError(f"different inputs in {row['space']}")
+        matched = old["status"] == row["status"] == "converged"
+        result = dict(space=row["space"], structures=row["structures"])
+        for name in ("status", "steps", "hvp", "final_Eh", "application_s", "process_s", "rss_GiB"):
+            result[f"control_{name}"] = old[name]
+            result[f"current_{name}"] = row[name]
+        result["energy_delta_Eh"] = float(row["final_Eh"]) - float(old["final_Eh"]) if matched else None
+        result["wall_speedup"] = old["application_s"] / row["application_s"] if matched else None
+        yield result
 
 
 if __name__ == "__main__":
@@ -122,11 +153,14 @@ if __name__ == "__main__":
     prep.add_argument("bundle", type=Path)
     summary = sub.add_parser("summarize")
     summary.add_argument("root", type=Path)
+    comparison = sub.add_parser("compare")
+    comparison.add_argument("control", type=Path)
+    comparison.add_argument("current", type=Path)
     args = parser.parse_args()
     if args.mode == "prepare":
         prepare(args.source, args.bundle)
     else:
-        rows = list(summarize(args.root))
+        rows = list(compare(args.control, args.current) if args.mode == "compare" else summarize(args.root))
         writer = csv.DictWriter(sys.stdout, fieldnames=rows[0], lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)

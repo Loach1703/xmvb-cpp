@@ -1882,6 +1882,72 @@ matrix-free generalized problem with the existing bounded preconditioner;
 the storage decision never changes the variational space or disables
 orthogonal CI.
 
+\subsection{Spin-block preconditioning without completeness}
+\label{sec:selected-spin-blocks}
+
+Completeness is required for the cancellations in
+Eq.~\eqref{eq:complete-left-inverse}, but not for factoring the spin Gram.
+Partition the selected structures by spatial occupation $\omega$ (the
+sets of doubly and singly occupied orbitals). Two distinct occupations have
+disjoint support in the original orthogonal spin-string product basis.
+Consequently, for any independent selection of structures,
+\begin{equation}
+ G=\Wa\Tr\Wa=\bigoplus_\omega G_\omega,
+ \qquad G_\omega=W_\omega\Tr W_\omega=L_\omega L_\omega\Tr.
+\end{equation}
+Here $W_\omega$ consists only of the selected columns in occupation
+$\omega$. Missing Rumer structures and missing ionic occupations are not
+added. No orbital-invariance or selected-space closure assumption enters.
+Factoring these blocks requires
+$\sum_\omega d_\omega^2$ stored numbers and
+$O(\sum_\omega d_\omega^3)$ arithmetic, where $d_\omega$ is the number of
+selected structures in the occupation. Applying their inverse to one vector
+costs $O(\sum_\omega d_\omega^2)$, with no exterior orbital transformation.
+The factors are shared between the accepted-point CI solve and finite CI
+transport. They are not stored separately for each thread.
+
+At nonorthogonal orbitals the physical selected metric is still
+$M=\Wa\Tr\Ta\Tr\Ta\Wa$, not $G$. Let $m_I>0$ be the retained
+metric-diagonal preconditioner. When the pair cache is streamed, the existing
+Jacobi construction retains only diagonal spin-product contributions,
+\begin{equation}
+ m_I=\sum_p W_{pI}^{\,2}(\Ta\Tr\Ta)_{pp}.
+\end{equation}
+It need not equal the exact $M_{II}$; no new physical-diagonal calculation is
+introduced here. Define one positive scale per block,
+\begin{equation}
+ \gamma_\omega=
+ \frac{\sum_{I\in\omega}m_I}{\operatorname{tr}G_\omega},
+ \qquad P=\bigoplus_\omega \gamma_\omega G_\omega.
+\end{equation}
+Only the already available positive diagonal estimate is used. A common scalar
+within each occupation preserves its complete spin-coupling geometry;
+independent diagonal rescalings within a block need not do so.
+$P^{-1}$ is positive definite and therefore admissible in metric CG. It
+also supplies a metric-aware Davidson correction without solving the
+physical metric at every CI expansion. The physical Hamiltonian, metric
+action, Ritz residual and metric-CG residual target are unchanged.
+
+For orthonormal orbitals, $\Ta=I$ and $P=G=M$. More generally, suppose
+\begin{equation}
+ aI\preceq\Ta\Tr\Ta\preceq bI,\qquad 0<a\leq b.
+\end{equation}
+Restriction gives $aG\preceq M\preceq bG$. The diagonal estimate above
+obeys $aG_{II}\leq m_I\leq bG_{II}$, as does the exact physical diagonal
+when available. Hence $a\leq\gamma_\omega\leq b$. It follows that
+\begin{equation}
+ \frac{a}{b}P\preceq M\preceq\frac{b}{a}P,
+ \qquad
+ \kappa(P^{-1/2}MP^{-1/2})\leq (b/a)^2.
+\end{equation}
+The bound no longer contains the condition number of the Rumer spin Gram.
+It does not remove genuine ill-conditioning of the orbital exterior map,
+nor guarantee a particular iteration count. In particular, $P^{-1}$ is not
+an exact restricted nonorthogonal inverse: the selected physical equation
+$Mx=b$ must still be solved to its original accuracy. Factor-storage
+admission concerns only this preconditioner and never admission of a
+wave function to orthogonal CI.
+
 \subsection{Residual image fusion and one-column projections}
 \label{sec:scalar-source}
 

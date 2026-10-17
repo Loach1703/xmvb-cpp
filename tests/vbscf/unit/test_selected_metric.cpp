@@ -18,6 +18,7 @@
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/overlap/metric.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
+#include "vbscf/structures/overlap/spin_metric.hpp"
 
 namespace {
 
@@ -240,6 +241,60 @@ void check_retained_ill_conditioned_metric() {
           "retained factor lost the original metric residual certificate");
 }
 
+void check_selected_spin_metric() {
+  // Two independent columns in one occupation block plus an ionic column.
+  // Neither completeness, closure nor a particular spin sector is required
+  // by the orbital-independent Gram factorization.
+  Eigen::MatrixXd selected = Eigen::MatrixXd::Zero(9, 3);
+  selected(0, 0) = 1.3;
+  selected(1, 1) = selected(3, 1) = 1.0;
+  selected(1, 2) = 2.0;
+  selected(3, 2) = -1.0;
+  Fixture fixture(3, 1, 1, selected);
+  auto action = fixture.action();
+  const Eigen::MatrixXd gram = selected.transpose() * selected;
+  constexpr std::size_t bytes = 5 * sizeof(double);
+  require(xmvb::vb::SpinMetric::fits(action, fixture.alpha, fixture.beta, bytes) &&
+              !xmvb::vb::SpinMetric::fits(action, fixture.alpha, fixture.beta, bytes - 1),
+          "selected spin metric factor budget is not exact");
+  const xmvb::vb::SpinMetric spin(action, fixture.alpha, fixture.beta, bytes);
+  require(spin.block_count() == 2 && spin.max_block_size() == 2 &&
+              spin.factor_bytes() == bytes,
+          "selected spin metric did not preserve occupation blocks");
+  const Eigen::VectorXd rhs = Eigen::Vector3d(0.31, -0.47, 0.28);
+  require((gram * spin.solve(rhs).col(0) - rhs).norm() < 1e-12 &&
+              (spin.diagonal() - gram.diagonal()).norm() < 1e-12,
+          "selected spin Gram solve disagrees with independent dense oracle");
+  const Eigen::VectorXd weights = Eigen::Vector3d(0.8, 1.1, 1.1);
+  const Eigen::MatrixXd diagonal_orbital_metric =
+      weights.asDiagonal() * gram * weights.asDiagonal();
+  require((diagonal_orbital_metric * spin.precondition(rhs,
+              diagonal_orbital_metric.diagonal()) - rhs).norm() < 1e-12,
+          "scaled spin inverse is not exact for occupation-diagonal orbital metrics");
+
+  // At nonorthogonal orbitals this remains only a preconditioner. The exact
+  // selected M action and original certified residual determine the solution.
+  const xmvb::vb::RepresentationOverlap representation(
+      action, fixture.alpha, fixture.beta, fixture.upper.rows());
+  const auto metric = representation.prepare_metric(fixture.upper);
+  const Eigen::MatrixXd physical = metric.selected_matrix();
+  xmvb::linalg::MetricSolveStats stats;
+  const auto solution = xmvb::linalg::solve_metric(rhs,
+      [&](const Eigen::VectorXd& x) { return Eigen::VectorXd(physical * x); },
+      [&](const Eigen::VectorXd& x) { return spin.precondition(x, physical.diagonal()); },
+      &stats);
+  require(stats.certifications > 0 && stats.relative_residual <=
+              std::sqrt(std::numeric_limits<double>::epsilon()) &&
+              (physical * solution - rhs).norm() < 1e-10 * rhs.norm(),
+          "spin-preconditioned selected solve lost the physical metric certificate");
+  const Eigen::VectorXd other = Eigen::Vector3d(-0.1, 0.8, 0.34);
+  const Eigen::VectorXd px = spin.precondition(rhs, physical.diagonal());
+  const Eigen::VectorXd py = spin.precondition(other, physical.diagonal());
+  require(rhs.dot(px) > 0.0 &&
+              std::abs(rhs.dot(py) - other.dot(px)) < 1e-12,
+          "scaled spin preconditioner is not symmetric positive definite");
+}
+
 void singlet_case() {
   Eigen::MatrixXd selected = Eigen::MatrixXd::Zero(9, 4);
   selected(0, 0) = 1.0;
@@ -313,6 +368,7 @@ void doublet_case() {
 }  // namespace
 
 int main() {
+  check_selected_spin_metric();
   check_retained_ill_conditioned_metric();
   singlet_case();
   doublet_case();

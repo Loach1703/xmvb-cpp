@@ -31,6 +31,7 @@
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
 #include "vbscf/structures/overlap/metric.hpp"
+#include "vbscf/structures/overlap/spin_metric.hpp"
 #include "mcscf/optimization/trace.hpp"
 
 namespace xmvb::vb {
@@ -44,6 +45,7 @@ struct ActiveSpaceGradientForwardContext {
   std::unique_ptr<StructureAction> structure_action;
   std::unique_ptr<StructureMetricInverse> structure_metric_inverse;
   std::shared_ptr<const SelectedMetric> selected_metric;
+  std::shared_ptr<const SpinMetric> spin_metric;
   std::optional<StructureAdjointState> structure_adjoint_state;
   StructureAccumulationResult structure_matrices;
   xmvb::linalg::GeneralizedEigenResult eigen_result;
@@ -488,6 +490,23 @@ void solve_structure_problem(
         preconditioner=[metric](const Eigen::VectorXd& r,double) {
           return Eigen::VectorXd(metric->factor.solve(r));
         };
+      } else if (structure_action.storage().orthogonal_direct_ci) {
+        // W^T W is occupation-block diagonal for any VB selection, not only
+        // FULL. Remove spin recoupling from the preconditioner even when the
+        // physical nonorthogonal Gram must remain an exact streamed action.
+        constexpr std::size_t budget = 64ULL * 1024ULL * 1024ULL;
+        const auto& alpha = context->same_spin_pair_cache.alpha_reuse_table.unique_determinants;
+        const auto& beta = context->same_spin_pair_cache.beta_reuse_table.unique_determinants;
+        if (SpinMetric::fits(structure_action, alpha, beta, budget)) {
+          auto spin = std::make_shared<SpinMetric>(structure_action, alpha, beta, budget);
+          context->spin_metric = spin;
+          preconditioner = [spin, &structure_action](const Eigen::VectorXd& r, double) {
+            return spin->precondition(r, structure_action.preconditioner_diagonal().overlap);
+          };
+          mcscf::diagnostics::ciah_trace("ciah_ci_preconditioner",
+              "spin=1,factor_bytes=%zu,blocks=%zu,max_block=%d",
+              spin->factor_bytes(), spin->block_count(), spin->max_block_size());
+        }
       }
       retain_davidson_result(
         solve_selected_structure_roots(
@@ -589,6 +608,7 @@ finalize_active_space_second_order_context(
       std::move(forward_context->timed_active_space_context.prepared_active_space);
   context->same_spin_pair_cache = std::move(forward_context->same_spin_pair_cache);
   context->selected_metric = std::move(forward_context->selected_metric);
+  context->spin_metric = std::move(forward_context->spin_metric);
   if (forward_context->structure_action) {
     context->structure_action.emplace(std::move(*forward_context->structure_action));
     if (forward_context->structure_metric_inverse) {

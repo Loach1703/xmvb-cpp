@@ -40,6 +40,7 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/orthogonal_ci/exterior_transform.cpp
   vbscf/structures/orthogonal_ci/metric.cpp
   vbscf/structures/overlap/representation.cpp
+  vbscf/structures/overlap/spin_metric.cpp
   vbscf/structures/orthogonal_ci/integrals.cpp
   vbscf/structures/selection/subspace/selector.cpp
   vbscf/structures/selection/union_graph/rank_predictor.cpp

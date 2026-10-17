@@ -55,6 +55,9 @@ struct AcceptedPointContext {
   /** @brief Existing bounded selected Gram/factor retained from Davidson. */
   std::shared_ptr<const SelectedMetric> selected_metric;
 
+  /** @brief Selected spin Gram factors; no orbital closure is assumed. */
+  std::shared_ptr<const SpinMetric> spin_metric;
+
   /**
    * @brief Accepted Hamiltonian and overlap images of the selected states.
    *
