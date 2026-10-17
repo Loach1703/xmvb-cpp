@@ -25,6 +25,37 @@ struct SpinFactorSource {
    * Zero declares no work beyond filling the output rows. Never a tolerance.
    */
   long double load_work = 0;
+  /** @brief Add scale * Y V (transpose=false) or scale * Y^T V to output.
+   * An independent exact contraction order, not a rank approximation. Inputs
+   * and output must not alias. Scratch is bounded per input column below.
+   */
+  std::function<void(bool, const Eigen::Ref<const Eigen::MatrixXd>&,
+      Eigen::Ref<Eigen::MatrixXd>, double)> contract;
+  std::size_t contract_rows = 0;
+  /** Work for the pair Y V_beta and Y^T V_alpha, per common input column. */
+  long double contract_work = 0;
+};
+
+/** @brief Bounded amplitude multiplication through factors or an exact support map.
+ * Chooses a contraction order by arithmetic work. No product carrier, source
+ * Gram cache, or per-thread panel is allocated. All calls share these slabs.
+ */
+class SpinAmplitudeWorkspace {
+public:
+  SpinAmplitudeWorkspace(const SpinFactorSource& source, int source_tile, int columns);
+  void add(const Eigen::Ref<const Eigen::MatrixXd>& alpha,
+      const Eigen::Ref<const Eigen::MatrixXd>& beta,
+      Eigen::Ref<Eigen::MatrixXd> result_alpha,
+      Eigen::Ref<Eigen::MatrixXd> result_beta, double scale = 1.0);
+  std::size_t loads() const noexcept { return loads_; }
+  std::size_t columns() const noexcept { return columns_; }
+
+private:
+  const SpinFactorSource& source_;
+  int width_;
+  bool mapped_;
+  Eigen::MatrixXd a_, b_, moment_;
+  std::size_t loads_ = 0, columns_ = 0;
 };
 
 /** @brief Exact concatenation of factor families; no rank truncation or carrier. */

@@ -536,6 +536,18 @@ void check_source_tangents() {
       for (const bool physical : {false,true}) {
         const auto base = plan.orthogonal_source(products,c,ta,tb,physical);
         const auto response = plan.orthogonal_source(products,q,ta,tb,physical);
+        const Eigen::MatrixXd full = reconstruct(base,3);
+        for (const bool transpose : {false,true}) {
+          const int in_rows = transpose ? na:nb,out_rows = transpose ? nb:na;
+          const Eigen::MatrixXd input = test_vectors(in_rows,3);
+          Eigen::MatrixXd output = Eigen::MatrixXd::Constant(out_rows,3,0.17);
+          Eigen::MatrixXd expected = output;
+          if (transpose) expected.noalias() -= 0.63*full.transpose()*input;
+          else expected.noalias() -= 0.63*full*input;
+          base.contract(transpose,input,output,-0.63);
+          require((output-expected).norm() < 4e-12*std::max(1.0,expected.norm()),
+                  "support amplitude map lost a transpose, parity weight or unequal spin space");
+        }
         const Eigen::MatrixXd orbital = sigma.apply_one_body_generator(reconstruct(base,3),generator);
         const Eigen::MatrixXd coefficient = reconstruct(response,3);
         for (const int mode : {0,1,2}) {
@@ -933,7 +945,7 @@ void check_product_response(int parity,bool unequal) {
 
 /** @brief Broad selected support: one final projection, independent of closure. */
 void check_broad_product_projection(bool unequal) {
-  const auto fixture=unequal ? make_fixture(5,2,1):make_fixture(4,2,2);
+  const auto fixture=unequal ? make_fixture(5,2,1):make_fixture(6,3,3);
   Terms terms;
   Strings alpha,beta;
   for (int a=0;a<static_cast<int>(fixture.alpha.size());++a)
@@ -957,6 +969,18 @@ void check_broad_product_projection(bool unequal) {
   narrow.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
   narrow.product_images->budget=128;
   const auto response=action.apply_response(wide,q);
+  // Exercise the source image order on the same nonclosed, arbitrary three
+  // structures. The wider equal-spin fixture favours the support-map image
+  // consumer; the unequal-spin fixture also certifies the resident order.
+  auto source_state=wide;
+  source_state.source_factors=true; source_state.product_images.reset();
+  const auto source_response=action.apply_response(source_state,q);
+  check_images(source_response.images,response.images);
+  require((source_response.generator-response.generator).norm()<3e-11 &&
+          (source_response.one_electron-response.one_electron).norm()<3e-11 &&
+          (source_response.pair_kernel-response.pair_kernel).norm()<3e-11 &&
+          source_response.images.tiles.source_workspace_bound<=xmvb::mcscf::kFactorWorkspaceBytes,
+          "single-pass source image changed an arbitrary-space adjoint or exceeded its budget");
   check_images(response.images,reference_images(fixture,terms,alpha,beta,q));
   check_images(response.images,action.apply_response(narrow,q).images);
   require(response.images.tiles.structure_projections==2*c.cols(),

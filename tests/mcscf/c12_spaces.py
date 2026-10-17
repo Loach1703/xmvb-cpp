@@ -15,7 +15,7 @@ import sys
 from summarize_scf_step import elapsed_seconds, field
 
 SEED = 20261017
-LABELS = ("ion01", "ion02", "full", "mixed3", "mixed20", "mixed600")
+LABELS = ("ion01", "ion02", "full", "mixed3", "mixed20", "mixed600", "cov")
 
 
 def pairings(sites):
@@ -73,7 +73,7 @@ def prepare(source, bundle):
                                   ("ion02", "ION(0:2)", sector_size(2)),
                                   ("full", "FULL", sector_size(6)),
                                   ("mixed3", None, 3), ("mixed20", None, 20),
-                                  ("mixed600", None, 600)):
+                                  ("mixed600", None, 600), ("cov", "cov", 132)):
         if keyword:
             deck, changes = re.subn(r"^str=.*$", f"str={keyword}", text, flags=re.I | re.M)
             if changes != 1:

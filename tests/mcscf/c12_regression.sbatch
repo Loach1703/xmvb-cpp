@@ -41,13 +41,13 @@ cmake --build "$source_dir/build" --target xmvb test_structure_tiles \
  test_representation_overlap test_selected_metric test_ci_transport \
  test_selected_ci_transport test_coupled_structure test_keyframe \
  test_orthogonal_direct_ci test_ciah test_integrals audit_channel_support \
- test_davidson test_casci -j16 > "$artifact/build.log" 2>&1
+ test_davidson test_casci test_ci_factors -j16 > "$artifact/build.log" 2>&1
 cp "$source_dir/build/CMakeCache.txt" "$artifact/"
 find "$source_dir/src" "$source_dir/tests/vbscf/unit" "$source_dir/tests/linalg/unit" "$source_dir/tests/mcscf" -type f \
  \( -name '*.cpp' -o -name '*.hpp' \) -print0 | sort -z | xargs -0 sha256sum > "$artifact/sources.sha256"
 srun --exact --ntasks=1 --cpus-per-task=2 --cpu-bind=cores env OMP_NUM_THREADS=2 \
  ctest --test-dir "$source_dir/build" --output-on-failure \
- -R '^(structure_tiles|representation_overlap|selected_metric|ci_transport|selected_ci_transport|coupled_structure|keyframe|orthogonal_direct_ci|ciah|integrals|channel_support|davidson|casci)$' \
+ -R '^(structure_tiles|representation_overlap|selected_metric|ci_transport|selected_ci_transport|coupled_structure|keyframe|orthogonal_direct_ci|ciah|integrals|channel_support|davidson|casci|ci_factors)$' \
  > "$artifact/ctest.out" 2>&1
 cp "$source_dir/build/Testing/Temporary/LastTest.log" "$artifact/test-details.log"
 if [[ ${1:-} == --tests-only ]]; then exit 0; fi

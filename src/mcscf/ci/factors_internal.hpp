@@ -6,6 +6,15 @@ namespace xmvb::mcscf::detail {
 
 enum class FactorContraction { Integral, Generator, Residual };
 
+/** @brief Compare two exact amplitude multiplication orders, never precision. */
+bool use_amplitude_map(const SpinFactorSource& source);
+
+/** @brief Shared scratch doubles for one amplitude multiplication panel. */
+std::size_t amplitude_workspace(const SpinFactorSource& source, int tile, int columns);
+
+bool integral_bra_is_left(const DirectCiSigmaAction& sigma,
+    const SpinFactorSource& left, const SpinFactorSource& right, std::size_t workspace_bytes);
+
 /** @brief Joint source/channel schedule; counts work, never changes the operator. */
 struct FactorPanels {
   int left = 0, right = 0, channels = 0;

@@ -104,6 +104,31 @@ void check_case(int n, int ea, int eb) {
     const Eigen::MatrixXd generator_reference = sigma.one_body_generator_adjoint(x,y);
     const Eigen::MatrixXd residual = sigma.apply(x) - 0.37 * x;
     const Eigen::MatrixXd residual_reference = sigma.one_body_generator_adjoint(residual,y);
+    auto mapped = bra;
+    mapped.contract_work = 1;
+    mapped.contract_rows = rows;
+    mapped.contract = [&](bool transpose,const Eigen::Ref<const Eigen::MatrixXd>& input,
+        Eigen::Ref<Eigen::MatrixXd> output,double scale) {
+      if (transpose) output.noalias() += scale*x.transpose()*input;
+      else output.noalias() += scale*x*input;
+    };
+    for (const std::size_t budget : {64ULL*1024*1024,
+        static_cast<unsigned long long>((18*rows+2+(xmvb::effective_openmp_thread_count()+1)*n*n)*sizeof(double))}) {
+      const auto plan = xmvb::mcscf::detail::plan_factor_panels(sigma,mapped,ket,budget,
+          xmvb::mcscf::detail::FactorContraction::Residual);
+      require(plan.workspace_bytes<=budget && plan.source_columns==0,
+              "support-map plan retained all-source storage or unaccounted scratch");
+      const auto actual = xmvb::mcscf::factor_generator_adjoint(sigma,mapped,ket,budget);
+      const auto relaxed = xmvb::mcscf::factor_residual_generator_adjoint(sigma,mapped,ket,0.37,budget);
+      require((actual-generator_reference).norm()<8e-12*std::max(1.0,generator_reference.norm()) &&
+              (relaxed-residual_reference).norm()<8e-12*std::max(1.0,residual_reference.norm()),
+              "support-map generator or H-left residual adjoint mismatch");
+      const auto integral = xmvb::mcscf::factor_integral_adjoint(sigma,mapped,ket,budget);
+      const auto reference = sigma.integral_adjoint(x,y);
+      require((integral.one_electron-reference.one_electron).norm()<8e-12 &&
+              (integral.pair_kernel-reference.pair_kernel).norm()<8e-12,
+              "support-map integral adjoint mismatch");
+    }
     const std::size_t reductions = (xmvb::effective_openmp_thread_count()+1) * n * n;
     for (const auto bytes : {64ULL * 1024 * 1024,
         static_cast<unsigned long long>((13 * rows + 1 + reductions) * sizeof(double))}) {
