@@ -1,0 +1,6 @@
+space,status,termination,exit_code,structures,steps,hvp,responses,initial_Eh,final_Eh,application_s,scf_s,process_s,rss_GiB,node
+ion01,running,,,5676,2,24,24,,,,,,,anode42
+ion02,running,,,47256,0,0,0,,,,,,,anode42
+full,converged,ciah_projected_gradient_tolerance,0,226512,4,40,40,-398.880685140388,-399.417495587054,97.036986,92.835531,107.31,3.568096160888672,anode42
+mixed3,converged,ciah_projected_gradient_tolerance,0,3,4,38,38,-398.459573604564,-399.050820856824,14.640989,11.956339,14.95,2.662525177001953,anode42
+mixed20,converged,ciah_projected_gradient_tolerance,0,20,4,38,38,-398.519385987531,-399.095231633359,20.185947,17.728778,20.38,2.6637039184570312,anode42
