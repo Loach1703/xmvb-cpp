@@ -10,11 +10,13 @@
 
 #include <Eigen/QR>
 #include <Eigen/LU>
+#include <Eigen/Cholesky>
 
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "vbscf/structures/overlap/metric.hpp"
+#include "vbscf/structures/overlap/spin_metric.hpp"
 #include "linalg/metric_solve.hpp"
 #include "mcscf/optimization/trace.hpp"
 
@@ -604,6 +606,27 @@ StructureTangentOperator::apply_inverse_augmented_hessian_diagonal(
 
   Eigen::MatrixXd ambient = expand(covector).scaled_coefficients;
   constexpr double kDenominatorFloor = 1.0e-8;
+  if (accepted_point_->spin_metric) {
+    const auto& constraint=accepted_point_->selected_state_structure_images->overlap;
+    Eigen::MatrixXd rhs(n_structures_,n_states_+1);
+    rhs.rightCols(n_states_)=constraint;
+    for (int state=0;state<n_states_;++state) {
+      const Eigen::VectorXd diagonal=(hessian_diagonal_.col(state)-
+          eigenvalue*metric_diagonal_).cwiseAbs().cwiseMax(kDenominatorFloor);
+      rhs.col(0)=ambient.col(state);
+      const Eigen::MatrixXd inverse=accepted_point_->spin_metric->solve_diagonal_model(rhs,diagonal);
+      const auto inverse_constraint=inverse.rightCols(n_states_);
+      const Eigen::MatrixXd gram=constraint.transpose()*inverse_constraint;
+      const Eigen::LLT<Eigen::MatrixXd> factor(gram);
+      if (factor.info()!=Eigen::Success)
+        throw std::runtime_error("spin AH constraint model is not positive definite");
+      // Invert the restricted model, not merely project its ambient inverse:
+      // R_h=R-R A(A^T R A)^-1 A^T R, with A=M C and R=(K G K)^-1.
+      ambient.col(state)=inverse.col(0)-inverse_constraint*
+          factor.solve(constraint.transpose()*inverse.col(0));
+    }
+    return project_coordinates(ambient);
+  }
   for (int state = 0; state < n_states_; ++state) {
     Eigen::VectorXd denominator = hessian_diagonal_.col(state) -
         eigenvalue * metric_diagonal_;

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <limits>
@@ -500,11 +501,19 @@ void solve_structure_problem(
         if (SpinMetric::fits(structure_action, alpha, beta, budget)) {
           auto spin = std::make_shared<SpinMetric>(structure_action, alpha, beta, budget);
           context->spin_metric = spin;
-          preconditioner = [spin, &structure_action](const Eigen::VectorXd& r, double) {
-            return spin->precondition(r, structure_action.preconditioner_diagonal().overlap);
+          preconditioner = [spin, &structure_action](const Eigen::VectorXd& r, double energy) {
+            const auto& diagonal=structure_action.preconditioner_diagonal();
+            // Match every H-E M diagonal while retaining the selected spin
+            // geometry. Positivity concerns this inverse model, not H-E M.
+            const Eigen::VectorXd floor=std::sqrt(std::numeric_limits<double>::epsilon())*
+                diagonal.hamiltonian.cwiseAbs().cwiseMax(
+                    (energy*diagonal.overlap).cwiseAbs()).cwiseMax(1.0);
+            const Eigen::VectorXd positive=(diagonal.hamiltonian-energy*diagonal.overlap)
+                .cwiseAbs().cwiseMax(floor);
+            return Eigen::VectorXd(spin->solve_diagonal_model(r,positive).col(0));
           };
           mcscf::diagnostics::ciah_trace("ciah_ci_preconditioner",
-              "spin=1,factor_bytes=%zu,blocks=%zu,max_block=%d",
+              "spin=1,energy_model=1,factor_bytes=%zu,blocks=%zu,max_block=%d",
               spin->factor_bytes(), spin->block_count(), spin->max_block_size());
         }
       }

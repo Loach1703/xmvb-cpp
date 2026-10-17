@@ -35,6 +35,14 @@ public:
   Eigen::VectorXd precondition(const Eigen::VectorXd& rhs,
       const Eigen::VectorXd& physical_diagonal) const;
 
+  /** @brief Inverse of K G K, matching a supplied positive model diagonal.
+   * K_ii=sqrt(diagonal_i/G_ii). Retains spin recoupling, without averaging
+   * energy denominators or changing any physical H/M action.
+   */
+  Eigen::MatrixXd solve_diagonal_model(
+      const Eigen::Ref<const Eigen::MatrixXd>& rhs,
+      const Eigen::Ref<const Eigen::VectorXd>& diagonal) const;
+
   std::size_t factor_bytes() const noexcept { return factor_bytes_; }
   std::size_t block_count() const noexcept { return blocks_.size(); }
   int max_block_size() const noexcept { return max_block_size_; }

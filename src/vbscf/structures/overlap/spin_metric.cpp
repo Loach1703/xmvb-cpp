@@ -163,4 +163,17 @@ Eigen::VectorXd SpinMetric::precondition(const Eigen::VectorXd& rhs,
   return result;
 }
 
+Eigen::MatrixXd SpinMetric::solve_diagonal_model(
+    const Eigen::Ref<const Eigen::MatrixXd>& rhs,
+    const Eigen::Ref<const Eigen::VectorXd>& diagonal) const {
+  if (diagonal.size()!=dimension_ || !diagonal.allFinite() ||
+      !(diagonal.array()>0.0).all())
+    throw std::invalid_argument("spin model requires a positive finite diagonal");
+  const Eigen::VectorXd scale=(diagonal_.array()/diagonal.array()).sqrt();
+  const Eigen::MatrixXd scaled=rhs.array().colwise()*scale.array();
+  Eigen::MatrixXd result=solve(scaled);
+  result.array().colwise()*=scale.array();
+  return result;
+}
+
 }  // namespace xmvb::vb

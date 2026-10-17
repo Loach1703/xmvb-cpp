@@ -1,9 +1,11 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -13,15 +15,125 @@
 
 #include "input/loading/loader.hpp"
 #include "linalg/metric_solve.hpp"
+#include "linalg/eigensolver.hpp"
 #include "output/trace/binary.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/orbitals/preparation/cholesky.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
+#include "vbscf/structures/overlap/spin_metric.hpp"
+#include "vbscf/derivatives/hessian/coupled/structure.hpp"
 
 namespace {
 
 using xmvb::vb::RepresentationOverlap;
+
+/** @brief Same current H/M action, seeds and targets; no orbital optimization. */
+void inspect_ci_models(const xmvb::vb::VbScfInput& input,
+    const std::shared_ptr<xmvb::vb::AcceptedPointContext>& context) {
+  const auto& action=*context->structure_action;
+  const auto& spin=context->spin_metric;
+  if (!spin) throw std::runtime_error("CI model inspection needs selected spin factors");
+  const auto& diagonal=action.preconditioner_diagonal();
+  const double energy=context->selected_state_energies.at(0);
+  const Eigen::VectorXd denominator=diagonal.hamiltonian-energy*diagonal.overlap;
+  std::cout << "model_dimension=" << action.n_structures() << '\n'
+            << "model_negative_diagonals=" << (denominator.array()<0.0).count() << '\n'
+            << "model_denominator_min=" << denominator.minCoeff() << '\n'
+            << "model_denominator_max=" << denominator.maxCoeff() << '\n';
+  // Reconstruct the discarded trace model only in this diagnostic. Group
+  // original selected columns by occupation; never form a physical matrix.
+  std::map<std::vector<int>,std::vector<int>> groups;
+  std::vector<bool> seen(action.n_structures(),false);
+  const auto& expansion=input.structure_data;
+  for (std::size_t p=0;p<expansion.determinant_to_structure_terms.size();++p) {
+    std::vector<int> occupation=expansion.alpha_det[p];
+    occupation.insert(occupation.end(),expansion.beta_det[p].begin(),expansion.beta_det[p].end());
+    std::sort(occupation.begin(),occupation.end());
+    for (const auto& term:expansion.determinant_to_structure_terms[p])
+      if (!seen[term.structure_index] && term.coefficient!=0.0) {
+        seen[term.structure_index]=true;
+        groups[occupation].push_back(term.structure_index);
+      }
+  }
+  Eigen::VectorXd trace_inverse(action.n_structures());
+  int negative_blocks=0;
+  double worst_spread=1.0;
+  for (const auto& [occupation,indices]:groups) {
+    double g=0.0,h=0.0,m=0.0,lo=std::numeric_limits<double>::infinity(),hi=0.0;
+    for (int i:indices) {
+      g+=spin->diagonal()[i]; h+=diagonal.hamiltonian[i]; m+=diagonal.overlap[i];
+      const double value=std::abs(denominator[i])/spin->diagonal()[i];
+      lo=std::min(lo,value); hi=std::max(hi,value);
+    }
+    if (h-energy*m<0.0) ++negative_blocks;
+    if (lo>0.0) worst_spread=std::max(worst_spread,hi/lo);
+    for (int i:indices) trace_inverse[i]=g; // Energy-dependent scale filled below.
+  }
+  std::cout << "trace_model_negative_blocks=" << negative_blocks << '\n'
+            << "trace_model_worst_within_block_spread=" << worst_spread << '\n';
+  const auto accuracy=context->structure_solve_accuracy;
+  const xmvb::linalg::GeneralizedEigenAction images=[&](const Eigen::Ref<const Eigen::MatrixXd>& x) {
+    auto pair=action.apply(x);
+    return xmvb::linalg::GeneralizedEigenActionResult{
+        std::move(pair.hamiltonian),std::move(pair.overlap)};
+  };
+  for (int model:{0,1,2}) {
+    auto options=xmvb::linalg::make_davidson_options(action.n_structures(),1,
+        accuracy.energy_tolerance,accuracy.gradient_tolerance,accuracy.stationarity_tolerance());
+    options.residual_preconditioner=[&](const Eigen::VectorXd& r,double e) {
+      if (model==0) return spin->precondition(r,diagonal.overlap);
+      if (model==1) {
+        Eigen::VectorXd z=spin->solve(r).col(0);
+        for (const auto& [occupation,indices]:groups) {
+          double h=0.0,m=0.0;
+          for (int i:indices) { h+=diagonal.hamiltonian[i]; m+=diagonal.overlap[i]; }
+          double divisor=h-e*m;
+          const double floor=std::sqrt(std::numeric_limits<double>::epsilon())*
+              std::max({trace_inverse[indices[0]],std::abs(h),std::abs(e*m)});
+          if (std::abs(divisor)<floor) divisor=std::copysign(floor,divisor==0.0 ? 1.0:divisor);
+          for (int i:indices) z[i]*=trace_inverse[i]/divisor;
+        }
+        return z;
+      }
+      const Eigen::VectorXd floor=std::sqrt(std::numeric_limits<double>::epsilon())*
+          diagonal.hamiltonian.cwiseAbs().cwiseMax((e*diagonal.overlap).cwiseAbs()).cwiseMax(1.0);
+      const Eigen::VectorXd d=(diagonal.hamiltonian-e*diagonal.overlap).cwiseAbs().cwiseMax(floor);
+      return Eigen::VectorXd(spin->solve_diagonal_model(r,d).col(0));
+    };
+    const auto start=std::chrono::steady_clock::now();
+    const auto solved=xmvb::linalg::GeneralizedEigensolver{}.solve_davidson(
+        images,diagonal.hamiltonian,diagonal.overlap,options);
+    std::cout << "ci_model=" << (model==0 ? "metric_spin":model==1 ? "discarded_trace":"diagonal_spin")
+              << ",actions=" << solved.block_actions
+              << ",energy=" << solved.eigenpairs.eigenvalues[0]
+              << ",residual=" << solved.stationarity_residual_norms[0]
+              << ",wall=" << std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()
+              << '\n';
+  }
+  const xmvb::vb::StructureTangentOperator tangent(context,action);
+  const int size=tangent.tangent_size();
+  Eigen::VectorXd x(size);
+  for (int i=0;i<size;++i) x[i]=std::sin(0.37*(i+1))+std::cos(0.11*(i+1));
+  x.normalize();
+  const Eigen::VectorXd rhs=tangent.apply_hessian_coordinates(x);
+  for (bool matched:{false,true}) {
+    Eigen::VectorXd z;
+    if (matched) z=tangent.apply_inverse_augmented_hessian_diagonal(rhs,0.0);
+    else {
+      Eigen::MatrixXd raw=tangent.expand(rhs).scaled_coefficients;
+      Eigen::VectorXd d=denominator;
+      for (Eigen::Index i=0;i<d.size();++i) if (std::abs(d[i])<1e-8) d[i]=1e-8;
+      raw.col(0).array()/=d.array();
+      z=tangent.project_coordinates(raw);
+    }
+    const Eigen::VectorXd az=tangent.apply_hessian_coordinates(z);
+    const double scale=rhs.dot(az)/az.squaredNorm();
+    std::cout << "ah_model=" << (matched ? "diagonal_spin":"raw_diagonal")
+              << ",inverse_work=" << rhs.dot(z)
+              << ",best_linear_residual=" << (rhs-scale*az).norm()/rhs.norm() << '\n';
+  }
+}
 
 void print_spectrum(const char* label, const Eigen::MatrixXd& matrix) {
   const Eigen::MatrixXd symmetric = 0.5 * (matrix + matrix.transpose()).eval();
@@ -94,7 +206,7 @@ int main(int argc, char** argv) {
   try {
     if (argc < 2 || argc > 3)
       throw std::invalid_argument(
-          "usage: test_selected_metric_point INPUT.xmi [OUTPUT_PREFIX]");
+          "usage: test_selected_metric_point INPUT.xmi [OUTPUT_PREFIX|--ci-model]");
     auto loaded = xmvb::vb::load_vbscf_input_with_timings(argv[1]);
     const Eigen::MatrixXd no_initial_eigenvectors;
     xmvb::vb::OrbitalGradientEvaluator evaluator;
@@ -106,6 +218,11 @@ int main(int argc, char** argv) {
     if (!context || !context->structure_action)
       throw std::runtime_error("accepted structure action is unavailable");
     const auto& action = *context->structure_action;
+    if (argc==3 && std::string(argv[2])=="--ci-model") {
+      std::cout << std::setprecision(17);
+      inspect_ci_models(loaded.input,context);
+      return 0;
+    }
     const Eigen::MatrixXd& coefficients = context->selected_state_eigenvectors;
     const auto images = context->selected_state_structure_images
         ? *context->selected_state_structure_images : action.apply(coefficients);

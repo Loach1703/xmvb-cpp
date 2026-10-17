@@ -1993,6 +1993,62 @@ accuracy test and never excludes a selected space from orthogonal CI.
 The same selected-space Davidson, positive spin-Gram preconditioner and
 full metric-CG residual certificate are retained.
 
+\subsection{A diagonal-matched spin model on the CI tangent}
+\label{sec:spin-tangent-model}
+
+An occupation-averaged scalar times $G_\omega$ removes spin recoupling
+but cannot resolve unequal energy denominators within that occupation.
+Moreover, a signed approximation of $H-EM$ need not be positive definite.
+These are properties of the preconditioner model, not grounds for removing
+negative curvature from the physical AH action.
+
+For a positive model diagonal $d_I$, define
+\begin{equation}
+ K_{II}=\sqrt{d_I/G_{II}},\qquad P=KGK,\qquad
+ R=P^{-1}=K^{-1}G^{-1}K^{-1}.
+ \label{eq:diagonal-spin-model}
+\end{equation}
+The model has diagonal $d$, retains every selected occupation block's
+spin Gram, and is positive definite. It is exact for an occupation-scaled
+Gram $P=\bigoplus_\omega a_\omega G_\omega$ when
+$d_I=a_\omega G_{II}$. Unlike replacing a block by its trace average,
+it matches each input diagonal individually. Applying $R$ uses the
+already retained factors of $G$, two elementwise scalings, and no orbital
+transform or physical H/M action.
+
+For the structure AH preconditioner at eigenvalue $\lambda$, use
+$d_I=|h_I-(E+\lambda)m_I|$, with the unchanged numerical denominator floor.
+Here $h_I,m_I$ are the retained diagonal models and $E$ is the selected
+state's CI energy. This positive preconditioner does not change the signed
+physical Hessian, its negative-curvature search, or its convergence test.
+The selected CI Davidson correction uses the same model with
+$d_I=|h_I-E m_I|$, applying the existing ordinary Davidson
+machine-precision denominator floor. This replaces a metric-only inverse
+by an energy-dependent inverse model without averaging any occupation
+block's denominators. The physical generalized Ritz problem and both
+stationarity and backward-error targets are unchanged.
+
+Let $A=M C$ contain the selected roots' constraint covectors, and let
+$Z$ be the existing orthonormal basis of $\ker A\Tr$. The inverse of the
+restricted model is
+\begin{equation}
+ (Z\Tr PZ)^{-1}
+ =Z\Tr\left[R-RA(A\Tr RA)^{-1}A\Tr R\right]Z.
+ \label{eq:constrained-spin-model}
+\end{equation}
+To prove the identity, solve $Pu+A\xi=Zr$, $A\Tr u=0$.
+The unconstrained solution $u=RZr-RA\xi$ determines
+$\xi=(A\Tr RA)^{-1}A\Tr RZr$; substituting it and multiplying by
+$Z\Tr$ gives Eq.~\eqref{eq:constrained-spin-model}. Merely computing
+$Z\Tr RZ$ is also a positive preconditioner, but is not the inverse of
+this restricted model in general.
+
+For each state, the implementation applies $R$ jointly to the RHS and
+the columns of $A$. Only the small selected-root Gram $A\Tr RA$ is
+factored. Storage is $O(N_{\rm str}N_{\rm state})$ in addition to the
+existing occupation factors; no product carrier, complete-space inverse,
+or dense structure Hessian is constructed.
+
 \subsection{Residual image fusion and one-column projections}
 \label{sec:scalar-source}
 
