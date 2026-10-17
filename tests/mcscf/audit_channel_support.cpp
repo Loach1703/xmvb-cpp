@@ -150,6 +150,8 @@ void census(const std::string& space,int tile_rows) {
   std::array<std::uint64_t,pairs+1> widths{};
   std::array<std::uint64_t,64> group_sizes{};
   std::map<Channels,std::uint64_t> groups;
+  std::vector<int> boundary_widths;
+  std::uint64_t contiguous_capacity=0,cyclic_capacity=0;
   std::uint64_t targets=0,source_targets=0,sum_width=0,sum_square=0,batches=0,
       group_count=0,largest_group=0,peak_groups=0,source_width=0,source_square=0,prefix_checks=0;
   int live=0;
@@ -161,6 +163,17 @@ void census(const std::string& space,int tile_rows) {
       ++group_sizes[std::bit_width(count)-1];
       largest_group=std::max(largest_group,count);
     }
+    // An arithmetic ownership model, not a wall-time or cache prediction.
+    std::array<std::uint64_t,32> contiguous{},cyclic{};
+    for (int owner=0;owner<32;++owner)
+      for (std::size_t i=boundary_widths.size()*owner/32;
+           i<boundary_widths.size()*(owner+1)/32;++i)
+        contiguous[owner]+=boundary_widths[i]*boundary_widths[i];
+    for (std::size_t i=0;i<boundary_widths.size();++i)
+      cyclic[i%32]+=boundary_widths[i]*boundary_widths[i];
+    contiguous_capacity+=32*(*std::max_element(contiguous.begin(),contiguous.end()));
+    cyclic_capacity+=32*(*std::max_element(cyclic.begin(),cyclic.end()));
+    boundary_widths.clear();
     groups.clear(); live=0;
   };
   auto cursor=support.cursor(1); int a,b; bool in_support;
@@ -176,6 +189,7 @@ void census(const std::string& space,int tile_rows) {
     ++targets; source_targets+=in_support; ++widths[width];
     sum_width+=width; sum_square+=width*width;
     if (in_support) { source_width+=width; source_square+=width*width; }
+    else boundary_widths.push_back(width);
     ++groups[mask];
     if (++live==tile_rows) flush();
   }
@@ -189,6 +203,10 @@ void census(const std::string& space,int tile_rows) {
       << " largest_group=" << largest_group << " peak_tile_groups=" << peak_groups
       << " batches=" << batches << '\n';
   if (space=="cov") std::cout << "prefix_boundary_certificate=PASS nodes=" << prefix_checks << '\n';
+  std::cout << "work_partition," << space << ',' << tile_rows
+      << ",workers=32,total_work=" << sum_square-source_square
+      << ",contiguous_capacity=" << contiguous_capacity
+      << ",cyclic_capacity=" << cyclic_capacity << '\n';
   for (const bool interior:{true,false}) {
     const auto count=interior ? source_targets:targets-source_targets;
     const auto width=interior ? source_width:sum_width-source_width;

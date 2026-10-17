@@ -222,6 +222,71 @@ against production generator basis actions. The final regression suite passes
 11/11. This validates the channel certificate, not a production projected
 sigma or a wall-time speedup.
 
+## Hybrid interior/boundary product
+
+An explicit source-projected image contract permits a hybrid contraction.
+Partition each generated tile into interior nodes $r\in\mathcal S$ and
+boundary nodes $r\in\mathcal I\setminus\mathcal S$, without moving or
+duplicating any carrier. Interior channel rows retain the contiguous dense
+product. Boundary rows evaluate only
+
+$$
+W_{r,\mathcal J_r}
+=K_{\mathcal J_r,\mathcal J_r}F_{r,\mathcal J_r},\qquad
+W_{r,\overline{\mathcal J_r}}=0.
+$$
+
+The second equality specifies a representative for the projected consumer,
+not the full Hamiltonian image. It is valid because that consumer's left
+channel vector vanishes on $\overline{\mathcal J_r}$. For a directional
+kernel, use the same channel sets in
+
+$$
+\dot W_{r,\mathcal J_r}
+=K_{\mathcal J_r,\mathcal J_r}\dot F_{r,\mathcal J_r}
++\dot K_{\mathcal J_r,\mathcal J_r}F_{r,\mathcal J_r}.
+$$
+
+Thus the channel-product work per right-hand side becomes
+
+$$
+O\!\left(|\mathcal S|d^2+
+\sum_{r\in\mathcal I\setminus\mathcal S}k_r^2\right),
+$$
+
+in addition to support generation, scatter and gather. This hybrid bound
+leaves interior structural zeros unexploited. Leaving the integral Gram
+contraction dense also retains its $O(|\mathcal I|d^2)$ work; accelerating
+one product is not a claim that the whole derivative has this reduced cost.
+
+The boundary row requires at most $d$ channel indices and $d$ copied input
+scalars, permitting in-place products without copying the channel slab.
+Parallel row ownership therefore requires $O(Td)$ small scratch for $T$
+workers, not $T$ copies of the spin-string product carrier. The source/halo
+partition is mathematical and independent of the numerical tile budget.
+
+For a response/state pair $F_r(v),F_r(u)$, the same emitted channel set
+also gives the exact boundary contribution
+
+$$
+G_{\mathcal J_r,\mathcal J_r}\mathrel{+}=
+w_r F_r(v)_{\mathcal J_r}F_r(u)_{\mathcal J_r}^{T},
+$$
+
+where $w_r$ is the exchange-orbit multiplicity. This contribution must be
+consumed **before** an in-place kernel product overwrites either argument.
+Each row owner may therefore add its Gram contribution and form its required
+images in the same boundary visit. Worker-local Gram matrices already used
+by the dense reduction need not be duplicated. Interior rows retain batched
+matrix products, and the existing Gram reduction completes before its scratch
+is reused for an in-place interior image product. Neither a physical response
+nor a channel with a permitted preimage is removed by this fusion.
+
+This is an exact contraction identity, not a claim of measured acceleration.
+The C12 projected-kernel implementations did not beat the saved native
+control and were removed from production. Their numerical and timing evidence
+is recorded in `results/diagnostics/c12-projected-channels-20261017/`.
+
 ## C12 census before implementation
 
 Hanhai22 job 1264972, CAS(12,12), even-exchange representatives, $d=78$.
