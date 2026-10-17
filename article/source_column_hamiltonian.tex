@@ -1948,6 +1948,51 @@ $Mx=b$ must still be solved to its original accuracy. Factor-storage
 admission concerns only this preconditioner and never admission of a
 wave function to orthogonal CI.
 
+\subsection{Selected-metric contraction order without closure}
+\label{sec:selected-metric-order}
+
+Write $A=U_\alpha$, $B=U_\beta$, $t=|\Omega|$ for the number
+of touched spin products, and $r$ for the number of touched beta columns.
+For arbitrary selected columns, including nonclosed ionic selections,
+\begin{equation}
+ M_{lr}v=\Wa\Tr\Ta_l\Tr\Ta_r\Wa v.
+ \label{eq:selected-metric-order}
+\end{equation}
+Zero extension of $\Wa v$ to an $A$-by-$B$ workspace is only an
+evaluation order for this equation: it adds neither independent coefficients
+nor selected structures. In particular, $t=AB$ is not a mathematical
+prerequisite for applying the ordered exterior maps to this workspace.
+The selected inverse is still the inverse of $M$, not a restriction of
+a complete-sector inverse.
+
+Let $s_\alpha,s_\beta$ count retained elementary exterior shear edges per map.
+Ignoring the common sparse expansion and final structure projection,
+the structural nondirectional work estimates for the two orders are
+\begin{align}
+ W_{\rm product}&=2(s_\alpha B+s_\beta A)+4AB,\\
+ W_{\rm factor}&=2(s_\alpha+s_\beta)r+2(A+B)r+tr.
+\end{align}
+The first expression counts two maps per spin on the shared product
+workspace; the second counts the single-spin source maps and the
+length-$r$ dots at touched products. Shear topology, not CI amplitudes
+or an empirical support fraction, determines these counts. A bounded
+product workspace is preferred when its arithmetic is no larger and all
+simultaneously live images fit the existing workspace allowance. Otherwise
+the same exact source panels are streamed. No spin-pair matrix or
+per-worker product workspace is retained. For balanced broad support,
+the avoidable $O(tr)$ dots become $O(n^2AB)$ exterior work. The same
+identity applies before differentiating or taking its adjoint, with the
+primal and tangent images sharing that workspace allowance.
+
+The active dimensions determine the shared-image footprint, not the selected
+CI dimension squared. For CAS(12,12), one $924$-by-$924$ double image occupies
+6.514 MiB; the finite transport pullback's five images occupy at most 32.570
+MiB, independent of thread count. A larger carrier exceeding the allowance
+continues to use bounded factor panels. This scheduling rule is not an
+accuracy test and never excludes a selected space from orthogonal CI.
+The same selected-space Davidson, positive spin-Gram preconditioner and
+full metric-CG residual certificate are retained.
+
 \subsection{Residual image fusion and one-column projections}
 \label{sec:scalar-source}
 

@@ -496,6 +496,12 @@ private:
       Eigen::Ref<Eigen::MatrixXd> generator) const;
   /** @brief Includes both residual-generator contractions and the H/M images. */
   bool prefer_factor_response(const mcscf::DirectCiSigmaAction& sigma) const;
+  /** @brief Exact overlap order from shear/dot work and shared-image storage.
+   * Zero extension to the product workspace does not require selected closure.
+   */
+  bool use_product_overlap(const ExteriorOrbitalTransform& alpha,
+      const ExteriorOrbitalTransform& beta, std::size_t workspace_bytes,
+      int images) const;
   /** @brief Coupled coefficient response directly from structure-space columns. */
   StructureResponseSweep source_response(const StructureAdjointState& state,
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,

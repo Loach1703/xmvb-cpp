@@ -406,10 +406,14 @@ void check_case(const std::vector<std::vector<int>>& alpha,
 }
 
 /** @brief Both exact contraction orders, including one-sided chart derivatives. */
-void check_broad_moment_budget() {
+void check_broad_moment_budget(bool restricted) {
   std::vector<std::vector<int>> spin;
   for (int p=0;p<5;++p) for (int q=p+1;q<5;++q) spin.push_back({p,q});
-  const auto w=selected_expansion(spin.size(),spin.size());
+  auto w=selected_expansion(spin.size(),spin.size());
+  if (restricted)
+    for (int a=0;a<static_cast<int>(spin.size());++a)
+      for (int b=0;b<static_cast<int>(spin.size());++b)
+        if ((a+b)%4==0) w.row(a*spin.size()+b).setZero();
   const auto action=make_action(spin,spin,w);
   Eigen::MatrixXd l=Eigen::MatrixXd::Identity(5,5),r=1.2*l;
   Eigen::MatrixXd dl=Eigen::MatrixXd::Zero(5,5),dr=dl;
@@ -419,6 +423,11 @@ void check_broad_moment_budget() {
   }
   const ExteriorOrbitalTransform la(spin,l),ra(spin,r);
   const Eigen::Vector3d x(0.4,-0.7,0.8),y(-0.2,0.6,0.3);
+  const Eigen::MatrixXd reference=reference_cross(l,r,w,spin,spin);
+  for (std::size_t bytes:{640u,64u*1024u*1024u})
+    require(relative_error(action.cross_overlap(y,la,la,ra,ra,
+                nullptr,nullptr,nullptr,nullptr,bytes),reference*y)<3e-12,
+        "restricted broad metric contraction differs from independent minors");
   const auto primal=action.cross_overlap_adjoint(x,y,la,la,ra,ra);
   const auto factor=action.cross_overlap_adjoint(x,y,la,la,ra,ra,nullptr,nullptr,1280);
   require(relative_error(primal.left,factor.left)<2e-12 &&
@@ -439,6 +448,13 @@ void check_broad_moment_budget() {
     require(relative_error(image,tiled)<3e-12,
             "broad cross-overlap jet differs from bounded source panels");
   }
+  const Eigen::Vector3d q(0.2,-0.1,0.3);
+  const auto wide=action.cross_overlap_transport_gradient(x,y,q,x+q,la,la,ra,ra,dr);
+  const auto narrow=action.cross_overlap_transport_gradient(x,y,q,x+q,la,la,ra,ra,dr,2560);
+  require(relative_error(wide.charts.left,narrow.charts.left)<3e-12 &&
+          relative_error(wide.charts.right,narrow.charts.right)<3e-12 &&
+          relative_error(wide.image,narrow.image)<3e-12,
+      "restricted broad transport moments differ from bounded source panels");
 }
 
 /** @brief Real parallel row scatters, with unequal complete spin carriers. */
@@ -591,7 +607,8 @@ void check_fused_exterior_generator_pullback() {
 int main() {
   try {
     check_fused_exterior_generator_pullback();
-    check_broad_moment_budget();
+    check_broad_moment_budget(false);
+    check_broad_moment_budget(true);
     check_parallel_transport();
     const std::vector<std::vector<int>> full_alpha = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};

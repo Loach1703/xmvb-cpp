@@ -69,6 +69,21 @@ int panel_width(std::size_t bytes, int na, int nb, int columns, int copies) {
 
 } // namespace
 
+bool StructureAction::use_product_overlap(const ExteriorOrbitalTransform& alpha,
+    const ExteriorOrbitalTransform& beta, std::size_t workspace_bytes,
+    int images) const {
+  const std::size_t products=static_cast<std::size_t>(n_unique_alpha_)*n_unique_beta_;
+  if (products>workspace_bytes/(images*sizeof(double))) return false;
+  if (spin_products_.size()==products) return true;
+  const double a=n_unique_alpha_, b=n_unique_beta_, r=sources_->columns.size();
+  const double sa=alpha.shear_pair_count(), sb=beta.shear_pair_count();
+  // Common W expansion/projection work cancels. Compare ordered exterior
+  // maps with source maps plus a length-r dot at each touched product.
+  const double product=2*(sa*b+sb*a)+4*a*b;
+  const double factor=2*(sa+sb)*r+2*(a+b)*r+spin_products_.size()*r;
+  return product<=factor;
+}
+
 Eigen::MatrixXd StructureAction::cross_overlap(
     const Eigen::Ref<const Eigen::MatrixXd>& vectors,
     const ExteriorOrbitalTransform& la, const ExteriorOrbitalTransform& lb,
@@ -83,9 +98,7 @@ Eigen::MatrixXd StructureAction::cross_overlap(
       (directional && !(dla && dlb && dra && drb)))
     throw std::invalid_argument("invalid selected cross overlap");
   const auto& sources = *sources_;
-  const std::size_t products=static_cast<std::size_t>(n_unique_alpha_)*n_unique_beta_;
-  if (spin_products_.size()==products &&
-      products<=workspace_bytes/((directional ? 2:1)*sizeof(double))) {
+  if (use_product_overlap(la,lb,workspace_bytes,directional ? 2:1)) {
     Eigen::MatrixXd result(n_structures_,vectors.cols());
     for (Eigen::Index column=0; column<vectors.cols(); ++column) {
       auto image=physical_product(*this,vectors.col(column),ra,rb,dra,drb);
@@ -217,11 +230,10 @@ UpperPair StructureAction::cross_overlap_adjoint(
     return {std::move(swapped.right),{}};
   }
   const bool left_requested = side == OverlapSide::Both;
-  const std::size_t products=static_cast<std::size_t>(n_unique_alpha_)*n_unique_beta_;
   const bool dl=directional && !delta_left->isZero(0.0);
   const bool dr=directional && !delta_right->isZero(0.0);
-  if (spin_products_.size()==products && same_chart(la,lb) && same_chart(ra,rb) &&
-      products<=workspace_bytes/((2+static_cast<int>(dl)+static_cast<int>(dr))*sizeof(double))) {
+  if (same_chart(la,lb) && same_chart(ra,rb) &&
+      use_product_overlap(la,lb,workspace_bytes,2+static_cast<int>(dl)+static_cast<int>(dr))) {
     if (directional && !dl && !dr)
       return {left_requested ? Eigen::MatrixXd::Zero(la.n_orbitals(),la.n_orbitals()).eval() : Eigen::MatrixXd{},
               Eigen::MatrixXd::Zero(ra.n_orbitals(),ra.n_orbitals())};
