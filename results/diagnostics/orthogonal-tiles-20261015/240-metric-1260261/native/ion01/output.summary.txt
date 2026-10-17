@@ -1,0 +1,13 @@
+# Extracted from output.out; complete raw output retained locally and remotely.
+9050fa8c1d2fd2195c27d973a8cba6383e6a899057b6039642e054a13fb7f55e  results/diagnostics/orthogonal-tiles-20261015/240-metric-1260261/native/ion01/output.out
+ Number of structures:   294
+                        VBSCF converged in     3 iterations
+Initial total energy               : -343.035697191509
+Final total energy                 : -343.407736636061
+AO integral provider wall time     : 0.755943 s
+AO integral input wall time        : 0.580253 s
+Orbital guess build wall time      : 0.001505 s
+Structure expansion wall time      : 0.000742 s
+Input preparation wall time        : 1.344207 s
+SCF iteration wall time            : 3.081895 s
+End-to-end wall time               : 4.431928 s

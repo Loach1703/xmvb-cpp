@@ -2,18 +2,20 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
+#include "mcscf/ci/strings.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/determinants/pairs/accepted_tile.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/determinants/algebra/cofactor_differential.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb {
 
@@ -183,7 +185,7 @@ bool has_materialized_opposite_spin_scalar_cache(
 std::vector<double> build_dense_active_pair_kernel(
     const std::vector<double>& eri_act,
     int n_orbitals) {
-  const int n_packed_active_pairs = packed_active_pair_count(n_orbitals);
+  const int n_packed_active_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   std::vector<double> dense_pair_kernel(
       n_packed_active_pairs *
           n_packed_active_pairs,
@@ -192,7 +194,7 @@ std::vector<double> build_dense_active_pair_kernel(
   for (int column_pair = 0; column_pair < n_packed_active_pairs; ++column_pair) {
     for (int row_pair = 0; row_pair < n_packed_active_pairs; ++row_pair) {
       const int packed_pair_of_pairs_index =
-          TwoElectronIndexer::packed_pair_of_pairs_index(row_pair, column_pair);
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(row_pair, column_pair);
       dense_pair_kernel[column_pair *
                             n_packed_active_pairs +
                         row_pair] =
@@ -209,10 +211,10 @@ OppositeSpinPackedPairProjection build_sparse_packed_pair_projection(
     const Eigen::MatrixXd& coefficient_matrix,
     bool coefficient_matrix_is_right_by_left,
     int n_orbitals,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     const std::vector<double>* dense_pair_kernel,
     bool materialize_projected_pair_values) {
-  const int n_packed_active_pairs = packed_active_pair_count(n_orbitals);
+  const int n_packed_active_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   OppositeSpinPackedPairProjection projection;
   if (occ_L.empty()) {
     return projection;
@@ -231,7 +233,7 @@ OppositeSpinPackedPairProjection build_sparse_packed_pair_projection(
     const int orbital_index_left = occ_L[left_column];
     for (int right_row = 0; right_row < static_cast<int>(occ_R.size()); ++right_row) {
       const int orbital_index_right = occ_R[right_row];
-      const int packed_pair_index = TwoElectronIndexer::packed_pair_index(
+      const int packed_pair_index = xmvb::core::PairIndex::packed_pair_index(
           orbital_index_right,
           orbital_index_left);
       if (touched_mask[packed_pair_index] == 0) {
@@ -287,7 +289,7 @@ OppositeSpinPackedPairProjection build_sparse_packed_pair_projection(
     }
   } else {
     projection.projected_pair_values =
-        apply_active_space_two_electron_kernel_to_sparse_projection(
+        xmvb::integrals::apply_active_space_two_electron_kernel_to_sparse_projection(
             two_electron_view,
             n_orbitals,
             projection.packed_pair_indices,
@@ -300,7 +302,7 @@ void attach_opposite_spin_pair_cache(
     const std::vector<int>& occ_L,
     const std::vector<int>& occ_R,
     int n_orbitals,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     const std::vector<double>* dense_pair_kernel,
     bool materialize_first_order_projected_values,
     SpinDeterminantPairEvaluation* pair_evaluation) {
@@ -309,7 +311,7 @@ void attach_opposite_spin_pair_cache(
   }
 
   pair_evaluation->opposite_spin_pair_cache.n_packed_active_pairs =
-      packed_active_pair_count(n_orbitals);
+      xmvb::integrals::packed_active_pair_count(n_orbitals);
 
   const auto& overlap_result = pair_evaluation->overlap_result;
   if (occ_L.empty() || overlap_result.nullity >= 2) {
@@ -368,7 +370,7 @@ Eigen::MatrixXd build_polynomial_same_spin_hamiltonian_overlap_gradient(
     const std::vector<int>& occ_R,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     SpinDeterminantPairEvaluation* pair_evaluation) {
   if (pair_evaluation == nullptr)
     throw std::invalid_argument("same-spin polynomial cache output must not be null");
@@ -379,7 +381,7 @@ Eigen::MatrixXd build_polynomial_same_spin_hamiltonian_overlap_gradient(
   payload->antisymmetrized_interaction =
       build_spin_antisymmetrized_interaction_matrix(
           occ_L, occ_R, n_active_orbitals,
-          make_active_space_two_electron_view(active_space_two_electron_result));
+          xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result));
   const Eigen::MatrixXd gradient = cofactor.first(payload->one_electron_block) +
       cofactor.second_contraction_gradient(
           payload->antisymmetrized_interaction);
@@ -392,7 +394,7 @@ void populate_same_spin_phi_cache_entry(
     const std::vector<int>& occ_R,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     SpinDeterminantPairEvaluation* pair_evaluation) {
   if (pair_evaluation == nullptr) {
     throw std::invalid_argument("same-spin pair evaluation must not be null");
@@ -431,7 +433,7 @@ void populate_same_spin_phi_cache_entry(
   const bool regular_ri_pair =
       pair_evaluation->has_same_spin_phi_cache &&
       active_space_two_electron_result.representation ==
-          ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
+          xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
   if (regular_ri_pair) {
     pair_evaluation->same_spin_overlap_hamiltonian_gradient =
         build_regular_same_spin_overlap_hamiltonian_gradient(
@@ -470,8 +472,8 @@ std::vector<SpinDeterminantPairEvaluation> build_same_spin_pair_cache(
   // left/right orientation. The scalar same-spin matrix elements are symmetric,
   // but the overlap/cofactor payload is directional because rows belong to the
   // right determinant and columns to the left determinant.
-  const ActiveSpaceTwoElectronView two_electron_view =
-      make_active_space_two_electron_view(eri_act);
+  const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
+      xmvb::integrals::make_active_space_two_electron_view(eri_act);
   const int n_threads =
       same_spin_pair_cache_thread_count(n_unique_determinants);
 
@@ -513,7 +515,7 @@ std::vector<SpinDeterminantPairEvaluation> build_same_spin_pair_cache(
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const std::vector<double>* dense_pair_kernel,
     bool materialize_projected_pair_values,
     bool retain_derivative_payload) {
@@ -521,8 +523,8 @@ std::vector<SpinDeterminantPairEvaluation> build_same_spin_pair_cache(
   std::vector<SpinDeterminantPairEvaluation> pair_cache(
       n_unique_determinants *
       n_unique_determinants);
-  const ActiveSpaceTwoElectronView two_electron_view =
-      make_active_space_two_electron_view(active_space_two_electron_result);
+  const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
+      xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result);
   const int n_threads =
       same_spin_pair_cache_thread_count(n_unique_determinants);
 
@@ -562,7 +564,7 @@ void populate_same_spin_phi_cache_entries(
     const std::vector<std::vector<int>>& unique_spin_determinants,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     std::vector<SpinDeterminantPairEvaluation>* pair_cache) {
   if (pair_cache == nullptr) {
     throw std::invalid_argument("pair_cache must not be null");
@@ -632,7 +634,7 @@ void complete_same_spin_pair_evaluation(
     const std::vector<int>& occ_R,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     bool populate_opposite_spin_projection,
     bool materialize_projected_pair_values,
     bool populate_response_payload,
@@ -645,7 +647,7 @@ void complete_same_spin_pair_evaluation(
         occ_L,
         occ_R,
         n_active_orbitals,
-        make_active_space_two_electron_view(active_space_two_electron_result),
+        xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result),
         nullptr,
         materialize_projected_pair_values,
         pair_evaluation);
@@ -708,7 +710,7 @@ std::size_t estimate_same_spin_pair_cache_bytes(
         std::max(max_electron_count, static_cast<int>(determinant.size()));
   }
   const std::size_t n_packed_active_pairs =
-      packed_active_pair_count(n_orbitals);
+      n_orbitals == 0 ? 0 : xmvb::integrals::packed_active_pair_count(n_orbitals);
   const std::size_t max_occupied_pair_count =
       static_cast<std::size_t>(max_electron_count) *
       static_cast<std::size_t>(std::max(0, max_electron_count - 1)) / 2;
@@ -743,30 +745,10 @@ std::size_t estimate_same_spin_pair_cache_bytes(
        per_pair_int_count * sizeof(int));
 }
 
-SameSpinPairCacheContext build_same_spin_pair_topology(
-    const std::vector<std::vector<int>>& alpha_det,
-    const std::vector<std::vector<int>>& beta_det,
-    int n_orbitals) {
-  if (alpha_det.size() != beta_det.size()) {
-    throw std::invalid_argument("alpha_det and beta_det must have the same size");
-  }
+namespace {
 
-  SameSpinPairCacheContext context;
-  context.alpha_reuse_table = build_spin_determinant_reuse_table(alpha_det);
-  context.close_shell_diagonal_reuses_same_spin_pair_cache =
-      can_reuse_close_shell_same_spin_pair_cache(alpha_det, beta_det);
-  context.beta_reuses_alpha_pair_cache =
-      context.close_shell_diagonal_reuses_same_spin_pair_cache ||
-      try_build_reuse_table_in_reference_basis(
-          beta_det,
-          context.alpha_reuse_table,
-          &context.beta_reuse_table);
-  if (context.close_shell_diagonal_reuses_same_spin_pair_cache) {
-    context.beta_reuse_table = context.alpha_reuse_table;
-  } else if (!context.beta_reuses_alpha_pair_cache) {
-    context.beta_reuse_table = build_spin_determinant_reuse_table(beta_det);
-  }
-
+SameSpinPairCacheContext finalize_spin_topology(
+    SameSpinPairCacheContext context, int n_orbitals) {
   context.alpha_pair_provider = std::make_shared<const AcceptedPairTileProvider>(
       context.alpha_reuse_table.unique_determinants,
       n_orbitals);
@@ -793,6 +775,111 @@ SameSpinPairCacheContext build_same_spin_pair_topology(
   context.n_unique_alpha = static_cast<int>(n_alpha);
   context.n_unique_beta = static_cast<int>(n_beta);
   return context;
+}
+
+std::uint64_t checked_spin_mask(const std::vector<int>& occupied,
+                                int n_orbitals, int n_electrons) {
+  if (static_cast<int>(occupied.size()) != n_electrons)
+    throw std::invalid_argument("spin determinants have inconsistent electron counts");
+  std::uint64_t mask = 0;
+  int previous = -1;
+  for (const int orbital : occupied) {
+    if (orbital <= previous || orbital < 0 || orbital >= n_orbitals)
+      throw std::invalid_argument("spin determinant occupation is invalid");
+    mask |= std::uint64_t{1} << orbital;
+    previous = orbital;
+  }
+  return mask;
+}
+
+SpinDeterminantReuseTable complete_spin_reuse_table(
+    const std::vector<std::vector<int>>& determinants, int n_orbitals) {
+  if (determinants.empty())
+    throw std::invalid_argument("orthogonal spin topology requires determinants");
+  const int n_electrons = static_cast<int>(determinants.front().size());
+  SpinDeterminantReuseTable table =
+      build_spin_determinant_reuse_table(determinants);
+  for (const auto& determinant : determinants)
+    checked_spin_mask(determinant, n_orbitals, n_electrons);
+  if (table.unique_determinants.size() ==
+      mcscf::string_count(n_orbitals, n_electrons))
+    return table;
+
+  const mcscf::SpinStrings full_strings(n_orbitals, n_electrons);
+  table.unique_determinants = full_strings.occupations();
+  for (std::size_t i = 0; i < determinants.size(); ++i)
+    table.determinant_to_unique_id[i] = full_strings.index(
+        checked_spin_mask(determinants[i], n_orbitals, n_electrons));
+  return table;
+}
+
+SpinDeterminantReuseTable map_spin_reuse_table_to_complete_basis(
+    const std::vector<std::vector<int>>& determinants,
+    const SpinDeterminantReuseTable& reference) {
+  std::unordered_map<std::vector<int>, int, SpinDeterminantHasher> indices;
+  indices.reserve(reference.unique_determinants.size());
+  for (int i = 0; i < static_cast<int>(reference.unique_determinants.size()); ++i)
+    indices.emplace(reference.unique_determinants[i], i);
+
+  SpinDeterminantReuseTable table;
+  table.unique_determinants = reference.unique_determinants;
+  table.determinant_to_unique_id.reserve(determinants.size());
+  for (const auto& determinant : determinants) {
+    const auto found = indices.find(determinant);
+    if (found == indices.end())
+      throw std::invalid_argument("spin determinant is outside complete basis");
+    table.determinant_to_unique_id.push_back(found->second);
+  }
+  return table;
+}
+
+}  // namespace
+
+SameSpinPairCacheContext build_same_spin_pair_topology(
+    const std::vector<std::vector<int>>& alpha_det,
+    const std::vector<std::vector<int>>& beta_det,
+    int n_orbitals) {
+  if (alpha_det.size() != beta_det.size()) {
+    throw std::invalid_argument("alpha_det and beta_det must have the same size");
+  }
+
+  SameSpinPairCacheContext context;
+  context.alpha_reuse_table = build_spin_determinant_reuse_table(alpha_det);
+  context.close_shell_diagonal_reuses_same_spin_pair_cache =
+      can_reuse_close_shell_same_spin_pair_cache(alpha_det, beta_det);
+  context.beta_reuses_alpha_pair_cache =
+      context.close_shell_diagonal_reuses_same_spin_pair_cache ||
+      try_build_reuse_table_in_reference_basis(
+          beta_det,
+          context.alpha_reuse_table,
+          &context.beta_reuse_table);
+  if (context.close_shell_diagonal_reuses_same_spin_pair_cache) {
+    context.beta_reuse_table = context.alpha_reuse_table;
+  } else if (!context.beta_reuses_alpha_pair_cache) {
+    context.beta_reuse_table = build_spin_determinant_reuse_table(beta_det);
+  }
+  return finalize_spin_topology(std::move(context), n_orbitals);
+}
+
+SameSpinPairCacheContext build_orthogonal_spin_topology(
+    const std::vector<std::vector<int>>& alpha_det,
+    const std::vector<std::vector<int>>& beta_det,
+    int n_orbitals) {
+  if (alpha_det.size() != beta_det.size())
+    throw std::invalid_argument("alpha_det and beta_det must have the same size");
+  if (n_orbitals < 0 || n_orbitals > 63)
+    throw std::invalid_argument("invalid orthogonal spin orbital count");
+
+  SameSpinPairCacheContext context;
+  context.alpha_reuse_table = complete_spin_reuse_table(alpha_det, n_orbitals);
+  context.close_shell_diagonal_reuses_same_spin_pair_cache =
+      can_reuse_close_shell_same_spin_pair_cache(alpha_det, beta_det);
+  context.beta_reuses_alpha_pair_cache =
+      alpha_det.front().size() == beta_det.front().size();
+  context.beta_reuse_table = context.beta_reuses_alpha_pair_cache
+      ? map_spin_reuse_table_to_complete_basis(beta_det, context.alpha_reuse_table)
+      : complete_spin_reuse_table(beta_det, n_orbitals);
+  return finalize_spin_topology(std::move(context), n_orbitals);
 }
 
 SameSpinPairCacheContext build_same_spin_pair_cache_context(
@@ -876,7 +963,7 @@ SameSpinPairCacheContext build_same_spin_pair_cache_context(
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result) {
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result) {
   return build_same_spin_pair_cache_context(
       alpha_det,
       beta_det,
@@ -895,7 +982,7 @@ SameSpinPairCacheContext build_same_spin_pair_cache_context(
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     SameSpinPairCacheBuildOptions build_options) {
   SameSpinPairCacheContext cache_context = build_same_spin_pair_topology(
       alpha_det, beta_det, n_orbitals);
@@ -910,7 +997,7 @@ SameSpinPairCacheContext build_same_spin_pair_cache_context(
           cache_context);
 
   const std::size_t expected_packed_size =
-      packed_active_two_electron_integral_count(n_orbitals);
+      xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals);
 
   if (!active_space_two_electron_result.packed_active_two_electron_integrals.empty() &&
       active_space_two_electron_result.packed_active_two_electron_integrals.size() ==
@@ -990,7 +1077,7 @@ void populate_same_spin_phi_cache(
     SameSpinPairCacheContext* same_spin_pair_cache,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result) {
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result) {
   if (same_spin_pair_cache == nullptr) {
     throw std::invalid_argument("same_spin_pair_cache must not be null");
   }
@@ -1133,7 +1220,7 @@ DeterminantPairEvaluation evaluate_full_determinant_pair_with_optional_same_spin
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     bool retain_spin_pair_evaluations) {
   if (same_spin_pair_cache != nullptr && same_spin_pair_cache->enabled()) {
     const auto& alpha_occ_L =

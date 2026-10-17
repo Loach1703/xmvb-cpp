@@ -7,9 +7,9 @@
 #include <Eigen/Core>
 
 #include "vbscf/core/contracts/input.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
-#include "vbscf/integrals/active/two_electron/response/directional.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "integrals/active/two_electron.hpp"
+#include "integrals/response/directional.hpp"
+#include "core/pair_index.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -85,7 +85,7 @@ ActiveSpaceIntegralDirectionView build_active_space_integral_direction(
     workspace->two_electron.dense_fixed_adjoint_direction.resize(0, 0);
   } else if (tangent.precomputed_packed_two_electron != nullptr) {
     const std::size_t packed_size =
-        packed_active_two_electron_integral_count(n_active_orbitals);
+        xmvb::integrals::packed_active_two_electron_integral_count(n_active_orbitals);
     if (tangent.precomputed_packed_two_electron->size() !=
         static_cast<Eigen::Index>(packed_size)) {
       throw std::invalid_argument(
@@ -101,7 +101,7 @@ ActiveSpaceIntegralDirectionView build_active_space_integral_direction(
           "active-space 2e direction requires either a precomputed direction "
           "or an exact AO-pair cache");
     }
-    compute_exact_packed_active_two_electron_integral_directional_derivative(
+    xmvb::integrals::compute_exact_packed_active_two_electron_integral_directional_derivative(
         *context.exact_two_electron_cache,
         tangent.dense_active_coefficients,
         context.input.ao_integral_input,

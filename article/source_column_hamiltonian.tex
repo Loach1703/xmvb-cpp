@@ -1,0 +1,2026 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=25mm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{newtxtext,newtxmath}
+\usepackage{booktabs,array,microtype}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\setlist{nosep}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{1.2em}
+\allowdisplaybreaks[1]
+\newtheorem{proposition}{Proposition}
+\DeclareMathOperator{\ran}{ran}
+\DeclareMathOperator{\rank}{rank}
+\DeclareMathOperator{\supp}{supp}
+\newcommand{\Tr}{^{\mathsf T}}
+\newcommand{\ip}[2]{\left\langle #1,#2\right\rangle_{\mathrm F}}
+\newcommand{\Wa}{\mathcal W}
+\newcommand{\Ta}{\mathcal T}
+\newcommand{\Ha}{\mathcal H}
+\newcommand{\Ea}{\mathcal E}
+\newcommand{\Id}{\mathcal I}
+\renewcommand{\vv}[1]{\mathbf{#1}}
+\title{Exact Orthogonal-CI Contraction for Arbitrary Selected\newline
+Valence-Bond Structure Spaces}
+\author{Theory and implementation note}
+\date{16 October 2026}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+An arbitrary selected valence-bond (VB) structure space is generally not
+invariant under orbital orthogonalization. This does not prevent exact
+evaluation of its Hamiltonian and overlap actions through an orthogonal
+configuration-interaction (CI) representation. The transformed wave function
+must be retained, but its complete spin-string product array need not be
+formed. We derive an exact source-factor representation, apply the
+Slater--Condon one-body generators separately to the two spin factors, and
+contract only the original products needed for the final structure-space
+projection. The resulting equations preserve the selected variational space
+without a closure assumption or intermediate amplitude truncation. Source
+and channel tiling bound the numerical workspace. Optional spin-exchange
+reduction and causal pruning of the exterior adjoint are derived separately.
+The scope is the Hamiltonian/overlap action, its active-integral adjoint,
+directional integral adjoints, oriented residual-generator adjoints, and
+selected-structure coefficient-response contractions.
+\end{abstract}
+
+\section{The selected VB space}
+
+Let $n$ be the number of active spatial orbitals, with $n_\alpha$ and
+$n_\beta$ active electrons of each spin. The complete one-spin string
+spaces have dimensions
+\begin{equation}
+ U_\alpha=\binom{n}{n_\alpha},\qquad
+ U_\beta=\binom{n}{n_\beta}.
+\end{equation}
+An index $a$ identifies an $\alpha$ string and $b$ a $\beta$ string.
+For a selected VB structure $I$, let $w_{ab,I}$ be its signed expansion
+coefficient on the corresponding spin-string product, with all normalization
+conventions included. For structure coefficients $\vv C$, define
+\begin{equation}\label{eq:W}
+ X=\Wa\vv C,\qquad X_{ab}=\sum_I w_{ab,I}C_I.
+\end{equation}
+Here $\Wa$ is a sparse linear map from structure coefficients to a matrix
+of spin-string product coefficients. The matrix notation does not prescribe
+a dense allocation: the map can be stored as sparse incidences between
+structures and touched string products. It introduces no determinant-pair
+traversal or separately optimized determinant coefficient vector.
+
+The original support and its two marginal index sets are
+\begin{align}
+ \Omega&=\{(a,b):w_{ab,I}\ne0\text{ for at least one selected }I\},
+ &t&=|\Omega|,\\
+ A_\Omega&=\{a:\exists b,\ (a,b)\in\Omega\},&
+ J&=\{b:\exists a,\ (a,b)\in\Omega\},\qquad r=|J|.
+\end{align}
+Support is determined by the selected structures, not by numerical
+smallness or cancellations in a particular Davidson vector.
+Using the Frobenius inner product, the adjoint structure map is
+\begin{equation}\label{eq:Wadj}
+ (\Wa^*Z)_I=\sum_{(a,b)\in\Omega}w_{ab,I}Z_{ab}.
+\end{equation}
+Thus only entries in $\Omega$ are needed at the \emph{end} of a complete
+action. Nothing in this statement permits dropping intermediate entries
+outside $\Omega$.
+
+\section{Orthogonalization without a closure assumption}
+
+At a fixed orbital point, write the nonorthogonal active orbitals as
+$\phi=\chi R$, where $\chi$ is an orthonormal basis of the same active
+one-particle space. For example, if $O$ is their positive-definite overlap,
+\begin{equation}
+ O=R\Tr R,\qquad \chi=\phi R^{-1}.
+\end{equation}
+This is an evaluation-coordinate change, not a change to the physical
+localization constraints or to the orbital optimization variables.
+Multilinearity of antisymmetrized products gives the exterior maps
+\begin{equation}
+ T_\sigma=\wedge^{n_\sigma}R,\qquad
+ (T_\sigma)_{a i}=\det R[a,i],\qquad \sigma\in\{\alpha,\beta\},
+\end{equation}
+where the row and column subsets contain $n_\sigma$ orbitals with a fixed
+ordering convention. The orthogonal-basis coefficient matrix is
+\begin{equation}\label{eq:T}
+ Y=\Ta X=T_\alpha X T_\beta\Tr,\qquad
+ \Ta^* Z=T_\alpha\Tr Z T_\beta.
+\end{equation}
+The minor matrices $T_\sigma$ are mathematical definitions; the
+implementation applies elementary exterior transforms without assembling
+them densely.
+
+Let $\Ha$ be the active Hamiltonian action in the orthogonal spin-string
+product basis. The selected structure Hamiltonian and overlap are exactly
+\begin{equation}\label{eq:restriction}
+ \boxed{\quad H=\Wa^*\Ta^*\Ha\Ta\Wa,\qquad
+ M=\Wa^*\Ta^*\Ta\Wa.\quad}
+\end{equation}
+An orbital-dependent scalar inactive-plus-nuclear energy $E_0$ contributes
+$E_0M$ to the total structure Hamiltonian and is separate from the active
+action $H$ in this note.
+The variational energy is
+\begin{equation}
+ E=E_0+\frac{\vv C\Tr H\vv C}{\vv C\Tr M\vv C},
+\end{equation}
+with $H$ denoting the active contribution of Eq.~\eqref{eq:restriction}.
+
+\begin{proposition}[Exact selected-space restriction]\label{prop:closure}
+For any selected structure map $\Wa$, Eq.~\eqref{eq:restriction} gives
+the exact selected-space Hamiltonian and overlap, whether or not
+$\Ta\ran\Wa\subseteq\ran\Wa$.
+\end{proposition}
+\begin{proof}
+For arbitrary structure vectors $\vv u$ and $\vv v$, the two physical
+states have orthogonal-basis amplitudes $\Ta\Wa\vv u$ and
+$\Ta\Wa\vv v$. Their Hamiltonian matrix element is
+\begin{equation}
+ \ip{\Ta\Wa\vv u}{\Ha(\Ta\Wa\vv v)}
+ =\vv u\Tr\bigl(\Wa^*\Ta^*\Ha\Ta\Wa\bigr)\vv v.
+\end{equation}
+Replacing $\Ha$ by the identity gives the overlap. No intermediate
+restriction to $\ran\Wa$ was inserted.
+\end{proof}
+
+The nonclosure issue arises only if a different operation is used, for
+example by zeroing transformed amplitudes outside the original selected
+support before applying $\Ha$. That operation changes the wave function.
+Equation~\eqref{eq:restriction} does not do so. Davidson vectors and Ritz
+coefficients remain in the selected VB structure space; the orthogonal
+representation is used internally to evaluate their images.
+For linearly independent selected structures, their eigenproblem remains
+\begin{equation}
+ H\vv C=E_{\rm act}M\vv C.
+\end{equation}
+The adjoint $\Wa^*$ contracts against the selected test structures; it is
+not an inverse coefficient transform. The nonidentity overlap $M$ is
+retained, so this procedure does not replace the selected VB problem by
+an unconstrained orthogonal-CI eigenproblem.
+
+\subsection{A minimal nonclosed example}
+
+Consider a two-by-two coefficient matrix with the single selected product
+$X=e_2e_2\Tr$, and let
+\begin{equation}
+ T_\alpha=\begin{pmatrix}1&a\\0&1\end{pmatrix},\qquad
+ T_\beta=\begin{pmatrix}1&b\\0&1\end{pmatrix}.
+\end{equation}
+This is a linear-algebra example of the coefficient map, not an assertion
+that a single spin product is a spin-adapted VB structure. Its transformed
+amplitudes are
+\begin{equation}\label{eq:example}
+ Y=\begin{pmatrix}ab&a\\b&1\end{pmatrix}
+ =\begin{pmatrix}a\\1\end{pmatrix}
+  \begin{pmatrix}b\\1\end{pmatrix}\Tr.
+\end{equation}
+For nonzero $a$ and $b$, all four products are present, so the original
+one-dimensional selected space is not closed. Nevertheless, two vectors
+represent the complete $Y$ exactly. The overlap is
+$(1+a^2)(1+b^2)$, not the value $1$ obtained by retaining only $Y_{22}$.
+An exact Hamiltonian contraction must likewise use all transformed
+amplitudes, explicitly or implicitly. The factorized route below retains
+them implicitly.
+
+\section{Exact source factors}
+
+\subsection{Column decomposition}
+
+Order the original touched $\beta$ columns as $J=(j_1,\ldots,j_r)$, and set
+\begin{equation}\label{eq:source}
+ A_{:\ell}=X_{:j_\ell},\qquad B_{:\ell}=e_{j_\ell},\qquad
+ X=AB\Tr.
+\end{equation}
+This is an identity for every input vector. It is not a truncated singular
+value decomposition, and $r$ is not a fitted rank. Transforming only the
+two factors gives
+\begin{equation}\label{eq:factors}
+ L=T_\alpha A,\qquad F=T_\beta B,\qquad
+ \Ta X=LF\Tr.
+\end{equation}
+The factors have dimensions $U_\alpha\times r$ and $U_\beta\times r$.
+The complete transformed $U_\alpha\times U_\beta$ matrix need not be
+formed, even if every one of its entries is nonzero.
+
+The distinction between $r$ and the number of structures matters. A single
+covalent structure with $m$ disjoint singlet pairs generally touches
+$2^m$ original source columns. Several structures can share most of those
+columns, and a broad selected space can touch all $U_\beta$ columns.
+Thus $\rank X\le r$ is an upper bound, not an identification of $r$ with
+one, with $\rank X$, or with the number of structures.
+
+\subsection{A minimum mixed row/column cover}\label{sec:cover}
+
+Grouping every source on the $\beta$ side is not always economical. View
+the original input support as a bipartite graph: vertices are the touched
+$\alpha$ and $\beta$ strings, and each supported product $(a,b)$ is one
+edge. Choose a vertex cover $C_\alpha\cup C_\beta$, so that every edge
+touches at least one chosen vertex. Assign an edge to its $\alpha$ endpoint
+if that endpoint is in $C_\alpha$; otherwise assign it to its covered
+$\beta$ endpoint. With this disjoint assignment,
+\begin{equation}\label{eq:cover}
+ X=\sum_{a\in C_\alpha}e_a u_a\Tr
+   +\sum_{b\in C_\beta}v_b e_b\Tr=AB\Tr.
+\end{equation}
+Here $(u_a)_b=X_{ab}$ only for edges assigned to row $a$, and
+$(v_b)_a=X_{ab}$ only for edges assigned to column $b$; the remaining
+entries are zero. Thus no coefficient is counted twice, including edges
+whose two endpoints are both covered. Each chosen vertex defines one
+coordinate-anchored outer product.
+
+Let $\nu(\Omega)$ be the maximum matching size, i.e., the largest number
+of edges with no shared endpoints. A minimum cover has cardinality
+\begin{equation}
+ r_* = |C_\alpha|+|C_\beta|=\nu(\Omega)
+ \le\min(|A_\Omega|,|J|).
+\end{equation}
+For completeness, the cover can be certified directly from a maximum
+matching. Start at unmatched $\alpha$ vertices and follow alternating
+unmatched/matched edges. If the reached vertex sets are $Z_\alpha$ and
+$Z_\beta$, then
+$(A_\Omega\setminus Z_\alpha)\cup Z_\beta$ covers every edge and
+contains exactly one endpoint per matched edge. Any cover must contain
+at least one endpoint of each disjoint matched edge, establishing
+minimality. The implementation uses layered augmenting paths, with
+$O(t\sqrt{U_\alpha+U_\beta})$ worst-case planning work and linear graph
+storage. The plan is independent of the numerical Davidson vector.
+
+This is a minimal factor count for \emph{support-only coordinate-anchored}
+decompositions, not a numerical rank claim. In particular,
+$\rank X\le\nu(\Omega)$; additional coefficient relations can lower the
+actual rank further. A diagonal support needs one source per edge. In
+contrast, the support
+\begin{equation}
+ \{(a_0,b_j):1\le j\le m\}
+ \cup\{(a_i,b_0):1\le i\le m\}
+\end{equation}
+needs only two mixed sources, although either a pure row or pure column
+decomposition needs $m+1$ sources. This reduces the factor dimension,
+rather than enlarging a tile or imposing an amplitude threshold.
+
+All subsequent Hamiltonian and sampling equations apply unchanged, with
+$r=r_*$ and the factors of Eq.~\eqref{eq:cover}. When a common exchange
+parity is used, construct the graph from the \emph{representative input}
+support of Section~6.1; the final projection still uses the complete
+original $\Omega$. If the original column cover is already minimal, its
+ordering may be retained to avoid changing established summation order.
+
+\section{Hamiltonian action on the factors}
+
+\subsection{One-body channels and the complete active Hamiltonian}
+
+Use real spatial orbitals and real, spin-independent molecular integrals.
+Let $e_{pq}=\sum_\sigma a^\dagger_{p\sigma}a_{q\sigma}$, and use the
+chemists' notation $(pq|rs)$ for two-electron integrals. The active
+Hamiltonian is
+\begin{equation}\label{eq:Hsecond}
+ \hat H=\sum_{pq}h_{pq}e_{pq}
+ +\frac12\sum_{pqrs}(pq|rs)
+       \bigl(e_{pq}e_{rs}-\delta_{qr}e_{ps}\bigr).
+\end{equation}
+Here $h$ includes the effective one-electron contribution of the inactive
+orbitals. Define
+\begin{equation}
+ f_{ps}=h_{ps}-\frac12\sum_q(pq|qs),\qquad
+ N=n_\alpha+n_\beta>0.
+\end{equation}
+Packed pair labels $P=(p,q)$ have $p\ge q$, so there are
+$d=n(n+1)/2$ channels. Define the symmetric generators
+\begin{equation}
+ \hat E_{\sigma P}=\begin{cases}
+ a^\dagger_{p\sigma}a_{p\sigma},&p=q,\\
+ a^\dagger_{p\sigma}a_{q\sigma}
+ +a^\dagger_{q\sigma}a_{p\sigma},&p>q,
+ \end{cases}
+ \qquad \hat E_P=\hat E_{\alpha P}+\hat E_{\beta P}.
+\end{equation}
+Let $f_P=f_{pq}$, $V_{PQ}=(pq|rs)$ for $Q=(r,s)$, and $d_P=1$ for
+diagonal pairs and zero otherwise. A symmetric kernel containing the
+\emph{entire} active Hamiltonian is
+\begin{equation}\label{eq:K}
+ K_{PQ}=\frac12 V_{PQ}
+       +\frac{f_Pd_Q+d_Pf_Q}{2N},\qquad
+ \hat H=\sum_{PQ}K_{PQ}\hat E_P\hat E_Q.
+\end{equation}
+Indeed, $\sum_Pd_P\hat E_P=\hat N=N\hat I$ on the fixed-electron
+space. The second term in $K$ therefore gives
+$\sum_P f_P\hat E_P$; the first term supplies the quadratic part of
+Eq.~\eqref{eq:Hsecond}. The usual integral permutation symmetries account
+for both ordered off-diagonal orbital pairs through $\hat E_P$; no extra
+off-diagonal multiplicity is needed in $K$.
+
+Let $E_{\sigma P}$ be the matrix of $\hat E_{\sigma P}$ on its
+one-spin string space. The Slater--Condon rules make this operation a
+sparse signed occupation/replacement scatter, rather than a dense string
+pair contraction. Its action on a product matrix is
+\begin{equation}
+ \Ea_P(Z)=E_{\alpha P}Z+Z E_{\beta P}\Tr,\qquad
+ \Ha=\sum_{PQ}K_{PQ}\Ea_P\Ea_Q.
+\end{equation}
+These identities require a complete carrier for each fixed-spin sector,
+or an exactly equivalent representation of all required intermediates.
+Arbitrary \emph{selected VB structure spaces} need not be complete.
+The two statements are different.
+
+\subsection{Generated channel sweep and its adjoint}
+
+Let $S$ contain the exact support of the transformed selected input and
+$I=\bigcup_P\operatorname{supp}(\Ea_P S)$ its one-generator closure.
+For a response $L$ and state $Y$, define the channel panels
+\begin{equation}
+ D^L_{zP}=(\Ea_P L)_z,\qquad D^Y_{zP}=(\Ea_P Y)_z,
+ \qquad z\in I.
+\end{equation}
+The same generated paths supply the Hamiltonian image and its integral
+cotangent:
+\begin{equation}
+ \sigma_L=\Ea^* (D^L K\Tr),\qquad
+ G_K=(D^L)\Tr D^Y.
+ \label{eq:tiled-channel-vjp}
+\end{equation}
+Here $\Ea^*$ is the signed occupation/replacement gather adjoint to the
+channel scatter. The Hamiltonian image is not truncated back to $S$ before
+any further consumer; its exterior-transform and structure adjoints perform
+the exact final projection. The supplied support must contain both inputs.
+For $L=Y$ the state scatter is the response scatter and is reused directly.
+For distinct inputs, read the state into the consumed input halo and place
+$D^Y$ in the slab that subsequently holds $D^L K\Tr$. After accumulating
+$G_K$, that slab is reused for sigma. Thus a second input requires no extra
+product array, channel slab, or worker-local tensor.
+
+For two inputs with the same certified spin-exchange parity, the channel
+sum may use one representative per exchange orbit. Its multiplicity is
+two off the exchange diagonal and one on the diagonal; apply this weight
+to only one Gram operand. This gives the full integral cotangent, while
+the emitted sigma remains a projected-action representative until its
+known parity projection is applied. Uncertified or unequal spin spaces
+use the complete generated channel support, without an exchange quotient.
+
+With $m=|I|$ generated channel targets and $b$ right-hand sides, the dense
+channel-kernel and Gram contractions cost $O(mbd^2)$ each, in addition to
+the sparse scatters, readers and final projections. The complete-carrier
+order instead uses $m=U_\alpha U_\beta$. This optimization avoids absent
+targets and repeated scatter; it does not lower the power of the orbital
+count in the exact channel kernel. The returned integral cotangent needs
+$O(d^2)$ storage, separately from the fixed shared numerical slab budget.
+No higher-order density tensor is formed, and no closure of the selected
+VB structure space is assumed.
+
+\subsection{Joint orbital-direction action}
+\label{sec:joint-direction}
+
+At a fixed orthogonal evaluation basis the signed spin-string connections
+do not depend on the integrals. Their orbital dependence has already been
+transferred to $Y$ and the channel kernel $K$. For an orbital direction let
+$Z=\delta Y$ and $\dot K=\delta K$, and define $A=\Ea Z$ and $B=\Ea Y$.
+Differentiating the Hamiltonian image gives
+\begin{equation}\label{eq:joint-direction}
+ \delta(\Ha Y)=\Ha Z+\delta\Ha Y
+ =\Ea^*\left(AK\Tr+B\dot K\Tr\right).
+\end{equation}
+Here $\dot K$ includes the transformed one-electron and two-electron
+directions in Eq.~\eqref{eq:K}; it is not merely the two-electron direction.
+The integral cotangent required by the orbital Hessian pullback is obtained
+from the same two scatters:
+\begin{equation}
+ J_K(Z,Y)=A\Tr B.
+ \label{eq:joint-direction-adjoint}
+\end{equation}
+State weights and the factor of two for real-state energy derivatives are
+applied after this bilinear contraction. They must not weight $B$ in
+Eq.~\eqref{eq:joint-direction} itself.
+
+The equality in Eq.~\eqref{eq:joint-direction} eliminates the second
+connection/halo traversal, the repeated scatter of $Y$, and a separate
+physical image gather. It also replaces the two orbital-generator
+cotangents of $\Ha Z$ and $\delta\Ha Y$ by the cotangent of their sum,
+by linearity in the left argument. Both kernel multiplications remain
+necessary; neither the $O(mbd^2)$ dense channel-kernel scaling nor the
+selected variational space changes. In particular, this is not a
+low-rank approximation or a relaxation of the Hessian accuracy.
+
+Three shared channel slabs suffice: retain $A$ and $B$, form $A\Tr B$,
+write $C=AK\Tr$ into the third slab, overwrite the now-consumed $A$ by
+$B\dot K\Tr$, and add it to $C$. The same numerical budget is retained
+by shortening the generated target batch when required. The extra slab
+therefore does not imply an increased cache budget or an additional
+spin-product array. Smaller batches can increase metadata overhead; a
+single symbolic traversal does not guarantee a factor-of-two speedup.
+
+For a certified spin-exchange parity, let $D$ be the diagonal matrix of
+exchange-orbit multiplicities on generated target rows. The integral
+cotangent is $A\Tr DB$. The multiplicity must be removed from the state
+operand before forming $B\dot K\Tr$; the projected-image multiplicity is
+then applied exactly once to the combined output. Unequal spin spaces
+or uncertified parity use $D=I$.
+
+The raw finite-orbital direction still contains the independent left
+exterior-transform term:
+\begin{equation}
+ \delta(H\vv C)=\Wa^*\left[
+       (\delta\Ta)^*\Ha Y+
+       \Ta^*\{\Ha Z+\delta\Ha Y\}\right]
+ \quad(\delta\vv C=0).
+\end{equation}
+This term is not eliminated by channel fusion. When accepted images are
+not resident, a second right-hand side carries $Y$ while the state reader
+has a structural zero in that slot. The joint outputs are then
+$(\Ha Y,\Ha Z+\delta\Ha Y)$, supplying the left term without an
+accepted-point replay outside the shared sweep. Optional diagnostics may
+gather $\delta\Ha Y$ separately from the already-computed overwritten
+slab; the production path needs only the combined image.
+
+\subsection{Triangular directions preserve the generated support}
+
+The support $S$ used above is the downward closure of the original touched
+spin products under the upper-triangular exterior transform, not the selected
+VB structure subspace itself. Write $P_S$ for its coordinate projector.
+Every $e_{pq}$ with $p\le q$ either keeps an occupation unchanged or replaces
+an occupied index by a lower index in one spin sector. Consequently,
+\begin{equation}
+ P_S e_{pq}P_S=e_{pq}P_S\quad(p\le q).
+ \label{eq:upper-support-invariance}
+\end{equation}
+For the Cholesky factor $R$, both $R$ and $\delta R$ are upper triangular,
+as is $L=\delta R R^{-1}$. The coefficient direction is therefore
+\begin{equation}
+ \delta Y=\Ta\Wa\delta\vv C+e(L)Y,\qquad
+ e(L)=\sum_{p\le q}L_{pq}e_{pq},\qquad P_S\delta Y=\delta Y.
+ \label{eq:upper-support-tangent}
+\end{equation}
+Thus the same support $S$ contains accepted states, selected-coefficient
+responses and their Cholesky representation directions. Their Hamiltonian
+channel sweeps need its one-generator closure $I$, not a second closure
+introduced merely by differentiating the upper-triangular transform.
+
+Only the upper-triangular part of the residual-generator cotangent is
+consumed by the Cholesky overlap pullback. For any residual $r$, including
+one that does not vanish outside the selected space,
+\begin{align}
+ \Gamma_{pq}&=\langle r,e_{pq}Y\rangle
+             =\langle P_Sr,e_{pq}Y\rangle,\qquad p\le q,\\
+ \delta\Gamma_{pq}&=\langle P_S\delta r,e_{pq}Y\rangle
+                  +\langle P_Sr,e_{pq}\delta Y\rangle,
+                  \qquad p\le q.
+ \label{eq:upper-residual-projection}
+\end{align}
+These identities permit a streamed physical overlap pullback to consume
+residual panels restricted to $S$, without retaining a complete residual
+carrier. They do not justify dropping the lower-triangular components from
+an interface that promises the full oriented generator cotangent. In general
+those components change under $P_S$ and can be nonzero.
+
+This is an invariant coordinate \emph{support} for upper-triangular actions,
+not closure of an arbitrarily selected VB structure space. Projection to
+selected structure coefficients before a residual-generator contraction
+remains invalid. The argument uses neither equal alpha/beta electron counts
+nor a common exchange parity.
+
+\subsection{Separation of the two spin factors}
+
+Define the same-spin channel actions
+\begin{equation}
+ D_\sigma=\sum_{PQ}K_{PQ}E_{\sigma P}E_{\sigma Q}.
+\end{equation}
+They include the particular distribution of one-electron terms implied
+by Eq.~\eqref{eq:K}; they are not independently assigned physical
+$\alpha$- and $\beta$-spin Hamiltonians. Expanding the two generators gives
+\begin{align}
+ \Ea_P\Ea_Q(LF\Tr)={}&
+ (E_{\alpha P}E_{\alpha Q}L)F\Tr
+ +L(E_{\beta P}E_{\beta Q}F)\Tr\notag\\
+ &+(E_{\alpha P}L)(E_{\beta Q}F)\Tr
+ +(E_{\alpha Q}L)(E_{\beta P}F)\Tr.
+\end{align}
+The last two terms become identical after summation because $K_{PQ}=K_{QP}$.
+Consequently,
+\begin{equation}\label{eq:Hfactor}
+ \boxed{\ \Ha(LF\Tr)=(D_\alpha L)F\Tr+L(D_\beta F)\Tr
+ +2\sum_{PQ}K_{PQ}(E_{\alpha P}L)(E_{\beta Q}F)\Tr.\ }
+\end{equation}
+The proof uses commutativity of different spin sectors, not commutativity
+of generators within one spin sector. It applies to unequal
+$U_\alpha,U_\beta$, unequal electron counts, ionic structures, and arbitrary
+mixtures of selected structures.
+
+\section{Direct sampling and structure projection}
+
+Introduce the pulled-back factors
+\begin{align}\label{eq:pullbacks}
+ L_0&=T_\alpha\Tr L,&F_0&=T_\beta\Tr F,\\
+ L_H&=T_\alpha\Tr D_\alpha L,&F_H&=T_\beta\Tr D_\beta F,\\
+ L_P&=T_\alpha\Tr E_{\alpha P}L,&
+ G_P&=T_\beta\Tr\sum_Q K_{PQ}E_{\beta Q}F.
+\end{align}
+Combining Eqs.~\eqref{eq:T} and \eqref{eq:Hfactor}, the needed original
+product entries are
+\begin{align}\label{eq:samples}
+ m_{ab}&=\sum_{\ell=1}^r(L_0)_{a\ell}(F_0)_{b\ell},\\
+ h_{ab}&=\sum_{\ell=1}^r\left[\label{eq:hsamples}
+ (L_H)_{a\ell}(F_0)_{b\ell}+(L_0)_{a\ell}(F_H)_{b\ell}
+ +2\sum_P(L_P)_{a\ell}(G_P)_{b\ell}\right],
+ \qquad (a,b)\in\Omega.
+\end{align}
+For any Davidson input $\vv v$, build $X=\Wa\vv v$ and return
+\begin{equation}\label{eq:final}
+ (M\vv v)_I=\sum_{(a,b)\in\Omega}w_{ab,I}m_{ab},\qquad
+ (H\vv v)_I=\sum_{(a,b)\in\Omega}w_{ab,I}h_{ab}.
+\end{equation}
+
+\begin{proposition}[Exact factored selected-space action]
+Equations~\eqref{eq:source}--\eqref{eq:final} evaluate
+Eq.~\eqref{eq:restriction} exactly for arbitrary selected structures,
+without constructing a complete transformed product array.
+\end{proposition}
+\begin{proof}
+Equation~\eqref{eq:source} is the exact decomposition into nonzero original
+columns. Linearity gives Eq.~\eqref{eq:factors}, and expansion of the
+Hamiltonian gives Eq.~\eqref{eq:Hfactor}. Applying $\Ta^*$ to each outer
+product yields Eqs.~\eqref{eq:samples} and \eqref{eq:hsamples}.
+All other final entries have zero
+coefficient in $\Wa^*$ by Eq.~\eqref{eq:Wadj}. The final sampling therefore
+omits no contribution to Eq.~\eqref{eq:restriction}.
+\end{proof}
+
+The contraction can be read as the following sequence:
+\begin{equation}
+ \vv v\ \xrightarrow{\Wa}\ X=AB\Tr
+ \ \xrightarrow{T_\alpha,T_\beta}\ LF\Tr
+ \ \xrightarrow{\text{spin generators}}\ \text{factor images}
+ \ \xrightarrow{T_\alpha\Tr,T_\beta\Tr}\ (h,m)|_\Omega
+ \ \xrightarrow{\Wa^*}\ (H\vv v,M\vv v).
+\end{equation}
+The middle objects are represented by factors and channel panels, not by
+a selected-space approximation to the transformed wave function. This is
+how Slater--Condon evaluation remains available without requiring selected
+structures to form an invariant space.
+
+\section{Two additional exact reductions}
+
+\subsection{Common spin-exchange parity}
+
+An optional reduction is available when the two one-spin bases and their
+orbital maps coincide, and every selected structure has the same certified
+transpose parity $\eta=\pm1$. Define
+\begin{equation}
+ \Pi X=X\Tr,\qquad P_\eta=\tfrac12(\Id+\eta\Pi),\qquad
+ \Pi\Wa=\eta\Wa.
+\end{equation}
+Construct $X_{\rm rep}$ by keeping $a<b$ with coefficient $2X_{ab}$,
+keeping diagonal entries with coefficient $X_{aa}$ for $\eta=+1$, and
+setting the other entries to zero. Odd parity has zero diagonal. Then
+\begin{equation}
+ P_\eta X_{\rm rep}=X.
+\end{equation}
+Since $\Ta$ and a spin-independent $\Ha$ commute with exchange,
+their original-basis composite $\mathcal A=\Ta^*\Ha\Ta$ also commutes.
+Furthermore $\Wa^*P_\eta=\Wa^*$. It follows that
+\begin{equation}
+ \Wa^*\mathcal A X_{\rm rep}
+ =\Wa^*P_\eta\mathcal A X_{\rm rep}
+ =\Wa^*\mathcal A P_\eta X_{\rm rep}
+ =\Wa^*\mathcal A X.
+\end{equation}
+The same proof applies to $\Ta^*\Ta$ for the overlap. Source factorization
+may therefore use $X_{\rm rep}$, but the final output sampling still uses
+\emph{both} halves of $\Omega$. The unprojected image of $X_{\rm rep}$
+is not itself a parity eigenvector.
+
+For a single structure with $m$ independent covalent pairs, this can reduce
+the source count from $2^m$ to $2^{m-1}$. It does not imply that the touched
+column count always halves for an arbitrary selected space. Equal spin
+dimensions alone are insufficient; common parity must be checked from the
+structure map. Parity is not a substitute for total-spin adaptation.
+Without it, the unreduced factorization remains exact.
+
+\subsection{Causal rows of the exterior adjoint}
+
+Only $A_\Omega$ rows of the $\alpha$ pullbacks and $J$ rows of the
+$\beta$ pullbacks enter Eq.~\eqref{eq:samples}. An elementary forward
+exterior shear updates $z_j\leftarrow z_j+s\epsilon z_i$, with orbital
+coefficient $s$ and fermionic sign $\epsilon=\pm1$. Its adjoint updates
+$z_i\leftarrow z_i+s\epsilon z_j$. Starting from the requested final
+rows, traverse the adjoint operations in reverse chronological order.
+Retain an update exactly when its destination is needed, and then mark
+its source as needed. Execute the retained updates in their original
+adjoint order, including the diagonal exterior scaling.
+
+For a row selector $Q_A$, this computes $Q_A T_\sigma\Tr Z$ exactly.
+Every intermediate row that can influence the answer is retained. The
+pruning concerns paths through a linear transformation, not closure of
+the selected VB space and not the magnitude of an amplitude. A bitmap on
+one-spin rows and retained shear-edge indices are sufficient; no product
+array or dense compound matrix is required.
+
+\section{Tiling, storage, and arithmetic}
+
+\subsection{Streaming the exact equations}
+
+Split the $r$ source columns into panels of width $s$, and the $d$ channels
+into panels of width $p$. Different source columns are summed independently
+in Eq.~\eqref{eq:samples}; the Hamiltonian action never couples source
+column labels to one another. For each source panel:
+\begin{enumerate}[label=\arabic*.]
+ \item Build its sparse $A,B$, and apply $T_\alpha,T_\beta$ to obtain $L,F$.
+ \item For a channel panel $\mathcal P$, scatter $E_{\sigma P}$ on the
+       corresponding factors.
+ \item Stream channel panels $\mathcal Q$ to accumulate
+       $V_{\sigma P}=\sum_QK_{PQ}E_{\sigma Q}F_\sigma$,
+       where $F_\alpha=L$ and $F_\beta=F$. This is a channel GEMM on
+       flattened spin-row/source-column panels.
+ \item Gather $\sum_{P\in\mathcal P}E_{\sigma P}V_{\sigma P}$ into
+       the same-spin images. Pull back $E_{\alpha P}L$ and $V_{\beta P}$
+       and add the cross-spin dot products on $\Omega$.
+ \item After all channel panels, pull back the base and same-spin factors,
+       add their samples, and reuse the slabs for the next source panel.
+\end{enumerate}
+Finally apply $\Wa^*$ once to the accumulated support arrays. Source,
+channel, and right-hand-side loops reuse shared backing allocations;
+threads do not receive private copies of the carrier.
+
+The explicit source/channel numerical slabs require
+\begin{equation}\label{eq:memory}
+ O\bigl((U_\alpha+U_\beta)sp\bigr)
+\end{equation}
+storage, plus $O(t)$ support coefficients and images per processed vector.
+Additional persistent storage includes the sparse structure map, one-spin
+link/exterior metadata, and the $d\times d$ kernel $K$. The source slabs
+do not include any $U_\alpha U_\beta$ coefficient array. This is a
+workspace statement, not a bound on the total process memory.
+For an overlap-only action no channel panels or same-spin Hamiltonian
+images are required, and the factor workspace reduces to
+$O((U_\alpha+U_\beta)s)$.
+
+\subsection{Where a speed advantage is obtained}
+
+Let $q_\sigma$ count elementary exterior shear edges. With a full channel
+panel ($p=d$), a leading-work bound per input vector is
+\begin{align}\label{eq:work}
+ O\Bigl(&r(U_\alpha+U_\beta)d^2
+       +rd(q_\alpha+q_\beta)+trd\notag\\
+       &+r\sum_\sigma U_\sigma n_\sigma(n-n_\sigma+1)
+       +\operatorname{nnz}(\Wa)\Bigr).
+\end{align}
+The terms describe channel mixing, exterior pullbacks, final sampling,
+Slater--Condon spin links, and the initial/final structure contractions.
+The displayed shear count is an upper bound; causal pruning reduces the
+selected-row pullbacks. Forward base-factor transforms remain necessary.
+For $p<d$, channel mixing keeps the same leading arithmetic order, while
+spin scatters can repeat across channel panels by a factor up to
+$\lceil d/p\rceil$. A smaller workspace does not change any equation or
+variational space.
+
+A generated-product contraction instead has channel-mixing work of order
+$N_{\rm cl}d^2$, where $N_{\rm cl}$ counts the generated product
+intermediates needed by that contraction order. When this support is broad
+and $r\ll\min(U_\alpha,U_\beta)$, the factorized order replaces the
+product dimension by a source-weighted sum of one-spin dimensions. For
+$U_\alpha\simeq U_\beta=U$ and $N_{\rm cl}\simeq U^2$, the leading
+mixing ratio is approximately $U/(2r)$, before other work is counted.
+
+For broad source support, $r$ can approach $U$ and the factorized order
+need not be faster. Both orders evaluate the same orthogonal-CI action.
+An arithmetic planner may select between them without a memory-based
+admission test for the physical selected space. Exact applicability to
+arbitrary structures therefore does not mean that their costs are equal
+or that selecting one structure universally yields rank one. There is no
+claim of eliminating the exponential growth of the complete one-spin
+spaces.
+
+\section{Integral adjoints without a product carrier}\label{sec:factor-adjoint}
+
+Let the bra and ket amplitudes have exact factorizations
+\begin{equation}
+ Y_\ell=L_\ell F_\ell\Tr,\qquad Y_r=L_r F_r\Tr,
+ \qquad \mathscr E=\ip{Y_\ell}{\Ha Y_r}.
+\end{equation}
+Their source counts $r_\ell$ and $r_r$ need not be equal. At fixed factors,
+the derivative with respect to the Hamiltonian channel kernel is
+\begin{equation}\label{eq:kernel-adjoint}
+ \frac{\partial\mathscr E}{\partial K_{PQ}}=
+ \ip{\Ea_PY_\ell}{\Ea_QY_r}=G_{PQ}.
+\end{equation}
+This uses the self-adjoint symmetric generators, but does not assume that
+the bra and ket, their source counts, or their spin spaces coincide.
+
+First contract the unacted ket factors into the bra amplitude:
+\begin{equation}\label{eq:weighted-bra}
+ W_\alpha=Y_\ell F_r=L_\ell(F_\ell\Tr F_r),\qquad
+ W_\beta=Y_\ell\Tr L_r=F_\ell(L_\ell\Tr L_r).
+\end{equation}
+For each channel $P$, form the two channel covectors
+\begin{align}\label{eq:channel-covectors}
+ C_{\alpha P}&=E_{\alpha P}W_\alpha
+            +L_\ell\bigl(F_\ell\Tr(E_{\beta P}F_r)\bigr),\\
+ C_{\beta P}&=E_{\beta P}W_\beta
+            +F_\ell\bigl(L_\ell\Tr(E_{\alpha P}L_r)\bigr).
+\end{align}
+Their dimensions are $U_\alpha\times r_r$ and $U_\beta\times r_r$.
+Self-adjointness moves the crossed generator from the bra to the ket;
+for example, $(E_{\beta P}F_\ell)\Tr F_r
+=F_\ell\Tr(E_{\beta P}F_r)$. Thus no channel scatter on the bra
+source family is required, even when it contains many panels.
+The full kernel derivative is then
+\begin{equation}\label{eq:factor-kernel-adjoint}
+ \boxed{\quad G_{PQ}=
+ \ip{C_{\alpha P}}{E_{\alpha Q}L_r}
+ +\ip{C_{\beta P}}{E_{\beta Q}F_r}.\quad}
+\end{equation}
+To verify this identity, expand $\Ea_QY_r$ as
+$(E_{\alpha Q}L_r)F_r\Tr+L_r(E_{\beta Q}F_r)\Tr$ and move each
+unacted ket factor to the bra side of the Frobenius product. The resulting
+bra contractions are precisely Eq.~\eqref{eq:channel-covectors}. This is
+the reverse contraction of the same one-body channel graph used for sigma;
+no product-space one-body response or higher-order density tensor is formed.
+
+Only $\operatorname{sym}G=(G+G\Tr)/2$ contributes to symmetric integral
+variations. Using the packed diagonal selector $d_P$ and the effective
+one-electron matrix $f$ defined above, Eq.~\eqref{eq:K} gives
+\begin{equation}
+ \delta\mathscr E=
+ \tfrac12\ip{\operatorname{sym}G}{\delta V}
+ +\sum_P\frac{[(\operatorname{sym}G)d]_P}{N}\,\delta f_P,
+ \qquad
+ \delta f_{ps}=\delta h_{ps}-\tfrac12\sum_q\delta(pq|qs).
+\end{equation}
+Unpacking the symmetric pair entries with half weight on each off-diagonal
+matrix element gives the full-matrix Frobenius gradients for $h$ and $V$.
+The product and factor algorithms share this final kernel pullback in code;
+they differ only in the contraction order that generates $G$.
+
+\subsection{A bounded reverse sweep}
+
+For each ket source panel, stream the bra factors to accumulate
+$W_\alpha,W_\beta$ once. For each $P$-channel panel, scatter the ket
+and these weighted factors, then stream the bra base factors to accumulate
+the crossed contributions to $C_{\sigma P}$. Only after the complete bra has been
+consumed, stream the ket $Q$ channels and add their Gram matrices to $G$.
+Putting the $Q$ contraction inside the bra source loop would repeat the
+leading channel GEMM unnecessarily; that order is not used.
+
+Let $s_\ell,s_r$ be the bra and ket panel widths and $p$ the channel width.
+The required numerical workspace, measured in doubles, is bounded by
+\begin{equation}
+ (U_\alpha+U_\beta)
+ \bigl[s_\ell+2s_r+(2+\mathbf 1_{p<d})s_rp\bigr]
+ +s_\ell s_rp+\max(\omega_\ell s_\ell,\omega_r s_r).
+\end{equation}
+It includes loaded bra/ket base factors, weighted bra factors, ket channel
+panels, channel covectors, and one reusable source moment matrix.
+When $p=d$, the ket $P$ panel also supplies all $Q$ channels; otherwise
+a separate $Q$ panel is required. Here $\omega_\ell,\omega_r$ count temporary doubles per source
+column used by the respective factor loaders, excluding their output views.
+They vanish for the original exterior-factor provider; source generation is
+sequential, so the larger loading scratch, not their sum, enters the bound.
+The immutable metadata and the required returned $d\times d$ gradient are
+separate. Both source
+and channel widths can decrease to respect the budget, without changing
+the represented amplitudes or a derivative tolerance.
+Source and channel widths are chosen jointly by the repeated-work estimate
+in Section~\ref{sec:factor-schedule}. A complete bra is retained when that
+schedule makes it worthwhile; otherwise the same equations stream its panels.
+
+With complete channel panels, the leading dense arithmetic is
+\begin{equation}
+ O\left((U_\alpha+U_\beta)
+    [r_r d^2+r_\ell r_r d]\right),
+\end{equation}
+instead of product-carrier Gram work of order $U_\alpha U_\beta d^2$.
+The source-pair term is essential and is not assumed linear in rank.
+Self-adjointness permits exchanging the bra and ket before contraction,
+placing the smaller source family on the ket side. One-spin link
+traversals and panel regeneration also contribute; a smaller channel
+panel can repeat these traversals. No universal speedup is inferred from
+the leading dense terms alone.
+
+For an exchange-parity reduction, a representative cannot replace both
+amplitudes without projection. A physical bra with parity $\eta$ may,
+however, contract an unprojected ket representative $Z$ when
+$Y_r=P_\eta Z$ and the integral derivative commutes with exchange:
+$\ip{Y_\ell}{\delta\Ha Z}=\ip{Y_\ell}{\delta\Ha Y_r}$.
+The caller must establish this identity; the common factor kernel does
+not infer a parity projection from equal spin dimensions.
+
+\subsection{Directional factors and the integral part of an HVP}
+
+Let $R$ be the nonsingular upper-triangular orbital map in the exterior
+transforms and let $\delta R$ be its direction. Define the spatial generator
+and its one-spin representation by
+\begin{equation}
+ \kappa=\delta R R^{-1},\qquad
+ \mathcal G_\sigma(\kappa)=\sum_{pq}\kappa_{pq}
+       a^\dagger_{p\sigma}a_{q\sigma}.
+\end{equation}
+The derivative of an exterior representation obeys
+$\delta T_\sigma=\mathcal G_\sigma(\kappa)T_\sigma$.
+This generator differentiates the CI representation; it does not replace
+the physical nonorthogonal VB orbital coordinates or their finite update.
+For $Y=LF\Tr$, with selected structure coefficients allowed to vary,
+\begin{equation}\label{eq:factor-tangent}
+ \boxed{\quad\delta Y=
+   (\mathcal G_\alpha(\kappa)L)F\Tr
+   +L(\mathcal G_\beta(\kappa)F)\Tr
+   +T_\alpha\,\delta X\,T_\beta\Tr,\qquad
+   \delta X=\Wa\,\delta\vv C.\quad}
+\end{equation}
+The structure map $\Wa$ and its exact support plan are fixed. The last term
+therefore uses the same support factorization with the structure-response
+coefficients; it is not a projection of either orbital derivative onto the
+original support. The two orbital terms generally leave that support and
+retain every contribution through their transformed spin factors.
+
+The response interface therefore carries $\delta\mathbf C$ in the selected
+structure basis, not $\delta X$ as a full spin-product array. For state $s$
+and an original touched product $e$, it loads only
+\begin{equation}
+ (\delta x_s)_e=\sum_I W_{eI}\,\delta C_{Is}.
+\end{equation}
+The incidences $W_{eI}$ and source cover are already retained at the accepted
+point. This costs $O(\operatorname{nnz}W)$ additions and scalar products per
+state, with $O(P)$ temporary coefficients for $P$ touched products, instead
+of an $O(U_\alpha U_\beta)$ response array per state. The response columns
+are borrowed from their owning structure-space calculation; they are not
+copied into a second bundle. Both the integral-gradient derivative and
+the oriented residual-generator derivative consume these same columns.
+The optional Hamiltonian/overlap output projection is omitted when only
+the response adjoint is requested. This changes neither the full orbital
+derivative in Eq.~\eqref{eq:factor-tangent} nor the selected-space variational
+problem. In particular, a zero-dimensional horizontal CI tangent does not
+remove the normalization response or its gauge multiplier.
+
+For each coordinate-anchored source $j$, write $Y_j=\ell_j f_j\Tr$.
+Its selected-coefficient derivative changes only the unanchored raw factor.
+For a $\beta$-anchored source $\delta f_j=0$; for an $\alpha$-anchored
+source $\delta\ell_j=0$. The symbols $\delta\ell_j$ and $\delta f_j$ here
+denote coefficient changes at fixed orbital map. Combining these changes
+with the orbital derivative gives
+\begin{align}
+ a_j&=\mathcal G_\alpha(\kappa)\ell_j+\delta\ell_j,&
+ b_j&=\mathcal G_\beta(\kappa)f_j+\delta f_j,\\
+ \delta Y&=\sum_{j=1}^{r}\left(a_j f_j\Tr+\ell_j b_j\Tr\right).
+ \label{eq:merged-factor-tangent}
+\end{align}
+Thus at most $2r$ factors are required, rather than the $3r$ produced by
+concatenating two orbital families and a separate coefficient-response
+family. No cross term $\delta\ell_j\delta f_j\Tr$ enters a first derivative.
+This is an exact source identity, not a numerical rank truncation. For a
+physical exchange-parity projection, apply the same linear projection to
+both sides of Eq.~\eqref{eq:merged-factor-tangent}, including exchanged
+anchors and their signs. A coefficient-only tangent needs only $r$ factors.
+
+A source panel loads its base factors and applies
+the oriented Slater--Condon generator to the required spin factor only.
+The same temporary is then overwritten by the coefficient derivative of
+that factor, transformed and accumulated. No second factor panel is needed.
+Unlike a Hamiltonian channel, $\kappa$ need not be symmetric: replacing it by
+its symmetric part would give the wrong orbital derivative. The one-factor
+temporary uses at most $\max(U_\alpha,U_\beta)s$ doubles for panel width $s$;
+it is included in the loader workspace term of the preceding bound.
+
+Write $\mathcal J(Y_\ell,Y_r)$ for the symmetric integral adjoint of
+$\langle Y_\ell,\mathcal H Y_r\rangle_{\rm F}$, including the shared
+$K$-kernel pullback. Since each physical integral variation is self-adjoint,
+\begin{equation}\label{eq:factor-adjoint-tangent}
+ \delta\mathcal J(Y,Y)=2\mathcal J(\delta Y,Y).
+\end{equation}
+Thus the integral-gradient derivative needed in an orbital HVP can be
+contracted from the directional factor source directly, without constructing
+$\delta Y$ or any higher-order RDM for this contraction. If the accepted
+and directional factor counts are $r$ and $r_\delta$, the leading dense work is
+\begin{equation}
+ O\left((U_\alpha+U_\beta)
+  [\min(r,r_\delta)d^2+r\,r_\delta d]\right),
+\end{equation}
+plus the one-spin link traversals and source transforms. The count
+$r_\delta$ includes both orbital terms and any structure response, including
+the physical parity reconstruction when required. It must not be estimated
+from the accepted source count alone.
+
+There are two exact placements of a certified exchange-parity projector
+$P_\eta$. If $Z$ is the accepted representative and $\delta Z$ its tangent,
+self-adjointness and $[P_\eta,\delta\mathcal H]=0$ give
+\begin{equation}\label{eq:tangent-parity-order}
+ \ip{P_\eta\delta Z}{\delta\mathcal H Z}
+ =\ip{P_\eta Z}{\delta\mathcal H\delta Z}.
+\end{equation}
+For an accepted representative with $r$ factors and a merged tangent with
+$2r$ factors, the two source-count pairs are $(4r,r)$ and $(2r,2r)$.
+Both have the same source-pair moment count. The first has less leading
+channel-Gram arithmetic, but can repeatedly regenerate its larger directional
+bra when it does not fit the common workspace. The second can keep the
+accepted bra resident without enlarging that workspace. Compare the full
+scalar-work estimate, including the actual planned provider loads, channel
+traversals and Gram work, rather than selecting solely by the smaller ket.
+The projector placement changes only contraction order, never the selected
+VB space or an accuracy criterion. Equation~\eqref{eq:tangent-parity-order}
+applies to the symmetric integral adjoint; it does not permit moving a
+Hamiltonian through the oriented generator in a residual adjoint.
+
+Equation~\eqref{eq:factor-adjoint-tangent} is the integral part of the HVP,
+not its complete orbital pullback. The derivative of the exterior-map
+adjoint, the full carrier residual, and the state-average gauge terms remain
+required. The present implementation keeps those terms while migrating the
+integral contraction to Eq.~\eqref{eq:factor-adjoint-tangent}.
+
+\subsection{Oriented generator and residual contractions}\label{sec:factor-generator}
+
+Define the orbital matrix $\mathcal D(X,Y)$ by
+\begin{equation}
+ [\mathcal D(X,Y)]_{pq}=
+ \langle X,(a^\dagger_{p\alpha}a_{q\alpha}
+                 +a^\dagger_{p\beta}a_{q\beta})Y\rangle_{\rm F}.
+\end{equation}
+It is the coefficient of $\kappa_{pq}$ in
+$\langle X,\mathcal G(\kappa)Y\rangle_{\rm F}$ and need not be symmetric.
+For $Y=L_rF_r\Tr$, form only the weighted single-spin panels
+\begin{equation}
+ W_\alpha=XF_r,\qquad W_\beta=X\Tr L_r.
+\end{equation}
+Then
+\begin{equation}\label{eq:generator-factor}
+ [\mathcal D(X,Y)]_{pq}=
+ \sum_j\langle (W_\alpha)_j,
+      a^\dagger_{p\alpha}a_{q\alpha}(L_r)_j\rangle
+ +\sum_j\langle (W_\beta)_j,
+      a^\dagger_{p\beta}a_{q\beta}(F_r)_j\rangle.
+\end{equation}
+If $X=L_\ell F_\ell\Tr$, each weighted panel is obtained from source-pair
+moments, $XF_r=L_\ell(F_\ell\Tr F_r)$ and
+$X\Tr L_r=F_\ell(L_\ell\Tr L_r)$. The final contractions traverse the
+oriented single-spin occupation/replacement links. They are not symmetric
+Hamiltonian-channel derivatives. For real coefficients,
+$\mathcal D(X,Y)=\mathcal D(Y,X)\Tr$; this permits a transposed
+contraction order but not an unqualified interchange of sources.
+
+For the residual $Z=(\Ha-E)X$, the required panels can also be obtained
+without $Z$ or $\Ha X$. Using the same-spin actions $D_\sigma$ and
+the ket channel mixtures
+\begin{equation}
+ V_{\alpha P}=\sum_QK_{PQ}E_{\alpha Q}L_r,\qquad
+ V_{\beta P}=\sum_QK_{PQ}E_{\beta Q}F_r,
+\end{equation}
+the exact residual-weighted panels are
+\begin{align}\label{eq:residual-panels}
+ Z_\alpha={}&D_\alpha W_\alpha+X(D_\beta F_r)
+       +2\sum_P E_{\alpha P}(X V_{\beta P})-E W_\alpha,\\
+ Z_\beta={}&D_\beta W_\beta+X\Tr(D_\alpha L_r)
+       +2\sum_P E_{\beta P}(X\Tr V_{\alpha P})-E W_\beta.
+\end{align}
+Thus $Z_\alpha=ZF_r$ and $Z_\beta=Z\Tr L_r$. Replacing
+$W_\alpha,W_\beta$ by $Z_\alpha,Z_\beta$ in
+Eq.~\eqref{eq:generator-factor} gives $\mathcal D((\Ha-E)X,Y)$.
+The spectator actions have been moved to the ket using self-adjointness
+of $D_\sigma$; the crossed term follows from Eq.~\eqref{eq:Hfactor}.
+Self-adjointness of $\Ha$ does \emph{not} justify exchanging the two
+sources here, because $\Ha$ generally does not commute with an oriented
+one-body generator.
+
+The implementation reuses the factor/channel sweep twice: once for the
+weighted panels to produce $D_\sigma W_\sigma$, and once for the ket
+panels to produce the spectator and crossed terms. After same-spin gather,
+the ket's raw channel buffers are reused for $X V_{\beta P}$ and
+$X\Tr V_{\alpha P}$, then consumed by the crossed gather. No separate
+channel scatter/mixing implementation or product-space residual is required.
+
+With complete channel panels, the leading dense arithmetic is
+$O((U_\alpha+U_\beta)[r_r d^2+r_\ell r_r d])$, plus the oriented
+single-spin link contractions. Without $\Ha$, it reduces to
+\begin{equation}
+ O\left((U_\alpha+U_\beta)r_\ell r_r
+  +r_r\sum_{\sigma}U_\sigma n_\sigma(n-n_\sigma+1)\right).
+\end{equation}
+Accepted-state transition densities use this estimate to choose between
+factor moments and product-space links. Their planner does not reuse the
+Hamiltonian-channel cost estimate.
+
+A conservative numerical workspace bound for the residual contraction,
+in doubles, is
+\begin{equation}
+ (U_\alpha+U_\beta)[s_\ell+(3p+9)s_r]
+ +s_\ell s_r\max(1,p)
+ +\max(\omega_\ell s_\ell,\omega_r s_r)+(t+1)n^2,
+\end{equation}
+where $t$ bounds the number of workers and the last term covers the small
+orbital-matrix reduction and its temporary result. The required returned
+$n\times n$ matrix and immutable metadata are separate. For a generator
+without $\Ha$, the channel sweep and residual outputs are absent, giving
+$(U_\alpha+U_\beta)(s_\ell+2s_r)+s_\ell s_r$ plus the same loading
+and reduction terms. No per-worker spin/product array is allocated.
+
+\subsection{Reuse of the normalization response}
+
+Let $C$ contain the selected structure coefficients and $M$ be the
+structure-overlap matrix. The solve-free normalization response has the
+known internal state frame
+\begin{equation}
+ M_C=C\Tr MC,\qquad K_g=-\tfrac12 C\Tr\delta M C,\qquad
+ A_g=M_C^{-1}K_g,\qquad Q_g=C A_g.
+ \label{eq:gauge-frame}
+\end{equation}
+Retain $A_g$ from the small selected-frame solve rather than infer it from
+the expanded numerical vectors $Q_g$. This identity requires no closure of
+the selected VB space under an orbital transformation.
+
+For a single selected root,
+\begin{equation}
+ a=-\frac12\frac{C\Tr\delta M C}{C\Tr MC},\qquad Q_g=aC.
+\end{equation}
+At fixed accepted active-space eigenvalue $\epsilon$, the integral adjoint and the
+residual-generator adjoint are quadratic in $C$. Therefore their
+coefficient-only directional derivatives are
+\begin{align}
+ \delta_C\mathcal J(Y,Y)&=2a\,\mathcal J(Y,Y),\\
+ \delta_C\mathcal D((\mathcal H-\epsilon)Y,Y)
+ &=2a\,\mathcal D((\mathcal H-\epsilon)Y,Y).
+ \label{eq:gauge-adjoint-reuse}
+\end{align}
+These identities do not assume that the full-carrier Ritz residual vanishes.
+Since the accepted orbital-map pullback is linear in these adjoints, their
+coefficient response is also $2a$ times the already retained active-integral
+adjoint. No new spin-source generation, Hamiltonian action or integral
+contraction is required for this part of the response.
+Given the already computed frame $a$, the reuse costs $O(d^2+n^2)$ scalar
+work in the current active-integral representation, with no extra array
+beyond the existing directional adjoint; $n$ is the active orbital count
+and $d=n(n+1)/2$. This removes the carrier dimensions and source rank from
+the coefficient-scaling update, not from the rest of the orbital HVP.
+
+The selected-state multiplier contribution remains separate, as does the
+directional derivative of the orbital-map pullback. Neither is removed by
+Eq.~\eqref{eq:gauge-adjoint-reuse}. The reused quantity is the accepted
+\emph{active-integral} adjoint, not the total orbital gradient, which also
+contains inactive-only contributions. For multiple states, retain the full
+matrix $A_g$; the weighted diagonal adjoint totals alone do not contain
+the required cross-state adjoints. The general coefficient-response
+contraction remains necessary until those transition adjoints are available.
+
+\subsection{Selected-structure response without a response carrier}\label{sec:factor-response}
+
+At a fixed orbital point let $Y_i=\Ta\Wa\vv C_i$ and
+$Q_i=\Ta\Wa\vv q_i$, where $\vv q_i$ is a coefficient response in
+the original selected structure space. Write
+$\mathcal J_i=\mathcal J(Y_i,Y_i)$ and
+$\Gamma_i=2\mathcal D((\Ha-E_i)Y_i,Y_i)$ for its unweighted accepted
+integral and exterior-generator adjoints. With $E_i$ fixed, their
+coefficient-response contributions are exactly
+\begin{align}\label{eq:factor-structure-response}
+ \delta\mathcal J_i&=2\mathcal J(Q_i,Y_i),\\
+ \delta\Gamma_i&=2\mathcal D((\Ha-E_i)Q_i,Y_i)
+                    +2\mathcal D((\Ha-E_i)Y_i,Q_i).
+\end{align}
+The first residual is the response of the wave function; the second is the
+response of the generator's right argument. Neither residual may be
+projected into the selected structure space before its generator contraction.
+Both are evaluated by the residual panels of
+Eq.~\eqref{eq:residual-panels}. Thus no $Q_i$, $\Ha Q_i$, or response
+residual product array is required. Each raw response is generated once
+on $\Omega$ and reused by the spin-factor adjoints and the tiled
+$\Wa^*\Ta^*\Ha Q_i$, $\Wa^*\Ta^*Q_i$ projections.
+
+\subsection{Product-tile response with resident accepted data}
+
+For a broad source graph the generated product order can be cheaper than
+factor-pair moments. Let $R_i=(\Ha-E_i)Y_i$ be the retained accepted residual.
+The transpose identity for real one-body generators is
+\begin{equation}
+ \mathcal D(L,R)=\mathcal D(R,L)\Tr,
+ \qquad (e_{pq})\Tr=e_{qp}.
+\end{equation}
+It rewrites the coefficient-response generator cotangent as
+\begin{equation}
+ \delta\Gamma_i=2\bigl[
+   \mathcal D(\Ha Q_i,Y_i)-E_i\mathcal D(Q_i,Y_i)
+   +\mathcal D(Q_i,R_i)\Tr\bigr].
+ \label{eq:product-response-generator}
+\end{equation}
+Every contraction now has a generated response panel as its left argument
+and a resident accepted array as its right argument. There is no need to
+build a complete $Q_i$, $\Ha Q_i$, or response residual array, nor to
+recompute $\Ha Y_i$. For disjoint beta-column projectors $P_t$, linearity
+gives $\mathcal D(L,R)=\sum_t\mathcal D(P_tL,R)$. The two input-panel
+terms in Eq.~\eqref{eq:product-response-generator} share their signed-link
+traversal; their second term is transposed only \emph{after} its oriented
+contraction. Truncating its lower triangle before transposition would lose
+required upper-triangular information.
+
+The generated Hamiltonian sweep also forms the channel Gram for
+$\mathcal J(Q_i,Y_i)$. Each emitted Hamiltonian panel is consumed both by
+the first term in Eq.~\eqref{eq:product-response-generator} and by the
+exterior/structure adjoint, before its storage is reused. Cache eviction
+may emit partial Hamiltonian panels: linearity of both consumers makes
+this exact without waiting for a complete sigma column. The physical
+Cholesky pullback needs only the upper triangle. By
+Eq.~\eqref{eq:upper-residual-projection}, the first term may therefore
+consume the Hamiltonian image restricted to the generated support $S$.
+This restriction does not assert closure in the selected structure basis.
+For a common exchange parity, the same summed-spin generators commute with
+the exchange projector, so the projected-action representative is sufficient
+for this physical cotangent as well as for the structure image.
+
+For a left panel whose beta columns belong to $B_t$, the two spin contributions
+to an oriented generator cotangent can be contracted as
+\begin{align}
+ \mathcal D^\alpha_{pq}(L,R)&=
+  \sum_{aa'}(e^\alpha_{pq})_{aa'}
+        \sum_{b\in B_t}L_{ab}R_{a'b},\\
+ \mathcal D^\beta_{pq}(L,R)&=
+  \sum_{b\in B_t,b'}(e^\beta_{pq})_{bb'}
+        \sum_aL_{ab}R_{ab'}.
+ \label{eq:spectator-first-generator}
+\end{align}
+Each signed link is visited outside the spectator dot product.
+Let $\ell_\sigma$ count diagonal and single replacements per spin string.
+The metadata work per right-hand side changes from
+\[
+ O\bigl(U_\alpha |B_t|(\ell_\alpha+\ell_\beta)\bigr)
+ \quad\text{to}\quad
+ O\bigl(U_\alpha\ell_\alpha+|B_t|\ell_\beta\bigr).
+\]
+The numerical dot-product work retains the former order; this is a reduction
+of repeated indexing and branching, not a lower orbital power for the entire
+contraction. Beta contributions use contiguous column dots and alpha
+contributions borrow strided row views, with no transposed carrier copy.
+The implementation partitions alpha rows and beta link events separately,
+so even one beta column can share its long spectator contractions across
+the existing OpenMP team. Only orbital-matrix reductions are partition-local.
+Upper-triangle selection is performed after the requested transpose and
+outside the spectator dot. Exact-zero stripes may be skipped, but no
+amplitude threshold or norm-based small-vector rejection is used.
+
+\paragraph{Compact symbolic panels.}
+For a beta panel $B_t$, let
+$S_t=\{(a,b)\in S:b\in B_t\}$.
+The retained input and partial-image panels store only $|S_t|b$
+floating-point values for $b$ simultaneous right-hand sides, together with
+one shared row-index pattern of size $O(|S_t|+|B_t|)$. All entries in this
+pattern are retained, including exact zeros and arbitrarily small values.
+This is symbolic support compression, not numerical sparsification.
+The Slater--Condon gather adds directly into these indexed rows. An ordered
+exterior adjoint temporarily unpacks one bounded panel; it does not unpack
+the complete carrier. Full symbolic support uses implicit row indices.
+Both caches retain their byte limits, and partial-image eviction remains
+linear as above. Shared patterns are held only by resident panels, rather
+than by an additional unbounded support table.
+
+For a complete covalent family with $n=2m$ orbitals and $m$ electrons per
+spin, the generated support obeys the prefix condition
+$N_\alpha(k)+N_\beta(k)\geq k$ for every $k$.
+Its cardinality is
+\begin{equation}
+ |S_{\mathrm{cov}}|=
+ \binom{2m}{m}^{\!2}-\binom{2m}{m+1}^{\!2}.
+ \label{eq:covalent-panel-count}
+\end{equation}
+To count the excluded pairs, reflect both occupation bits,
+$(a_j,b_j)\mapsto(1-b_j,1-a_j)$, up to the first prefix with
+$N_\alpha(k)+N_\beta(k)=k-1$. This maps an excluded pair bijectively to
+two strings with $m+1$ electrons; the inverse reflects up to the first
+prefix excess of one. Any selected covalent subset has support contained
+in this set. Thus the complete-covalent upper bounds for 12 and 14 orbitals
+are 226512 and 2760615 stored coordinates, respectively, rather than
+853776 and 11778624 complete-product coordinates. This bound does not
+apply to arbitrary ionic selections: their own generated support determines
+the retained count, and the same bounded-cache algorithm still applies.
+
+Cache misses may occur inside the persistent sigma parallel region.
+The ordered exterior kernels therefore share its existing workers through
+disjoint-column or disjoint-row tasks, instead of opening a nested parallel
+region that executes serially. Each task borrows the same panel; there is
+no per-worker floating-point carrier. This changes scheduling, not the
+order of elementary shears acting on any coefficient.
+
+Accepted arrays $Y_i$ and $R_i$ are borrowed, not copied. Removing their
+storage is a separate migration of accepted and orbital-direction consumers;
+the present identities remove the additional \emph{response} carriers.
+Original-support incidence/value buffers, bounded column caches, small
+orbital reductions and the active-integral cotangent have separate storage
+costs. In particular, a touched-support buffer is not a guarantee of
+subquadratic memory if the original support itself fills the product grid.
+
+For positive state weights $w_i$ the contributions above are summed with $w_i$.
+The separate overlap-multiplier term is
+\begin{equation}
+ 2\sum_{ij} w_i\mu_{ji}\mathcal D(Y_j,Y_i),\qquad
+ \mu_{ji}=\frac12\left[\lambda_{ji}+\frac{w_j}{w_i}\lambda_{ij}\right],
+\end{equation}
+where $\lambda_{ij}$ are the directional normalization/orthogonality multipliers
+in the structure-response equations. This weight-symmetrized gauge
+contribution is not part of either residual panel.
+An exactly zero $\vv q_i$ contributes no images or derivative tensors;
+this follows from linearity, not an amplitude threshold.
+
+For source counts $r_\ell,r_r$, the leading dense work of the integral
+adjoint and both residual-generator contractions is
+\begin{equation}
+ O\bigl((U_\alpha+U_\beta)
+        [r_r d^2+r_\ell r_r d]\bigr).
+\end{equation}
+The two Hamiltonian images also supply their generator adjoints by the
+shared image consumer in Section~\ref{sec:source-state}. Only $\Ha Q_i$
+is projected to structure H/M images; $\Ha Y_i$ is consumed by its adjoint
+without an unused structure projection. With equal
+representative source counts $r_r=r$ and physical bra count $r_\ell=l$,
+the leading multiply--add count used for this consumer is
+\begin{equation}
+ W_{\rm source}=6(U_\alpha+U_\beta)rd^2
+            +(U_\alpha+U_\beta)lr(12d+20).
+\end{equation}
+The coefficients count one integral adjoint and two shared H-image/generator
+adjoint sweeps. The energy shifts use the transpose identity for the ordinary
+generator adjoint. The fused product sigma/Gram has leading
+work $4N_{\rm product}d^2$, with $N_{\rm product}$ reduced only by a
+certified exchange parity. Comparing these leading operation counts
+does not fit timings or change numerical thresholds. Link work,
+source transforms, sampling and finite tile effects still affect wall time.
+A product order
+can still be cheaper for broad support; this is an exact arithmetic-order
+choice, not a change of variational space or a memory admission criterion.
+
+\subsection{Accepted states and orbital directions without product arrays}\label{sec:source-state}
+
+Let $F=\Ta\Wa$, $Y=F\vv C$ and
+$\kappa=\delta R R^{-1}$. Holding the structure coefficients fixed,
+\begin{align}\label{eq:source-direction-images}
+ \delta(H\vv C)&=F^*\bigl[\delta\Ha Y+
+               \Ha\mathcal G(\kappa)Y+
+               \mathcal G(\kappa)^*\Ha Y\bigr],\\
+ \delta(M\vv C)&=F^*\bigl[\mathcal G(\kappa)+
+                               \mathcal G(\kappa)^*\bigr]Y.
+\end{align}
+The left-generator term differentiates the projection, not the physical
+selected structure map. It may not be omitted even if the selected
+coefficients solve their generalized eigenproblem.
+
+Each Hamiltonian image is a sum of outer products from Eq.~\eqref{eq:Hfactor}.
+For any such term $AB\Tr$,
+\begin{equation}
+ \mathcal G(\kappa)^*(AB\Tr)=
+   [\mathcal G_\alpha(\kappa\Tr)A]B\Tr
+   +A[\mathcal G_\beta(\kappa\Tr)B]\Tr.
+\end{equation}
+Apply the oriented spin generators to the factor panels, perform the same
+causal exterior adjoints, and sample only $\Omega$. Two additional shared
+spin-factor channel slabs suffice, including both base and same-spin
+images. They are reserved inside the original numerical budget, never
+allocated independently per worker.
+
+For a general orbital/structure tangent $\delta Y$, the accepted generator
+adjoint $\Gamma=2\mathcal D((\Ha-E)Y,Y)$ has direction
+\begin{equation}\label{eq:source-generator-direction}
+ \delta\Gamma=2\mathcal D((\Ha-E)\delta Y,Y)
+             +2\mathcal D((\Ha-E)Y,\delta Y)
+             +2\mathcal D(\delta\Ha Y,Y),
+\end{equation}
+before adding the separate normalization/orthogonality multipliers.
+Here $E$ is held fixed; its required directional multiplier terms follow
+the same state-average gauge convention as Section~\ref{sec:factor-response}.
+The third term uses the residual-panel kernel with Hamiltonian $\delta\Ha$
+and shift zero. The integral direction remains $2\mathcal J(\delta Y,Y)$.
+Consequently the accepted adjoints and their complete directions require
+only structure coefficients, source providers, small orbital tensors and
+bounded numerical panels, not accepted amplitudes or residual product arrays.
+The differentiated Cholesky/integral pullback is still applied afterwards;
+Eq.~\eqref{eq:source-generator-direction} does not replace that chain rule.
+
+Computing Eq.~\eqref{eq:source-generator-direction} after releasing the
+directional H/M images would repeat their Hamiltonian work. Instead consume
+each outer-product image $X=\sum_j A_jB_j\Tr$ before its exterior projection.
+For right factors $Y_r=L_rF_r\Tr$, accumulate
+\begin{equation}
+ Z_\alpha\mathrel{+}=A(B\Tr F_r),\qquad
+ Z_\beta\mathrel{+}=B(A\Tr L_r).
+\end{equation}
+After all source/channel tiles, these are $XF_r$ and $X\Tr L_r$;
+Eq.~\eqref{eq:generator-factor} then returns $\mathcal D(X,Y_r)$.
+For a certified exchange representative, accumulate its physical image
+$P_\eta X=\tfrac12(X+\eta X\Tr)$ by adding the exchanged factors with
+weight $\eta/2$. No product-space symmetrization is formed.
+
+Let $D=\mathcal D(Y,\delta Y)$. Since
+$\mathcal D(\delta Y,Y)=D\Tr$, the orbital-direction cache is only
+\begin{equation}
+ \delta\Gamma=2\bigl[
+     \mathcal D(\Ha\delta Y,Y)+\mathcal D(\delta\Ha Y,Y)
+    +\mathcal D(\Ha Y,\delta Y)-E(D+D\Tr)\bigr].
+\end{equation}
+The three Hamiltonian images are already generated for
+Eq.~\eqref{eq:source-direction-images}. Their generator adjoints are
+collected in that sweep; the subsequent HVP pullback reuses this small
+$n\times n$ covector, not a sigma or residual product array. With state
+averaging, the cache is the weighted sum and coefficient-response/gauge
+terms are added separately. The integral-adjoint direction remains required.
+
+One numerical budget is split between the H-image workspace and the right
+factor/moment workspace. Right factors are tiled if necessary; the H source
+can then replay, but its structure projection occurs only on the first pass.
+When all right factors fit, the three images visit $4r$ representative source
+columns: $2r$ for $\Ha\delta Y$, $r$ for $\delta\Ha Y$, and $r$ for
+$\Ha Y$. The unfused residual-panel route plus the images visits $12r$.
+This removes repeated channel mixing, not the source-pair moment arithmetic
+or the outer optimizer's HVP calls.
+
+\subsection{Joint source/channel scheduling}\label{sec:factor-schedule}
+
+For source widths $s_\ell,s_r$ and channel width $p$, define
+\begin{equation}
+ N_\ell=\left\lceil r_\ell/s_\ell\right\rceil,\qquad
+ N_r=\left\lceil r_r/s_r\right\rceil,\qquad
+ N_P=\left\lceil d/p\right\rceil,\qquad U=U_\alpha+U_\beta.
+\end{equation}
+The leading dense channel and moment arithmetic does not depend on these
+widths, but source regeneration, link traversal and output traffic do.
+In particular, the number of loaded bra source columns is
+\begin{equation}
+ C_\ell=\begin{cases}
+ r_\ell,&s_\ell=r_\ell,\\
+ N_r(N_P+b)r_\ell,&s_\ell<r_\ell,
+ \end{cases}\qquad
+ b=\begin{cases}1,&\text{integral adjoint},\\2,&\text{residual generator}.
+ \end{cases}
+\end{equation}
+Here $b$ counts the channel-independent moment sweeps. If generating a
+source column costs $\ell_\ell$ nominal scalar operations and element
+touches, source work is $C_\ell\ell_\ell$. Each provider declares this work
+from its sparse writes, diagonal scales and exterior shear multiply--adds;
+directional providers add the oriented generator work. This metadata affects
+only the evaluation schedule, never the amplitudes, ranks or tolerances.
+
+The single-replacement links are generated in ascending packed-channel
+order. For each larger orbital index, ascending lower indices with opposite
+occupation generate every link once. A channel tile then uses binary ranges
+in the existing link and occupation arrays. It does not scan all links and
+reject those outside the tile, nor allocate a string-by-channel offset table.
+Let $J=\sum_\sigma U_\sigma n_\sigma(n-n_\sigma+1)$ count the single-spin
+occupation/replacement links. Across all source columns, matching-link visits
+scale as $r_rv(N_P)J$, where
+\begin{equation}
+ v_I(N_P)=N_P+1,\qquad v_R(N_P)=2N_P+3.
+\end{equation}
+Without channel ranges these counts were respectively $N_P^2+N_P$ and
+$2N_P^2+3N_P$. Binary lookup comparisons still repeat with those latter
+counts and are included through an upper comparison estimate $B$ per
+complete single-spin row family. The complete-channel case needs no binary
+lookup penalty.
+
+The schedule also counts repeated output reads and writes in the moment
+GEMMs, and repeated channel zero fills:
+\begin{align}
+ W_{\rm out}&=2U r_r(d+b)N_\ell,\\
+ W_{0,I}&=U r_r d(N_P+1),&
+ W_{0,R}&=2U r_r dN_P.
+\end{align}
+Combining these terms gives the nominal variable-work estimate
+\begin{equation}
+ \widehat W=C_\ell\ell_\ell+
+   r_r\bigl[3v(N_P)J+s(N_P)B\bigr]+W_0+W_{\rm out},
+\end{equation}
+where $s_I=N_P^2+N_P$, $s_R=2N_P^2+3N_P$, and the factor three counts
+one matching-link visit plus its multiply and add. Terms invariant across
+the candidate schedules are omitted. The estimate combines scalar work and
+element traffic without fitted hardware weights; it is not a prediction of
+absolute wall time, which requires native measurement.
+
+The planner searches feasible source and channel widths under the same memory
+bound. For each ket/channel choice it takes the largest feasible bra panel;
+ties use fewer moment panels. Partial-channel residual sweeps currently use
+one ket column because the shared forward workspace and moment buffers must
+use the same channel width. Full-channel sweeps allow wider ket panels.
+This is a workspace scheduling limit, not a restriction on the selected VB space.
+
+\section{A shared accepted--tangent product sweep}\label{sec:product-jet}
+
+For broad source support, retain the generated product contraction order
+without retaining unbounded accepted or directional product arrays.
+Write $F=\Ta\Wa$, $Y=F\vv C$, and let $\delta F$ denote the change of
+the exterior map under the orbital direction. The complete directional
+wave function and the accepted residual are
+\begin{equation}
+ Z=\delta F\vv C+F\delta\vv C,
+ \qquad R_Y=(\Ha-E)Y.
+\end{equation}
+Here $E$ is held fixed in the orbital Lagrangian; its response and the
+state-average gauge multipliers are included separately as in
+Section~\ref{sec:factor-response}. Differentiating the complete projection,
+rather than projecting an intermediate wave function, gives
+\begin{align}
+ \delta(F^*\Ha Y)&=F^*(\delta\Ha Y+\Ha Z)+(\delta F)^*\Ha Y,\label{eq:product-jet-H}\\
+ \delta(F^*Y)&=F^*Z+(\delta F)^*Y.
+ \label{eq:product-jet-images}
+\end{align}
+The left-map derivative is necessary even when $\delta\vv C=0$.
+No invariance of the selected structure space is used.
+
+With $\mathcal J$ and $\mathcal D$ defined above, the accepted and
+directional orbital-generator cotangents are
+\begin{align}
+ \Gamma&=2\mathcal D(R_Y,Y),\\
+ \delta\mathcal J&=2\mathcal J(Z,Y),\\
+ \delta\Gamma&=2\left[
+   \mathcal D(\Ha Z+\delta\Ha Y,Y)
+   +\mathcal D(R_Y,Z)-E\mathcal D(Z,Y)\right].
+ \label{eq:product-jet-generator}
+\end{align}
+Only the upper triangle of the final generator cotangent is needed by
+the Cholesky pullback. The previously proved support certificate permits
+$R_Y$ and the emitted Hamiltonian images to be restricted to $S$ for these
+upper cotangents. It does not permit replacing a general oriented transition
+density by its upper triangle.
+
+If compact accepted panels of $(Y,R_Y)$ are resident, the same panels supply
+the right readers, $\mathcal D(R_Y,Z)$, and
+$\Ha Y=R_Y+EY$ in the left projection of
+Eq.~\eqref{eq:product-jet-H}. Thus a coefficient-only response
+requires neither another accepted exterior transform nor another accepted
+Hamiltonian action. The channel sweep producing $\Ha Z$ also accumulates
+$\mathcal J(Z,Y)$ before its slabs are released.
+The forward orbital-direction consumer retains the resulting small
+cotangents and prepared integral tangent; its reverse consumer reuses them.
+
+When accepted panels cannot all remain resident under the shared budget,
+generate $Y$ and $Z$ together and apply $\Ha$ to this two-column-family
+block. The equivalent unretained form of the generator response is
+\begin{equation}
+ \delta\Gamma=2\left[
+ \mathcal D(\Ha Z+\delta\Ha Y,Y)+\mathcal D(\Ha Y,Z)
+ -E\{\mathcal D(Z,Y)+\mathcal D(Y,Z)\}\right].
+\end{equation}
+For real wave functions the last brace equals
+$\mathcal D(Z,Y)+\mathcal D(Z,Y)\Tr$. One complete oriented traversal
+therefore supplies both terms, followed by upper-triangle selection.
+The resident and streamed equations are identical; residency changes only
+reuse, not the variational space or accuracy. This does not assert that
+all accepted work can be retained at fixed memory without recomputation.
+
+Each emitted Hamiltonian panel is consumed by the structure projection and
+generator adjoint before release. Partial images emitted on eviction are
+valid because both consumers are linear. A one-body generator's neighbor
+columns are themselves read in bounded batches; their union must not become
+a complete right carrier. With panel width $b$, shared residency bound $B$
+and the existing bounded sigma workspace $W_\sigma$, auxiliary numerical
+storage, excluding immutable incidence and one-spin topology, is
+\begin{equation}
+ O\left(t+(U_\alpha+U_\beta)b+B+W_\sigma+n^4\right)
+\end{equation}
+per sequentially processed state, in addition to the selected coefficient
+block. The $n^4$ term denotes the retained active integral and adjoint tensors,
+not a spin-product array. If original touched support is complete, $t$
+itself can equal $U_\alpha U_\beta$; this bound does not conceal that input
+cost. Accepted residency is shared across roots, never copied per worker.
+
+\section{Necessary projections and cancelling coordinate maps}
+\label{sec:necessary-maps}
+
+An overlap solve is not a physical observable. Its necessity depends on
+the coordinate map that the optimizer has chosen. Let
+$F(p)=\Ta(p)\Wa$ map selected structure coefficients into an orthogonal
+spin-string carrier at orbital displacement $p$. With an independent
+structure displacement $q$, write $\vv C_b=\vv C_0+Zq$, where $Z$ embeds
+the structure tangent. The current finite CI transport projects the target
+\begin{equation}
+ b(p,q)=F(0)\vv C_b+\dot F(0)[p]\vv C_0
+\end{equation}
+onto the selected space at the displaced orbitals. Its normal equation is
+\begin{equation}\label{eq:transport-normal}
+ M(p)\vv C(p,q)=F(p)\Tr b(p,q),\qquad M(p)=F(p)\Tr F(p).
+\end{equation}
+For a nonclosed selection this is a genuine restricted projection: replacing
+$M(p)$ by the identity, or using an inverse on a larger complete space,
+does not give the same transport. Its gradient pullback involves the adjoint
+solve with the same $M(p)$. These operations are necessary for this finite
+coordinate map, not for every possible VBSCF optimization framework.
+Changing the map requires deriving its derivatives consistently, rather
+than independently deleting the projection from a keyframe or an HVP.
+Two requests for exactly the same $(p,q)$ within one immutable macro model,
+however, solve exactly the same equation; the previously computed point is
+sufficient for both consumers.
+
+There is a stronger reduction when $\ran\Wa$ is a complete spin sector.
+Define its orthogonal projector $P$ and its orbital-independent Gram $G$ by
+\begin{equation}
+ G=\Wa^*\Wa,\qquad P=\Wa G^{-1}\Wa^*.
+\end{equation}
+The common spatial orbital transformation commutes with the total-spin
+projector. Thus $\Ta P=P\Ta$, as do its inverse and adjoint, and the
+Moore--Penrose inverse of $F=\Ta\Wa$ is
+\begin{equation}\label{eq:complete-left-inverse}
+ F^+=G^{-1}\Wa^*\Ta^{-1},\qquad
+ FM^{-1}=\Ta^{-*}\Wa G^{-1}.
+\end{equation}
+Indeed, the proposed left inverse times $F$ is the identity, while
+$FF^+=\Ta P\Ta^{-1}=P$ is an orthogonal projector. Completeness here
+means completeness of the selected spin sector, not merely completeness of
+the ambient alpha and beta string lists. Covalent-only and arbitrary
+selected spaces generally do not meet this hypothesis.
+
+Let $D$ be the existing carrier diagonal, including its root-energy shift
+and the unchanged denominator protection. The symmetric structure-space
+inverse preconditioner can therefore be evaluated as
+\begin{align}
+ M^{-1}F^*D^{-1}FM^{-1}
+ &=G^{-1}\Wa^*\Ta^{-1}D^{-1}\Ta^{-*}\Wa G^{-1}.
+ \label{eq:cancelled-carrier-inverse}
+\end{align}
+No commutation between $D$ and the spin projector is needed: the two outer
+structure maps retain the required projection. Equation~\eqref{eq:cancelled-carrier-inverse}
+removes the interior inverse/forward exterior maps and repeated expansion
+and contraction. It retains the same two Riesz maps algebraically; it does
+not replace covectors by coefficient vectors. Only one carrier workspace
+is live, with the original right-hand-side chunk bound. $G$ is factored by
+spatial occupation blocks, not as a global dense structure matrix.
+
+The normalization and selected-state constraints do not restore the need
+for repeated metric solves. If the columns of $C$ are the selected states,
+put $K=C\Tr MC$ and define
+\begin{equation}
+ A=M^{-1}-CK^{-1}C\Tr,\quad
+ P_R=I-MCK^{-1}C\Tr,\quad P_L=P_R\Tr.
+\end{equation}
+The exact constrained inverse preconditioner is
+\begin{equation}\label{eq:horizontal-carrier-inverse}
+ A F^*D^{-1}F A
+ =P_L\left[M^{-1}F^*D^{-1}FM^{-1}\right]P_R.
+\end{equation}
+Only the already available $MC$ and the small state Gram $K$ are needed
+for the two outer corrections. Thus two coordinate-metric CG solves in
+the composite evaluation are unnecessary. Multiplication by the independent
+horizontal coordinate basis before and after this expression gives the
+same constrained operator. The identity applies columnwise when different
+roots use different shifted carrier diagonals.
+
+The same closure identity permits direct evaluation of the complete-sector
+transport as
+\begin{equation}
+ \vv C=G^{-1}\Wa^*\Ta(p)^{-1}b.
+\end{equation}
+This does not license the
+corresponding replacement in Eq.~\eqref{eq:transport-normal} for a nonclosed
+selection. Moreover, CI transport used only as an initial guess for a later
+fully relaxed root solve is distinct from the transport used to define a
+keyframe objective: altering the former can change iteration cost and root
+tracking, while altering the latter also changes the finite model and its
+pullback. These two roles must not be conflated.
+
+\subsection{Complete-sector CI coordinates}
+
+For a complete spin sector, the orbital map need not appear in any inner
+CI iteration. Factor the orbital-independent spin Gram by occupation blocks,
+$G=LL\Tr$, and put
+\begin{equation}
+ U=\Wa L^{-\mathsf T},\qquad U\Tr U=I,\qquad UU\Tr=P.
+\end{equation}
+Here $L$ is block diagonal in spatial occupations; no global dense factor is
+formed. The square change of selected-space coordinates and its inverse are
+\begin{equation}\label{eq:full-ci-coordinates}
+ J=U\Tr\Ta\Wa,\qquad
+ J^{-1}=G^{-1}\Wa\Tr\Ta^{-1}U.
+\end{equation}
+Indeed, $UJ=\Ta\Wa$ follows from $P\Ta\Wa=\Ta\Wa$.
+Consequently, the original generalized eigenproblem is exactly equivalent to
+\begin{equation}
+ H\vv C=M\vv C E\quad\Longleftrightarrow\quad
+ (U\Tr\Ha U)\vv x=\vv x E,\qquad \vv x=J\vv C.
+\end{equation}
+The dimension remains the number of independent selected spin-adapted
+structures, not the dimension of the ambient spin-string product carrier.
+An inner Hamiltonian action is $\vv x\mapsto U\Tr\Ha U\vv x$;
+its overlap action is the identity. Thus no inner exterior orbital map or
+orbital-dependent overlap action is mathematically needed.
+In the shared Davidson solver, the overlap images of the trial basis are
+then the trial basis itself. Their third stored basis matrix, associated
+matrix--vector products and separate reorthogonalization updates are omitted.
+The original subspace capacity is retained rather than spending the freed
+memory on a larger subspace.
+
+The existing complete-sector inverse preconditioner transforms by congruence
+to $U\Tr D^{-1}U$. In particular, $r_C=J\Tr r_x$ and
+$JQ_CJ\Tr=U\Tr D^{-1}U$ imply that the preconditioned correction is the
+same physical direction. Metric orthogonalization of the original trial
+vectors is ordinary orthogonalization of their images under $J$. The change
+of coordinates therefore does not replace Davidson by a different physical
+subspace algorithm. For a pure target-spin residual, its Euclidean norm in
+these coordinates is its physical carrier norm. The same requested physical
+stationarity accuracy is retained; a new relaxed threshold is not introduced.
+The algebraic backward-error gates are evaluated in the isometric coordinates
+with the same numerical tolerances. Those gates are coordinate dependent, so
+the last accepted CI iteration need not be identical to that in the original
+coefficient representation; the physical stationarity norm is invariant.
+Initial trial vectors must first be mapped with $J$, rather than reinterpreted
+as coordinates in a different basis. At the exit, return
+\begin{equation}
+ \vv C=J^{-1}\vv x,\qquad HC=J\Tr h,\qquad MC=J\Tr\vv x,
+ \qquad h=(U\Tr\Ha U)\vv x.
+\end{equation}
+The retained Ritz images supply $h$ without another Hamiltonian application.
+Only the boundary maps use $\Ta$ or its inverse. Carrier arrays are processed
+in budgeted RHS chunks and the sigma contraction retains its bounded internal
+tiles. No additional carrier-sized array is stored for each thread. This
+elimination requires the complete-sector identity; it is not valid for a
+general nonclosed selected VB space.
+
+\subsection{Cross-overlap generator moments}
+\label{sec:cross-moments}
+
+CI transport also requires overlaps between two orbital representations.
+Write $T_s=T_{s\alpha}\otimes T_{s\beta}$, where the exterior maps on
+side $s\in\{l,r\}$ are induced by the same spatial upper-triangular
+matrix $R_s$ for both spins. For arbitrary selected coefficients, define
+\begin{equation}
+ L=T_l\Wa c_l,\qquad R=T_r\Wa c_r,\qquad
+ f=L\Tr R.
+\end{equation}
+These physical amplitudes lie in the ambient spin-string product carrier;
+no closure of $\operatorname{range}(\Wa)$ under $T_s$ is assumed.
+The cross-overlap action can be evaluated in the exact order
+\begin{equation}
+ c\longmapsto\Wa\Tr T_l\Tr[T_r\Wa c].
+ \label{eq:cross-direct}
+\end{equation}
+Each exterior map and its directional derivative is applied once to the
+shared amplitude array. In particular, it is unnecessary to reconstruct
+every output product from all source columns after the transforms.
+
+The adjoint admits an additional contraction reduction. Let
+$\hat E_{pq}=\hat a^\dagger_{p\alpha}\hat a_{q\alpha}
++\hat a^\dagger_{p\beta}\hat a_{q\beta}$ and define
+\begin{equation}
+ D_{pq}=\langle R|\hat E_{pq}|L\rangle,\qquad
+ K_s=\delta R_sR_s^{-1}.
+\end{equation}
+The representation derivatives are
+$\delta L=\hat E(K_l)L$ and $\delta R=\hat E(K_r)R$, with
+$\hat E(K)=\sum_{pq}K_{pq}\hat E_{pq}$. Thus the upper-triangular
+orbital adjoints are
+\begin{equation}
+ g_l=\operatorname{upper}(DR_l^{-T}),\qquad
+ g_r=\operatorname{upper}(D\Tr R_r^{-T}).
+ \label{eq:cross-moment-adjoint}
+\end{equation}
+Here $\operatorname{upper}$ retains the diagonal and upper triangle;
+the transpose on $D$ follows from real one-body matrix elements, not from
+equality of the left and right states. For a simultaneous direction,
+\begin{align}
+ \delta D_{pq}&=\langle\delta R|\hat E_{pq}|L\rangle
+                 +\langle R|\hat E_{pq}|\delta L\rangle,\\
+ \delta g_l&=\operatorname{upper}\bigl[
+   \delta D R_l^{-T}-DR_l^{-T}(\delta R_l)\Tr R_l^{-T}\bigr],\\
+ \delta g_r&=\operatorname{upper}\bigl[
+   (\delta D)\Tr R_r^{-T}
+   -D\Tr R_r^{-T}(\delta R_r)\Tr R_r^{-T}\bigr].
+ \label{eq:cross-moment-jet}
+\end{align}
+Only one-body Slater--Condon links and small orbital triangular solves are
+needed. No Hamiltonian sigma, cofactor, or extra structure projection is
+required for these adjoints. Residual-weighted transport curvature uses
+these identities without setting the finite CI Ritz residual to zero.
+
+If $A$ and $B$ denote the numbers of spin strings and $r$ the number of
+source columns, the source-factor adjoint includes reconstruction work
+$O(|\Omega|r)$, in addition to its exterior transforms and generator
+contractions. For broad touched support, $|\Omega|=AB$ and $r=B$.
+Equations~\eqref{eq:cross-direct}--\eqref{eq:cross-moment-jet} replace that
+reconstruction by $O(\operatorname{nnz}\Wa+n_{\rm act}^2 AB)$ work.
+This is a different exact contraction order, not a low-rank truncation.
+It requires one or two shared carrier arrays for the overlap action,
+and two to four for its adjoint jet, depending on which side varies.
+They are admitted only within the existing caller workspace budget;
+there are no per-thread carrier copies. Narrow touched support or a
+carrier exceeding that budget retains the bounded source-panel order.
+Independent spin-dependent orbital maps also use that order, since
+Eq.~\eqref{eq:cross-moment-adjoint} combines the two spins only for a
+common spatial chart. Neither schedule changes the selected VB space.
+
+\subsection{One final beta adjoint for image jets}
+\label{sec:final-beta-adjoint}
+
+Let $Z$ be an orthogonal spin-string Hamiltonian or overlap image with
+$A$ alpha rows and $B$ beta columns. Its selected-space projection is
+\begin{equation}
+ \mathcal P(Z)=\Wa\Tr\operatorname{vec}(T_\alpha\Tr ZT_\beta).
+ \label{eq:image-projection}
+\end{equation}
+Here $\operatorname{vec}$ denotes the same fixed product ordering as the
+structure expansion. Its directional derivative is
+\begin{align}
+ \delta\mathcal P
+ &=\Wa\Tr\operatorname{vec}(P T_\beta+Q\,\delta T_\beta),\\
+ P&=T_\alpha\Tr\delta Z+(\delta T_\alpha)\Tr Z,
+ \qquad Q=T_\alpha\Tr Z.
+ \label{eq:image-projection-jet}
+\end{align}
+These equations allow all alpha-pulled column contributions to accumulate
+before applying the beta adjoint. An ordinary image contributes to $P$;
+a left-representation derivative contributes to both $P$ and $Q$.
+One ordered directional exterior sweep then returns
+$P T_\beta+Q\delta T_\beta$, after which the structure incidences are
+contracted once. The rule applies independently to each requested image,
+including the separate integral and representation forcing diagnostics.
+It does not assume that the selected structure space closes under $T$.
+
+The source-panel alternative samples the transformed beta columns at the
+original touched products. Over all output panels of width $t$, this takes
+$O(|\Omega|B)$ beta reconstruction work, since $B/t$ panels each evaluate
+length-$t$ dots at $|\Omega|$ products. For broad support this is $O(AB^2)$.
+The final elementary exterior adjoint instead requires
+$O(n_{\rm act}^2 AB)$ work plus the structure incidence contraction.
+The older bounded group accumulator already avoids repeated incidence
+scans when resident; the reduction here concerns beta reconstruction,
+not an assertion that it always rescanned every structure per output tile.
+
+This contraction order uses one shared $A\times B$ array per ordinary
+target and two per directional target. It replaces, rather than supplements,
+the group-projection payload and is admitted only when all target arrays fit
+its existing workspace quarter. Numerical residency and tile width are not
+increased. Narrow support or larger jets retain the exact bounded panel
+schedule. Integral sigma and adjoint sweeps, state weights and their
+spin-exchange multiplicities are unchanged; no approximate derivative or
+modified optimization tolerance is introduced.
+
+\subsection{Generated input jets without beta-row reconstruction}
+
+The input side admits the same ordering reduction. Reshape $\Wa c$ into
+$X\in\mathbb R^{A\times B}$ and an independent coefficient direction
+$\Wa q$ into $\delta X$. Then
+\begin{align}
+ Y&=T_\alpha X T_\beta\Tr,\\
+ \delta Y&=(\delta T_\alpha)X T_\beta\Tr
+       +T_\alpha\delta X T_\beta\Tr
+       +T_\alpha X(\delta T_\beta)\Tr.
+ \label{eq:input-exterior-jet}
+\end{align}
+Apply the ordered elementary exterior jet first on the alpha side, then
+on the beta side, to evaluate these expressions in two shared arrays.
+Generated sigma readers borrow their columns directly; they do not build
+another copy of each requested panel. The cost is
+$O(\operatorname{nnz}\Wa+n_{\rm act}^2 AB)$ instead of rebuilding every
+input beta panel in $O(|\Omega|B)$ work. For a coefficient-only direction
+with accepted $Y$ already available, only $\delta X$ is transformed;
+the accepted primal and residual panels remain shared with all consumers.
+For orbital directions the primal needed by the ordered jet is discarded
+after the derivative is formed when accepted panels already own $Y$.
+
+The identity $\delta Y=\hat E(\delta R R^{-1})Y$ for a pure orbital
+direction is algebraically equivalent. The implementation uses
+Eq.~\eqref{eq:input-exterior-jet}, not an additional orbital inverse, so
+no new inverse-conditioned cancellation is introduced into the derivative.
+Its one or two arrays replace the original input-panel payload inside the
+same workspace quarter. Narrow support and arrays exceeding that budget
+use the existing exact generated-panel order. No assumption about closure
+of the selected structure space or any amplitude cutoff is needed.
+
+\subsection{Fixed selected metrics and singleton columns}
+\label{sec:matching-metric}
+
+Let $K_\sigma=T_{l,\sigma}\Tr T_{r,\sigma}$, and label the
+touched original products by $g=(a_g,b_g)\in\Omega$. Suppose each
+touched $\beta$ string occurs with only one $\alpha$ string. This
+single-entry-column property holds for a covalent occupation pattern: the
+$\beta$ occupation is the complement of the $\alpha$ occupation.
+It does not require a complete structure space or spin-adapted closure.
+For $b$ right-hand sides, first form the sparse structure expansion
+$D_{gj}=\sum_I w_{gI}V_{Ij}$. The exact cross overlap is
+\begin{align}
+ P_{gh}&=(K_\alpha)_{a_g a_h}(K_\beta)_{b_g b_h},\\
+ Q_{gj}&=\sum_{h\in\Omega}P_{gh}D_{hj},
+ &Z_{Ij}&=\sum_{g\in\Omega}w_{gI}Q_{gj}.
+\end{align}
+For a source tile $J\subset\Omega$, construct only the columns
+$A_J=K_\alpha[e_{a_h}]_{h\in J}$ and
+$B_J=K_\beta[e_{b_h}]_{h\in J}$. Their coefficient-free basis images
+are shared by all right-hand sides. Sample
+$(P_J)_{gh}=(A_J)_{a_g h}(B_J)_{b_g h}$ and accumulate
+$Q\gets Q+P_JD_J$. The directional version uses precisely
+\begin{equation}
+ \dot P_{gh}=(\dot K_\alpha)_{a_g a_h}(K_\beta)_{b_g b_h}
+ +(K_\alpha)_{a_g a_h}(\dot K_\beta)_{b_g b_h}.
+\end{equation}
+The ordered exterior jets already provide both factor derivatives.
+Unlike transforming coefficient-weighted source factors independently for
+each right-hand side, the basis-image work is no longer multiplied by $b$.
+Writing $t=|\Omega|$ and $s_\sigma$ for the number of one-spin shear
+edges, the arithmetic is
+\begin{equation}
+ O\!\left(t(s_\alpha+s_\beta)+t^2b+
+ \operatorname{nnz}(\Wa)b\right),
+\end{equation}
+with tile width $j$ and bounded RHS width $b$ requiring
+$O((U_\alpha+U_\beta+t)j+tb)$ workspace. No $t\times t$ or
+$U_\alpha\times U_\beta$ numerical array is retained. This ordering
+is especially useful when projecting the selected metric, rather than
+repeatedly mapping each selected basis vector through the same exterior
+operators.
+
+At a fixed chart, the selected metric
+\begin{equation}
+ M=\Wa^*(K_\alpha\otimes K_\beta)\Wa
+\end{equation}
+is immutable. If its $N_{\mathrm{str}}^2$ entries fit the existing
+workspace, project $M$ once with the tiled multi-RHS equations above and
+reuse $Mv$ in subsequent metric CG iterations. This removes repeated
+exterior evaluations, not the selected-space projection or the metric.
+The same iterative solve, initial vector, preconditioner, and residual
+criterion are retained. A larger selected metric remains an exact tiled
+operator. Storage admission changes only the representation of this fixed
+linear operator; it never excludes a wave function from orthogonal CI.
+The implementation partitions the existing metric workspace into one half
+for construction and one quarter each for the selected identity and result;
+it introduces no string-pair storage and no larger memory allowance.
+
+\subsection{Metric-aware Davidson corrections in a selected space}
+\label{sec:selected-ci-metric}
+
+The dimensions of the selected CI problem and the orthogonal contraction
+carrier are distinct. Davidson solves
+\begin{equation}
+ H\vv C=E M\vv C,\qquad \vv C\Tr M\vv C=1,
+\end{equation}
+in the original selected structure space, not in the string-product space.
+Let $F=\Ta\Wa$, so $H=F^*\Ha F$ and $M=F^*F$. A Ritz residual
+$\vv r=H\vv C-E M\vv C$ is a covector on that coefficient space.
+The metric representative of this covector is
+\begin{equation}\label{eq:selected-riesz}
+ \vv z=M^{-1}\vv r.
+\end{equation}
+If the current Davidson basis is $V$, the Galerkin condition
+$V\Tr\vv r=0$ immediately gives
+\begin{equation}
+ V\Tr M\vv z=V\Tr\vv r=0.
+\end{equation}
+Thus this correction lies outside the current subspace in the correct
+metric, up to the linear-solve and Ritz residual errors. Applying a raw
+coordinate diagonal to $\vv r$ does not have this property in general.
+In particular, diagonal normalization cannot remove correlations between
+nearly dependent Rumer columns.
+
+For an invertible selected-basis change $\vv C=P\vv x$, the transformed
+residual and metric obey
+\begin{equation}
+ \vv r_x=P\Tr\vv r,\qquad M_x=P\Tr M P,\qquad
+ M_x^{-1}\vv r_x=P^{-1}M^{-1}\vv r.
+\end{equation}
+The physical correction is unchanged. This covariance concerns the
+preconditioner; it does not assert that a coordinate-dependent finite
+stopping rule becomes invariant under every basis change.
+
+Equation~\eqref{eq:selected-riesz} is a metric preconditioner, not an exact
+inverse of $H-E M$. It removes the coefficient-space geometry but does not
+model every physical excitation gap. For a selected metric retained within
+the existing budget, factor $M=L L\Tr$ once and use two triangular solves.
+The selected inverse is essential: for a nonclosed selection it cannot be
+replaced by the selected principal block of a complete-space inverse.
+No Hessian, structure Hamiltonian, full string-pair Gram or carrier-vector
+preconditioner is assembled. The original structure coefficients remain the
+Davidson variables, and all accuracy budgets are retained.
+
+Once this fixed selected $M$ is available, repeating its exterior
+back-projection during every Hamiltonian action is also unnecessary.
+For an input block $V$, evaluate only $H V$ through generated product tiles
+and return $M V$ from the small selected matrix. This removes the overlap
+image's alpha adjoint, beta sampling and structure projection from the
+product sweep. The Hamiltonian projection, its exact support and its
+Slater--Condon links are unchanged. The ordinary factor sweep retains its
+joint H/M contraction. Larger selected metrics continue to use the same
+matrix-free generalized problem with the existing bounded preconditioner;
+the storage decision never changes the variational space or disables
+orthogonal CI.
+
+\subsection{Residual image fusion and one-column projections}
+\label{sec:scalar-source}
+
+The oriented generator bilinear $\mathcal D$ is linear in its first
+argument. A source sweep emitting Hamiltonian factors $H_t=A_tB_t\Tr$
+can therefore emit the identity factors with coefficient $-\epsilon$ in
+the same consumer:
+\begin{equation}
+ \mathcal D((\Ha-\epsilon)Y,Z)
+ =\sum_t\mathcal D(H_t,Z)-\epsilon\mathcal D(Y,Z).
+\end{equation}
+This changes neither the Hamiltonian image returned to the structure
+solver nor its overlap image. It removes the separate overlap-generator
+sweep used only by the orbital adjoint. In particular,
+\begin{align}
+ \delta\Gamma=2\bigl[\mathcal D(\delta\Ha Y,Y)
+  +\mathcal D((\Ha-\epsilon)\delta Y,Y)
+  +\mathcal D((\Ha-\epsilon)Y,\delta Y)\bigr]
+\end{align}
+is evaluated without separately generating
+$\mathcal D(Y,\delta Y)+\mathcal D(\delta Y,Y)$.
+The identity factor is consumed once per source panel, not once per
+Hamiltonian channel. Common spin-exchange projection is applied by the
+same consumer; unequal spin-string dimensions require no exchange argument.
+The state energy $\epsilon$ is held fixed in this derivative: its variation
+is supplied by the existing selected-frame multiplier, not omitted or
+counted twice.
+
+For one selected VB structure, let $c\ne0$ be its accepted coefficient,
+$Y=\Ta\Wa c$, and $h,m$ the scalar selected Hamiltonian and overlap.
+Let $K=\delta R R^{-1}$ and define
+\begin{equation}
+ \gamma=\mathcal D(Y,Y),\qquad
+ \Gamma=2\mathcal D((\Ha-\epsilon)Y,Y).
+\end{equation}
+The accepted integral adjoints $G_h,G_V$ differentiate
+$\langle Y,\Ha Y\rangle$ with respect to the orthogonal one-electron
+integrals and symmetric Coulomb kernel. With $c$ held fixed,
+\begin{align}
+ c^2\delta m&=2\ip{\gamma}{K},\\
+ c^2\delta h&=\ip{G_h}{\delta h_{\mathrm{orth}}}
+             +\ip{G_V}{\delta V_{\mathrm{orth}}}
+             +\ip{\Gamma}{K}+\epsilon c^2\delta m.
+\end{align}
+These identities do not require $c=1$, unit wave-function norm, or
+stationarity in a larger carrier space. The action interface returns
+$(\delta h)c$ and $(\delta m)c$, so the right-hand sides must be
+\emph{divided by $c$}, not returned as quadratic expectations.
+If the accepted adjoints include a nonzero state weight, remove that weight
+from their contraction first; $\gamma$ is unweighted.
+
+There is no independent CI tangent in a one-column space, but normalization
+transport and its orbital derivative remain necessary. Only the H/M image
+projections are replaced: directional integral and generator adjoints still
+receive their full physical contributions. Computing the two scalar images
+requires $O(n^4)$ small-integral arithmetic and no exterior adjoint,
+Slater--Condon traversal, product array, or structure projection. The ordinary
+nonclosed multicolumn formulas are unchanged. Optional connection diagnostics
+request the separate integral/representation images and retain their exact
+uncontracted evaluation; they are not required by the production HVP.
+
+\section{Correspondence with the current implementation}
+
+The original column contraction corresponds to revision \texttt{a5004add};
+Section~\ref{sec:cover} adds the minimum mixed-support decomposition.
+Paths below are relative to \texttt{src/}; this table records the
+implementation boundary rather than introducing physical assumptions.
+\begin{center}\small
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.37\linewidth}
+                >{\raggedright\arraybackslash}p{0.54\linewidth}}
+\toprule
+Mathematical operation & Implementation \\
+\midrule
+Original support and minimum source cover &
+\path{vbscf/structures/assembly/sources.cpp} \\
+VB source generation, sampling and $\Wa^*$ &
+\path{vbscf/structures/assembly/source_tiles.cpp}\newline
+\texttt{apply\_source\_tiles()} \\
+Common factor sweep and integral adjoint &
+\path{mcscf/ci/factors.cpp} \\
+Selected-structure response and its adjoints &
+\path{vbscf/structures/assembly/source_response.cpp} \\
+Source-state orbital directions and HVP pullback &
+\path{vbscf/structures/assembly/source_direction.cpp} \\
+Broad-support accepted/tangent sweep &
+\path{vbscf/structures/assembly/product_jet.cpp} \\
+Shared H-image projection and generator adjoint &
+\path{vbscf/structures/assembly/source_image.cpp} \\
+Generator and residual-weighted factor adjoints &
+\path{mcscf/ci/factor_generator.cpp} \\
+Joint source/channel work plan &
+\path{mcscf/ci/factor_plan.cpp} \\
+Hamiltonian channel kernel, Eq.~\eqref{eq:K} &
+\path{mcscf/ci/sigma.cpp}\newline
+\texttt{build\_hamiltonian\_pair\_kernel()} \\
+Slater--Condon spin connections &
+\path{mcscf/ci/spin_channels.cpp} \\
+Exterior transforms and causal adjoint rows &
+\path{vbscf/structures/orthogonal_ci/exterior_transform.cpp}\newline
+\texttt{projection()} and \texttt{apply\_adjoint\_left\_block()} \\
+Independent complete-carrier comparisons &
+\path{../tests/vbscf/unit/test_structure_tiles.cpp} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The active-space forward entries complete the computational fixed-spin
+string tables before constructing the action. Original input incidences are
+remapped into those tables; neither the selected VB structures nor their
+independent coefficients are enlarged. This completion supplies the exterior
+maps and Slater--Condon links without allocating numerical pair tables or
+product amplitudes. It must occur in the production entries, not only in
+selected-space test fixtures.
+
+Fixed-point structure Hamiltonian/overlap actions choose between the common
+factor sweep and generated product tiles. Accepted-state integral gradients
+choose between the exact factor and
+product contractions by their arithmetic costs. Raw state coefficients are
+retained in structure space. Broad product-order accepted, directional and
+reverse consumers use Section~\ref{sec:product-jet}. Compact accepted
+wave-function/residual panels may remain under one shared residency cap;
+unbounded accepted and directional carrier fields are deleted.
+A selected-space eigenvector need not be
+stationary on the full carrier: its residual contribution to the
+exterior-transform gradient is retained.
+Accepted-state transition densities use Eq.~\eqref{eq:generator-factor}
+when advantageous. The residual-panel kernel of
+Eq.~\eqref{eq:residual-panels} is available and independently tested;
+source-order accepted states now omit accepted orthogonal and residual arrays.
+The coupled coefficient-response consumer in
+Section~\ref{sec:factor-response} uses neither accepted nor response product
+arrays when its factor contraction order is cheaper. Section~\ref{sec:source-state}
+extends that ownership to source-state orbital directions and HVPs. Broad
+product-order derivative consumers now share the generated product jet.
+Complete-space inverse/preconditioner consumers remain a separate ownership boundary.
+
+\paragraph{Main result.}
+Equations~\eqref{eq:Hfactor}--\eqref{eq:final} give the exact
+selected-space restriction through spin factors and Slater--Condon actions,
+without a closure assumption or a complete transformed product array.
+
+\end{document}

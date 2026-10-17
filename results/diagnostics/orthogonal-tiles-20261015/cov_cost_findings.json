@@ -1,0 +1,46 @@
+{
+  "case": "LOFLEA COV CAS(12,12), 132 structures, exact cc-pVDZ, HAO, NEO/CIAH, Davidson",
+  "threads": 8,
+  "node": "anode50",
+  "saved_native_job": 1263333,
+  "previous_current_native_job": 1263497,
+  "current_native_job": 1263538,
+  "current_full_phase_job": 1263535,
+  "saved_first_step_phase_job": 1263332,
+  "current_first_step_phase_job": 1263547,
+  "source_change_in_this_audit": "Opt-in stage clocks only; the AO diagonal optimization from the preceding round is retained. No optimizer, tolerance, or contraction-policy change. The execution mirror excludes unrelated local RI edits.",
+  "verified": [
+    "All three native runs converge in 4 accepted steps, 36 orbital HVPs and 36 structure responses.",
+    "The macro/micro/keyframe counts are identical. Final energies agree within 4e-12 Eh.",
+    "Current native process wall is 72.14 s versus saved 71.48 s; peak RSS is 2632420 versus 2632084 KiB.",
+    "Current accumulated process CPU is 503.96 s versus saved 507.84 s. This is not an instruction-count measurement.",
+    "Initial analytic diagonal falls from 1.993672 to 1.316811 s in first-step phase captures.",
+    "First-step H actions remain 45 (46 RHS total), M actions 5, ordinary left transforms 3899 and directional transforms 1620.",
+    "First-step sigma source elements remain 596735014; H input/output panels remain 675/675, M input panels 75; all input/output evictions are zero.",
+    "The unchanged contraction orders run more slowly per call in the new first-step capture; the diagonal gain is offset elsewhere. The exact core groups differ from the saved baseline.",
+    "Full-run CI transport curvature costs 14.680028 s and keyframe transport gradient 6.435213 s. Exterior topology construction costs only 0.451747 s.",
+    "The 30 selected metric solves cost 0.367974 s, including metric preparation; their CG operator applications cost 0.029677 s.",
+    "Build/test job 1263533 passes 6/6 selected regressions. First-step job 1263547 exits 2 because it intentionally reaches max_iterations, not because it converged."
+  ],
+  "mathematical_audit": {
+    "retain": [
+      "Selected-space projections for arbitrary nonclosed VB selections.",
+      "The complete CI transport curvature and keyframe pullback.",
+      "Distinct orbital integral-direction and coefficient-response contractions; these are not interchangeable RHSs."
+    ],
+    "confirmed_unconsumed_outputs": {
+      "normal_adjoint_calls": 73,
+      "directional_adjoint_calls": 47,
+      "total_left_and_right_outputs": 240,
+      "unused_one_sided_outputs": 109,
+      "explanation": "36 curvature calls request the right side of both adjoints; 11 keyframes request one side of base, origin and connection adjoints but both sides of the metric adjoint; 4 origin constructions request only the right adjoint. Shared forward factors are still necessary, so output count is not a speedup estimate."
+    },
+    "next_changes_not_implemented": [
+      "Compute only the adjoint side actually consumed, without dropping the common forward transforms.",
+      "Fuse overlap value, direction and consumed VJP work in one bounded tile sweep, sharing accepted factors between consumers.",
+      "Reuse fixed accepted-chart exterior maps, but prioritize contraction work over the sub-second constructor cost."
+    ]
+  },
+  "unresolved": "No additional mathematical work was found in the matched first-step counts. The current data do not isolate how much of the remaining wall-time difference is node/core load, frequency, memory/cache behavior or instrumentation/build variation. The previous 74.17 s run is retained, not presented as repaired by an optimizer change.",
+  "timing_note": "Nested phase clocks overlap. Profiled timings attribute stages; native GNU time establishes process wall and peak RSS. Old binaries were not rerun."
+}

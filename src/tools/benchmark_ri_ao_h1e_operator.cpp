@@ -10,11 +10,11 @@
 
 #include "input/loading/loader.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
-#include "vbscf/integrals/active/matrix/backpropagator.hpp"
-#include "vbscf/integrals/active/two_electron/response/ri.hpp"
-#include "vbscf/integrals/active/two_electron/transformation/packed_pair_map.hpp"
+#include "integrals/active/matrix_adjoint.hpp"
+#include "integrals/response/ri.hpp"
+#include "integrals/active/pair_map.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
+#include "integrals/ao/ri_operator.hpp"
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
 
 namespace {
@@ -110,7 +110,7 @@ std::vector<double> build_production_ao_h1e_backprop_input(
   const auto active_space_gradient_result =
       active_space_gradient_evaluator.evaluate(input);
 
-  xmvb::vb::ActiveSpaceMatrixBackpropagator matrix_backpropagator;
+  xmvb::integrals::ActiveSpaceMatrixBackpropagator matrix_backpropagator;
   const auto matrix_backpropagation_result = matrix_backpropagator.backpropagate(
       active_space_gradient_result.active_orbital_overlap_gradient,
       active_space_gradient_result.active_one_electron_gradient,
@@ -154,7 +154,7 @@ struct TimedRunResult {
 
 TimedRunResult time_operator(
     const std::vector<double>& input_matrix,
-    const xmvb::vb::RiAoFactorization& ri_cache,
+    const xmvb::integrals::RiAoFactorization& ri_cache,
     int n_basis_functions,
     bool attempt_spectral_factorization,
     int repeats) {
@@ -162,7 +162,7 @@ TimedRunResult time_operator(
   const auto start_time = std::chrono::steady_clock::now();
   for (int repeat_index = 0; repeat_index < repeats; ++repeat_index) {
     const auto output =
-        xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+        xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
             input_matrix,
             ri_cache,
             n_basis_functions,
@@ -194,20 +194,20 @@ struct ActivePairDirectionBenchmarkResult {
 };
 
 ActivePairDirectionBenchmarkResult benchmark_active_pair_direction(
-    const xmvb::vb::RiAoFactorization& ri_cache,
+    const xmvb::integrals::RiAoFactorization& ri_cache,
     const xmvb::vb::ActiveSpaceGradientResult& gradient_result,
     int n_active_orbitals,
     int repeats,
     std::mt19937* generator) {
   const auto cache =
-      xmvb::vb::build_ri_active_two_electron_response_cache(
+      xmvb::integrals::build_ri_active_two_electron_response_cache(
           ri_cache,
           gradient_result.active_space_two_electron_result,
           n_active_orbitals);
   const Matrix direction = random_matrix(
       ri_cache.n_basis_functions, n_active_orbitals, generator);
-  xmvb::vb::PackedOrbitalPairMapMatrix pair_direction;
-  xmvb::vb::build_packed_orbital_pair_map_directional_derivative(
+  xmvb::integrals::PackedOrbitalPairMapMatrix pair_direction;
+  xmvb::integrals::build_packed_orbital_pair_map_directional_derivative(
       gradient_result.active_space_two_electron_result
           .dense_active_coefficients,
       direction,
@@ -215,7 +215,7 @@ ActivePairDirectionBenchmarkResult benchmark_active_pair_direction(
   Matrix packed_result =
       ri_cache.metric_whitened_ao_pair_factors * pair_direction;
   Matrix planned_result =
-      xmvb::vb::compute_ri_active_pair_factor_directional_derivative(
+      xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
           cache, direction);
 
   ActivePairDirectionBenchmarkResult result;
@@ -223,7 +223,7 @@ ActivePairDirectionBenchmarkResult benchmark_active_pair_direction(
       (packed_result - planned_result).cwiseAbs().maxCoeff();
   const auto run_packed = [&]() {
     const auto start = std::chrono::steady_clock::now();
-    xmvb::vb::build_packed_orbital_pair_map_directional_derivative(
+    xmvb::integrals::build_packed_orbital_pair_map_directional_derivative(
         gradient_result.active_space_two_electron_result
             .dense_active_coefficients,
         direction,
@@ -237,7 +237,7 @@ ActivePairDirectionBenchmarkResult benchmark_active_pair_direction(
   const auto run_planned = [&]() {
     const auto start = std::chrono::steady_clock::now();
     planned_result =
-        xmvb::vb::compute_ri_active_pair_factor_directional_derivative(
+        xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
             cache, direction);
     result.planned_seconds += std::chrono::duration<double>(
         std::chrono::steady_clock::now() - start).count();
@@ -256,7 +256,7 @@ ActivePairDirectionBenchmarkResult benchmark_active_pair_direction(
 }
 
 FusedBenchmarkResult benchmark_fused_low_rank_operator(
-    const xmvb::vb::RiAoFactorization& ri_cache,
+    const xmvb::integrals::RiAoFactorization& ri_cache,
     int n_basis_functions,
     int n_inactive_orbitals,
     int n_active_orbitals,
@@ -278,11 +278,11 @@ FusedBenchmarkResult benchmark_fused_low_rank_operator(
       source_u * source_v.transpose() + source_v * source_u.transpose();
   const Matrix dense_adjoint =
       adjoint_u * adjoint_v.transpose() + adjoint_v * adjoint_u.transpose();
-  xmvb::vb::AoEffectiveOneElectronRiFusedWorkspace dense_workspace;
+  xmvb::integrals::AoEffectiveOneElectronRiFusedWorkspace dense_workspace;
   Matrix dense_forward;
   Matrix dense_transpose;
 
-  xmvb::vb::apply_ao_effective_one_electron_ri_operator_fused(
+  xmvb::integrals::apply_ao_effective_one_electron_ri_operator_fused(
       dense_source,
       dense_adjoint,
       ri_cache,
@@ -293,7 +293,7 @@ FusedBenchmarkResult benchmark_fused_low_rank_operator(
 
   const auto run_dense = [&]() {
     const auto start = std::chrono::steady_clock::now();
-    xmvb::vb::apply_ao_effective_one_electron_ri_operator_fused(
+    xmvb::integrals::apply_ao_effective_one_electron_ri_operator_fused(
         dense_source,
         dense_adjoint,
         ri_cache,
@@ -310,13 +310,13 @@ FusedBenchmarkResult benchmark_fused_low_rank_operator(
   const std::vector<double> dense_adjoint_storage(
       dense_adjoint.data(), dense_adjoint.data() + dense_adjoint.size());
   const auto spectral_forward_reference =
-      xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+      xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
           dense_source_storage,
           ri_cache,
           n_basis_functions,
           {.attempt_spectral_factorization = true});
   const auto spectral_transpose_reference =
-      xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+      xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
           dense_adjoint_storage,
           ri_cache,
           n_basis_functions,
@@ -333,13 +333,13 @@ FusedBenchmarkResult benchmark_fused_low_rank_operator(
   const auto run_spectral = [&]() {
     const auto start = std::chrono::steady_clock::now();
     const auto spectral_forward =
-        xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+        xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
             dense_source_storage,
             ri_cache,
             n_basis_functions,
             {.attempt_spectral_factorization = true});
     const auto spectral_transpose =
-        xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+        xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
             dense_adjoint_storage,
             ri_cache,
             n_basis_functions,

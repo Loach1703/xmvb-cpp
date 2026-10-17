@@ -8,10 +8,10 @@
 #include <utility>
 #include <vector>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "vbscf/core/configuration/flags.hpp"
 
 namespace {
@@ -411,20 +411,12 @@ int main(int argc, char** argv) {
     const auto load_result =
         xmvb::vb::load_vbscf_input_with_timings(options.input_path, load_options);
 
-    xmvb::vb::ActiveSpaceOrbitalPreparer orbital_preparer;
-    xmvb::vb::AoEffectiveOneElectronBuilder ao_effective_one_electron_builder;
-    xmvb::vb::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
-    xmvb::vb::ActiveSpaceTwoElectronBuilder active_space_two_electron_builder;
+
     const auto prepared_active_space =
-        xmvb::vb::prepare_timed_active_space_context(
-            load_result.input,
-            orbital_preparer,
-            ao_effective_one_electron_builder,
-            active_space_one_electron_builder,
-            active_space_two_electron_builder)
+        xmvb::vb::prepare_timed_active_space_context(load_result.input)
             .prepared_active_space;
 
-    xmvb::core::GeneralizedEigensolver generalized_eigensolver;
+    xmvb::linalg::GeneralizedEigensolver generalized_eigensolver;
     xmvb::vb::FullDeterminantStructureHamiltonianOverlapBuilder structure_builder;
 
     std::cout << std::setprecision(12);

@@ -10,7 +10,7 @@
 
 #include "input/loading/loader.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
+#include "integrals/ao/ri_operator.hpp"
 
 namespace {
 
@@ -126,38 +126,38 @@ int main(int argc, char** argv) {
       const Matrix symmetric_b = symmetrize(general_b);
 
       const auto dense_general_a =
-          xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+          xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
               flatten_matrix(general_a),
               ri_cache,
               n_basis_functions,
               {.attempt_spectral_factorization = false});
       const auto low_rank_general_a =
-          xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+          xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
               flatten_matrix(general_a),
               ri_cache,
               n_basis_functions,
               {.attempt_spectral_factorization = true});
       const auto dense_general_b =
-          xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+          xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
               flatten_matrix(general_b),
               ri_cache,
               n_basis_functions,
               {.attempt_spectral_factorization = false});
 
       const auto dense_symmetric_a =
-          xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+          xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
               flatten_matrix(symmetric_a),
               ri_cache,
               n_basis_functions,
               {.attempt_spectral_factorization = false});
       const auto low_rank_symmetric_a =
-          xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+          xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
               flatten_matrix(symmetric_a),
               ri_cache,
               n_basis_functions,
               {.attempt_spectral_factorization = true});
       const auto dense_symmetric_b =
-          xmvb::vb::apply_ao_effective_one_electron_ri_operator(
+          xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
               flatten_matrix(symmetric_b),
               ri_cache,
               n_basis_functions,

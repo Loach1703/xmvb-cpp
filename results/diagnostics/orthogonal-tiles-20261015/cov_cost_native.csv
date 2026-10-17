@@ -1,0 +1,4 @@
+job,node,space,variant,actual_threads,exit_code,termination,structures,recorded_accepted_steps,orbital_hvp,structure_response,initial_Eh,after_step_Eh,scf_s,application_s,process_s,cpu_s,rss_kib,cpu_percent,last_ci_actions
+github-scf-step-1263333,anode50,COV,current,8,0,neo_projected_gradient_tolerance,132,4,36,36,-398.533053417516,-399.106646267332,67.355929,71.236984,71.48,507.84000000000003,2632084,710,9
+github-scf-step-1263497,anode50,COV,current,8,0,neo_projected_gradient_tolerance,132,4,36,36,-398.533053417516,-399.106646267329,69.538818,73.941877,74.17,515.38,2611628,694,9
+github-scf-step-1263538,anode50,COV,current,8,0,neo_projected_gradient_tolerance,132,4,36,36,-398.533053417516,-399.106646267328,67.797482,71.900716,72.14,503.96000000000004,2632420,698,9

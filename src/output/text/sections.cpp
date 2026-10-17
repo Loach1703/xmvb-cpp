@@ -788,8 +788,8 @@ void print_population_analysis(
   }
 }
 
-Eigen::MatrixXd build_kinetic_matrix(const vb::LibcintInput& input) {
-  vb::LibcintDirectShellEvaluator evaluator(input);
+Eigen::MatrixXd build_kinetic_matrix(const xmvb::integrals::LibcintInput& input) {
+  xmvb::libcint::LibcintDirectShellEvaluator evaluator(input);
   const int n_bf = evaluator.n_basis_functions();
   Eigen::MatrixXd matrix = Eigen::MatrixXd::Zero(n_bf, n_bf);
   for (int left_shell = 0; left_shell < input.n_shells; ++left_shell) {
@@ -811,8 +811,8 @@ Eigen::MatrixXd build_kinetic_matrix(const vb::LibcintInput& input) {
 }
 
 std::array<Eigen::MatrixXd, 3> build_position_matrices(
-    const vb::LibcintInput& input) {
-  vb::LibcintDirectShellEvaluator evaluator(input);
+    const xmvb::integrals::LibcintInput& input) {
+  xmvb::libcint::LibcintDirectShellEvaluator evaluator(input);
   const int n_bf = evaluator.n_basis_functions();
   std::array<Eigen::MatrixXd, 3> matrices = {
       Eigen::MatrixXd::Zero(n_bf, n_bf),

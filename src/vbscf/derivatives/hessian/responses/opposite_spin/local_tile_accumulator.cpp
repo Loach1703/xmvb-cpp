@@ -9,8 +9,8 @@
 #include "vbscf/derivatives/hessian/responses/opposite_spin/overlap_contractions_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb::detail {
 namespace {
@@ -30,7 +30,7 @@ void add_packed_outer_product(
       if (partner_projection[partner_channel] == 0.0) {
         continue;
       }
-      (*packed_gradient)[TwoElectronIndexer::packed_pair_of_pairs_index(
+      (*packed_gradient)[xmvb::core::PairIndex::packed_pair_of_pairs_index(
           partner_channel, primary_channel)] +=
           primary_value * partner_projection[partner_channel];
     }
@@ -122,7 +122,7 @@ void add_accepted_projection_channel(
   for (std::size_t entry = 0;
        entry < accepted.packed_pair_indices.size();
        ++entry) {
-    (*packed_gradient)[TwoElectronIndexer::packed_pair_of_pairs_index(
+    (*packed_gradient)[xmvb::core::PairIndex::packed_pair_of_pairs_index(
         directional_channel,
         accepted.packed_pair_indices[entry])] +=
         weight * accepted.packed_pair_values[entry];
@@ -137,11 +137,11 @@ LocalOppositeSpinTileAccumulator::LocalOppositeSpinTileAccumulator(
     int n_active_orbitals,
     const std::vector<double>& active_overlap,
     const Eigen::MatrixXd& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_two_electron)
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron)
     : accepted_pair_cache_(accepted_pair_cache),
       selected_states_(selected_states),
       n_active_orbitals_(n_active_orbitals),
-      n_packed_pairs_(packed_active_pair_count(n_active_orbitals)),
+      n_packed_pairs_(xmvb::integrals::packed_active_pair_count(n_active_orbitals)),
       active_overlap_(active_overlap),
       active_one_electron_(active_one_electron),
       active_two_electron_(active_two_electron),
@@ -153,7 +153,7 @@ LocalOppositeSpinTileAccumulator::LocalOppositeSpinTileAccumulator(
       static_cast<std::size_t>(n_active_orbitals) * n_active_orbitals,
       0.0);
   result_.packed_active_two_electron_gradient.assign(
-      packed_active_two_electron_integral_count(n_active_orbitals),
+      xmvb::integrals::packed_active_two_electron_integral_count(n_active_orbitals),
       0.0);
 }
 
@@ -228,7 +228,7 @@ void LocalOppositeSpinTileAccumulator::accumulate_primary(
     }
   }
   const Eigen::MatrixXd projected =
-      apply_active_space_two_electron_kernel_block(
+      xmvb::integrals::apply_active_space_two_electron_kernel_block(
           active_two_electron_, n_active_orbitals_, raw_projection);
   Eigen::MatrixXd accepted_weight(n_electrons, n_electrons);
   const Eigen::MatrixXd zero = Eigen::MatrixXd::Zero(
@@ -254,7 +254,7 @@ void LocalOppositeSpinTileAccumulator::accumulate_primary(
         for (int right_electron = 0;
              right_electron < n_electrons;
              ++right_electron) {
-          const int channel = TwoElectronIndexer::packed_pair_index(
+          const int channel = xmvb::core::PairIndex::packed_pair_index(
               occupied_right[right_electron],
               occupied_left[left_electron]);
           accepted_weight(left_electron, right_electron) =
@@ -398,7 +398,7 @@ void LocalOppositeSpinTileAccumulator::accumulate_cross_response(
               for (int right_electron = 0;
                    right_electron < static_cast<int>(occupied_right.size());
                    ++right_electron) {
-                if (TwoElectronIndexer::packed_pair_index(
+                if (xmvb::core::PairIndex::packed_pair_index(
                         occupied_right[right_electron],
                         occupied_left[left_electron]) == channel) {
                   pair_weights[pair_offset + left_electron +

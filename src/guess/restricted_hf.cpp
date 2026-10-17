@@ -8,9 +8,9 @@
 #include <Eigen/Core>
 #include <Eigen/LU>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "guess/closed_shell_fock.hpp"
-#include "vbscf/core/storage/eigen.hpp"
+#include "linalg/storage.hpp"
 
 namespace xmvb::vb {
 
@@ -196,7 +196,7 @@ RestrictedHartreeFockSolver::RestrictedHartreeFockSolver(
 RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve(
     int n_total_electrons,
     const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap_matrix,
-    const AoIntegralInput& ao_integral_input) const {
+    const xmvb::integrals::AoIntegralInput& ao_integral_input) const {
   return solve(
       n_total_electrons,
       ao_overlap_matrix,
@@ -207,7 +207,7 @@ RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve(
 RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve(
     int n_total_electrons,
     const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap_matrix,
-    const AoIntegralInput& ao_integral_input,
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
     const std::vector<double>& initial_density_projector) const {
   return solve_impl(
       n_total_electrons,
@@ -222,7 +222,7 @@ RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve(
     int n_total_electrons,
     const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap_matrix,
     const Eigen::Ref<const Eigen::MatrixXd>& core_hamiltonian_matrix,
-    const RiAoFactorization& ri_factorization) const {
+    const xmvb::integrals::RiAoFactorization& ri_factorization) const {
   return solve(
       n_total_electrons,
       ao_overlap_matrix,
@@ -235,7 +235,7 @@ RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve(
     int n_total_electrons,
     const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap_matrix,
     const Eigen::Ref<const Eigen::MatrixXd>& core_hamiltonian_matrix,
-    const RiAoFactorization& ri_factorization,
+    const xmvb::integrals::RiAoFactorization& ri_factorization,
     const std::vector<double>& initial_density_projector) const {
   return solve_impl(
       n_total_electrons,
@@ -250,8 +250,8 @@ RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve_impl(
     int n_total_electrons,
     const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap_matrix,
     const Eigen::Ref<const Eigen::MatrixXd>& core_hamiltonian_matrix,
-    const AoIntegralInput* ao_integral_input,
-    const RiAoFactorization* ri_factorization,
+    const xmvb::integrals::AoIntegralInput* ao_integral_input,
+    const xmvb::integrals::RiAoFactorization* ri_factorization,
     const std::vector<double>& initial_density_projector) const {
   if ((ao_integral_input == nullptr) == (ri_factorization == nullptr)) {
     throw std::invalid_argument(
@@ -302,7 +302,7 @@ RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve_impl(
   const auto symmetric_core_hamiltonian =
       symmetrize_matrix(core_hamiltonian_matrix);
 
-  core::GeneralizedEigensolver eigensolver;
+  linalg::GeneralizedEigensolver eigensolver;
   ClosedShellFockBuilder fock_builder;
   const auto build_fock = [&](
       const Eigen::Ref<const Eigen::MatrixXd>& density) {
@@ -316,8 +316,8 @@ RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve_impl(
   };
 
   auto core_eigen_result = eigensolver.solve_dense(
-      flatten_matrix_column_major(symmetric_core_hamiltonian),
-      flatten_matrix_column_major(symmetric_overlap_matrix),
+      xmvb::linalg::flatten_matrix_column_major(symmetric_core_hamiltonian),
+      xmvb::linalg::flatten_matrix_column_major(symmetric_overlap_matrix),
       n_basis_functions);
   Eigen::MatrixXd density_projector;
   if (!initial_density_projector.empty()) {
@@ -366,8 +366,8 @@ RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve_impl(
       }
     }
     auto fock_eigen_result = eigensolver.solve_dense(
-        flatten_matrix_column_major(symmetric_fock_matrix),
-        flatten_matrix_column_major(symmetric_overlap_matrix),
+        xmvb::linalg::flatten_matrix_column_major(symmetric_fock_matrix),
+        xmvb::linalg::flatten_matrix_column_major(symmetric_overlap_matrix),
         n_basis_functions);
     const Eigen::Map<const Eigen::MatrixXd> fock_eigenvectors(
         fock_eigen_result.eigenvector_matrix.data(),
@@ -407,8 +407,8 @@ RestrictedHartreeFockResult RestrictedHartreeFockSolver::solve_impl(
 
   result.fock_matrix = build_fock(result.density_projector);
   auto final_eigen_result = eigensolver.solve_dense(
-      flatten_matrix_column_major(result.fock_matrix),
-      flatten_matrix_column_major(symmetric_overlap_matrix),
+      xmvb::linalg::flatten_matrix_column_major(result.fock_matrix),
+      xmvb::linalg::flatten_matrix_column_major(symmetric_overlap_matrix),
       n_basis_functions);
   result.orbital_energies = Eigen::Map<const Eigen::VectorXd>(
       final_eigen_result.eigenvalues.data(),

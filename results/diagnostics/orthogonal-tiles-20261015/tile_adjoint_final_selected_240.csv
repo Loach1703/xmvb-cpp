@@ -1,0 +1,5 @@
+run,structures,eigensolver,active_orbitals,status,termination_reason,iterations,orbital_hvp,initial_energy_Eh,energy_Eh,scf_seconds,total_seconds,rss_mib
+source-cover-1261533,1,davidson,8,converged,neo_projected_gradient_tolerance,3,21,-342.513371965287,-342.941087950299,6.263637,8.668273,1518.29296875
+source-cover-1261533,1,dense,8,converged,neo_projected_gradient_tolerance,3,21,-342.513371965287,-342.941087950298,6.240736,8.507757,1521.78515625
+source-cover-1261533,3,davidson,8,converged,neo_projected_gradient_tolerance,3,21,-342.625519383418,-343.040331009663,6.61756,8.880905,1526.47265625
+source-cover-1261533,3,dense,8,converged,neo_projected_gradient_tolerance,3,21,-342.625519383418,-343.040331009665,6.926176,9.336852,1517.28125

@@ -252,26 +252,22 @@ void apply_ctrl_assignment(
   }
   if (key == "ISCF") {
     const int iscf = std::stoi(raw_value);
-    if (iscf == 5) {
-      metadata->scf_optimizer = InputScfOptimizer::Lbfgs;
-      return;
-    }
     if (iscf == 7) {
       metadata->scf_optimizer = InputScfOptimizer::Tnhvp;
       return;
     }
     if (iscf == 8) {
-      metadata->scf_optimizer = InputScfOptimizer::BlockLbfgs;
+      metadata->scf_optimizer = InputScfOptimizer::Plbfgs;
       return;
     }
     if (iscf == 9) {
-      metadata->scf_optimizer = InputScfOptimizer::Neo;
+      metadata->scf_optimizer = InputScfOptimizer::Ciah;
       return;
     }
     throw std::invalid_argument(
         "unsupported ISCF value " + raw_value +
-        "; use ISCF=5 for XMVB L-BFGS, ISCF=7 for TNHVP, or "
-        "ISCF=8 for block-LBFGS, or ISCF=9 for NEO");
+        "; use ISCF=7 for TNHVP, "
+        "ISCF=8 for P-LBFGS, or ISCF=9 for CIAH");
   }
   if (key == "EIGENSOLVER") {
     metadata->has_explicit_structure_eigensolver = true;

@@ -1,5 +1,21 @@
 # Independent TNVB: build, run and numerical acceptance
 
+## Master synchronization: 2026-10-17
+
+Master `03d469cc` is integrated with TNVB restricted to ISCF=8/P-LBFGS.
+The C++23 build includes the production CLI and all TNVB numerical tools.
+Five focused CTests pass: input invariants, gradient adapter, RDM policy,
+acceptance-summary logic, and trial isolation with an accepted orbital step.
+The normal benzene ENERGY CLI run and fixed-orbital exact/RI energy-gradient
+comparisons also pass; maximum same-orbital gradient differences are
+5.11e-15 / 4.94e-15. This is not a new full C14 optimization acceptance.
+The isolated verification build is
+`/pool1/home/chentz/apps/xmvb4.0/build/cpp-tnvb-master-20261017`.
+Its LAPACK and LAPACKE explicitly use the previously verified dynamic
+OpenBLAS library recorded in the older `cpp-tnvb/CMakeCache.txt`; automatic
+selection of the older static library caused SIGILL on this host.
+No existing installation or submission script is replaced.
+
 ## Scope
 
 The `tnvb` branch supplies a separate `xmvb_tnvb` library. Production uses
@@ -8,14 +24,13 @@ total-state construction and FULL 3-RDM. HAO and OEO use the same electronic
 adapter. Selected structures remain a selected space, not a complete CAS.
 The default ordinary determinant path and its second-order caches remain
 available; a TNVB evaluation creates neither determinants nor an
-`AcceptedPointContext`. ISCF=5 retains the existing raw-coordinate L-BFGS,
-line search, history and stopping criteria.
-TNVB also supports the existing ISCF=8 nonredundant orbital-block L-BFGS.
+`AcceptedPointContext`. TNVB uses ISCF=8, the shared nonredundant orbital-block
+P-LBFGS optimizer (`Plbfgs`), after merging master `03d469cc` on 2026-10-17.
 It uses the same first-order electronic adapter and does not require an
 `AcceptedPointContext`, a determinant HVP, or a new input keyword. Its original
-stopping metric is the projected reduced-gradient infinity norm, unlike the
-raw-coordinate L2 norm used by ISCF=5. Neither optimizer's numerical stopping
-thresholds or algorithm is changed by enabling TNVB.
+stopping metric is the projected reduced-gradient infinity norm. Enabling TNVB
+does not change that optimizer's numerical stopping thresholds or algorithm.
+Master removed native ISCF=5; this branch does not restore or alias it.
 
 Only these new input keywords are registered:
 
@@ -25,12 +40,11 @@ Only these new input keywords are registered:
 | `TNBOND` | Required positive integer; cap for each structure's SU(2) MPS. |
 | `TNSUMBOND` | Required for optimization, positive and at least `TNBOND`. |
 
-For ENERGY, use `VBSCF ISCF=5 ITMAX=0 TNVB TNBOND=128`. No total MPS or
+For ENERGY, use `VBSCF ISCF=8 ITMAX=0 TNVB TNBOND=128`. No total MPS or
 1/2/3-RDM is constructed. For optimization, use
-`VBSCF ISCF=5 ITMAX=200 TNVB TNBOND=128 TNSUMBOND=256`.
-Replace `ISCF=5` with `ISCF=8` to use orbital-block L-BFGS. The existing CLI
-override `--optimizer-backend block_lbfgs` has the same effect. In ENERGY
-(`ITMAX=0`), either setting evaluates the fixed orbitals without optimization.
+`VBSCF ISCF=8 ITMAX=200 TNVB TNBOND=128 TNSUMBOND=256`.
+The CLI override is `--optimizer-backend plbfgs`. In ENERGY (`ITMAX=0`),
+the fixed orbitals are evaluated without optimization.
 These are additions to the existing `$CTRL`; geometry, orbital guess and
 VB structures are still needed. Structures can be supplied explicitly through
 `$STR` or generated using the existing supported `STR=...` structure classes,
@@ -40,13 +54,14 @@ overrides `ITMAX`. Omitted `ITMAX` retains the project default 2000; specify
 zero explicitly for ENERGY. TNVB defaults to dense H/S solving. An explicit
 unsupported eigensolver or optimizer request is a capability error.
 
-No old TNVB keywords, adaptive scheduling, contracted backend, TNHVP, NEO,
+No old TNVB keywords, adaptive scheduling, contracted backend, TNHVP, CIAH,
 state averaging, open-shell treatment or nuclear derivatives are registered
 by this module. Generic unknown-keyword handling remains the existing
 project behavior, without compatibility or old-keyword rejection branches.
 
 ## Build isolation
 
+The project requires CMake >=3.20 and a C++23 compiler.
 `XMVB_ENABLE_TNVB` defaults to OFF. This build does not require Python or
 Block2. Configure an independent build directory and dependency roots:
 
@@ -151,7 +166,7 @@ all 24 orbitals of the benzene fixture, natural-orbital and population sections
 after a full-gradient evaluation, and their absence in ENERGY output.
 ISCF=8 integration checks and their explicitly bounded C14 scope are recorded
 separately in `tnvb_iscf8_integration.md`; the original ISCF=5 acceptance archive
-is preserved. The block optimizer's current Armijo trials evaluate full
+is preserved as historical evidence. The P-LBFGS optimizer's Armijo trials evaluate full
 gradients, including FULL 3-RDM, even for rejected trials. Joining this optimizer
 does not by itself reduce the cost of a gradient evaluation.
 
@@ -183,7 +198,7 @@ pullback for gradients. `check_tnvb_directions` checks independent S, h,
 packed-g, inactive-orbital and active-orbital directions at three step sizes;
 two adjacent passing step sizes are required.
 
-`optimize_tnvb` uses the same guess, ISCF=5 and convergence settings for both
+`optimize_tnvb` uses the same guess, ISCF=8 and convergence settings for both
 backends, retains failed/unconverged outcomes, compares both endpoints and
 cross-evaluates their exported physical orbitals. A different stationary point
 is not labeled as a passing optimization match. C14 is capped at 200 accepted

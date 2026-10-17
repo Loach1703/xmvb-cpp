@@ -1,0 +1,27 @@
+C12 before/after contraction benchmark, 2026-10-17
+
+Before application: frozen production binary from C14 Slurm job 1264476,
+revision cd958ad7. sha256:
+754361e898313f724b260684d227d2ade986804db83385fafa825dca7a3f146e
+
+Before kernel: existing test_structure_tiles, built Oct 16 22:53 after 48c145ba.
+sha256: 5e15b85d8a82126fdee82f11a56d12b6b17fc19f53ffbc5d48ee55abe3b1d09a
+The later cd958ad7 selected-metric factor sharing changes did not modify the
+sigma/exterior/assembly contractions being compared. No old source is rebuilt.
+The kernel baseline therefore predates metric-factor sharing; prepared metric
+timing must be interpreted with this distinction, not labelled cd958ad7.
+
+After: cd958ad7 plus this round's sigma_tiles, exterior_transform,
+orthogonal_tiles, product_jet, overlap_tiles and numerical test edits.
+Compute-node source manifest and executable hashes accompany each result.
+Unrelated local RI edits are excluded from synchronization.
+
+Operator fixture: deterministic singlet CAS(12,12), 132 covalent Rumer structures.
+Molecular end-to-end fixture: testdata/vbscf/csd_LOFLEA_vb.xmi, ISCF=9 instead
+of 7; full original guess, exact cc-pVDZ ERI, same thresholds and ITMAX=2000.
+This is not a user-supplied molecular C12.xmi (none was found locally).
+
+One allocation, same node, 32 physical cores; OpenMP close/cores binding;
+BLAS threads=1. Native GNU-time-v runs measure wall time and process peak RSS.
+Independent numerical-reference tests and phase diagnostics are separate.
+No C14 baseline or historical GitHub version is rerun.

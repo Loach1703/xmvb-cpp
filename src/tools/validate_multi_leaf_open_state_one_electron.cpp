@@ -17,7 +17,7 @@
 #include "input/loading/loader.hpp"
 #include "vbscf/determinants/algebra/overlap.hpp"
 #include "vbscf/structures/reference/overlap.hpp"
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "vbscf/structures/selection/union_graph/screening.hpp"
 
 namespace {
@@ -1950,16 +1950,8 @@ int main(int argc, char** argv) {
         throw std::out_of_range("structure index is out of range for the selected input");
       }
 
-      xmvb::vb::ActiveSpaceOrbitalPreparer orbital_preparer;
-      xmvb::vb::AoEffectiveOneElectronBuilder ao_effective_one_electron_builder;
-      xmvb::vb::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
-      xmvb::vb::ActiveSpaceTwoElectronBuilder active_space_two_electron_builder;
-      const auto timed_active_space = xmvb::vb::prepare_timed_active_space_context(
-          load_result.input,
-          orbital_preparer,
-          ao_effective_one_electron_builder,
-          active_space_one_electron_builder,
-          active_space_two_electron_builder);
+
+      const auto timed_active_space = xmvb::vb::prepare_timed_active_space_context(load_result.input);
       const auto& prepared_active_space = timed_active_space.prepared_active_space;
       const auto& active_overlap_storage =
           prepared_active_space.orbital_result.active_orbital_overlap_matrix;

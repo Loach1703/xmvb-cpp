@@ -24,8 +24,8 @@ void require(bool condition, const char* message) {
 }
 
 /** @brief One s, p, and Cartesian d shell with a common coefficient scale. */
-xmvb::vb::LibcintInput make_input(double coefficient_scale) {
-  xmvb::vb::LibcintInput input;
+xmvb::integrals::LibcintInput make_input(double coefficient_scale) {
+  xmvb::integrals::LibcintInput input;
   input.n_atoms = 1;
   input.n_shells = kShells;
   input.n_gaussian_primitives = kShells;
@@ -41,7 +41,7 @@ xmvb::vb::LibcintInput make_input(double coefficient_scale) {
     const int environment_offset = static_cast<int>(input.env.size());
     input.env.push_back(1.0);
     input.env.push_back(
-        coefficient_scale * xmvb::vb::shell_normalization(shell, 1.0));
+        coefficient_scale * xmvb::libcint::shell_normalization(shell, 1.0));
     input.bas[shell * BAS_SLOTS + ANG_OF] = shell;
     input.bas[shell * BAS_SLOTS + NPRIM_OF] = 1;
     input.bas[shell * BAS_SLOTS + NCTR_OF] = 1;
@@ -65,8 +65,8 @@ std::size_t quartet_index(int i, int j, int k, int l,
 }
 
 void check_bound_and_schwarz(
-    const xmvb::vb::LibcintDirectShellEvaluator& evaluator) {
-  xmvb::vb::LibcintShellWorkspace workspace;
+    const xmvb::libcint::LibcintDirectShellEvaluator& evaluator) {
+  xmvb::libcint::LibcintShellWorkspace workspace;
   double bounds[kShells][kShells] = {};
   for (int i = 0; i < kShells; ++i) {
     for (int j = 0; j < kShells; ++j) {
@@ -109,10 +109,10 @@ void check_bound_and_schwarz(
 }
 
 void check_normalized_quartets_are_scale_invariant(
-    const xmvb::vb::LibcintDirectShellEvaluator& original,
-    const xmvb::vb::LibcintDirectShellEvaluator& scaled) {
-  xmvb::vb::LibcintShellWorkspace original_workspace;
-  xmvb::vb::LibcintShellWorkspace scaled_workspace;
+    const xmvb::libcint::LibcintDirectShellEvaluator& original,
+    const xmvb::libcint::LibcintDirectShellEvaluator& scaled) {
+  xmvb::libcint::LibcintShellWorkspace original_workspace;
+  xmvb::libcint::LibcintShellWorkspace scaled_workspace;
   for (int i = 0; i < kShells; ++i) {
     for (int j = 0; j < kShells; ++j) {
       for (int k = 0; k < kShells; ++k) {
@@ -134,8 +134,8 @@ void check_normalized_quartets_are_scale_invariant(
 }
 
 void check_materialized_equal(
-    const xmvb::vb::MaterializedAoIntegralBuffers& a,
-    const xmvb::vb::MaterializedAoIntegralBuffers& b) {
+    const xmvb::libcint::MaterializedAoIntegralBuffers& a,
+    const xmvb::libcint::MaterializedAoIntegralBuffers& b) {
   require(a.n_basis_functions == b.n_basis_functions,
           "materialized AO counts differ");
   require(a.left_pair_indices == b.left_pair_indices &&
@@ -157,8 +157,8 @@ int main() {
   try {
     const auto original_input = make_input(1.0);
     auto scaled_input = make_input(1.0e-3);
-    xmvb::vb::LibcintDirectShellEvaluator original(original_input);
-    xmvb::vb::LibcintDirectShellEvaluator scaled(scaled_input);
+    xmvb::libcint::LibcintDirectShellEvaluator original(original_input);
+    xmvb::libcint::LibcintDirectShellEvaluator scaled(scaled_input);
     check_bound_and_schwarz(original);
     check_bound_and_schwarz(scaled);
     check_normalized_quartets_are_scale_invariant(original, scaled);
@@ -171,14 +171,14 @@ int main() {
                 scaled_input.n_shells, scaled_input.env.data(), nullptr);
     require(std::abs(raw_s_quartet) < kTolerance,
             "scaled raw s quartet does not exercise the old prescreen failure");
-    xmvb::vb::LibcintShellWorkspace workspace;
+    xmvb::libcint::LibcintShellWorkspace workspace;
     const auto& normalized_s = scaled.evaluate_two_electron_shell_quartet(
         0, 0, 0, 0, workspace);
     require(std::abs(normalized_s.values[0]) > 1.0e-2,
             "scaled normalized s quartet unexpectedly vanished");
 
-    xmvb::vb::LibcintMaterializedIntegralProvider provider;
-    xmvb::vb::LibcintMaterializedIntegralProviderOptions screened;
+    xmvb::libcint::LibcintMaterializedIntegralProvider provider;
+    xmvb::libcint::LibcintMaterializedIntegralProviderOptions screened;
     screened.integral_tolerance = kTolerance;
     screened.use_shell_pair_prescreen = true;
     auto unscreened = screened;

@@ -12,8 +12,8 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 #include "vbscf/determinants/pairs/accepted_tile.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -65,7 +65,7 @@ OppositeSpinBackwardContribution make_zero_contribution(int n_active) {
   result.active_orbital_overlap_gradient.assign(
       static_cast<std::size_t>(n_active) * n_active, 0.0);
   result.packed_active_two_electron_gradient.assign(
-      packed_active_two_electron_integral_count(n_active), 0.0);
+      xmvb::integrals::packed_active_two_electron_integral_count(n_active), 0.0);
   return result;
 }
 
@@ -228,7 +228,7 @@ void accumulate_packed_gradient(
               alpha_value * raw_partner_images(work, beta_channel);
           if (std::abs(contribution) > kContributionTolerance) {
             (*packed_gradient)[
-                TwoElectronIndexer::packed_pair_of_pairs_index(
+                xmvb::core::PairIndex::packed_pair_of_pairs_index(
                     beta_channel, alpha_channel)] += contribution;
           }
         }
@@ -262,7 +262,7 @@ void accumulate_overlap_gradient(
         for (int right_electron = 0;
              right_electron < n_electrons;
              ++right_electron) {
-          const int channel = TwoElectronIndexer::packed_pair_index(
+          const int channel = xmvb::core::PairIndex::packed_pair_index(
               occupied_right[right_electron],
               occupied_left[left_electron]);
           cofactor_weight(left_electron, right_electron) =
@@ -294,7 +294,7 @@ void consume_primary_tiles(
     int n_active,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     OppositeSpinBackwardContribution* result) {
   const PrimarySpin partner_spin = primary_spin == PrimarySpin::Alpha
       ? PrimarySpin::Beta
@@ -310,7 +310,7 @@ void consume_primary_tiles(
       : tile_plan.partner.beta;
   const int n_primary = spin_size(states, primary_spin);
   const int n_partner = spin_size(states, partner_spin);
-  const int n_pairs = packed_active_pair_count(n_active);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active);
 
   for (int primary_left = 0;
        primary_left < n_primary;
@@ -381,7 +381,7 @@ void consume_primary_tiles(
             raw_images,
             &result->packed_active_two_electron_gradient);
       }
-      const Eigen::MatrixXd projected = apply_active_space_two_electron_kernel_block(
+      const Eigen::MatrixXd projected = xmvb::integrals::apply_active_space_two_electron_kernel_block(
           two_electron, n_active, raw_images.transpose()).transpose();
       accumulate_overlap_gradient(
           primary_tile,
@@ -401,7 +401,7 @@ OppositeSpinBackwardContribution build_opposite_spin_backward_contribution(
     int n_active,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron) {
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron) {
   validate_backward_inputs(cache, states, n_active, active_overlap, h1e);
   OppositeSpinBackwardContribution result = make_zero_contribution(n_active);
   consume_primary_tiles(
@@ -437,7 +437,7 @@ build_directional_opposite_spin_backward_contribution(
     int n_active,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e,
-    const ActiveSpaceTwoElectronResult& two_electron) {
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron) {
   validate_backward_inputs(cache, states, n_active, active_overlap, h1e);
   validate_directional_states(states, directions);
   OppositeSpinBackwardContribution result = make_zero_contribution(n_active);

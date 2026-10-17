@@ -1,5 +1,7 @@
 #include "vbscf/workflow/evaluator.hpp"
 
+#include "mcscf/states/weights.hpp"
+
 #include <stdexcept>
 #include <utility>
 
@@ -35,25 +37,6 @@ double compute_selected_state_average_energy(
   return energy;
 }
 
-std::vector<double> normalize_state_average_weights(
-    const std::vector<double>& state_average_weights) {
-  double weight_sum = 0.0;
-  for (const double state_weight : state_average_weights) {
-    if (state_weight < 0.0) {
-      throw std::invalid_argument("state_average_weights must be non-negative");
-    }
-    weight_sum += state_weight;
-  }
-  if (weight_sum <= 0.0) {
-    throw std::invalid_argument("state_average_weights must sum to a positive value");
-  }
-
-  std::vector<double> normalized_weights = state_average_weights;
-  for (double& state_weight : normalized_weights) {
-    state_weight /= weight_sum;
-  }
-  return normalized_weights;
-}
 
 void validate_state_selection(
     const std::vector<int>& selected_state_indices,
@@ -81,7 +64,7 @@ VbScfEvaluator::VbScfEvaluator()
 
 VbScfEvaluator::VbScfEvaluator(
     StructureMatrixEvaluator matrix_evaluator,
-    xmvb::core::GeneralizedEigensolver generalized_eigensolver)
+    xmvb::linalg::GeneralizedEigensolver generalized_eigensolver)
     : matrix_evaluator_(std::move(matrix_evaluator)),
       generalized_eigensolver_(std::move(generalized_eigensolver)) {}
 
@@ -105,14 +88,14 @@ VbScfResult VbScfEvaluator::evaluate(
       state_average_weights,
       input.structure_data.n_structures);
   const std::vector<double> normalized_weights =
-      normalize_state_average_weights(state_average_weights);
+      mcscf::normalize_weights(state_average_weights);
 
   VbScfResult result;
   result.n_structures = input.structure_data.n_structures;
   result.nuclear_repulsion_energy = nuclear_repulsion_energy;
   result.selected_state_indices = selected_state_indices;
   result.state_average_weights = normalized_weights;
-  const auto prepared_active_space = matrix_evaluator_.prepare_active_space(input);
+  const auto prepared_active_space = prepare_timed_active_space_context(input).prepared_active_space;
   result.structure_matrices = matrix_evaluator_.evaluate(
       input,
       prepared_active_space);

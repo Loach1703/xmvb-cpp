@@ -5,7 +5,7 @@
 #include <limits>
 #include <stdexcept>
 
-#include "core/eigen_response.hpp"
+#include "linalg/eigen_response.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -42,23 +42,20 @@ void validate_weights(const std::vector<double>& weights) {
 }  // namespace
 
 ScaledStructureCoupling scale_equal_weight_structure_coupling(
-    const xmvb::core::EqualWeightEigenCoupling& coupling,
+    const xmvb::linalg::EqualWeightEigenCoupling& coupling,
     const std::vector<double>& normalized_state_weights) {
   validate_weights(normalized_state_weights);
   const Eigen::Index n_states =
       static_cast<Eigen::Index>(normalized_state_weights.size());
-  const Eigen::Index n_structures = coupling.gauge_coefficient_response.rows();
   const bool has_forcing = coupling.horizontal_forcing.size() != 0;
-  if (n_structures <= 0 ||
-      (!has_forcing && (coupling.horizontal_forcing.rows() != 0 ||
+  if ((!has_forcing && (coupling.horizontal_forcing.rows() != 0 ||
                         coupling.horizontal_forcing.cols() != 0)) ||
-      (has_forcing && (coupling.horizontal_forcing.rows() != n_structures ||
-                       coupling.horizontal_forcing.cols() != n_states)) ||
-      coupling.gauge_coefficient_response.cols() != n_states ||
+      (has_forcing && coupling.horizontal_forcing.cols() != n_states) ||
+      coupling.gauge_frame.rows() != n_states || coupling.gauge_frame.cols() != n_states ||
       coupling.gauge_selected_matrix_response.rows() != n_states ||
       coupling.gauge_selected_matrix_response.cols() != n_states ||
       !coupling.horizontal_forcing.allFinite() ||
-      !coupling.gauge_coefficient_response.allFinite() ||
+      !coupling.gauge_frame.allFinite() ||
       !coupling.gauge_selected_matrix_response.allFinite()) {
     throw std::invalid_argument(
         "equal-weight structure coupling dimensions or values are inconsistent");
@@ -71,7 +68,7 @@ ScaledStructureCoupling scale_equal_weight_structure_coupling(
     result.horizontal_forcing.scaled_coefficients.col(state) *=
         std::sqrt(2.0 * normalized_state_weights[static_cast<std::size_t>(state)]);
   }
-  result.gauge_coefficient_response = coupling.gauge_coefficient_response;
+  result.gauge_frame = coupling.gauge_frame;
   result.gauge_adjoint_multipliers =
       -coupling.gauge_selected_matrix_response;
   return result;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <Eigen/Core>
 
 #include "vbscf/orbitals/charts/chart.hpp"
@@ -12,6 +13,7 @@ struct AcceptedPointContext;
 struct VbScfCoupledKeyframeEvaluation;
 class StructureMetricInverse;
 class StructureTangentOperator;
+struct SelectedMetric;
 
 /** @brief One selected-space retraction and its immutable trial geometry. */
 struct CiTransportPoint {
@@ -23,11 +25,12 @@ struct CiTransportPoint {
   Eigen::MatrixXd coefficients;
 };
 
-/** @brief Residual-weighted origin Hessian correction, split by input block. */
-struct CiTransportCurvature {
-  Eigen::VectorXd orbital_from_orbital;
-  Eigen::VectorXd orbital_from_structure;
-  Eigen::VectorXd structure_from_orbital;
+/** @brief Consistent energy/gradient of the residual-balanced CIAH model.
+ * Physical macro acceptance continues to use the objective, not this energy.
+ */
+struct CiTransportModel {
+  double energy = 0.0;
+  Eigen::VectorXd gradient;
 };
 
 /** @brief Projected finite CI transport; selected structures need not be closed. */
@@ -42,15 +45,14 @@ public:
 
   CiTransportPoint retract(const Eigen::VectorXd& orbital_step,
                            const Eigen::VectorXd& structure_step) const;
-  Eigen::VectorXd gradient(const CiTransportPoint& point,
-                          const VbScfCoupledKeyframeEvaluation& fixed) const;
-  CiTransportCurvature curvature(const Eigen::VectorXd& orbital_direction,
-                                const Eigen::VectorXd& structure_direction) const;
+  CiTransportModel evaluate_model(const CiTransportPoint& point,
+                                 const VbScfCoupledKeyframeEvaluation& fixed) const;
   Eigen::VectorXd origin_structure_gradient() const;
 
 private:
   Eigen::MatrixXd solve(const Eigen::MatrixXd& upper,
-                       const Eigen::MatrixXd& rhs) const;
+                       const Eigen::MatrixXd& rhs,
+                       const Eigen::MatrixXd* initial = nullptr) const;
   Eigen::VectorXd raw_direction(const Eigen::VectorXd& reduced) const;
 
   const OrbitalPreparationInput& input_;
@@ -65,12 +67,13 @@ private:
   Eigen::MatrixXd zero_;
   Eigen::MatrixXd c0_;
   Eigen::MatrixXd gc0_;
-  Eigen::MatrixXd lambda0_;
   double coordinate_scale_;
   Eigen::VectorXd diagonal_;
-  Eigen::MatrixXd residual_upper_gradient_;
-  Eigen::MatrixXd residual_overlap_gradient_;
   const StructureMetricInverse* inverse_ = nullptr;
+  /** One trial chart, shared by retraction and its gradient solve. */
+  mutable Eigen::MatrixXd metric_upper_;
+  mutable std::optional<RepresentationOverlap::PreparedMetric> prepared_metric_;
+  mutable std::shared_ptr<const SelectedMetric> selected_metric_;
 };
 
 }  // namespace xmvb::vb

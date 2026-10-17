@@ -14,8 +14,9 @@
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
-#include "core/metric_solve.hpp"
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "vbscf/structures/overlap/metric.hpp"
+#include "linalg/metric_solve.hpp"
+#include "mcscf/optimization/trace.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -140,7 +141,7 @@ StructureTangentOperator::StructureTangentOperator(
   }
   constraint_qr_.compute(selected_images.overlap);
   metric_inverse_ = accepted_point_->metric_inverse(action);
-  if (metric_inverse_) diagnostics::neo_trace("ciah_metric_factors",
+  if (metric_inverse_) mcscf::diagnostics::ciah_trace("ciah_metric_factors",
       "bytes=%zu,blocks=%zu,max_block=%d,carrier_diagonal=%d", metric_inverse_->factor_bytes(),
       metric_inverse_->block_count(), metric_inverse_->max_block_size(),
       static_cast<int>(action_->supports_carrier_diagonal()));
@@ -323,6 +324,16 @@ StructureTangentOperator::apply_coupling_coordinates(
       block.adjoint_multipliers.front()};
 }
 
+StructureCoordinateCouplingAction StructureTangentOperator::finish_coupling_coordinates(
+    const Eigen::Ref<const Eigen::MatrixXd>& coefficients,StructureResponseSweep sweep,
+    StructureActiveIntegralAdjoint* adjoint) const {
+  if (coefficients.rows()!=n_structures_ || coefficients.cols()!=n_states_)
+    throw std::invalid_argument("joint structure response has incompatible coordinates");
+  const auto block=finish_coupling_block(coefficients,std::move(sweep.images),&sweep,adjoint);
+  return {block.hessian_coordinates.col(0),block.metric_coordinates.col(0),
+      block.coefficient_responses.front(),block.adjoint_multipliers.front()};
+}
+
 StructureCoordinateCouplingBlock
 StructureTangentOperator::apply_coupling_coordinate_block(
     const Eigen::Ref<const Eigen::MatrixXd>& coordinates,
@@ -356,13 +367,22 @@ StructureTangentOperator::apply_coupling_coordinate_block(
   if (adjoint) {
     if (!accepted_point_->structure_adjoint_state)
       accepted_point_->structure_adjoint_state = action_->prepare_active_adjoint(
-          accepted_point_->selected_state_matrices,
+          accepted_point_->selected_state_eigenvectors,
+          accepted_point_->normalized_state_weights,
           accepted_point_->selected_state_energies);
     sweep = action_->apply_response(*accepted_point_->structure_adjoint_state, raw);
     images = std::move(sweep.images);
   } else {
     images = action_->apply(raw);
   }
+  return finish_coupling_block(raw,std::move(images),adjoint ? &sweep:nullptr,adjoint);
+}
+
+StructureCoordinateCouplingBlock StructureTangentOperator::finish_coupling_block(
+    const Eigen::Ref<const Eigen::MatrixXd>& raw,StructureActionResult images,
+    StructureResponseSweep* sweep,StructureActiveIntegralAdjoint* adjoint) const {
+  const Eigen::Index width=raw.cols()/n_states_;
+  const Eigen::Index horizontal_rows=n_structures_-n_states_;
   Eigen::MatrixXd shifted = images.hamiltonian;
   for (Eigen::Index block = 0; block < width; ++block) {
     for (int state = 0; state < n_states_; ++state) {
@@ -387,7 +407,7 @@ StructureTangentOperator::apply_coupling_coordinate_block(
   Eigen::MatrixXd scaled_shifted = std::move(shifted);
   if (adjoint)
     *adjoint = action_->finish_response(*accepted_point_->structure_adjoint_state,
-        std::move(sweep), result.adjoint_multipliers.front());
+        std::move(*sweep), result.adjoint_multipliers.front());
   Eigen::MatrixXd scaled_overlap = images.overlap;
   for (Eigen::Index block = 0; block < width; ++block) {
     for (int state = 0; state < n_states_; ++state) {
@@ -474,9 +494,12 @@ double StructureTangentOperator::diagonal_dual_norm(
 
 Eigen::VectorXd StructureTangentOperator::apply_inverse_metric_model(
     const Eigen::VectorXd& covector) const {
-  if (!metric_inverse_) return apply_inverse_metric_diagonal(covector);
+  const auto& selected_metric = accepted_point_->selected_metric;
+  if (!metric_inverse_ && !selected_metric) return apply_inverse_metric_diagonal(covector);
   const Eigen::MatrixXd rhs = expand(covector).scaled_coefficients;
-  Eigen::MatrixXd image = metric_inverse_->apply(rhs);
+  Eigen::MatrixXd image;
+  if (metric_inverse_) image = metric_inverse_->apply(rhs);
+  else image = selected_metric->factor.solve(rhs);
   // Z spans ker[(M C)^T]. The exact horizontal inverse is
   // Z^T [M^-1 - C (C^T M C)^-1 C^T] Z, not Z^T M^-1 Z.
   image.noalias() -= selected_ *
@@ -485,33 +508,33 @@ Eigen::VectorXd StructureTangentOperator::apply_inverse_metric_model(
 }
 
 double StructureTangentOperator::dual_norm(const Eigen::VectorXd& covector,
-    core::MetricSolveWorkspace* workspace) const {
+    linalg::MetricSolveWorkspace* workspace) const {
   return metric_image(covector, workspace).norm(covector);
 }
 
-core::MetricImage StructureTangentOperator::metric_image(const Eigen::VectorXd& covector,
-    core::MetricSolveWorkspace* workspace, const core::MetricImage* initial) const {
+linalg::MetricImage StructureTangentOperator::metric_image(const Eigen::VectorXd& covector,
+    linalg::MetricSolveWorkspace* workspace, const linalg::MetricImage* initial) const {
   if (covector.size() != tangent_size() || !covector.allFinite())
     throw std::invalid_argument("invalid structure metric covector");
-  const bool trace = diagnostics::neo_event_trace_enabled();
+  const bool trace = mcscf::diagnostics::ciah_event_trace_enabled();
   const auto start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
-  core::MetricSolveStats stats;
+  linalg::MetricSolveStats stats;
   const auto action = [this](const Eigen::VectorXd& x) { return apply_metric_coordinates(x); };
   const auto precondition = [this](const Eigen::VectorXd& x) { return apply_inverse_metric_model(x); };
-  // A complete-space inverse already solves in one CG step; recycle only the
-  // selected-space solves that otherwise repeat long Krylov traversals.
-  core::MetricImage result;
+  // Exact complete-space or resident selected factors need no recycling.
+  // Recycle only streamed selected solves that repeat long Krylov traversals.
+  linalg::MetricImage result;
   if (workspace) {
     result = workspace->image(covector, action, precondition, trace ? &stats : nullptr,
-        initial, !metric_inverse_);
+        initial, !metric_inverse_ && !accepted_point_->selected_metric);
   } else {
     Eigen::VectorXd image;
-    result.inverse = core::solve_metric(covector, action, precondition,
+    result.inverse = linalg::solve_metric(covector, action, precondition,
         trace ? &stats : nullptr, initial ? &initial->inverse : nullptr, &image);
     result.residual = covector - image;
   }
-  if (trace) diagnostics::neo_trace("ciah_structure_norm",
+  if (trace) mcscf::diagnostics::ciah_trace("ciah_structure_norm",
       "seconds=%.17g,iterations=%d,actions=%d,certifications=%d,relative_residual=%.17g,cache_hit=%d,seeded=%d,propagated_residual=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
       stats.iterations, stats.actions, stats.certifications, stats.relative_residual,
@@ -565,17 +588,18 @@ StructureTangentOperator::apply_inverse_augmented_hessian_diagonal(
   }
 
   if (metric_inverse_ && action_->supports_carrier_diagonal()) {
-    const auto riesz=[&](const Eigen::VectorXd& rhs) {
-      return core::solve_metric(rhs,
-          [this](const Eigen::VectorXd& x) {return apply_metric_coordinates(x);},
-          [this](const Eigen::VectorXd& x) {return apply_inverse_metric_model(x);});
-    };
-    // L=FZ, G_s=L^T L. The symmetric pulled-back inverse is
-    // G_s^-1 L^T D^-1 L G_s^-1, not a copied carrier diagonal.
-    const Eigen::MatrixXd coefficients=expand(riesz(covector)).scaled_coefficients;
-    const Eigen::MatrixXd image=action_->apply_inverse_carrier_diagonal(
-        coefficients,energies_,eigenvalue);
-    return riesz(project_coordinates(image));
+    // A=M^-1-C(C^T M C)^-1 C^T is the constrained inverse.
+    // A F^T D^-1 F A = P_L [M^-1 F^T D^-1 F M^-1] P_R,
+    // P_R=I-M C(C^T M C)^-1 C^T and P_L=P_R^T.
+    // Use the cached M C; no metric action or inverse solve remains.
+    const auto& mc=accepted_point_->selected_state_structure_images->overlap;
+    Eigen::MatrixXd rhs=expand(covector).scaled_coefficients;
+    Eigen::MatrixXd weights=selected_metric_inverse_*(selected_.transpose()*rhs);
+    rhs.noalias()-=mc*weights;
+    Eigen::MatrixXd image=metric_inverse_->apply_carrier_inverse(rhs,energies_,eigenvalue);
+    weights=selected_metric_inverse_*(mc.transpose()*image);
+    image.noalias()-=selected_*weights;
+    return project_coordinates(image);
   }
 
   Eigen::MatrixXd ambient = expand(covector).scaled_coefficients;

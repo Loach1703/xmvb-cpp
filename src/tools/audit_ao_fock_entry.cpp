@@ -12,7 +12,7 @@
 #include "input/deck/model.hpp"
 #include "input/deck/primary_basis.hpp"
 #include "libcint/direct_shell.hpp"
-#include "vbscf/integrals/ao/libcint/validation.hpp"
+#include "integrals/ao/libcint.hpp"
 
 namespace {
 
@@ -63,10 +63,10 @@ int parse_ao_index(const char* text, int nbf) {
   return static_cast<int>(parsed);
 }
 
-int containing_shell(const xmvb::vb::LibcintInput& input, int ao) {
+int containing_shell(const xmvb::integrals::LibcintInput& input, int ao) {
   for (int shell = 0; shell < input.n_shells; ++shell) {
-    const int offset = xmvb::vb::shell_ao_offset(input, shell);
-    const int count = xmvb::vb::shell_ao_count(input, shell);
+    const int offset = xmvb::integrals::shell_ao_offset(input, shell);
+    const int count = xmvb::integrals::shell_ao_count(input, shell);
     if (ao >= offset && ao < offset + count) {
       return shell;
     }
@@ -147,17 +147,17 @@ int main(int argc, char** argv) {
     const auto deck = xmvb::vb::parse_input_deck_model(argv[1]);
     auto basis = xmvb::vb::build_input_deck_basis(deck, deck.metadata.basis_name);
     const auto& input = basis.libcint_input;
-    const int nbf = xmvb::vb::infer_n_basis_functions(input);
+    const int nbf = xmvb::integrals::infer_n_basis_functions(input);
     const int mu = parse_ao_index(argv[3], nbf);
     const int nu = parse_ao_index(argv[4], nbf);
     const auto density = read_density(argv[2], nbf);
     const int shell_mu = containing_shell(input, mu);
     const int shell_nu = containing_shell(input, nu);
-    const int local_mu = mu - xmvb::vb::shell_ao_offset(input, shell_mu);
-    const int local_nu = nu - xmvb::vb::shell_ao_offset(input, shell_nu);
+    const int local_mu = mu - xmvb::integrals::shell_ao_offset(input, shell_mu);
+    const int local_nu = nu - xmvb::integrals::shell_ao_offset(input, shell_nu);
 
-    xmvb::vb::LibcintDirectShellEvaluator evaluator(input);
-    xmvb::vb::LibcintShellWorkspace workspace;
+    xmvb::libcint::LibcintDirectShellEvaluator evaluator(input);
+    xmvb::libcint::LibcintShellWorkspace workspace;
     const auto& normalization = evaluator.ao_normalization();
     const auto [minimum_norm, maximum_norm] =
         std::minmax_element(normalization.begin(), normalization.end());
@@ -179,11 +179,11 @@ int main(int argc, char** argv) {
 
     AuditResult result;
     for (int shell_rho = 0; shell_rho < input.n_shells; ++shell_rho) {
-      const int rho_offset = xmvb::vb::shell_ao_offset(input, shell_rho);
-      const int n_rho = xmvb::vb::shell_ao_count(input, shell_rho);
+      const int rho_offset = xmvb::integrals::shell_ao_offset(input, shell_rho);
+      const int n_rho = xmvb::integrals::shell_ao_count(input, shell_rho);
       for (int shell_sigma = 0; shell_sigma < input.n_shells; ++shell_sigma) {
-        const int sigma_offset = xmvb::vb::shell_ao_offset(input, shell_sigma);
-        const int n_sigma = xmvb::vb::shell_ao_count(input, shell_sigma);
+        const int sigma_offset = xmvb::integrals::shell_ao_offset(input, shell_sigma);
+        const int n_sigma = xmvb::integrals::shell_ao_count(input, shell_sigma);
 
         const bool skip_coulomb = std::sqrt(
             pair_bounds[pair_index(shell_mu, shell_nu)] *

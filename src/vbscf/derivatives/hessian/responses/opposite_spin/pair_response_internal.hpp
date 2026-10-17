@@ -8,7 +8,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_response_internal.hpp"
 #include "vbscf/determinants/pairs/accepted_tile.hpp"
 #include "vbscf/determinants/pairs/evaluator.hpp"
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
+#include "integrals/active/two_electron_result.hpp"
 
 namespace xmvb::vb::detail {
 
@@ -94,7 +94,7 @@ DirectionalOppositeSpinPairTile build_directional_opposite_spin_pair_tile(
     const std::vector<SpinDeterminantPairEvaluation>& ordered_pair_cache,
     int n_unique_determinants,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const ActiveSpaceIntegralDirectionView& direction,
     const SameSpinDirectionalPairTileView& same_spin_tile,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors = nullptr,
@@ -104,7 +104,7 @@ DirectionalOppositeSpinPairTile build_directional_opposite_spin_pair_tile(
     const std::vector<std::vector<int>>& unique_determinants,
     const AcceptedSpinPairTile& accepted_pair_tile,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const ActiveSpaceIntegralDirectionView& direction,
     const SameSpinDirectionalPairTileView& same_spin_tile,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors = nullptr,

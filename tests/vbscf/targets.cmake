@@ -9,40 +9,32 @@ set(_xmvb_vbscf_unit_targets
   test_spinor_projection
   test_active_two_electron_sparse
   test_accepted_pair_tile
-  test_block_inverse_bfgs
   test_hessian_diagonal
   test_keyframe
   test_cofactor_differential
   test_coupled_structure
-  test_ciah
   test_ci_transport
   test_representation_overlap
+  test_selected_metric
   test_overlap_pullback
   test_selected_ci_transport
   test_orbital_step_geometry
   test_curvature_decomposition
-  test_davidson
-  test_eigen_response
   test_localized_representative_selector
-  test_minres
-  test_neo
-  test_neo_globalization
   test_normalized_orbital_curvature
   test_oeo_normalization_pullback
   test_opposite_spin_pair_graph
   test_orthogonal_direct_ci
-  test_orthonormal_hvp_basis
-  test_positive_ritz_secants
   test_projected_orbital_surrogate
   test_reduced_hessian_reference
   test_ri_ao_h1e_hvp
   test_ri_pair_contractions
   test_ri_active_two_electron_response
-  test_shifted_metric_preconditioner
   test_sparse_orbital_quotient
   test_support_preserving_gauge
   test_spectral_trust_region
   test_structure_spin
+  test_structure_tiles
   test_orbital_block_partition)
 
 foreach(target_name IN LISTS _xmvb_vbscf_unit_targets)
@@ -52,10 +44,18 @@ foreach(target_name IN LISTS _xmvb_vbscf_unit_targets)
   target_link_libraries(${target_name} PRIVATE xmvb_vbscf)
 endforeach()
 
+add_executable(test_metric_point EXCLUDE_FROM_ALL
+  ${CMAKE_SOURCE_DIR}/tests/vbscf/diagnostics/metric_point.cpp)
+target_link_libraries(test_metric_point PRIVATE xmvb_input xmvb_vbscf)
+
+add_executable(test_selected_metric_point EXCLUDE_FROM_ALL
+  ${CMAKE_SOURCE_DIR}/tests/vbscf/diagnostics/selected_metric_point.cpp)
+target_link_libraries(test_selected_metric_point PRIVATE xmvb_input xmvb_vbscf)
+
 if (BUILD_TESTING)
-  add_test(NAME ciah COMMAND test_ciah)
   add_test(NAME ci_transport COMMAND test_ci_transport)
   add_test(NAME representation_overlap COMMAND test_representation_overlap)
+  add_test(NAME selected_metric COMMAND test_selected_metric)
   add_test(NAME overlap_pullback COMMAND test_overlap_pullback)
   add_test(NAME selected_ci_transport COMMAND test_selected_ci_transport)
   add_test(NAME orbital_step_geometry COMMAND test_orbital_step_geometry)
@@ -65,39 +65,21 @@ if (BUILD_TESTING)
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME active_two_electron_sparse COMMAND test_active_two_electron_sparse)
   add_test(NAME accepted_pair_tile COMMAND test_accepted_pair_tile)
-  add_test(NAME block_inverse_bfgs COMMAND test_block_inverse_bfgs)
   add_test(NAME hessian_diagonal COMMAND test_hessian_diagonal)
   add_test(NAME keyframe COMMAND test_keyframe)
-  set_tests_properties(block_inverse_bfgs PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME orbital_block_partition COMMAND test_orbital_block_partition)
   add_test(NAME curvature_decomposition COMMAND test_curvature_decomposition)
   add_test(NAME oeo_normalization_pullback COMMAND test_oeo_normalization_pullback)
   add_test(NAME opposite_spin_pair_graph COMMAND test_opposite_spin_pair_graph)
   add_test(NAME orthogonal_direct_ci COMMAND test_orthogonal_direct_ci)
+  add_test(NAME structure_tiles COMMAND test_structure_tiles)
   add_test(NAME cofactor_differential COMMAND test_cofactor_differential)
   add_test(NAME coupled_structure COMMAND test_coupled_structure)
   set_tests_properties(coupled_structure PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME davidson COMMAND test_davidson)
-  add_test(NAME eigen_response COMMAND test_eigen_response)
-  add_test(NAME minres COMMAND test_minres)
-  set_tests_properties(minres PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME neo COMMAND test_neo)
-  set_tests_properties(neo PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME neo_globalization COMMAND test_neo_globalization)
-  add_test(
-    NAME shifted_metric_preconditioner
-    COMMAND test_shifted_metric_preconditioner)
-  set_tests_properties(neo_globalization PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(
     NAME localized_representative_selector
     COMMAND test_localized_representative_selector)
-  set_tests_properties(davidson PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   set_tests_properties(oeo_normalization_pullback PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
 
@@ -157,18 +139,12 @@ if (BUILD_TESTING)
   add_test(NAME projected_orbital_surrogate COMMAND test_projected_orbital_surrogate)
   set_tests_properties(projected_orbital_surrogate PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME positive_ritz_secants COMMAND test_positive_ritz_secants)
-  set_tests_properties(positive_ritz_secants PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME normalized_orbital_curvature COMMAND test_normalized_orbital_curvature)
   set_tests_properties(normalized_orbital_curvature PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME spectral_trust_region COMMAND test_spectral_trust_region)
   add_test(NAME structure_spin COMMAND test_structure_spin)
   set_tests_properties(spectral_trust_region PROPERTIES
-    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
-  add_test(NAME orthonormal_hvp_basis COMMAND test_orthonormal_hvp_basis)
-  set_tests_properties(orthonormal_hvp_basis PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME reduced_hessian_reference COMMAND test_reduced_hessian_reference)
   set_tests_properties(reduced_hessian_reference PROPERTIES
@@ -192,52 +168,36 @@ if (BUILD_TESTING)
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
 
   add_test(
-    NAME lbfgs_f2
+    NAME plbfgs_f2
     COMMAND
       xmvb
       ${CMAKE_SOURCE_DIR}/testdata/vbscf/F2.xmi
-      --optimizer-backend lbfgs
+      --optimizer-backend plbfgs
       --eigensolver davidson
       --max-iterations 40
       --gradient-tolerance 1e-3
       --energy-tolerance 1e-7)
-  set_tests_properties(lbfgs_f2 PROPERTIES
+  set_tests_properties(plbfgs_f2 PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     ENVIRONMENT
       "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;GOTO_NUM_THREADS=1;MKL_NUM_THREADS=1"
-    PASS_REGULAR_EXPRESSION "xmvb_lbfgs_dual_tolerance")
+    PASS_REGULAR_EXPRESSION "plbfgs_projected_gradient_tolerance")
 
   add_test(
-    NAME block_lbfgs_f2
+    NAME ciah_f2
     COMMAND
       xmvb
       ${CMAKE_SOURCE_DIR}/testdata/vbscf/F2.xmi
-      --optimizer-backend block_lbfgs
-      --eigensolver davidson
-      --max-iterations 40
-      --gradient-tolerance 1e-3
-      --energy-tolerance 1e-7)
-  set_tests_properties(block_lbfgs_f2 PROPERTIES
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    ENVIRONMENT
-      "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;GOTO_NUM_THREADS=1;MKL_NUM_THREADS=1"
-    PASS_REGULAR_EXPRESSION "block_lbfgs_projected_gradient_tolerance")
-
-  add_test(
-    NAME neo_f2
-    COMMAND
-      xmvb
-      ${CMAKE_SOURCE_DIR}/testdata/vbscf/F2.xmi
-      --optimizer-backend neo
+      --optimizer-backend ciah
       --eigensolver davidson
       --max-iterations 30
       --gradient-tolerance 1e-3
       --energy-tolerance 1e-7)
-  set_tests_properties(neo_f2 PROPERTIES
+  set_tests_properties(ciah_f2 PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     ENVIRONMENT
       "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;GOTO_NUM_THREADS=1;MKL_NUM_THREADS=1"
-    PASS_REGULAR_EXPRESSION "neo_projected_gradient_tolerance")
+    PASS_REGULAR_EXPRESSION "ciah_projected_gradient_tolerance")
 
   foreach(_xmvb_orbital_type IN ITEMS hao oeo)
     if (_xmvb_orbital_type STREQUAL "hao")
@@ -250,12 +210,12 @@ if (BUILD_TESTING)
     foreach(_xmvb_integral_mode IN ITEMS exact ri)
       if (_xmvb_integral_mode STREQUAL "ri")
         set(_xmvb_hessian_diagonal_test
-          neo_hessian_diagonal_ri_f2_${_xmvb_orbital_type})
+          ciah_hessian_diagonal_ri_f2_${_xmvb_orbital_type})
         set(_xmvb_hessian_diagonal_mode_args
           --standard-two-electron-mode ri)
       else()
         set(_xmvb_hessian_diagonal_test
-          neo_hessian_diagonal_f2_${_xmvb_orbital_type})
+          ciah_hessian_diagonal_f2_${_xmvb_orbital_type})
         set(_xmvb_hessian_diagonal_mode_args)
       endif()
       add_test(
@@ -263,7 +223,7 @@ if (BUILD_TESTING)
         COMMAND
           xmvb
           ${_xmvb_hessian_diagonal_input}
-          --optimizer-backend neo
+          --optimizer-backend ciah
           --orbital-preconditioner hessian-diagonal
           ${_xmvb_hessian_diagonal_mode_args}
           --eigensolver davidson
@@ -275,7 +235,7 @@ if (BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         ENVIRONMENT
           "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;GOTO_NUM_THREADS=1;MKL_NUM_THREADS=1"
-        PASS_REGULAR_EXPRESSION "neo_projected_gradient_tolerance")
+        PASS_REGULAR_EXPRESSION "ciah_projected_gradient_tolerance")
     endforeach()
   endforeach()
   unset(_xmvb_hessian_diagonal_input)
@@ -285,14 +245,14 @@ if (BUILD_TESTING)
   unset(_xmvb_orbital_type)
 
   add_test(
-    NAME neo_pyscf_reference_f2
+    NAME ciah_pyscf_reference_f2
     COMMAND
       ${CMAKE_COMMAND}
       -DXMVB_EXE=$<TARGET_FILE:xmvb>
       -DXMVB_INPUT=${CMAKE_SOURCE_DIR}/testdata/vbscf/F2_OEO_PYSCF_LOW.xmi
-      -DTRACE_FILE=${CMAKE_CURRENT_BINARY_DIR}/neo_pyscf_reference_f2.tsv
-      -P ${CMAKE_SOURCE_DIR}/tests/vbscf/check_neo_pyscf_reference.cmake)
-  set_tests_properties(neo_pyscf_reference_f2 PROPERTIES
+      -DTRACE_FILE=${CMAKE_CURRENT_BINARY_DIR}/ciah_pyscf_reference_f2.tsv
+      -P ${CMAKE_SOURCE_DIR}/tests/vbscf/check_ciah_reference.cmake)
+  set_tests_properties(ciah_pyscf_reference_f2 PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
   add_test(

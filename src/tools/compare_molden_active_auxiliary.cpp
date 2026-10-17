@@ -135,7 +135,7 @@ MoldenOrbitals parse_molden_file(
 }
 
 std::vector<int> build_molden_to_internal_ao_permutation(
-    const xmvb::vb::LibcintInput& libcint_input,
+    const xmvb::integrals::LibcintInput& libcint_input,
     int n_basis_functions) {
   constexpr std::array<int, 6> kDOrder = {0, 3, 5, 1, 2, 4};
   constexpr std::array<int, 10> kFOrder = {0, 6, 9, 3, 1, 2, 5, 8, 7, 4};
@@ -151,7 +151,7 @@ std::vector<int> build_molden_to_internal_ao_permutation(
         libcint_input.basidx[shell_index * 2];
     const int ao_count =
         libcint_input.basidx[shell_index * 2 + 1];
-    if (ao_offset < 0 || ao_count != xmvb::vb::cartesian_ao_count(angular_momentum) ||
+    if (ao_offset < 0 || ao_count != xmvb::libcint::cartesian_ao_count(angular_momentum) ||
         ao_offset + ao_count > n_basis_functions) {
       throw std::runtime_error(
           "Libcint shell AO layout is inconsistent while building Molden permutation");

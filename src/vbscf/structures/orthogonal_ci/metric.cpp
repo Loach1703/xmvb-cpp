@@ -48,9 +48,9 @@ std::vector<std::vector<int>> StructureMetricInverse::occupation_groups(
     const auto first = action.structure_term_offsets_[structure];
     const auto last = action.structure_term_offsets_[structure + 1];
     if (first == last) throw std::invalid_argument("structure metric expansion has an empty column");
-    const Pattern occupation = pattern(action.spin_terms_[action.structure_term_indices_[first]].spin_product);
+    const Pattern occupation = pattern(action.spin_products_[action.spin_terms_[action.structure_term_indices_[first]].group]);
     for (auto position = first + 1; position < last; ++position) {
-      if (pattern(action.spin_terms_[action.structure_term_indices_[position]].spin_product) != occupation)
+      if (pattern(action.spin_products_[action.spin_terms_[action.structure_term_indices_[position]].group]) != occupation)
         throw std::invalid_argument("structure spans multiple spatial occupation patterns");
     }
     groups[occupation].push_back(structure);
@@ -145,15 +145,17 @@ StructureMetricInverse::StructureMetricInverse(
 }
 
 Eigen::MatrixXd StructureMetricInverse::solve_spin(
-    const Eigen::Ref<const Eigen::MatrixXd>& rhs) const {
+    const Eigen::Ref<const Eigen::MatrixXd>& rhs, SpinFactor factor) const {
   Eigen::MatrixXd result(rhs.rows(), rhs.cols());
   Eigen::MatrixXd local(max_block_size_, rhs.cols());
   for (const auto& block : blocks_) {
     const int d = static_cast<int>(block.indices.size());
     auto values = local.topRows(d);
     for (int row = 0; row < d; ++row) values.row(row) = rhs.row(block.indices[row]);
-    block.lower.triangularView<Eigen::Lower>().solveInPlace(values);
-    block.lower.transpose().triangularView<Eigen::Upper>().solveInPlace(values);
+    if (factor != SpinFactor::Upper)
+      block.lower.triangularView<Eigen::Lower>().solveInPlace(values);
+    if (factor != SpinFactor::Lower)
+      block.lower.transpose().triangularView<Eigen::Upper>().solveInPlace(values);
     for (int row = 0; row < d; ++row) result.row(block.indices[row]) = values.row(row);
   }
   return result;
@@ -173,6 +175,94 @@ Eigen::MatrixXd StructureMetricInverse::apply(
   }
   if (!result.allFinite())
     throw std::runtime_error("structure metric inverse produced nonfinite coefficients");
+  return result;
+}
+
+Eigen::MatrixXd StructureMetricInverse::apply_carrier_inverse(
+    const Eigen::Ref<const Eigen::MatrixXd>& rhs,
+    const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const {
+  if (rhs.rows()!=action_->n_structures_ || rhs.cols()<=0 ||
+      rhs.cols()!=energies.size() || !rhs.allFinite())
+    throw std::invalid_argument("invalid complete-sector carrier inverse RHS");
+  Eigen::MatrixXd result(rhs.rows(),rhs.cols());
+  for (Eigen::Index first=0;first<rhs.cols();first+=chunk_width_) {
+    const Eigen::Index count=std::min<Eigen::Index>(chunk_width_,rhs.cols()-first);
+    Eigen::MatrixXd carrier=action_->expand_structure_block(solve_spin(rhs.middleCols(first,count)));
+    action_->inverse_adjoint_orbital_transform(&carrier);
+    action_->divide_carrier_diagonal(carrier,energies.segment(first,count),eigenvalue);
+    action_->inverse_orbital_transform(&carrier);
+    result.middleCols(first,count)=solve_spin(action_->contract_spin_product_block(carrier));
+  }
+  return result;
+}
+
+Eigen::MatrixXd StructureMetricInverse::to_ci_coordinates(
+    const Eigen::Ref<const Eigen::MatrixXd>& coefficients) const {
+  Eigen::MatrixXd result(coefficients.rows(),coefficients.cols());
+  for (Eigen::Index first=0; first<coefficients.cols(); first+=chunk_width_) {
+    const Eigen::Index count=std::min<Eigen::Index>(chunk_width_,coefficients.cols()-first);
+    const auto carrier=action_->orthogonalize_structure_block(coefficients.middleCols(first,count));
+    result.middleCols(first,count)=solve_spin(
+        action_->contract_spin_product_block(carrier),SpinFactor::Lower);
+  }
+  return result;
+}
+
+Eigen::MatrixXd StructureMetricInverse::from_ci_coordinates(
+    const Eigen::Ref<const Eigen::MatrixXd>& coordinates) const {
+  Eigen::MatrixXd result(coordinates.rows(),coordinates.cols());
+  for (Eigen::Index first=0; first<coordinates.cols(); first+=chunk_width_) {
+    const Eigen::Index count=std::min<Eigen::Index>(chunk_width_,coordinates.cols()-first);
+    auto carrier=action_->expand_structure_block(
+        solve_spin(coordinates.middleCols(first,count),SpinFactor::Upper));
+    action_->inverse_orbital_transform(&carrier);
+    result.middleCols(first,count)=solve_spin(action_->contract_spin_product_block(carrier));
+  }
+  return result;
+}
+
+Eigen::MatrixXd StructureMetricInverse::ci_covector_to_structure(
+    const Eigen::Ref<const Eigen::MatrixXd>& covector) const {
+  Eigen::MatrixXd result(covector.rows(),covector.cols());
+  for (Eigen::Index first=0; first<covector.cols(); first+=chunk_width_) {
+    const Eigen::Index count=std::min<Eigen::Index>(chunk_width_,covector.cols()-first);
+    auto carrier=action_->expand_structure_block(
+        solve_spin(covector.middleCols(first,count),SpinFactor::Upper));
+    action_->adjoint_orbital_transform(&carrier);
+    result.middleCols(first,count)=action_->contract_spin_product_block(carrier);
+  }
+  return result;
+}
+
+Eigen::MatrixXd StructureMetricInverse::apply_ci_hamiltonian(
+    const Eigen::Ref<const Eigen::MatrixXd>& coordinates) const {
+  Eigen::MatrixXd result(coordinates.rows(),coordinates.cols());
+  // Sigma retains both its input and output carrier. Keep their combined
+  // payload within the existing carrier-column allowance even for tiny G.
+  const int width=std::max(1,chunk_width_/2);
+  for (Eigen::Index first=0; first<coordinates.cols(); first+=width) {
+    const Eigen::Index count=std::min<Eigen::Index>(width,coordinates.cols()-first);
+    const auto carrier=action_->expand_structure_block(
+        solve_spin(coordinates.middleCols(first,count),SpinFactor::Upper));
+    const auto sigma=action_->apply_carrier_hamiltonian(carrier);
+    result.middleCols(first,count)=solve_spin(
+        action_->contract_spin_product_block(sigma),SpinFactor::Lower);
+  }
+  return result;
+}
+
+Eigen::MatrixXd StructureMetricInverse::apply_ci_preconditioner(
+    const Eigen::Ref<const Eigen::MatrixXd>& covector,
+    const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const {
+  Eigen::MatrixXd result(covector.rows(),covector.cols());
+  for (Eigen::Index first=0; first<covector.cols(); first+=chunk_width_) {
+    const Eigen::Index count=std::min<Eigen::Index>(chunk_width_,covector.cols()-first);
+    auto carrier=action_->expand_structure_block(
+        solve_spin(covector.middleCols(first,count),SpinFactor::Upper));
+    action_->divide_carrier_diagonal(carrier,energies.segment(first,count),eigenvalue);
+    result.middleCols(first,count)=solve_spin(
+        action_->contract_spin_product_block(carrier),SpinFactor::Lower);
+  }
   return result;
 }
 

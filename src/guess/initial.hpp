@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "vbscf/integrals/ao/contracts/input.hpp"
-#include "vbscf/integrals/ao/libcint/input.hpp"
-#include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "integrals/ao/input.hpp"
+#include "integrals/ao/libcint_input.hpp"
+#include "integrals/ao/ri.hpp"
 #include "vbscf/orbitals/preparation/input.hpp"
 
 namespace xmvb::vb {
@@ -23,9 +23,9 @@ bool initial_orbital_guess_supported(int guess_type) noexcept;
 void build_initial_orbital_guess(
     const std::string& input_file_path,
     int guess_type,
-    const LibcintInput& libcint_input,
-    const AoIntegralInput& ao_integral_input,
-    const RiAoFactorization* ri_factorization,
+    const xmvb::integrals::LibcintInput& libcint_input,
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
+    const xmvb::integrals::RiAoFactorization* ri_factorization,
     const std::vector<std::string>* read_guess_lines,
     OrbitalPreparationInput* orbital_preparation_input);
 

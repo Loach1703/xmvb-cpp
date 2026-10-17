@@ -55,6 +55,10 @@ class OrbitalPhysicalMetric {
   Eigen::VectorXd physical_feature(
       const SparseParameterLayout& layout,
       const Eigen::Ref<const Eigen::VectorXd>& packed_direction) const;
+  /** @brief Exact reverse of physical_feature with the same accepted-point factors. */
+  Eigen::VectorXd feature_adjoint(
+      const SparseParameterLayout& layout,
+      const Eigen::Ref<const Eigen::VectorXd>& feature) const;
   Eigen::MatrixXd overlap_;
   Eigen::MatrixXd ao_metric_upper_;
   Eigen::MatrixXd inactive_;
@@ -66,9 +70,6 @@ class OrbitalPhysicalMetric {
   /** @brief Accepted-point contractions reused by feature and cotangent actions. */
   Eigen::MatrixXd inactive_inverse_active_overlap_;
   Eigen::MatrixXd inactive_times_inverse_;
-  Eigen::MatrixXd inactive_inverse_times_inactive_transpose_;
-  /** @brief Shared factor S I (I^T S I)^-1; AO-by-inactive, not per worker. */
-  Eigen::MatrixXd overlap_times_inactive_inverse_;
   Eigen::MatrixXd overlap_active_;
   Eigen::MatrixXd overlap_projected_active_;
   Eigen::MatrixXd transposed_overlap_projected_active_;

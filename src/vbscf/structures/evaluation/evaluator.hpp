@@ -2,13 +2,9 @@
 
 #include "vbscf/core/contracts/input.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "vbscf/structures/expansion/types.hpp"
-#include "vbscf/integrals/active/one_electron/builder.hpp"
-#include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/builder.hpp"
-#include "vbscf/integrals/ao/one_electron/builder.hpp"
 
 namespace xmvb::vb {
 
@@ -20,30 +16,11 @@ namespace xmvb::vb {
  * 2. Build AO `G11/F11` from AO integrals and inactive density.
  * 3. Project AO effective one-electron integrals into active-space `HHO`.
  * 4. Transform AO two-electron integrals into active-space `GGO`.
- * 5. Assemble full determinant and structure Hamiltonian/overlap matrices.
+ * 5. Contract spin-string contributions into structure Hamiltonian/overlap matrices.
  */
 class StructureMatrixEvaluator {
 public:
-  /**
-   * @brief Creates an evaluator with default helper components.
-   */
-  StructureMatrixEvaluator();
-
-  /**
-   * @brief Creates an evaluator with explicit helper components.
-   */
-  StructureMatrixEvaluator(
-      ActiveSpaceOrbitalPreparer orbital_preparer,
-      AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
-      ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
-      ActiveSpaceTwoElectronBuilder active_space_two_electron_builder,
-      FullDeterminantStructureHamiltonianOverlapBuilder structure_builder);
-
-  /**
-   * @brief Prepares the shared active-space intermediates used by matrix/SCF code.
-   */
-  PreparedActiveSpaceContext prepare_active_space(
-      const VbScfInput& input) const;
+  StructureMatrixEvaluator() = default;
 
   /**
    * @brief Evaluates structure matrices from prebuilt active-space intermediates.
@@ -59,10 +36,6 @@ public:
       SameSpinPairCacheBuildOptions options) const;
 
 private:
-  ActiveSpaceOrbitalPreparer orbital_preparer_;
-  AoEffectiveOneElectronBuilder ao_effective_one_electron_builder_;
-  ActiveSpaceOneElectronBuilder active_space_one_electron_builder_;
-  ActiveSpaceTwoElectronBuilder active_space_two_electron_builder_;
   FullDeterminantStructureHamiltonianOverlapBuilder structure_builder_;
 };
 

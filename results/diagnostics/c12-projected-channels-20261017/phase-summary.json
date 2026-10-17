@@ -1,0 +1,461 @@
+[
+  {
+    "run": "run-1264965",
+    "node": "anode42",
+    "note": "Nested phase totals overlap; they are not additive wall-time shares.",
+    "initial_Eh": -398.533053417516,
+    "final_Eh": -399.106646267329,
+    "termination": "ciah_projected_gradient_tolerance",
+    "steps": 4,
+    "hvp": 36,
+    "application_s": 18.190408,
+    "process_s": 18.39,
+    "rss_kib": 2750516,
+    "phases": {
+      "hvp_apply": {
+        "calls": 36,
+        "wall_s": 5.119607453,
+        "process_cpu_s": 163.800309
+      },
+      "ci_response": {
+        "calls": 52,
+        "wall_s": 3.120510319,
+        "process_cpu_s": 100.192225
+      },
+      "ci_sigma": {
+        "calls": 77,
+        "wall_s": 2.504472874,
+        "process_cpu_s": 77.753327
+      },
+      "ci_transform_left": {
+        "calls": 3037,
+        "wall_s": 0.670685522,
+        "process_cpu_s": 18.515503
+      },
+      "ci_product_projection": {
+        "calls": 1068,
+        "wall_s": 1.209186168,
+        "process_cpu_s": 37.67488
+      },
+      "ao_response": {
+        "calls": 36,
+        "wall_s": 0.687071518,
+        "process_cpu_s": 22.286937
+      },
+      "ao_h1e_fused": {
+        "calls": 40,
+        "wall_s": 1.734536711,
+        "process_cpu_s": 51.420653
+      }
+    },
+    "tile_totals": {
+      "sweeps": 129,
+      "prepare": 0.863372722,
+      "read": 0.6507156910000003,
+      "compute": 2.3420021159999993,
+      "write": 1.7503140140000004,
+      "source_elements": 1120445436.0,
+      "batches": 1171.0,
+      "gram": 0.4015687850000001,
+      "gram_tiles": 25344.0,
+      "workspace_allocations": 1.0,
+      "workspace_reused": 128.0,
+      "workspace_peak_capacity_bytes": 67108864.0
+    },
+    "job": 1264965
+  },
+  {
+    "run": "run-1265025",
+    "node": "anode42",
+    "note": "Nested phase totals overlap; they are not additive wall-time shares.",
+    "initial_Eh": -398.533053417516,
+    "final_Eh": -399.10664626733,
+    "termination": "ciah_projected_gradient_tolerance",
+    "steps": 4,
+    "hvp": 36,
+    "application_s": 19.836913,
+    "process_s": 20.03,
+    "rss_kib": 2757336,
+    "phases": {
+      "hvp_apply": {
+        "calls": 36,
+        "wall_s": 6.00249466,
+        "process_cpu_s": 192.274798
+      },
+      "ci_response": {
+        "calls": 52,
+        "wall_s": 4.085744061,
+        "process_cpu_s": 130.787631
+      },
+      "ci_sigma": {
+        "calls": 77,
+        "wall_s": 2.56650791,
+        "process_cpu_s": 80.031918
+      },
+      "ci_transform_left": {
+        "calls": 3037,
+        "wall_s": 0.685511259,
+        "process_cpu_s": 20.090231
+      },
+      "ci_product_projection": {
+        "calls": 1068,
+        "wall_s": 1.255509534,
+        "process_cpu_s": 39.342435
+      },
+      "ao_response": {
+        "calls": 36,
+        "wall_s": 0.700458154,
+        "process_cpu_s": 23.19519
+      },
+      "ao_h1e_fused": {
+        "calls": 40,
+        "wall_s": 1.863184674,
+        "process_cpu_s": 54.848044
+      }
+    },
+    "tile_totals": {
+      "sweeps": 129,
+      "prepare": 1.071475322,
+      "read": 0.6902562169999994,
+      "compute": 3.0526508059999986,
+      "write": 1.818265144,
+      "source_elements": 1120903740.0,
+      "batches": 1171.0,
+      "gram": 0.5207482559999999,
+      "gram_tiles": 25344.0,
+      "workspace_allocations": 1.0,
+      "workspace_reused": 128.0,
+      "workspace_peak_capacity_bytes": 67108864.0
+    },
+    "job": 1265025
+  },
+  {
+    "run": "run-1265032",
+    "node": "anode42",
+    "note": "Nested phase totals overlap; they are not additive wall-time shares.",
+    "initial_Eh": -398.533053417516,
+    "final_Eh": -399.106646267329,
+    "termination": "ciah_projected_gradient_tolerance",
+    "steps": 4,
+    "hvp": 36,
+    "application_s": 18.328361,
+    "process_s": 18.53,
+    "rss_kib": 2837956,
+    "phases": {
+      "hvp_apply": {
+        "calls": 36,
+        "wall_s": 5.321063649,
+        "process_cpu_s": 170.861976
+      },
+      "ci_response": {
+        "calls": 52,
+        "wall_s": 3.499374301,
+        "process_cpu_s": 112.045438
+      },
+      "ci_sigma": {
+        "calls": 77,
+        "wall_s": 2.370177087,
+        "process_cpu_s": 75.939846
+      },
+      "ci_transform_left": {
+        "calls": 3037,
+        "wall_s": 0.660400876,
+        "process_cpu_s": 21.937365
+      },
+      "ci_product_projection": {
+        "calls": 1068,
+        "wall_s": 1.181292528,
+        "process_cpu_s": 39.320124
+      },
+      "ao_response": {
+        "calls": 36,
+        "wall_s": 0.670945473,
+        "process_cpu_s": 21.006803
+      },
+      "ao_h1e_fused": {
+        "calls": 40,
+        "wall_s": 1.739973163,
+        "process_cpu_s": 52.278104
+      }
+    },
+    "tile_totals": {
+      "sweeps": 129,
+      "prepare": 1.0079695510000002,
+      "read": 0.6349948670000001,
+      "compute": 2.5666495099999986,
+      "write": 1.6417936420000003,
+      "source_elements": 1120903740.0,
+      "batches": 1171.0,
+      "gram": 0.38167725800000013,
+      "gram_tiles": 25344.0,
+      "workspace_allocations": 1.0,
+      "workspace_reused": 128.0,
+      "workspace_peak_capacity_bytes": 67108864.0
+    },
+    "job": 1265032
+  },
+  {
+    "run": "run-1265037",
+    "node": "anode42",
+    "note": "Nested phase totals overlap; they are not additive wall-time shares.",
+    "initial_Eh": -398.533053417516,
+    "final_Eh": -399.106646267331,
+    "termination": "ciah_projected_gradient_tolerance",
+    "steps": 4,
+    "hvp": 36,
+    "application_s": 18.134562,
+    "process_s": 18.33,
+    "rss_kib": 2773664,
+    "phases": {
+      "hvp_apply": {
+        "calls": 36,
+        "wall_s": 5.093602826,
+        "process_cpu_s": 163.164834
+      },
+      "ci_response": {
+        "calls": 52,
+        "wall_s": 3.226049978,
+        "process_cpu_s": 103.994094
+      },
+      "ci_sigma": {
+        "calls": 77,
+        "wall_s": 2.424821158,
+        "process_cpu_s": 75.751505
+      },
+      "ci_transform_left": {
+        "calls": 3037,
+        "wall_s": 0.680394048,
+        "process_cpu_s": 19.291808
+      },
+      "ci_product_projection": {
+        "calls": 1068,
+        "wall_s": 1.170232686,
+        "process_cpu_s": 35.463259
+      },
+      "ao_response": {
+        "calls": 36,
+        "wall_s": 0.673710408,
+        "process_cpu_s": 22.193765
+      },
+      "ao_h1e_fused": {
+        "calls": 40,
+        "wall_s": 1.728963564,
+        "process_cpu_s": 51.721593
+      }
+    },
+    "tile_totals": {
+      "sweeps": 129,
+      "prepare": 1.0331067719999998,
+      "read": 0.6336593140000001,
+      "compute": 2.2735929870000016,
+      "write": 1.6887611959999997,
+      "source_elements": 1120903740.0,
+      "batches": 1171.0,
+      "gram": 0.568680975,
+      "gram_tiles": 25344.0,
+      "workspace_allocations": 1.0,
+      "workspace_reused": 128.0,
+      "workspace_peak_capacity_bytes": 67108864.0
+    },
+    "job": 1265037,
+    "gram_scope_note": "Gram timer includes fused boundary image computation."
+  },
+  {
+    "run": "run-1265038",
+    "node": "anode42",
+    "note": "Nested phase totals overlap; they are not additive wall-time shares.",
+    "initial_Eh": -398.533053417516,
+    "final_Eh": -399.10664626733,
+    "termination": "ciah_projected_gradient_tolerance",
+    "steps": 4,
+    "hvp": 36,
+    "application_s": 18.750687,
+    "process_s": 18.95,
+    "rss_kib": 2793152,
+    "phases": {
+      "hvp_apply": {
+        "calls": 36,
+        "wall_s": 5.249086577,
+        "process_cpu_s": 167.968051
+      },
+      "ci_response": {
+        "calls": 52,
+        "wall_s": 3.317076304,
+        "process_cpu_s": 106.516364
+      },
+      "ci_sigma": {
+        "calls": 77,
+        "wall_s": 2.765145269,
+        "process_cpu_s": 86.886369
+      },
+      "ci_transform_left": {
+        "calls": 3037,
+        "wall_s": 0.687580417,
+        "process_cpu_s": 19.666996
+      },
+      "ci_product_projection": {
+        "calls": 1068,
+        "wall_s": 1.212316014,
+        "process_cpu_s": 37.68531
+      },
+      "ao_response": {
+        "calls": 36,
+        "wall_s": 0.697532204,
+        "process_cpu_s": 23.114952
+      },
+      "ao_h1e_fused": {
+        "calls": 40,
+        "wall_s": 1.780075031,
+        "process_cpu_s": 53.586045
+      }
+    },
+    "tile_totals": {
+      "sweeps": 129,
+      "prepare": 1.3089033519999997,
+      "read": 0.6485246349999999,
+      "compute": 2.402104966999999,
+      "write": 1.7042743739999995,
+      "source_elements": 1121184636.0,
+      "batches": 1171.0,
+      "gram": 0.5913200720000001,
+      "gram_tiles": 25344.0,
+      "workspace_allocations": 1.0,
+      "workspace_reused": 128.0,
+      "workspace_peak_capacity_bytes": 67108864.0
+    },
+    "job": 1265038,
+    "gram_scope_note": "Gram timer includes fused boundary image computation."
+  },
+  {
+    "run": "run-1265039",
+    "node": "anode42",
+    "note": "Nested phase totals overlap; they are not additive wall-time shares.",
+    "initial_Eh": -398.533053417516,
+    "final_Eh": -399.106646267331,
+    "termination": "ciah_projected_gradient_tolerance",
+    "steps": 4,
+    "hvp": 36,
+    "application_s": 18.461519,
+    "process_s": 18.66,
+    "rss_kib": 2795828,
+    "phases": {
+      "hvp_apply": {
+        "calls": 36,
+        "wall_s": 5.286771231,
+        "process_cpu_s": 169.999585
+      },
+      "ci_response": {
+        "calls": 52,
+        "wall_s": 3.38016833,
+        "process_cpu_s": 108.542021
+      },
+      "ci_sigma": {
+        "calls": 77,
+        "wall_s": 2.533746277,
+        "process_cpu_s": 79.947646
+      },
+      "ci_transform_left": {
+        "calls": 3037,
+        "wall_s": 0.691518438,
+        "process_cpu_s": 18.871294
+      },
+      "ci_product_projection": {
+        "calls": 1068,
+        "wall_s": 1.211180907,
+        "process_cpu_s": 38.092755
+      },
+      "ao_response": {
+        "calls": 36,
+        "wall_s": 0.684342986,
+        "process_cpu_s": 22.461581
+      },
+      "ao_h1e_fused": {
+        "calls": 40,
+        "wall_s": 1.75570284,
+        "process_cpu_s": 53.268508
+      }
+    },
+    "tile_totals": {
+      "sweeps": 129,
+      "prepare": 1.0532163559999999,
+      "read": 0.6705283179999999,
+      "compute": 2.394373987,
+      "write": 1.7658697580000005,
+      "source_elements": 1120903740.0,
+      "batches": 1171.0,
+      "gram": 0.566117401,
+      "gram_tiles": 25344.0,
+      "workspace_allocations": 1.0,
+      "workspace_reused": 128.0,
+      "workspace_peak_capacity_bytes": 67108864.0
+    },
+    "job": 1265039,
+    "gram_scope_note": "Gram timer includes fused boundary image computation."
+  },
+  {
+    "run": "run-1265046",
+    "node": "anode42",
+    "note": "Nested phase totals overlap; they are not additive wall-time shares.",
+    "initial_Eh": -398.533053417516,
+    "final_Eh": -399.106646267333,
+    "termination": "ciah_projected_gradient_tolerance",
+    "steps": 4,
+    "hvp": 36,
+    "application_s": 18.554604,
+    "process_s": 18.75,
+    "rss_kib": 2771388,
+    "phases": {
+      "hvp_apply": {
+        "calls": 36,
+        "wall_s": 5.239998663,
+        "process_cpu_s": 167.996401
+      },
+      "ci_response": {
+        "calls": 52,
+        "wall_s": 3.33184272,
+        "process_cpu_s": 107.047914
+      },
+      "ci_sigma": {
+        "calls": 77,
+        "wall_s": 2.524146536,
+        "process_cpu_s": 78.903414
+      },
+      "ci_transform_left": {
+        "calls": 3037,
+        "wall_s": 0.684294829,
+        "process_cpu_s": 20.137115
+      },
+      "ci_product_projection": {
+        "calls": 1068,
+        "wall_s": 1.19499291,
+        "process_cpu_s": 36.566695
+      },
+      "ao_response": {
+        "calls": 36,
+        "wall_s": 0.685336548,
+        "process_cpu_s": 22.981747
+      },
+      "ao_h1e_fused": {
+        "calls": 40,
+        "wall_s": 1.702251844,
+        "process_cpu_s": 51.526329
+      }
+    },
+    "tile_totals": {
+      "sweeps": 129,
+      "prepare": 1.038058018,
+      "read": 0.6658401139999996,
+      "compute": 2.377219394,
+      "write": 1.754286522,
+      "source_elements": 1120903740.0,
+      "batches": 1171.0,
+      "gram": 0.568623298,
+      "gram_tiles": 25344.0,
+      "workspace_allocations": 1.0,
+      "workspace_reused": 128.0,
+      "workspace_peak_capacity_bytes": 67108864.0
+    },
+    "job": 1265046,
+    "gram_scope_note": "Gram timer includes fused boundary image computation."
+  }
+]

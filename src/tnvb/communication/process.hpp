@@ -4,7 +4,7 @@
 #include <string>
 #include "tnvb/communication/response.hpp"
 #include "vbscf/core/contracts/input.hpp"
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/integrals/active/space.hpp"
 
 namespace xmvb::tnvb {
 

@@ -5,10 +5,10 @@
 
 #include <Eigen/Core>
 
-#include "core/openmp.hpp"
-#include "vbscf/core/storage/eigen.hpp"
-#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
+#include "parallel/openmp.hpp"
+#include "linalg/storage.hpp"
+#include "integrals/ao/exact.hpp"
+#include "integrals/ao/ri_operator.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -60,11 +60,11 @@ AoEffectiveOneElectronResult make_result_from_complete_symmetric_storage(
 AoEffectiveOneElectronResult build_exact(
     const Eigen::Ref<const Eigen::MatrixXd>& density,
     const Eigen::Ref<const Eigen::MatrixXd>& core,
-    const AoIntegralInput& ao) {
+    const xmvb::integrals::AoIntegralInput& ao) {
   const int n_bf = ao.n_basis_functions;
   validate_ao_matrices(density, core, n_bf);
   return make_result_from_triangular_storage(
-      apply_ao_h1e(
+      xmvb::integrals::apply_ao_h1e(
           density.data(),
           ao,
           effective_openmp_thread_count()),
@@ -75,15 +75,15 @@ AoEffectiveOneElectronResult build_exact(
 AoEffectiveOneElectronResult build_ri(
     const Eigen::Ref<const Eigen::MatrixXd>& density,
     const Eigen::Ref<const Eigen::MatrixXd>& core,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf) {
   validate_ao_matrices(density, core, n_bf);
   if (ri.n_basis_functions != n_bf) {
     throw std::invalid_argument("RI basis-function count mismatch");
   }
   return make_result_from_complete_symmetric_storage(
-      apply_ao_effective_one_electron_ri_operator(
-          flatten_matrix_column_major(density),
+      xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
+          xmvb::linalg::flatten_matrix_column_major(density),
           ri,
           n_bf,
           {.attempt_spectral_factorization = true}),
@@ -92,9 +92,9 @@ AoEffectiveOneElectronResult build_ri(
 }
 
 AoEffectiveOneElectronResult build_ri(
-    const AoEffectiveOneElectronRiLowRankFactors& factors,
+    const xmvb::integrals::AoEffectiveOneElectronRiLowRankFactors& factors,
     const Eigen::Ref<const Eigen::MatrixXd>& core,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf) {
   if (n_bf <= 0 || core.rows() != n_bf || core.cols() != n_bf) {
     throw std::invalid_argument("invalid AO-H1E core matrix dimensions");
@@ -103,7 +103,7 @@ AoEffectiveOneElectronResult build_ri(
     throw std::invalid_argument("RI basis-function count mismatch");
   }
   return make_result_from_complete_symmetric_storage(
-      apply_ao_effective_one_electron_ri_operator(factors, ri, n_bf),
+      xmvb::integrals::apply_ao_effective_one_electron_ri_operator(factors, ri, n_bf),
       core,
       n_bf);
 }
@@ -124,7 +124,7 @@ Eigen::Map<const Eigen::MatrixXd> map_square(
 AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
     const std::vector<double>& density,
     const Eigen::Ref<const Eigen::MatrixXd>& core,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf) const {
   return build_ri(map_square(density, n_bf), core, ri, n_bf);
 }
@@ -132,7 +132,7 @@ AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
 AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
     const Eigen::Ref<const Eigen::MatrixXd>& density,
     const Eigen::Ref<const Eigen::MatrixXd>& core,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf) const {
   return build_ri(density, core, ri, n_bf);
 }
@@ -140,7 +140,7 @@ AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
 AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
     const OrbitalPreparationResult& orbitals,
     const Eigen::Ref<const Eigen::MatrixXd>& core,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf,
     int n_inactive) const {
   if (n_inactive < 0 || n_inactive > n_bf ||
@@ -149,7 +149,7 @@ AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
     throw std::invalid_argument("invalid inactive-density factor dimensions");
   }
   return build_ri(
-      AoEffectiveOneElectronRiLowRankFactors{
+      xmvb::integrals::AoEffectiveOneElectronRiLowRankFactors{
           .scaled_factor_matrix = orbitals.inactive_density_low_rank_factors,
           .n_positive_components = n_inactive,
           .n_negative_components = 0,
@@ -162,20 +162,20 @@ AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
 AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
     const std::vector<double>& density,
     const Eigen::Ref<const Eigen::MatrixXd>& core,
-    const AoIntegralInput& ao) const {
+    const xmvb::integrals::AoIntegralInput& ao) const {
   return build_exact(map_square(density, ao.n_basis_functions), core, ao);
 }
 
 AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
     const Eigen::Ref<const Eigen::MatrixXd>& density,
     const Eigen::Ref<const Eigen::MatrixXd>& core,
-    const AoIntegralInput& ao) const {
+    const xmvb::integrals::AoIntegralInput& ao) const {
   return build_exact(density, core, ao);
 }
 
 AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
     const std::vector<double>& density,
-    const AoIntegralInput& ao) const {
+    const xmvb::integrals::AoIntegralInput& ao) const {
   return build_exact(
       map_square(density, ao.n_basis_functions),
       ao.ao_core_hamiltonian_matrix,
@@ -184,7 +184,7 @@ AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
 
 AoEffectiveOneElectronResult AoEffectiveOneElectronBuilder::build(
     const Eigen::Ref<const Eigen::MatrixXd>& density,
-    const AoIntegralInput& ao) const {
+    const xmvb::integrals::AoIntegralInput& ao) const {
   return build_exact(density, ao.ao_core_hamiltonian_matrix, ao);
 }
 

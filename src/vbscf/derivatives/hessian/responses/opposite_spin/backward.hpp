@@ -4,7 +4,7 @@
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/derivatives/hessian/responses/active_space/integral_direction.hpp"
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
+#include "integrals/active/two_electron_result.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 
 namespace xmvb::vb {
@@ -48,7 +48,7 @@ OppositeSpinBackwardContribution build_opposite_spin_backward_contribution(
     int n_active_orbitals,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result);
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result);
 
 /**
  * @brief Builds the directional opposite-spin backward contribution.
@@ -68,7 +68,7 @@ build_directional_opposite_spin_backward_contribution(
     int n_active_orbitals,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result);
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result);
 
 /**
  * @brief Builds the exact opposite-spin local-response contribution.

@@ -1,0 +1,1256 @@
+-- Configuring done (1.0s)
+CMake Warning at src/CMakeLists.txt:195 (add_executable):
+  Cannot generate a safe runtime search path for target test_ci_factors
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:197 (add_executable):
+  Cannot generate a safe runtime search path for target test_casci because
+  files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:253 (add_executable):
+  Cannot generate a safe runtime search path for target xmvb because files in
+  some directories may conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:291 (add_executable):
+  Cannot generate a safe runtime search path for target test_output_orbitals
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:317 (add_executable):
+  Cannot generate a safe runtime search path for target test_product_frontier
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:321 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_input_auxiliary_basis because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:326 (add_executable):
+  Cannot generate a safe runtime search path for target test_libcint_ri
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:332 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_libcint_shell_screening because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:344 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_input_guess_selection because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:350 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_generated_structures because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/CMakeLists.txt:356 (add_executable):
+  Cannot generate a safe runtime search path for target test_full_space
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+
+
+CMake Warning at src/tools/targets.cmake:7 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_orbital_gradient because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:15 (add_executable):
+  Cannot generate a safe runtime search path for target
+  benchmark_orbital_evaluation because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:23 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_auxiliary_gradient because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:31 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_reference_orbital_gradient because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:39 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_ao_h1e_ri_operator because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:47 (add_executable):
+  Cannot generate a safe runtime search path for target
+  inspect_ri_inactive_density because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:55 (add_executable):
+  Cannot generate a safe runtime search path for target check_ri_ao_h1e_modes
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:63 (add_executable):
+  Cannot generate a safe runtime search path for target
+  benchmark_ri_ao_h1e_operator because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:71 (add_executable):
+  Cannot generate a safe runtime search path for target
+  inspect_ao_h1e_backprop_symmetry because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:79 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_reference_orbital_gradient_modes because files in some directories
+  may conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:87 (add_executable):
+  Cannot generate a safe runtime search path for target
+  compare_exact_ri_energy_decomposition because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:95 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_active_space_gradient because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:103 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_structure_builder_fast_path because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:111 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_exact_active_space_builders because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:119 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_exact_two_electron_hvp because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:127 (add_executable):
+  Cannot generate a safe runtime search path for target check_exact_ctx_hvp
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:136 (add_executable):
+  Cannot generate a safe runtime search path for target
+  benchmark_exact_ctx_hvp because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:144 (add_executable):
+  Cannot generate a safe runtime search path for target audit_newton_step
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:152 (add_executable):
+  Cannot generate a safe runtime search path for target
+  audit_orbital_gradient because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:156 (add_executable):
+  Cannot generate a safe runtime search path for target
+  audit_sparse_orbital_gauge because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_spinor_strings
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_spinor_projection because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_active_two_electron_sparse because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_accepted_pair_tile because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_block_inverse_bfgs because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_hessian_diagonal
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_keyframe because
+  files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_cofactor_differential because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_coupled_structure because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_ciah because
+  files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_ci_transport
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_representation_overlap because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_restricted_metric because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_overlap_pullback
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_selected_ci_transport because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_orbital_step_geometry because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_curvature_decomposition because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_davidson because
+  files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_eigen_response
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_localized_representative_selector because files in some directories
+  may conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_minres because
+  files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_neo because
+  files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_neo_globalization because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_normalized_orbital_curvature because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_oeo_normalization_pullback because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_opposite_spin_pair_graph because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_orthogonal_direct_ci because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_orthonormal_hvp_basis because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_positive_ritz_secants because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_projected_orbital_surrogate because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_reduced_hessian_reference because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_ri_ao_h1e_hvp
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_ri_pair_contractions because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_ri_active_two_electron_response because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_shifted_metric_preconditioner because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_sparse_orbital_quotient because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_support_preserving_gauge because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_spectral_trust_region because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_structure_spin
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target test_structure_tiles
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at tests/vbscf/targets.cmake:51 (add_executable):
+  Cannot generate a safe runtime search path for target
+  test_orbital_block_partition because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/tools/targets.cmake:164 (include)
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:166 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_exact_ao_h1e_builder because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:174 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_structure_expansion_signs because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:182 (add_executable):
+  Cannot generate a safe runtime search path for target check_structure_spin
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:189 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_structure_overlap_against_raw_reference because files in some
+  directories may conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:197 (add_executable):
+  Cannot generate a safe runtime search path for target
+  inspect_input_deck_model because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:204 (add_executable):
+  Cannot generate a safe runtime search path for target
+  compare_molden_active_auxiliary because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:212 (add_executable):
+  Cannot generate a safe runtime search path for target dump_loaded_molden
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:220 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_same_spin_overlap_gradient because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:228 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_structure_overlap_weight because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:236 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_geminal_structure_overlap because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:244 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_union_graph_overlap_blocks because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:252 (add_executable):
+  Cannot generate a safe runtime search path for target
+  analyze_union_graph_rank_dataset because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:260 (add_executable):
+  Cannot generate a safe runtime search path for target
+  analyze_metric_aware_graph because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:268 (add_executable):
+  Cannot generate a safe runtime search path for target
+  analyze_metric_aware_graph_dataset because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:276 (add_executable):
+  Cannot generate a safe runtime search path for target
+  analyze_exact_disconnected_overlap_dataset because files in some
+  directories may conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:284 (add_executable):
+  Cannot generate a safe runtime search path for target
+  debug_exact_raw_vb_overlap_pair because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:292 (add_executable):
+  Cannot generate a safe runtime search path for target
+  validate_multi_leaf_open_state_one_electron because files in some
+  directories may conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:300 (add_executable):
+  Cannot generate a safe runtime search path for target
+  benchmark_union_graph_single_step because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:308 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_direct_libcint_smoke because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:316 (add_executable):
+  Cannot generate a safe runtime search path for target audit_ao_fock_entry
+  because files in some directories may conflict with libraries in implicit
+  directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:323 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_libcint_ri_smoke because files in some directories may conflict with
+  libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:331 (add_executable):
+  Cannot generate a safe runtime search path for target
+  compare_ri_active_space_builder because files in some directories may
+  conflict with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+CMake Warning at src/tools/targets.cmake:345 (add_executable):
+  Cannot generate a safe runtime search path for target
+  check_active_overlap_split because files in some directories may conflict
+  with libraries in implicit directories:
+
+    runtime library [libgomp.so.1] in /gpfs/opt/gcc/14.1.0/lib64 may be hidden by files in:
+      /home/guqqgroup/xiatao/software/xmvb-deps-20261012/lib
+
+  Some of these libraries may not be found correctly.
+Call Stack (most recent call first):
+  src/CMakeLists.txt:448 (include)
+
+
+-- Generating done (1.3s)
+-- Build files have been written to: /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/build

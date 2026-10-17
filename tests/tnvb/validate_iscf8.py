@@ -26,8 +26,8 @@ def run(args):
         prefix = root / f"{name}_{args.mode}_iscf8"
         deck = inputs / f"{name}_{args.mode}_iscf8.xmi"
         original = (repository / "testdata" / "tnvb" / fixture).read_text()
-        assert len(re.findall(r"(?mi)^iscf=5$", original)) == 1
-        text = re.sub(r"(?mi)^iscf=5$", "iscf=8", original)
+        assert len(re.findall(r"(?mi)^iscf=8$", original)) == 1
+        text = original
         deck.write_text(re.sub(r"(?mi)^itmax=\d+$", f"itmax={steps}", text))
         report_path = prefix.with_suffix(".json")
         if report_path.exists():
@@ -40,7 +40,7 @@ def run(args):
             raise RuntimeError(f"optimizer did not produce {report_path}, status={completed.returncode}")
         report = json.loads(report_path.read_text())
         reference, tensor = report["reference"], report["tnvb"]
-        valid = (report["optimizer"] == "block_lbfgs" and
+        valid = (report["optimizer"] == "plbfgs" and
                  report["convergence_profile"] == "original" and
                  report["energy_tolerance"] == 1e-7 and
                  report["gradient_tolerance"] == 1e-3 and
@@ -64,7 +64,7 @@ def run(args):
                 # A one-step C14 cap is deliberately NOT convergence evidence.
                 valid = valid and result["iterations"] == 1 and len(history) == 2
                 valid = valid and result["termination"] in (
-                    "max_iterations", "block_lbfgs_projected_gradient_tolerance")
+                    "max_iterations", "plbfgs_projected_gradient_tolerance")
         if convergence_required:
             valid = valid and completed.returncode == 0 and report["passed"]
         else:

@@ -1,5 +1,11 @@
 # TNVB / ISCF=8 integration
 
+> Historical validation record. Since the 2026-10-17 merge of master
+> `03d469cc`, the current optimizer is `Plbfgs` / `--optimizer-backend plbfgs`;
+> native ISCF=5 is removed. Use ISCF=8 for current TNVB decks. The measurements
+> below retain their original revision and are not revalidation of this merge.
+> Current usage is documented in `tnvb_usage.md`.
+
 Status (2026-10-12): implemented and verified for the scope below. Full C14
 ISCF=8 convergence and reproducibility of independently optimized OEO weights
 are not claimed.

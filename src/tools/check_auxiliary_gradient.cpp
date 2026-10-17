@@ -7,21 +7,21 @@
 #include <utility>
 #include <vector>
 
-#include "core/eigensolver.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/integrals/ao/ri/cache.hpp"
-#include "vbscf/core/storage/eigen.hpp"
+#include "linalg/storage.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/matrix/backpropagator.hpp"
-#include "vbscf/integrals/active/one_electron/builder.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/active/matrix_adjoint.hpp"
+#include "integrals/active/one_electron.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/active/two_electron/response/backpropagator.hpp"
-#include "vbscf/integrals/active/two_electron/construction/builder.hpp"
+#include "vbscf/integrals/active/space.hpp"
+#include "integrals/active/exact.hpp"
 #include "vbscf/integrals/ao/one_electron/builder.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
-#include "vbscf/integrals/active/two_electron/construction/ri_builder.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/ri.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
 
 namespace {
@@ -56,11 +56,11 @@ bool has_materialized_ao_two_electron_integrals(
 }
 
 const char* active_space_representation_name(
-    xmvb::vb::ActiveSpaceTwoElectronRepresentation representation) {
+    xmvb::integrals::ActiveSpaceTwoElectronRepresentation representation) {
   switch (representation) {
-    case xmvb::vb::ActiveSpaceTwoElectronRepresentation::PackedExact:
+    case xmvb::integrals::ActiveSpaceTwoElectronRepresentation::PackedExact:
       return "packed_exact";
-    case xmvb::vb::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity:
+    case xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity:
       return "ri";
   }
   return "unknown";
@@ -185,7 +185,7 @@ double evaluate_total_energy_from_auxiliary(
       active_orbital_overlap_input *
       active_auxiliary_orbitals;
 
-  xmvb::vb::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
+  xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
   const auto active_space_one_electron_result =
       active_space_one_electron_builder.build(
           ao_effective_h1e,
@@ -194,27 +194,22 @@ double evaluate_total_energy_from_auxiliary(
           n_inactive_doubly_occupied_orbitals,
           n_active_orbitals);
   const auto active_orbitals = build_active_orbitals(active_auxiliary_orbitals);
-  xmvb::vb::ActiveSpaceTwoElectronResult active_space_two_electron_result;
+  xmvb::integrals::ActiveSpaceTwoElectronResult active_space_two_electron_result;
   if (use_standard_ri_active_space_path(input)) {
-    xmvb::vb::RiActiveSpaceTwoElectronBuilder ri_active_space_two_electron_builder;
     active_space_two_electron_result =
-        ri_active_space_two_electron_builder.build(
-            xmvb::vb::ensure_vbscf_input_ri_cache(input),
-            active_orbitals,
-            n_basis_functions,
-            n_active_orbitals);
+        xmvb::integrals::transform_ri_active_integrals(
+            xmvb::vb::ensure_vbscf_input_ri_cache(input), active_auxiliary_orbitals);
     active_space_two_electron_result.packed_active_two_electron_integrals =
-        xmvb::vb::reconstruct_packed_active_two_electron_integrals(
-            xmvb::vb::make_active_space_two_electron_view(
+        xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
+            xmvb::integrals::make_active_space_two_electron_view(
                 active_space_two_electron_result),
             n_active_orbitals);
   } else {
-    xmvb::vb::ActiveSpaceTwoElectronBuilder active_space_two_electron_builder;
     active_space_two_electron_result =
-        active_space_two_electron_builder.build(
-            input.ao_integral_input,
-            active_orbitals,
-            n_active_orbitals);
+        xmvb::integrals::transform_exact_active_integrals(
+            input.ao_integral_input, active_orbitals.active_sparse_row_offsets,
+            active_orbitals.active_sparse_orbital_indices,
+            active_orbitals.active_sparse_values, n_active_orbitals);
   }
 
   xmvb::vb::FullDeterminantStructureHamiltonianOverlapBuilder structure_builder;
@@ -230,7 +225,7 @@ double evaluate_total_energy_from_auxiliary(
       active_space_two_electron_result.packed_active_two_electron_integrals,
       input.structure_data.n_structures);
 
-  xmvb::core::GeneralizedEigensolver generalized_eigensolver;
+  xmvb::linalg::GeneralizedEigensolver generalized_eigensolver;
   const auto eigen_result = generalized_eigensolver.solve_dense(
       structure_matrices.hamiltonian_matrix,
       structure_matrices.overlap_matrix,
@@ -269,7 +264,7 @@ ActiveSpaceMatrices build_active_space_matrices(
       active_orbital_overlap_input *
       active_auxiliary_orbitals;
 
-  xmvb::vb::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
+  xmvb::integrals::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
   const auto active_space_one_electron_result =
       active_space_one_electron_builder.build(
           ao_effective_h1e,
@@ -278,121 +273,38 @@ ActiveSpaceMatrices build_active_space_matrices(
           n_inactive_doubly_occupied_orbitals,
           n_active_orbitals);
   const auto active_orbitals = build_active_orbitals(active_auxiliary_orbitals);
-  xmvb::vb::ActiveSpaceTwoElectronResult active_space_two_electron_result;
+  xmvb::integrals::ActiveSpaceTwoElectronResult active_space_two_electron_result;
   if (use_standard_ri_active_space_path(input)) {
-    xmvb::vb::RiActiveSpaceTwoElectronBuilder ri_active_space_two_electron_builder;
     active_space_two_electron_result =
-        ri_active_space_two_electron_builder.build(
-            xmvb::vb::ensure_vbscf_input_ri_cache(input),
-            active_orbitals,
-            n_basis_functions,
-            n_active_orbitals);
+        xmvb::integrals::transform_ri_active_integrals(
+            xmvb::vb::ensure_vbscf_input_ri_cache(input), active_auxiliary_orbitals);
     active_space_two_electron_result.packed_active_two_electron_integrals =
-        xmvb::vb::reconstruct_packed_active_two_electron_integrals(
-            xmvb::vb::make_active_space_two_electron_view(
+        xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
+            xmvb::integrals::make_active_space_two_electron_view(
                 active_space_two_electron_result),
             n_active_orbitals);
   } else {
-    xmvb::vb::ActiveSpaceTwoElectronBuilder active_space_two_electron_builder;
     active_space_two_electron_result =
-        active_space_two_electron_builder.build(
-            input.ao_integral_input,
-            active_orbitals,
-            n_active_orbitals);
+        xmvb::integrals::transform_exact_active_integrals(
+            input.ao_integral_input, active_orbitals.active_sparse_row_offsets,
+            active_orbitals.active_sparse_orbital_indices,
+            active_orbitals.active_sparse_values, n_active_orbitals);
   }
 
   ActiveSpaceMatrices result;
   result.active_orbital_overlap_matrix.assign(
       active_orbital_overlap_matrix.data(),
       active_orbital_overlap_matrix.data() + active_orbital_overlap_matrix.size());
-  result.h1e_act = xmvb::vb::flatten_matrix_column_major(
+  result.h1e_act = xmvb::linalg::flatten_matrix_column_major(
       active_space_one_electron_result.h1e_act);
   result.packed_active_two_electron_integrals =
       active_space_two_electron_result.packed_active_two_electron_integrals;
   return result;
 }
 
-Eigen::MatrixXd build_active_pair_gradient_matrix(
-    const std::vector<double>& packed_active_two_electron_gradient,
-    int n_active_orbitals) {
-  const std::size_t n_active_pairs =
-      n_active_orbitals * (n_active_orbitals + 1) / 2;
-  Eigen::MatrixXd active_pair_gradient_matrix =
-      Eigen::MatrixXd::Zero(
-          static_cast<Eigen::Index>(n_active_pairs),
-          static_cast<Eigen::Index>(n_active_pairs));
-
-  for (int row_first = 0; row_first < n_active_orbitals; ++row_first) {
-    for (int row_second = 0; row_second <= row_first; ++row_second) {
-      const std::size_t row_pair_index =
-          row_first * (row_first + 1) / 2 + row_second;
-      for (int column_first = 0; column_first < n_active_orbitals; ++column_first) {
-        for (int column_second = 0; column_second <= column_first; ++column_second) {
-          const std::size_t column_pair_index =
-              column_first * (column_first + 1) / 2 + column_second;
-          const int packed_index =
-              (row_pair_index >= column_pair_index)
-                  ? xmvb::vb::TwoElectronIndexer::two_electron_storage_index(
-                        row_first,
-                        row_second,
-                        column_first,
-                        column_second)
-                  : xmvb::vb::TwoElectronIndexer::two_electron_storage_index(
-                        column_first,
-                        column_second,
-                        row_first,
-                        row_second);
-          double value =
-              packed_active_two_electron_gradient[packed_index];
-          if (row_pair_index == column_pair_index) {
-            value *= 2.0;
-          }
-          active_pair_gradient_matrix(
-              static_cast<Eigen::Index>(row_pair_index),
-              static_cast<Eigen::Index>(column_pair_index)) = value;
-        }
-      }
-    }
-  }
-
-  return active_pair_gradient_matrix;
-}
-
-std::vector<double> build_ri_active_pair_factor_gradient(
-    const std::vector<double>& packed_active_two_electron_gradient,
-    const xmvb::vb::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
-    int n_active_orbitals) {
-  if (active_space_two_electron_result.representation !=
-      xmvb::vb::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
-    throw std::invalid_argument("RI active-pair-factor gradient requires an RI forward result");
-  }
-  const std::size_t n_active_pairs =
-      n_active_orbitals * (n_active_orbitals + 1) / 2;
-  const std::size_t expected_factor_size =
-      active_space_two_electron_result.n_auxiliary_functions *
-      n_active_pairs;
-  if (active_space_two_electron_result.ri_active_pair_factors.size() !=
-          expected_factor_size ||
-      active_space_two_electron_result.ri_active_pair_factors.rows() !=
-          active_space_two_electron_result.n_auxiliary_functions ||
-      active_space_two_electron_result.ri_active_pair_factors.cols() !=
-          static_cast<Eigen::Index>(n_active_pairs)) {
-    throw std::invalid_argument("RI active-pair-factor buffer size mismatch");
-  }
-
-  const auto active_pair_gradient_matrix =
-      build_active_pair_gradient_matrix(
-          packed_active_two_electron_gradient,
-          n_active_orbitals);
-  const Eigen::MatrixXd ri_active_pair_factor_gradient =
-      active_space_two_electron_result.ri_active_pair_factors *
-      active_pair_gradient_matrix;
-  return xmvb::vb::flatten_matrix_column_major(ri_active_pair_factor_gradient);
-}
-
 std::vector<double> build_total_ao_effective_one_electron_gradient(
     const xmvb::vb::ActiveSpaceGradientResult& active_space_gradient_result,
-    const xmvb::vb::ActiveSpaceMatrixBackpropagationResult& matrix_backpropagation_result) {
+    const xmvb::integrals::ActiveSpaceMatrixBackpropagationResult& matrix_backpropagation_result) {
   std::vector<double> total_ao_effective_one_electron_gradient =
       matrix_backpropagation_result.ao_effective_one_electron_gradient;
   if (total_ao_effective_one_electron_gradient.size() !=
@@ -503,8 +415,8 @@ int main(int argc, char** argv) {
     xmvb::vb::ActiveSpaceGradientEvaluator active_space_gradient_evaluator;
     const auto active_space_gradient_result =
         active_space_gradient_evaluator.evaluate(input, load_result.nuclear_repulsion_energy);
-    xmvb::vb::ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator;
-    xmvb::vb::ActiveSpaceTwoElectronBackpropagator active_space_two_electron_backpropagator;
+    xmvb::integrals::ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator;
+
     xmvb::vb::AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator;
     const auto active_space_matrix_backpropagation_result =
         active_space_matrix_backpropagator.backpropagate(
@@ -516,42 +428,23 @@ int main(int argc, char** argv) {
             n_basis_functions,
             n_inactive_doubly_occupied_orbitals,
             n_active_orbitals);
-    const auto active_space_two_electron_backpropagation_result =
-        active_space_gradient_result.active_space_two_electron_result.representation ==
-                xmvb::vb::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity
-            ? active_space_two_electron_backpropagator.backpropagate(
-                  build_ri_active_pair_factor_gradient(
-                      active_space_gradient_result.packed_active_two_electron_gradient,
-                      active_space_gradient_result.active_space_two_electron_result,
-                      n_active_orbitals),
-                  input,
-                  active_space_gradient_result.active_space_two_electron_result,
-                  n_basis_functions,
-                  n_inactive_doubly_occupied_orbitals,
-                  n_active_orbitals)
-            : active_space_two_electron_backpropagator.backpropagate(
-                  active_space_gradient_result.packed_active_two_electron_gradient,
-                  input.ao_integral_input.pair_graph,
-                  active_space_gradient_result.orbital_preparation_result,
-                  n_basis_functions,
-                  n_inactive_doubly_occupied_orbitals,
-                  n_active_orbitals);
+    const Eigen::MatrixXd active_two_electron_gradient =
+        xmvb::vb::pullback_active_integrals(input,
+            active_space_gradient_result.active_space_two_electron_result,
+            active_space_gradient_result.packed_active_two_electron_gradient);
 
     Eigen::MatrixXd total_active_auxiliary_gradient =
         active_space_matrix_backpropagation_result.active_auxiliary_orbital_gradient;
     if (total_active_auxiliary_gradient.rows() != n_basis_functions ||
         total_active_auxiliary_gradient.cols() != n_active_orbitals ||
-        active_space_two_electron_backpropagation_result
-                .active_auxiliary_orbital_gradient.rows() !=
+        active_two_electron_gradient.rows() !=
             n_basis_functions ||
-        active_space_two_electron_backpropagation_result
-                .active_auxiliary_orbital_gradient.cols() !=
+        active_two_electron_gradient.cols() !=
             n_active_orbitals) {
       throw std::runtime_error("auxiliary gradient size mismatch");
     }
     total_active_auxiliary_gradient.noalias() +=
-        active_space_two_electron_backpropagation_result
-            .active_auxiliary_orbital_gradient;
+        active_two_electron_gradient;
     const std::vector<double> total_ao_effective_one_electron_gradient =
         build_total_ao_effective_one_electron_gradient(
             active_space_gradient_result,
@@ -660,8 +553,7 @@ int main(int argc, char** argv) {
                   basis_function_index,
                   active_orbital_index);
       const double analytic_two_electron =
-          active_space_two_electron_backpropagation_result
-              .active_auxiliary_orbital_gradient(
+          active_two_electron_gradient(
                   basis_function_index,
                   active_orbital_index);
 

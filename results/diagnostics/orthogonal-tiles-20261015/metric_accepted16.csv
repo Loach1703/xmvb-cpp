@@ -1,0 +1,2 @@
+run,kind,orbitals,structures,alpha_strings,beta_strings,accepted_raw_product_doubles,accepted_orthogonal_product_doubles,accepted_residual_product_doubles,removed_raw_product_bytes,energy_Eh,gradient_seconds,rss_mib
+metric-accepted-1261239,synthetic_production_gradient,16,1,12870,12870,0,0,0,1325095200,-11.414362993577727,25.606795099999999,117.484375

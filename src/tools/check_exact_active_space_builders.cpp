@@ -14,10 +14,10 @@
 #endif
 
 #include "input/loading/loader.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/one_electron/builder.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/active/one_electron.hpp"
 #include "vbscf/orbitals/preparation/preparer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/builder.hpp"
+#include "integrals/active/exact.hpp"
 #include "vbscf/integrals/ao/one_electron/builder.hpp"
 
 namespace {
@@ -173,7 +173,7 @@ UniquePermutationSet enumerate_unique_symmetry_permutations(
 
 xmvb::vb::AoEffectiveOneElectronResult build_reference_ao_effective_one_electron(
     const Eigen::Ref<const Eigen::MatrixXd>& inactive_density_matrix,
-    const xmvb::vb::AoIntegralInput& ao_integral_input) {
+    const xmvb::integrals::AoIntegralInput& ao_integral_input) {
   const int n_basis_functions = ao_integral_input.n_basis_functions;
   if (n_basis_functions <= 0) {
     throw std::invalid_argument("n_basis_functions must be positive");
@@ -234,8 +234,8 @@ xmvb::vb::AoEffectiveOneElectronResult build_reference_ao_effective_one_electron
   return result;
 }
 
-xmvb::vb::ActiveSpaceTwoElectronResult build_reference_active_space_two_electron(
-    const xmvb::vb::AoIntegralInput& ao_integral_input,
+xmvb::integrals::ActiveSpaceTwoElectronResult build_reference_active_space_two_electron(
+    const xmvb::integrals::AoIntegralInput& ao_integral_input,
     const Eigen::Ref<const Eigen::MatrixXd>& auxiliary_orbital_matrix,
     int n_inactive_doubly_occupied_orbitals,
     int n_active_orbitals) {
@@ -282,7 +282,7 @@ xmvb::vb::ActiveSpaceTwoElectronResult build_reference_active_space_two_electron
          integral_offset < static_cast<std::ptrdiff_t>(
                                ao_integral_input.pair_graph.integral_count());
          ++integral_offset) {
-      const xmvb::vb::AoPairIntegral eri =
+      const xmvb::integrals::AoPairIntegral eri =
           ao_integral_input.pair_graph.integral(integral_offset);
       const double ao_integral_value = eri.value;
       const int i = ao_integral_input.pair_graph.pair_first[eri.left_pair];
@@ -354,7 +354,7 @@ xmvb::vb::ActiveSpaceTwoElectronResult build_reference_active_space_two_electron
   }
 
   const std::size_t packed_size =
-      xmvb::vb::TwoElectronIndexer::two_electron_storage_index(
+      xmvb::core::PairIndex::two_electron_storage_index(
           n_active_orbitals - 1,
           n_active_orbitals - 1,
           n_active_orbitals - 1,
@@ -367,7 +367,7 @@ xmvb::vb::ActiveSpaceTwoElectronResult build_reference_active_space_two_electron
         const int s_upper = (r == p) ? q : r;
         for (int s = 0; s <= s_upper; ++s) {
           const int packed_index =
-              xmvb::vb::TwoElectronIndexer::two_electron_storage_index(
+              xmvb::core::PairIndex::two_electron_storage_index(
                   p,
                   q,
                   r,
@@ -379,7 +379,7 @@ xmvb::vb::ActiveSpaceTwoElectronResult build_reference_active_space_two_electron
     }
   }
 
-  xmvb::vb::ActiveSpaceTwoElectronResult result;
+  xmvb::integrals::ActiveSpaceTwoElectronResult result;
   result.packed_active_two_electron_integrals =
       std::move(packed_active_two_electron_integrals);
   return result;
@@ -431,7 +431,7 @@ int main(int argc, char** argv) {
             orbital_result.inactive_density_matrix,
             input.ao_integral_input);
 
-    xmvb::vb::ActiveSpaceOneElectronBuilder active_h1e_builder;
+    xmvb::integrals::ActiveSpaceOneElectronBuilder active_h1e_builder;
     const auto current_active_h1e_result =
         active_h1e_builder.build(
             current_ao_result.ao_effective_h1e,
@@ -468,12 +468,11 @@ int main(int argc, char** argv) {
                      reference_h1e_act)
               << '\n';
     if (!options.skip_active_eri) {
-      xmvb::vb::ActiveSpaceTwoElectronBuilder active_eri_builder;
       const auto current_active_eri_result =
-          active_eri_builder.build(
-              input.ao_integral_input,
-              orbital_result,
-              n_active_orbitals);
+          xmvb::integrals::transform_exact_active_integrals(
+              input.ao_integral_input, orbital_result.active_sparse_row_offsets,
+              orbital_result.active_sparse_orbital_indices,
+              orbital_result.active_sparse_values, n_active_orbitals);
       const auto reference_active_eri_result =
           build_reference_active_space_two_electron(
               input.ao_integral_input,

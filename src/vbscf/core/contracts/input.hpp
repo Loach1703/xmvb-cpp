@@ -4,22 +4,18 @@
 
 #include "vbscf/structures/expansion/types.hpp"
 #include "vbscf/core/contracts/tnvb.hpp"
-#include "vbscf/integrals/ao/contracts/input.hpp"
-#include "vbscf/integrals/ao/libcint/input.hpp"
+#include "integrals/ao/input.hpp"
+#include "integrals/ao/libcint_input.hpp"
 #include "vbscf/orbitals/preparation/input.hpp"
+
+namespace xmvb::integrals {
+class RiAoFactorizationProvider;
+struct RiAoFactorization;
+}
 
 namespace xmvb::vb {
 
-class RiAoFactorizationProvider;
-struct RiAoFactorization;
-
 enum class StandardTwoElectronMode {
-  Auto,
-  Exact,
-  ResolutionOfIdentity,
-};
-
-enum class PfTwoElectronMode {
   Auto,
   Exact,
   ResolutionOfIdentity,
@@ -57,12 +53,12 @@ struct VbScfInput {
   /**
    * @brief AO Hamiltonian and AO two-electron integrals.
    */
-  AoIntegralInput ao_integral_input;
+  xmvb::integrals::AoIntegralInput ao_integral_input;
 
   /**
    * @brief Primary-basis libcint input used by AO integral providers.
    */
-  LibcintInput libcint_input;
+  xmvb::integrals::LibcintInput libcint_input;
 
   /**
    * @brief Optional explicit RI auxiliary basis parsed from the input deck.
@@ -70,7 +66,7 @@ struct VbScfInput {
    * RI calculations require this basis. The input loader resolves an explicit
    * `AUXBASIS` keyword or the `${BASIS}-jkfit` default before factorization.
    */
-  LibcintInput auxiliary_libcint_input;
+  xmvb::integrals::LibcintInput auxiliary_libcint_input;
 
   /**
    * @brief Requested standard-VB two-electron representation.
@@ -83,16 +79,9 @@ struct VbScfInput {
       StandardTwoElectronMode::Auto;
 
   /**
-   * @brief Requested Pf two-electron representation.
-   *
-   * `Auto` lets the consuming Pf evaluator select its default representation.
-   */
-  PfTwoElectronMode pf_two_electron_mode = PfTwoElectronMode::Auto;
-
-  /**
    * @brief Provider for lazily building AO-side RI factors.
    */
-  std::shared_ptr<const RiAoFactorizationProvider> ri_factorization_provider;
+  std::shared_ptr<const xmvb::integrals::RiAoFactorizationProvider> ri_factorization_provider;
 
   /**
    * @brief Optional molecule-static AO-side RI factorization shared across copies.
@@ -100,7 +89,7 @@ struct VbScfInput {
    * This numerical cache is populated through `ri_factorization_provider` and
    * reused across repeated SCF objective/gradient evaluations.
    */
-  mutable std::shared_ptr<const RiAoFactorization> ri_factorization;
+  mutable std::shared_ptr<const xmvb::integrals::RiAoFactorization> ri_factorization;
 };
 
 }  // namespace xmvb::vb

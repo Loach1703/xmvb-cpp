@@ -19,8 +19,8 @@ void require(bool condition, const char* message) {
 }
 
 /** @brief One normalized s Gaussian; duplicate shells make the metric singular. */
-xmvb::vb::LibcintInput make_input(int n_shells) {
-  xmvb::vb::LibcintInput input;
+xmvb::integrals::LibcintInput make_input(int n_shells) {
+  xmvb::integrals::LibcintInput input;
   input.n_atoms = 1;
   input.n_shells = n_shells;
   input.n_gaussian_primitives = n_shells;
@@ -33,7 +33,7 @@ xmvb::vb::LibcintInput make_input(int n_shells) {
   for (int shell = 0; shell < n_shells; ++shell) {
     const int offset = static_cast<int>(input.env.size());
     input.env.push_back(1.0);
-    input.env.push_back(xmvb::vb::shell_normalization(0, 1.0));
+    input.env.push_back(xmvb::libcint::shell_normalization(0, 1.0));
     input.bas[shell * BAS_SLOTS + NPRIM_OF] = 1;
     input.bas[shell * BAS_SLOTS + NCTR_OF] = 1;
     input.bas[shell * BAS_SLOTS + PTR_EXP] = offset;
@@ -52,12 +52,12 @@ void check_shell_workspace() {
   for (int shell = 0; shell < 3; ++shell) {
     input.bas[shell * BAS_SLOTS + ANG_OF] = shell;
     input.env[input.bas[shell * BAS_SLOTS + PTR_COEFF]] =
-        xmvb::vb::shell_normalization(shell, 1.0);
+        xmvb::libcint::shell_normalization(shell, 1.0);
     input.basidx[2 * shell] = offset;
     input.basidx[2 * shell + 1] = counts[shell];
     offset += counts[shell];
   }
-  xmvb::vb::LibcintDirectShellEvaluator evaluator(input);
+  xmvb::libcint::LibcintDirectShellEvaluator evaluator(input);
   const auto& norm = evaluator.ao_normalization();
   std::vector<std::vector<double>> references(81);
   for (int task = 0; task < 81; ++task) {
@@ -80,7 +80,7 @@ void check_shell_workspace() {
   std::atomic<bool> valid(true);
 #pragma omp parallel
   {
-    xmvb::vb::LibcintShellWorkspace workspace;
+    xmvb::libcint::LibcintShellWorkspace workspace;
 #pragma omp for schedule(dynamic, 1)
     for (int task = 0; task < 81; ++task) {
       const auto& block = evaluator.evaluate_two_electron_shell_quartet(
@@ -91,7 +91,7 @@ void check_shell_workspace() {
     }
   }
   require(valid.load(), "shared libcint optimizer differs from legacy reference");
-  xmvb::vb::LibcintShellWorkspace workspace;
+  xmvb::libcint::LibcintShellWorkspace workspace;
   evaluator.evaluate_two_electron_shell_quartet(2, 2, 2, 2, workspace);
   const double* values = workspace.quartet.values.data();
   const double* cache = workspace.cache.data();
@@ -108,18 +108,18 @@ int main() {
   try {
     check_shell_workspace();
     constexpr double pi = 3.14159265358979323846;
-    using xmvb::vb::radial_cartesian_scale;
-    require(radial_cartesian_scale(0,0,0) == 1.0, "s normalization");
-    require(radial_cartesian_scale(1,0,0) == 1.0, "p normalization");
-    require(std::abs(std::pow(radial_cartesian_scale(2,0,0),2) - 4*pi/5) < 1e-14,
+    using xmvb::libcint::radial_cartesian_scale;
+    require(xmvb::libcint::radial_cartesian_scale(0,0,0) == 1.0, "s normalization");
+    require(xmvb::libcint::radial_cartesian_scale(1,0,0) == 1.0, "p normalization");
+    require(std::abs(std::pow(xmvb::libcint::radial_cartesian_scale(2,0,0),2) - 4*pi/5) < 1e-14,
             "Cartesian dxx radial norm");
-    require(std::abs(std::pow(radial_cartesian_scale(1,1,0),2) - 4*pi/15) < 1e-14,
+    require(std::abs(std::pow(xmvb::libcint::radial_cartesian_scale(1,1,0),2) - 4*pi/15) < 1e-14,
             "Cartesian dxy radial norm");
-    require(std::abs(std::pow(radial_cartesian_scale(3,0,0),2) - 4*pi/7) < 1e-14,
+    require(std::abs(std::pow(xmvb::libcint::radial_cartesian_scale(3,0,0),2) - 4*pi/7) < 1e-14,
             "Cartesian fxxx radial norm");
 
     const auto primary = make_input(1);
-    xmvb::vb::LibcintRiIntegralProvider provider;
+    xmvb::libcint::LibcintRiIntegralProvider provider;
     const auto positive = provider.build(primary, make_input(1), {});
     const auto singular = provider.build(primary, make_input(3), {});
     require(positive.n_auxiliary_functions == 1, "positive metric rank");

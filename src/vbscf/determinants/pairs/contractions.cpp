@@ -7,22 +7,22 @@
 #include <string>
 #include <vector>
 
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb {
 
 Eigen::MatrixXd build_spin_antisymmetrized_interaction_matrix(
     const std::vector<int>& occ_L, const std::vector<int>& occ_R,
-    int n_active_orbitals, const ActiveSpaceTwoElectronView& view) {
+    int n_active_orbitals, const xmvb::integrals::ActiveSpaceTwoElectronView& view) {
   const int n=occ_L.size(), m=n*(n-1)/2;
   Eigen::MatrixXd g(m,m);
   for (int j=1;j<n;++j) for (int i=0;i<j;++i)
     for (int l=1;l<n;++l) for (int k=0;k<l;++k) {
-      const auto pair=TwoElectronIndexer::packed_pair_index;
+      const auto pair=xmvb::core::PairIndex::packed_pair_index;
       g(j*(j-1)/2+i,l*(l-1)/2+k) =
-          lookup_active_space_two_electron_kernel_value(view,pair(occ_R[i],occ_L[k]),pair(occ_R[j],occ_L[l]),n_active_orbitals) -
-          lookup_active_space_two_electron_kernel_value(view,pair(occ_R[i],occ_L[l]),pair(occ_R[j],occ_L[k]),n_active_orbitals);
+          xmvb::integrals::lookup_active_space_two_electron_kernel_value(view,pair(occ_R[i],occ_L[k]),pair(occ_R[j],occ_L[l]),n_active_orbitals) -
+          xmvb::integrals::lookup_active_space_two_electron_kernel_value(view,pair(occ_R[i],occ_L[l]),pair(occ_R[j],occ_L[k]),n_active_orbitals);
     }
   return g;
 }
@@ -35,7 +35,7 @@ Eigen::MatrixXd build_spin_antisymmetrized_interaction_direction(
   if (packed_direction.empty()) return g;
   for (int j=1;j<n;++j) for (int i=0;i<j;++i)
     for (int l=1;l<n;++l) for (int k=0;k<l;++k) {
-      const auto index=TwoElectronIndexer::two_electron_storage_index;
+      const auto index=xmvb::core::PairIndex::two_electron_storage_index;
       g(j*(j-1)/2+i,l*(l-1)/2+k) =
           packed_direction[index(occ_R[i],occ_L[k],occ_R[j],occ_L[l])] -
           packed_direction[index(occ_R[i],occ_L[l],occ_R[j],occ_L[k])];
@@ -156,7 +156,7 @@ void build_inverse_overlap_gradient_from_projected_pair_values(
     for (int right_row = 0; right_row < n_electrons; ++right_row) {
       const int orbital_index_right =
           occ_R[right_row];
-      const int packed_pair_index = TwoElectronIndexer::packed_pair_index(
+      const int packed_pair_index = xmvb::core::PairIndex::packed_pair_index(
           orbital_index_right,
           orbital_index_left);
       (*inverse_overlap_gradient)(left_column, right_row) =
@@ -251,22 +251,22 @@ SameSpinPhiResult compute_same_spin_original_phi_impl(
     for (int right_first = 0; right_first < n_electrons - 1; ++right_first) {
       const int orbital_index_right_first =
           occ_R[right_first];
-      const int direct_left_pair_index = TwoElectronIndexer::packed_pair_index(
+      const int direct_left_pair_index = xmvb::core::PairIndex::packed_pair_index(
           orbital_index_right_first,
           orbital_index_left_first);
       for (int left_second = left_first + 1; left_second < n_electrons; ++left_second) {
         const int orbital_index_left_second =
             occ_L[left_second];
-        const int exchange_left_pair_index = TwoElectronIndexer::packed_pair_index(
+        const int exchange_left_pair_index = xmvb::core::PairIndex::packed_pair_index(
             orbital_index_right_first,
             orbital_index_left_second);
         for (int right_second = right_first + 1; right_second < n_electrons; ++right_second) {
           const int orbital_index_right_second =
               occ_R[right_second];
-          const int direct_right_pair_index = TwoElectronIndexer::packed_pair_index(
+          const int direct_right_pair_index = xmvb::core::PairIndex::packed_pair_index(
               orbital_index_right_second,
               orbital_index_left_second);
-          const int exchange_right_pair_index = TwoElectronIndexer::packed_pair_index(
+          const int exchange_right_pair_index = xmvb::core::PairIndex::packed_pair_index(
               orbital_index_right_second,
               orbital_index_left_first);
           const double interaction_value =
@@ -305,7 +305,7 @@ SameSpinPhiResult compute_ri_same_spin_original_phi(
   }
   const int n_electrons = static_cast<int>(occ_L.size());
   if (static_cast<int>(occ_R.size()) != n_electrons ||
-      ri_factors.cols() != packed_active_pair_count(n_active_orbitals)) {
+      ri_factors.cols() != xmvb::integrals::packed_active_pair_count(n_active_orbitals)) {
     throw std::invalid_argument("invalid RI same-spin phi dimensions");
   }
 
@@ -327,7 +327,7 @@ SameSpinPhiResult compute_ri_same_spin_original_phi(
       for (int right = 0; right < n_electrons; ++right) {
         transition(right, left) = ri_factors(
             auxiliary,
-            TwoElectronIndexer::packed_pair_index(
+            xmvb::core::PairIndex::packed_pair_index(
                 occ_R[right], occ_L[left]));
       }
     }
@@ -357,7 +357,7 @@ Eigen::MatrixXd gather_ri_transition(
     for (int right = 0; right < n_electrons; ++right) {
       transition(right, left) = factors(
           auxiliary,
-          TwoElectronIndexer::packed_pair_index(
+          xmvb::core::PairIndex::packed_pair_index(
               occ_R[right], occ_L[left]));
     }
   }
@@ -398,7 +398,7 @@ double compute_opposite_spin_original_phi_impl(
           alpha_occ_R[alpha_right_row];
       const double alpha_inverse_value =
           alpha_inverse_overlap_submatrix(alpha_left_column, alpha_right_row);
-      const int alpha_packed_pair_index = TwoElectronIndexer::packed_pair_index(
+      const int alpha_packed_pair_index = xmvb::core::PairIndex::packed_pair_index(
           alpha_orbital_right,
           alpha_orbital_left);
       for (int beta_left_column = 0; beta_left_column < n_beta_electrons; ++beta_left_column) {
@@ -409,7 +409,7 @@ double compute_opposite_spin_original_phi_impl(
               beta_occ_R[beta_right_row];
           const double beta_inverse_value =
               beta_inverse_overlap_submatrix(beta_left_column, beta_right_row);
-          const int beta_packed_pair_index = TwoElectronIndexer::packed_pair_index(
+          const int beta_packed_pair_index = xmvb::core::PairIndex::packed_pair_index(
               beta_orbital_right,
               beta_orbital_left);
           const double interaction_value =
@@ -470,7 +470,7 @@ RegularRiSameSpinDirection evaluate_regular_ri_same_spin_direction(
         "regular RI same-spin direction requires a nonsingular pair");
   }
   const int n_electrons = static_cast<int>(occ_L.size());
-  const int n_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   if (static_cast<int>(occ_R.size()) != n_electrons ||
       delta_overlap_block.rows() != n_electrons ||
       delta_overlap_block.cols() != n_electrons ||
@@ -574,7 +574,7 @@ evaluate_regular_ri_same_spin_direction_batch(
   }
 
   const int n_electrons = static_cast<int>(occ_L.size());
-  const int n_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   if (static_cast<int>(occ_R.size()) != n_electrons ||
       inverse_overlap_gradient.rows() != n_electrons ||
       inverse_overlap_gradient.cols() != n_electrons ||
@@ -886,9 +886,9 @@ double contract_opposite_spin_first_order_projections(
 double project_sparse_projection_onto_packed_pair(
     const OppositeSpinPackedPairProjection& sparse_projection,
     int target_packed_pair_index,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     int n_active_orbitals) {
-  const int n_packed_active_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_packed_active_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   if (target_packed_pair_index < 0 || target_packed_pair_index >= n_packed_active_pairs) {
     throw std::invalid_argument("packed active-pair index out of range");
   }
@@ -904,7 +904,7 @@ double project_sparse_projection_onto_packed_pair(
        entry_index < sparse_projection.packed_pair_indices.size();
        ++entry_index) {
     projected_value +=
-        lookup_active_space_two_electron_kernel_value(
+        xmvb::integrals::lookup_active_space_two_electron_kernel_value(
             two_electron_view,
             target_packed_pair_index,
             sparse_projection.packed_pair_indices[entry_index],
@@ -917,9 +917,9 @@ double project_sparse_projection_onto_packed_pair(
 Eigen::VectorXd gather_projected_values_for_packed_pair_indices(
     const OppositeSpinPackedPairProjection& sparse_projection,
     const std::vector<int>& target_packed_pair_indices,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     int n_active_orbitals) {
-  const int n_packed_active_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_packed_active_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   if (static_cast<int>(sparse_projection.projected_pair_values.size()) ==
       n_packed_active_pairs) {
     Eigen::VectorXd projected_values =
@@ -938,7 +938,7 @@ Eigen::VectorXd gather_projected_values_for_packed_pair_indices(
     return projected_values;
   }
 
-  return apply_active_space_two_electron_kernel_to_sparse_projection_subset(
+  return xmvb::integrals::apply_active_space_two_electron_kernel_to_sparse_projection_subset(
       two_electron_view,
       n_active_orbitals,
       sparse_projection.packed_pair_indices,
@@ -1277,7 +1277,7 @@ SameSpinPhiResult compute_same_spin_original_phi(
           int row_packed_pair_index,
           int column_packed_pair_index) {
         const int packed_pair_of_pairs_index =
-            TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 row_packed_pair_index,
                 column_packed_pair_index);
         return packed_active_two_electron_integrals[
@@ -1290,11 +1290,11 @@ SameSpinPhiResult compute_same_spin_original_phi(
     const std::vector<int>& occ_R,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const DeterminantOverlapResult& det_ovlp_result,
     Eigen::MatrixXd* inverse_overlap_gradient) {
   if (active_space_two_electron_result.representation ==
-          ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity &&
+          xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity &&
       active_space_two_electron_result.packed_active_two_electron_integrals.empty()) {
     return compute_ri_same_spin_original_phi(
         occ_L,
@@ -1305,8 +1305,8 @@ SameSpinPhiResult compute_same_spin_original_phi(
         active_space_two_electron_result.ri_active_pair_factors,
         inverse_overlap_gradient);
   }
-  const ActiveSpaceTwoElectronView two_electron_view =
-      make_active_space_two_electron_view(active_space_two_electron_result);
+  const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
+      xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result);
   return compute_same_spin_original_phi_impl(
       occ_L,
       occ_R,
@@ -1317,7 +1317,7 @@ SameSpinPhiResult compute_same_spin_original_phi(
       [&two_electron_view, n_active_orbitals](
           int row_packed_pair_index,
           int column_packed_pair_index) {
-        return lookup_active_space_two_electron_kernel_value(
+        return xmvb::integrals::lookup_active_space_two_electron_kernel_value(
             two_electron_view,
             row_packed_pair_index,
             column_packed_pair_index,
@@ -1374,7 +1374,7 @@ double compute_opposite_spin_original_phi(
           int row_packed_pair_index,
           int column_packed_pair_index) {
         const int packed_pair_of_pairs_index =
-            TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 row_packed_pair_index,
                 column_packed_pair_index);
         return packed_active_two_electron_integrals[
@@ -1391,7 +1391,7 @@ double compute_opposite_spin_original_phi(
     const std::vector<int>& beta_occ_R,
     const DeterminantOverlapResult& beta_overlap_result,
     const OppositeSpinPairCache* beta_pair_cache,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     Eigen::MatrixXd* alpha_inverse_overlap_gradient,
     Eigen::MatrixXd* beta_inverse_overlap_gradient) {
   if (alpha_overlap_result.nullity != 0 || beta_overlap_result.nullity != 0 ||
@@ -1421,15 +1421,15 @@ double compute_opposite_spin_original_phi(
 
   int n_active_orbitals = 0;
   if (active_space_two_electron_result.representation ==
-      ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
-    n_active_orbitals = infer_active_orbital_count_from_packed_pair_count(
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
+    n_active_orbitals = xmvb::integrals::infer_active_orbital_count_from_packed_pair_count(
         active_space_two_electron_result.ri_active_pair_factors.cols());
   } else {
-    n_active_orbitals = infer_active_orbital_count_from_packed_integral_count(
+    n_active_orbitals = xmvb::integrals::infer_active_orbital_count_from_packed_integral_count(
         active_space_two_electron_result.packed_active_two_electron_integrals.size());
   }
-  const ActiveSpaceTwoElectronView two_electron_view =
-      make_active_space_two_electron_view(active_space_two_electron_result);
+  const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
+      xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result);
   return compute_opposite_spin_original_phi_impl(
       alpha_occ_L,
       alpha_occ_R,
@@ -1442,7 +1442,7 @@ double compute_opposite_spin_original_phi(
       [&two_electron_view, n_active_orbitals](
           int row_packed_pair_index,
           int column_packed_pair_index) {
-        return lookup_active_space_two_electron_kernel_value(
+        return xmvb::integrals::lookup_active_space_two_electron_kernel_value(
             two_electron_view,
             row_packed_pair_index,
             column_packed_pair_index,
@@ -1481,7 +1481,7 @@ double compute_opposite_spin_original_phi(
     const std::vector<int>& beta_occ_L,
     const std::vector<int>& beta_occ_R,
     const DeterminantOverlapResult& beta_overlap_result,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     Eigen::MatrixXd* alpha_inverse_overlap_gradient,
     Eigen::MatrixXd* beta_inverse_overlap_gradient) {
   return compute_opposite_spin_original_phi(

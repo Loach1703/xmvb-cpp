@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 
 namespace xmvb::vb {
 
@@ -36,7 +36,7 @@ AcceptedSpinPairTile AcceptedPairTileProvider::build(
     int right_end,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron,
     AcceptedPairTileBuildOptions options) const {
   if (left_begin < 0 || left_end <= left_begin || left_end > size() ||
       right_begin < 0 || right_end <= right_begin || right_end > size()) {

@@ -1,0 +1,964 @@
+[
+  {
+    "run": "run-1264610",
+    "node": "anode40",
+    "note": "Nested phase totals overlap; they are not additive wall-time shares.",
+    "initial_Eh": -398.533053417516,
+    "final_Eh": -399.106646267331,
+    "termination": "ciah_projected_gradient_tolerance",
+    "steps": 4,
+    "hvp": 36,
+    "application_s": 32.28488,
+    "process_s": 32.49,
+    "rss_kib": 2752260,
+    "phases": {
+      "chart": {
+        "calls": 7,
+        "wall_s": 0.060088142,
+        "process_cpu_s": 1.169932
+      },
+      "projection": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "curvature": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "block_factor": {
+        "calls": 160,
+        "wall_s": 0.008479172,
+        "process_cpu_s": 0.303015
+      },
+      "block_eigen": {
+        "calls": 160,
+        "wall_s": 0.007110134,
+        "process_cpu_s": 0.094787
+      },
+      "trial_forward": {
+        "calls": 5,
+        "wall_s": 5.452090611,
+        "process_cpu_s": 172.715164
+      },
+      "trial_gradient": {
+        "calls": 5,
+        "wall_s": 0.720402439,
+        "process_cpu_s": 23.321818
+      },
+      "armijo_accepted": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "armijo_rejected": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_solve": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "hvp_apply": {
+        "calls": 36,
+        "wall_s": 8.011087878,
+        "process_cpu_s": 255.932641
+      },
+      "hvp_setup": {
+        "calls": 36,
+        "wall_s": 0.016081667,
+        "process_cpu_s": 0.476085
+      },
+      "ao_response": {
+        "calls": 36,
+        "wall_s": 0.824596303,
+        "process_cpu_s": 26.778242
+      },
+      "active_direction": {
+        "calls": 36,
+        "wall_s": 0.010606206,
+        "process_cpu_s": 0.157175
+      },
+      "selected_direction": {
+        "calls": 36,
+        "wall_s": 6.875889883,
+        "process_cpu_s": 218.912932
+      },
+      "active_backward": {
+        "calls": 36,
+        "wall_s": 0.018275579,
+        "process_cpu_s": 0.638002
+      },
+      "orbital_pullback": {
+        "calls": 36,
+        "wall_s": 0.055719084,
+        "process_cpu_s": 1.321508
+      },
+      "two_electron_response": {
+        "calls": 36,
+        "wall_s": 0.170311488,
+        "process_cpu_s": 6.914395
+      },
+      "fixed_pullback": {
+        "calls": 36,
+        "wall_s": 0.035014326,
+        "process_cpu_s": 0.656467
+      },
+      "structure_solve": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "structure_adjoint": {
+        "calls": 36,
+        "wall_s": 0.058076043,
+        "process_cpu_s": 1.805959
+      },
+      "neo_projected_solve": {
+        "calls": 61,
+        "wall_s": 0.00137335,
+        "process_cpu_s": 0.125361
+      },
+      "neo_preconditioner": {
+        "calls": 32,
+        "wall_s": 0.004434037,
+        "process_cpu_s": 0.229065
+      },
+      "neo_basis": {
+        "calls": 36,
+        "wall_s": 0.000313255,
+        "process_cpu_s": 0.000272
+      },
+      "neo_metric": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "metric_action": {
+        "calls": 209,
+        "wall_s": 0.089342352,
+        "process_cpu_s": 0.749567
+      },
+      "metric_solve": {
+        "calls": 9,
+        "wall_s": 0.069952615,
+        "process_cpu_s": 0.069941
+      },
+      "metric_block": {
+        "calls": 9,
+        "wall_s": 0.011959059,
+        "process_cpu_s": 0.011941
+      },
+      "ao_pair_action": {
+        "calls": 16,
+        "wall_s": 1.100972959,
+        "process_cpu_s": 35.414218
+      },
+      "ao_h1e_fused": {
+        "calls": 40,
+        "wall_s": 2.013290913,
+        "process_cpu_s": 60.820983
+      },
+      "ao_h1e_transpose": {
+        "calls": 16,
+        "wall_s": 0.322491054,
+        "process_cpu_s": 9.972449
+      },
+      "ao_h1e_forward": {
+        "calls": 16,
+        "wall_s": 0.357516517,
+        "process_cpu_s": 10.360635
+      },
+      "ci_connections": {
+        "calls": 16,
+        "wall_s": 0.01342732,
+        "process_cpu_s": 0.015451
+      },
+      "ci_sigma": {
+        "calls": 77,
+        "wall_s": 3.912532125,
+        "process_cpu_s": 122.589258
+      },
+      "ci_generator": {
+        "calls": 144,
+        "wall_s": 0.159575919,
+        "process_cpu_s": 4.457163
+      },
+      "ci_integral_direction": {
+        "calls": 36,
+        "wall_s": 6.873966795,
+        "process_cpu_s": 218.911025
+      },
+      "ci_transform_left": {
+        "calls": 3325,
+        "wall_s": 0.981809783,
+        "process_cpu_s": 25.778668
+      },
+      "ci_transform_right": {
+        "calls": 93,
+        "wall_s": 0.084036363,
+        "process_cpu_s": 2.242535
+      },
+      "ci_directional_transform": {
+        "calls": 760,
+        "wall_s": 0.766606297,
+        "process_cpu_s": 21.691553
+      },
+      "ci_integral_adjoint": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ci_generator_adjoint": {
+        "calls": 704,
+        "wall_s": 0.393911054,
+        "process_cpu_s": 13.279424
+      },
+      "ci_response": {
+        "calls": 88,
+        "wall_s": 10.758140961,
+        "process_cpu_s": 342.552148
+      },
+      "neo_projection_factor": {
+        "calls": 36,
+        "wall_s": 0.001298983,
+        "process_cpu_s": 0.001254
+      },
+      "neo_projection_residual": {
+        "calls": 61,
+        "wall_s": 0.003424491,
+        "process_cpu_s": 0.12749
+      },
+      "trust_secular": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_metric_factor": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_structure_factor": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_spectrum": {
+        "calls": 61,
+        "wall_s": 0.002385453,
+        "process_cpu_s": 0.002308
+      },
+      "chart_constraint_svd": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "chart_gauge_svd": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "exchange_build": {
+        "calls": 4,
+        "wall_s": 0.466050245,
+        "process_cpu_s": 14.770442
+      },
+      "exchange_action": {
+        "calls": 36,
+        "wall_s": 0.125533618,
+        "process_cpu_s": 4.428436
+      },
+      "neo_boundary_spectrum": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_indefinite_spectrum": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_curvature_spectrum": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ciah_macro": {
+        "calls": 4,
+        "wall_s": 24.551120528,
+        "process_cpu_s": 721.813982
+      },
+      "ciah_next": {
+        "calls": 61,
+        "wall_s": 12.875257049,
+        "process_cpu_s": 409.957081
+      },
+      "ciah_images": {
+        "calls": 36,
+        "wall_s": 12.851255816,
+        "process_cpu_s": 409.336273
+      },
+      "ciah_keyframe": {
+        "calls": 11,
+        "wall_s": 6.527134607,
+        "process_cpu_s": 148.212319
+      },
+      "ciah_refresh": {
+        "calls": 9,
+        "wall_s": 0.000192497,
+        "process_cpu_s": 0.000184
+      },
+      "ciah_trial": {
+        "calls": 4,
+        "wall_s": 4.215708841,
+        "process_cpu_s": 132.900426
+      },
+      "ciah_completion": {
+        "calls": 4,
+        "wall_s": 0.564741063,
+        "process_cpu_s": 18.327236
+      },
+      "ciah_setup": {
+        "calls": 4,
+        "wall_s": 0.004249846,
+        "process_cpu_s": 0.375286
+      },
+      "ciah_structure": {
+        "calls": 36,
+        "wall_s": 4.819057579,
+        "process_cpu_s": 153.217925
+      },
+      "ciah_connection": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ciah_observe": {
+        "calls": 36,
+        "wall_s": 0.008811214,
+        "process_cpu_s": 0.13269
+      },
+      "chart_span": {
+        "calls": 7,
+        "wall_s": 0.001333614,
+        "process_cpu_s": 0.001324
+      },
+      "chart_quotient": {
+        "calls": 280,
+        "wall_s": 0.051107624,
+        "process_cpu_s": 0.938862
+      },
+      "chart_whitening": {
+        "calls": 40,
+        "wall_s": 0.001256315,
+        "process_cpu_s": 0.001218
+      },
+      "chart_gram": {
+        "calls": 560,
+        "wall_s": 0.004968473,
+        "process_cpu_s": 0.056763
+      },
+      "chart_curvature": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ci_product_projection": {
+        "calls": 1536,
+        "wall_s": 1.782871287,
+        "process_cpu_s": 57.379888
+      },
+      "ci_transform_build": {
+        "calls": 178,
+        "wall_s": 0.11584134,
+        "process_cpu_s": 2.445575
+      },
+      "ci_overlap_apply": {
+        "calls": 15,
+        "wall_s": 0.196553676,
+        "process_cpu_s": 6.394893
+      },
+      "ci_overlap_direction": {
+        "calls": 15,
+        "wall_s": 0.319831659,
+        "process_cpu_s": 8.177836
+      },
+      "ci_overlap_adjoint": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ci_overlap_adjoint_direction": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ci_transport_retract": {
+        "calls": 15,
+        "wall_s": 0.959578651,
+        "process_cpu_s": 27.749758
+      },
+      "ci_transport_gradient": {
+        "calls": 11,
+        "wall_s": 2.707572778,
+        "process_cpu_s": 31.837849
+      },
+      "ci_overlap_transport_gradient": {
+        "calls": 11,
+        "wall_s": 2.676265646,
+        "process_cpu_s": 31.323331
+      },
+      "ci_product_pattern": {
+        "calls": 524,
+        "wall_s": 0.453671505,
+        "process_cpu_s": 22.833107
+      },
+      "ci_product_generate": {
+        "calls": 812,
+        "wall_s": 1.612472131,
+        "process_cpu_s": 52.075588
+      },
+      "ci_product_pack": {
+        "calls": 956,
+        "wall_s": 0.046807463,
+        "process_cpu_s": 1.936045
+      },
+      "ci_supported_validation": {
+        "calls": 1792,
+        "wall_s": 0.059406187,
+        "process_cpu_s": 1.002194
+      },
+      "ci_exterior_generator_pullback": {
+        "calls": 440,
+        "wall_s": 2.318528179,
+        "process_cpu_s": 25.183469
+      },
+      "ci_exterior_moment_pullback": {
+        "calls": 440,
+        "wall_s": 0.004343142,
+        "process_cpu_s": 0.127705
+      }
+    },
+    "tile_totals": {
+      "sweeps": 165,
+      "prepare": 1.6169299330000002,
+      "read": 3.5973067079999996,
+      "compute": 6.566288623999993,
+      "write": 2.3840380080000014,
+      "source_elements": 1964120314.0,
+      "batches": 3109.0,
+      "gram": 2.914877865,
+      "gram_tiles": 114176.0
+    },
+    "events": {
+      "ciah_structure_cost": {
+        "calls": 36,
+        "fields": {
+          "coupling": {
+            "sum": 4.75736798,
+            "min": 0.104729989,
+            "median": 0.13734064,
+            "max": 0.146774247
+          },
+          "orbital_adjoint": {
+            "sum": 0.058093633000000006,
+            "min": 0.001194866,
+            "median": 0.0016302970000000002,
+            "max": 0.0019561
+          },
+          "projection": {
+            "sum": 0.000260573,
+            "min": 4.79e-06,
+            "median": 6.28e-06,
+            "max": 3.4159e-05
+          }
+        }
+      }
+    }
+  },
+  {
+    "run": "run-1264636",
+    "node": "anode40",
+    "note": "Nested phase totals overlap; they are not additive wall-time shares.",
+    "initial_Eh": -398.533053417516,
+    "final_Eh": -399.106646267332,
+    "termination": "ciah_projected_gradient_tolerance",
+    "steps": 4,
+    "hvp": 36,
+    "application_s": 31.477191,
+    "process_s": 31.7,
+    "rss_kib": 2695160,
+    "phases": {
+      "chart": {
+        "calls": 7,
+        "wall_s": 0.062809536,
+        "process_cpu_s": 1.274266
+      },
+      "projection": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "curvature": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "block_factor": {
+        "calls": 160,
+        "wall_s": 0.008628224,
+        "process_cpu_s": 0.23798
+      },
+      "block_eigen": {
+        "calls": 160,
+        "wall_s": 0.007276534,
+        "process_cpu_s": 0.236651
+      },
+      "trial_forward": {
+        "calls": 5,
+        "wall_s": 5.124770538,
+        "process_cpu_s": 162.213827
+      },
+      "trial_gradient": {
+        "calls": 5,
+        "wall_s": 0.733390819,
+        "process_cpu_s": 23.610042
+      },
+      "armijo_accepted": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "armijo_rejected": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_solve": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "hvp_apply": {
+        "calls": 36,
+        "wall_s": 7.83214523,
+        "process_cpu_s": 249.940196
+      },
+      "hvp_setup": {
+        "calls": 36,
+        "wall_s": 0.014848435,
+        "process_cpu_s": 0.014784
+      },
+      "ao_response": {
+        "calls": 36,
+        "wall_s": 0.7877164,
+        "process_cpu_s": 26.010634
+      },
+      "active_direction": {
+        "calls": 36,
+        "wall_s": 0.010984835,
+        "process_cpu_s": 0.085698
+      },
+      "selected_direction": {
+        "calls": 36,
+        "wall_s": 6.728454741,
+        "process_cpu_s": 214.127368
+      },
+      "active_backward": {
+        "calls": 36,
+        "wall_s": 0.017796568,
+        "process_cpu_s": 0.265055
+      },
+      "orbital_pullback": {
+        "calls": 36,
+        "wall_s": 0.054121041,
+        "process_cpu_s": 2.180857
+      },
+      "two_electron_response": {
+        "calls": 36,
+        "wall_s": 0.180240099,
+        "process_cpu_s": 6.68044
+      },
+      "fixed_pullback": {
+        "calls": 36,
+        "wall_s": 0.03367655,
+        "process_cpu_s": 0.570352
+      },
+      "structure_solve": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "structure_adjoint": {
+        "calls": 36,
+        "wall_s": 0.048494917,
+        "process_cpu_s": 1.664985
+      },
+      "neo_projected_solve": {
+        "calls": 61,
+        "wall_s": 0.00132708,
+        "process_cpu_s": 0.086685
+      },
+      "neo_preconditioner": {
+        "calls": 32,
+        "wall_s": 0.004012668,
+        "process_cpu_s": 0.003967
+      },
+      "neo_basis": {
+        "calls": 36,
+        "wall_s": 0.000308796,
+        "process_cpu_s": 0.000267
+      },
+      "neo_metric": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "metric_action": {
+        "calls": 209,
+        "wall_s": 0.092923181,
+        "process_cpu_s": 1.264779
+      },
+      "metric_solve": {
+        "calls": 9,
+        "wall_s": 0.07428886,
+        "process_cpu_s": 0.074277
+      },
+      "metric_block": {
+        "calls": 9,
+        "wall_s": 0.012582297,
+        "process_cpu_s": 0.012564
+      },
+      "ao_pair_action": {
+        "calls": 16,
+        "wall_s": 1.053895059,
+        "process_cpu_s": 33.879614
+      },
+      "ao_h1e_fused": {
+        "calls": 40,
+        "wall_s": 2.06408855,
+        "process_cpu_s": 62.167139
+      },
+      "ao_h1e_transpose": {
+        "calls": 16,
+        "wall_s": 0.320054228,
+        "process_cpu_s": 9.796867
+      },
+      "ao_h1e_forward": {
+        "calls": 16,
+        "wall_s": 0.323759694,
+        "process_cpu_s": 9.319586
+      },
+      "ci_connections": {
+        "calls": 16,
+        "wall_s": 0.012937411,
+        "process_cpu_s": 0.089436
+      },
+      "ci_sigma": {
+        "calls": 77,
+        "wall_s": 3.64193892,
+        "process_cpu_s": 114.110936
+      },
+      "ci_generator": {
+        "calls": 144,
+        "wall_s": 0.146575396,
+        "process_cpu_s": 4.986279
+      },
+      "ci_integral_direction": {
+        "calls": 36,
+        "wall_s": 6.726712972,
+        "process_cpu_s": 214.125626
+      },
+      "ci_transform_left": {
+        "calls": 3325,
+        "wall_s": 0.938212197,
+        "process_cpu_s": 27.22159
+      },
+      "ci_transform_right": {
+        "calls": 93,
+        "wall_s": 0.08300579,
+        "process_cpu_s": 1.815989
+      },
+      "ci_directional_transform": {
+        "calls": 760,
+        "wall_s": 0.753913344,
+        "process_cpu_s": 23.671428
+      },
+      "ci_integral_adjoint": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ci_generator_adjoint": {
+        "calls": 704,
+        "wall_s": 0.380829986,
+        "process_cpu_s": 11.898023
+      },
+      "ci_response": {
+        "calls": 88,
+        "wall_s": 10.338633046,
+        "process_cpu_s": 329.665043
+      },
+      "neo_projection_factor": {
+        "calls": 36,
+        "wall_s": 0.001263789,
+        "process_cpu_s": 0.001218
+      },
+      "neo_projection_residual": {
+        "calls": 61,
+        "wall_s": 0.00331576,
+        "process_cpu_s": 0.127253
+      },
+      "trust_secular": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_metric_factor": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_structure_factor": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_spectrum": {
+        "calls": 61,
+        "wall_s": 0.002386522,
+        "process_cpu_s": 0.002307
+      },
+      "chart_constraint_svd": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "chart_gauge_svd": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "exchange_build": {
+        "calls": 4,
+        "wall_s": 0.493976783,
+        "process_cpu_s": 15.683438
+      },
+      "exchange_action": {
+        "calls": 36,
+        "wall_s": 0.138825698,
+        "process_cpu_s": 4.579249
+      },
+      "neo_boundary_spectrum": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_indefinite_spectrum": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "neo_curvature_spectrum": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ciah_macro": {
+        "calls": 4,
+        "wall_s": 23.493835839,
+        "process_cpu_s": 689.973669
+      },
+      "ciah_next": {
+        "calls": 61,
+        "wall_s": 12.438394514,
+        "process_cpu_s": 396.499511
+      },
+      "ciah_images": {
+        "calls": 36,
+        "wall_s": 12.414762229,
+        "process_cpu_s": 395.894472
+      },
+      "ciah_keyframe": {
+        "calls": 11,
+        "wall_s": 6.248831707,
+        "process_cpu_s": 141.17047
+      },
+      "ciah_refresh": {
+        "calls": 9,
+        "wall_s": 0.000177964,
+        "process_cpu_s": 0.000167
+      },
+      "ciah_trial": {
+        "calls": 4,
+        "wall_s": 3.879169272,
+        "process_cpu_s": 122.207385
+      },
+      "ciah_completion": {
+        "calls": 4,
+        "wall_s": 0.582975028,
+        "process_cpu_s": 18.757802
+      },
+      "ciah_setup": {
+        "calls": 4,
+        "wall_s": 0.004983085,
+        "process_cpu_s": 0.25303
+      },
+      "ciah_structure": {
+        "calls": 36,
+        "wall_s": 4.561679279,
+        "process_cpu_s": 145.330638
+      },
+      "ciah_connection": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ciah_observe": {
+        "calls": 36,
+        "wall_s": 0.009043274,
+        "process_cpu_s": 0.257001
+      },
+      "chart_span": {
+        "calls": 7,
+        "wall_s": 0.001411556,
+        "process_cpu_s": 0.079035
+      },
+      "chart_quotient": {
+        "calls": 280,
+        "wall_s": 0.053093626,
+        "process_cpu_s": 1.094611
+      },
+      "chart_whitening": {
+        "calls": 40,
+        "wall_s": 0.001503754,
+        "process_cpu_s": 0.001454
+      },
+      "chart_gram": {
+        "calls": 560,
+        "wall_s": 0.00527309,
+        "process_cpu_s": 0.062396
+      },
+      "chart_curvature": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ci_product_projection": {
+        "calls": 1536,
+        "wall_s": 1.748367832,
+        "process_cpu_s": 54.533841
+      },
+      "ci_transform_build": {
+        "calls": 178,
+        "wall_s": 0.108933684,
+        "process_cpu_s": 1.877221
+      },
+      "ci_overlap_apply": {
+        "calls": 15,
+        "wall_s": 0.185723716,
+        "process_cpu_s": 6.137366
+      },
+      "ci_overlap_direction": {
+        "calls": 15,
+        "wall_s": 0.300578726,
+        "process_cpu_s": 7.715894
+      },
+      "ci_overlap_adjoint": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ci_overlap_adjoint_direction": {
+        "calls": 0,
+        "wall_s": 0.0,
+        "process_cpu_s": 0.0
+      },
+      "ci_transport_retract": {
+        "calls": 15,
+        "wall_s": 0.916885389,
+        "process_cpu_s": 26.404695
+      },
+      "ci_transport_gradient": {
+        "calls": 11,
+        "wall_s": 2.669231099,
+        "process_cpu_s": 31.291145
+      },
+      "ci_overlap_transport_gradient": {
+        "calls": 11,
+        "wall_s": 2.639526233,
+        "process_cpu_s": 30.995256
+      },
+      "ci_product_pattern": {
+        "calls": 524,
+        "wall_s": 0.400955162,
+        "process_cpu_s": 19.370687
+      },
+      "ci_product_generate": {
+        "calls": 812,
+        "wall_s": 1.495852422,
+        "process_cpu_s": 48.817056
+      },
+      "ci_product_pack": {
+        "calls": 956,
+        "wall_s": 0.045022272,
+        "process_cpu_s": 0.854559
+      },
+      "ci_supported_validation": {
+        "calls": 1792,
+        "wall_s": 0.059782536,
+        "process_cpu_s": 1.261122
+      },
+      "ci_exterior_generator_pullback": {
+        "calls": 440,
+        "wall_s": 2.294269503,
+        "process_cpu_s": 24.533839
+      },
+      "ci_exterior_moment_pullback": {
+        "calls": 440,
+        "wall_s": 0.004159843,
+        "process_cpu_s": 0.003536
+      }
+    },
+    "tile_totals": {
+      "sweeps": 165,
+      "prepare": 1.558851123,
+      "read": 3.4126123440000016,
+      "compute": 6.165369993999999,
+      "write": 2.3287852069999992,
+      "source_elements": 1964120314.0,
+      "batches": 3109.0,
+      "gram": 2.8008803170000003,
+      "gram_tiles": 114176.0
+    },
+    "events": {
+      "ciah_structure_cost": {
+        "calls": 36,
+        "fields": {
+          "coupling": {
+            "sum": 4.510061632999998,
+            "min": 0.098706808,
+            "median": 0.12676676250000002,
+            "max": 0.140599918
+          },
+          "orbital_adjoint": {
+            "sum": 0.04851025600000001,
+            "min": 0.001083131,
+            "median": 0.001359562,
+            "max": 0.001577393
+          },
+          "projection": {
+            "sum": 0.00022151700000000004,
+            "min": 4.49e-06,
+            "median": 5.8e-06,
+            "max": 1.423e-05
+          }
+        }
+      }
+    }
+  }
+]

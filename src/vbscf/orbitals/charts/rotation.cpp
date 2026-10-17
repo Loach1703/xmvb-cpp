@@ -68,7 +68,7 @@ void OrbitalChart::build_rotation_inverse(
       if (!orbital.ah_frame_inverse.allFinite() || error.norm() > bound)
         throw std::runtime_error("analytic rotation inverse failed its residual certificate");
       // The full-frame inverse replaces the signed local spectral inverse;
-      // retain the independent positive block needed by block-LBFGS.
+      // retain the independent positive block needed by P-LBFGS.
       orbital.ah_block_eigenvalues.resize(0);
       orbital.ah_block_eigenvectors.resize(0, 0);
     }

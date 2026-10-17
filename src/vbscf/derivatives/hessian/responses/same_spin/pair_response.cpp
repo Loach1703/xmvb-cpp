@@ -5,11 +5,11 @@
 #include <stdexcept>
 #include <utility>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/determinants/algebra/cofactor_differential.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 
 namespace xmvb::vb::detail {
 
@@ -185,12 +185,12 @@ void accumulate_deleted_minor_same_spin_two_electron_gradient_contribution_local
             continue;
           }
 
-          const int direct_index = TwoElectronIndexer::two_electron_storage_index(
+          const int direct_index = xmvb::core::PairIndex::two_electron_storage_index(
               orbital_index_right_first,
               orbital_index_left_first,
               orbital_index_right_second,
               orbital_index_left_second);
-          const int exchange_index = TwoElectronIndexer::two_electron_storage_index(
+          const int exchange_index = xmvb::core::PairIndex::two_electron_storage_index(
               orbital_index_right_first,
               orbital_index_left_second,
               orbital_index_right_second,
@@ -284,7 +284,7 @@ static Eigen::MatrixXd build_ri_spin_antisymmetrized_interaction_direction(
   const int n_electrons = static_cast<int>(occ_L.size());
   const int n_electron_pairs = n_electrons * (n_electrons - 1) / 2;
   Eigen::MatrixXd result(n_electron_pairs, n_electron_pairs);
-  const auto pair = TwoElectronIndexer::packed_pair_index;
+  const auto pair = xmvb::core::PairIndex::packed_pair_index;
   const auto kernel_direction = [&](int p, int q) {
     return directional_factors.col(p).dot(accepted_factors.col(q)) +
         accepted_factors.col(p).dot(directional_factors.col(q));
@@ -642,12 +642,12 @@ void accumulate_directional_deleted_minor_same_spin_two_electron_gradient_contri
             continue;
           }
 
-          const int direct_index = TwoElectronIndexer::two_electron_storage_index(
+          const int direct_index = xmvb::core::PairIndex::two_electron_storage_index(
               orbital_index_right_first,
               orbital_index_left_first,
               orbital_index_right_second,
               orbital_index_left_second);
-          const int exchange_index = TwoElectronIndexer::two_electron_storage_index(
+          const int exchange_index = xmvb::core::PairIndex::two_electron_storage_index(
               orbital_index_right_first,
               orbital_index_left_second,
               orbital_index_right_second,

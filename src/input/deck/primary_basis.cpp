@@ -385,16 +385,16 @@ std::unordered_map<int, std::vector<BasisShellTemplate>> parse_basis_templates(
           first_shell.exponents.push_back(exponent);
           first_shell.coefficients.push_back(
               parse_fortran_double(primitive_tokens[1]) *
-              shell_normalization(0, exponent));
+              xmvb::libcint::shell_normalization(0, exponent));
           second_shell.exponents.push_back(exponent);
           second_shell.coefficients.push_back(
               parse_fortran_double(primitive_tokens[2]) *
-              shell_normalization(1, exponent));
+              xmvb::libcint::shell_normalization(1, exponent));
         } else {
           first_shell.exponents.push_back(exponent);
           first_shell.coefficients.push_back(
               parse_fortran_double(primitive_tokens[1]) *
-              shell_normalization(first_shell.angular_momentum, exponent));
+              xmvb::libcint::shell_normalization(first_shell.angular_momentum, exponent));
         }
       }
 
@@ -424,7 +424,7 @@ std::unordered_map<int, std::vector<BasisShellTemplate>> parse_basis_templates(
   return shells_by_atomic_number;
 }
 
-LibcintInput build_libcint_input(
+xmvb::integrals::LibcintInput build_libcint_input(
     const InputDeck& input_deck,
     const std::unordered_map<int, std::vector<BasisShellTemplate>>& shells_by_atomic_number) {
   if (input_deck.geometry_atoms.empty()) {
@@ -447,7 +447,7 @@ LibcintInput build_libcint_input(
     }
   }
 
-  LibcintInput input;
+  xmvb::integrals::LibcintInput input;
   input.n_atoms = n_atoms;
   input.n_shells = n_shells;
   input.n_gaussian_primitives = n_gaussian_primitives;
@@ -501,7 +501,7 @@ LibcintInput build_libcint_input(
       env_offset += 2 * n_primitives;
 
       input.basidx[shell_index * 2] = ao_offset;
-      const int ao_count = cartesian_ao_count(shell_template.angular_momentum);
+      const int ao_count = xmvb::libcint::cartesian_ao_count(shell_template.angular_momentum);
       input.basidx[shell_index * 2 + 1] = ao_count;
       ao_offset += ao_count;
       ++shell_index;

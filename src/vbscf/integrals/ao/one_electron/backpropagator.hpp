@@ -4,9 +4,9 @@
 
 #include <vector>
 
-#include "vbscf/integrals/ao/contracts/input.hpp"
+#include "integrals/ao/input.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagation_result.hpp"
-#include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "integrals/ao/ri.hpp"
 #include "vbscf/orbitals/preparation/result.hpp"
 
 namespace xmvb::vb {
@@ -24,12 +24,12 @@ public:
    */
   AoEffectiveOneElectronBackpropagationResult backpropagate(
       const std::vector<double>& ao_effective_one_electron_gradient,
-      const RiAoFactorization& ri_factorization,
+      const xmvb::integrals::RiAoFactorization& ri_factorization,
       int n_basis_functions) const;
 
   AoEffectiveOneElectronBackpropagationResult backpropagate(
       const Eigen::Ref<const Eigen::MatrixXd>& ao_effective_one_electron_gradient,
-      const RiAoFactorization& ri_factorization,
+      const xmvb::integrals::RiAoFactorization& ri_factorization,
       int n_basis_functions) const;
 
   /**
@@ -46,7 +46,7 @@ public:
   AoEffectiveOneElectronBackpropagationResult backpropagate(
       const std::vector<double>& active_one_electron_gradient,
       const OrbitalPreparationResult& orbital_result,
-      const RiAoFactorization& ri_factorization,
+      const xmvb::integrals::RiAoFactorization& ri_factorization,
       int n_basis_functions,
       int n_inactive_doubly_occupied_orbitals,
       int n_active_orbitals) const;
@@ -56,11 +56,11 @@ public:
    */
   AoEffectiveOneElectronBackpropagationResult backpropagate(
       const std::vector<double>& ao_effective_one_electron_gradient,
-      const AoIntegralInput& ao_integral_input) const;
+      const xmvb::integrals::AoIntegralInput& ao_integral_input) const;
 
   AoEffectiveOneElectronBackpropagationResult backpropagate(
       const Eigen::Ref<const Eigen::MatrixXd>& ao_effective_one_electron_gradient,
-      const AoIntegralInput& ao_integral_input) const;
+      const xmvb::integrals::AoIntegralInput& ao_integral_input) const;
 };
 
 }  // namespace xmvb::vb

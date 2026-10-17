@@ -1,10 +1,14 @@
 #include <array>
+#include <barrier>
 #include <cmath>
 #include <chrono>
+#include <cstdint>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -20,13 +24,15 @@
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
-#include "vbscf/structures/orthogonal_ci/planner.hpp"
-#include "vbscf/structures/orthogonal_ci/sigma.hpp"
+#include "mcscf/ci/planner.hpp"
+#include "mcscf/ci/product_support.hpp"
+#include "mcscf/ci/sigma.hpp"
 #include "vbscf/determinants/pairs/evaluator.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 
 namespace {
@@ -38,12 +44,16 @@ void require(bool condition, const std::string& message) {
 }
 
 void check_fused_response(
-    const xmvb::vb::DirectCiSigmaAction& action,
+    const xmvb::mcscf::DirectCiSigmaAction& action,
     const Eigen::Ref<const Eigen::MatrixXd>& response,
     const Eigen::Ref<const Eigen::MatrixXd>& state) {
   const auto fused = action.apply_with_adjoint(response, state);
   const auto sigma = action.apply(response);
   const auto adjoint = action.integral_adjoint(response, state);
+  const Eigen::MatrixXd moment=action.one_body_generator_adjoint(response,state);
+  const Eigen::MatrixXd density=0.5*(moment+moment.transpose()).eval();
+  require((fused.integrals.one_electron-density).norm()<3e-12*std::max(1.0,density.norm()),
+          "one-electron integral adjoint differs from the symmetrized generator density");
   require((fused.sigma - sigma).norm() < 3e-12 * std::max(1.0, sigma.norm()),
           "fused response sigma differs from separate action");
   require((fused.integrals.one_electron - adjoint.one_electron).norm() <
@@ -70,15 +80,12 @@ void check_joint_structure_response(const xmvb::vb::StructureAction& action,
     states.states[i].normalized_state_weight = states.normalized_state_weights[i];
     states.states[i].coefficient_matrix = action.expand_structure_block(raw.col(i));
   }
-  const auto accepted = action.prepare_active_adjoint(states, {-1.3, -0.9});
+  const auto accepted = action.prepare_active_adjoint(raw, states.normalized_state_weights, {-1.3, -0.9});
   const Eigen::MatrixXd multipliers =
       (Eigen::Matrix2d() << 0.13, -0.04, 0.08, -0.21).finished();
   for (bool zero : {false, true}) {
     if (zero) raw.setZero();
     else raw = raw.array().cos().matrix();
-    auto response = states;
-    for (int i = 0; i < 2; ++i)
-      response.states[i].coefficient_matrix = action.expand_structure_block(raw.col(i));
     auto sweep = action.apply_response(accepted, raw);
     const auto images = action.apply(raw);
     require((sweep.images.hamiltonian-images.hamiltonian).norm() <
@@ -87,7 +94,7 @@ void check_joint_structure_response(const xmvb::vb::StructureAction& action,
         3e-11*std::max(1.0,images.overlap.norm()), "joint response changed H/S images");
     const auto joint = action.finish_response(accepted, std::move(sweep), multipliers);
     const auto reference = action.active_integral_adjoint_direction(accepted,
-        &response, &multipliers, {}, {}, {}, nullptr, false);
+        &raw, &multipliers, {}, {}, {}, nullptr, false);
     require((joint.overlap-reference.overlap).norm() <
         3e-11*std::max(1.0,reference.overlap.norm()) &&
         (joint.one_electron-reference.one_electron).norm() <
@@ -292,7 +299,7 @@ void check_exterior_transform(int width) {
 void check_planner() {
   const auto cerras_alpha = complete_space(11, 5);
   const auto cerras_beta = complete_space(11, 6);
-  const auto cerras = xmvb::vb::plan_orthogonal_direct_ci_action(
+  const auto cerras = xmvb::mcscf::plan_orthogonal_direct_ci_action(
       cerras_alpha,
       cerras_beta,
       11,
@@ -309,7 +316,7 @@ void check_planner() {
   require(cerras.favors_direct_ci(), "CERRAS-size FLOP plan rejected direct CI");
 
   const auto loflea_space = complete_space(12, 6);
-  const auto loflea = xmvb::vb::plan_orthogonal_direct_ci_action(
+  const auto loflea = xmvb::mcscf::plan_orthogonal_direct_ci_action(
       loflea_space,
       loflea_space,
       12,
@@ -326,7 +333,7 @@ void check_planner() {
 
   auto incomplete = cerras_alpha;
   incomplete.pop_back();
-  const auto rejected = xmvb::vb::plan_orthogonal_direct_ci_action(
+  const auto rejected = xmvb::mcscf::plan_orthogonal_direct_ci_action(
       incomplete,
       cerras_beta,
       11,
@@ -336,7 +343,7 @@ void check_planner() {
 
   auto duplicate = cerras_alpha;
   duplicate.back() = duplicate.front();
-  const auto duplicate_rejected = xmvb::vb::plan_orthogonal_direct_ci_action(
+  const auto duplicate_rejected = xmvb::mcscf::plan_orthogonal_direct_ci_action(
       duplicate,
       cerras_beta,
       11,
@@ -345,12 +352,8 @@ void check_planner() {
       !duplicate_rejected.carrier_complete(),
       "count-complete carrier with a duplicate string was admitted");
 
-  constexpr std::size_t workspace_budget = 256ULL * 1024ULL * 1024ULL;
-  require(
-      loflea.fits_action_workspace(workspace_budget),
-      "LOFLEA-size direct-CI carrier exceeded the action workspace");
   const auto large_half_filled = complete_space(16, 8);
-  const auto large_plan = xmvb::vb::plan_orthogonal_direct_ci_action(
+  const auto large_plan = xmvb::mcscf::plan_orthogonal_direct_ci_action(
       large_half_filled,
       large_half_filled,
       16,
@@ -358,9 +361,6 @@ void check_planner() {
   require(
       large_plan.carrier_complete(),
       "large fixed-spin carrier was not recognized");
-  require(
-      !large_plan.fits_action_workspace(workspace_budget),
-      "multi-gigabyte direct-CI carrier passed the action workspace limit");
 }
 
 void check_sigma_action() {
@@ -386,7 +386,7 @@ void check_sigma_action() {
       one_electron(column, row) = value;
     }
   }
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   Eigen::MatrixXd pair_factor(7, n_pairs);
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row < pair_factor.rows(); ++row) {
@@ -395,13 +395,13 @@ void check_sigma_action() {
     }
   }
   const Eigen::MatrixXd pair_kernel = pair_factor.transpose() * pair_factor;
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   two_electron.packed_active_two_electron_integrals.resize(
-      xmvb::vb::packed_active_two_electron_integral_count(n_orbitals));
+      xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row <= column; ++row) {
       two_electron.packed_active_two_electron_integrals[
-          xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               row, column)] = pair_kernel(row, column);
     }
   }
@@ -492,9 +492,9 @@ void check_sigma_action() {
       alpha, orthogonal.orbital_transform);
   const xmvb::vb::ExteriorOrbitalTransform beta_transform(
       beta, orthogonal.orbital_transform);
-  const xmvb::vb::DirectCiSigmaAction sigma_action(
+  const xmvb::mcscf::DirectCiSigmaAction sigma_action(
       alpha, beta, orthogonal);
-  const xmvb::vb::DirectCiSigmaAction sigma_direction(
+  const xmvb::mcscf::DirectCiSigmaAction sigma_direction(
       alpha, beta, orthogonal_direction);
 
   const Eigen::MatrixXd diagonal=sigma_action.diagonal(orthogonal.one_electron);
@@ -516,22 +516,22 @@ void check_sigma_action() {
     }
   }
 
-  const xmvb::vb::DirectCiSigmaAction shared_direction(
+  const xmvb::mcscf::DirectCiSigmaAction shared_direction(
       sigma_action, orthogonal_direction);
   require((shared_direction.apply(coefficients) - sigma_direction.apply(coefficients))
               .cwiseAbs().maxCoeff() < 2.0e-12,
           "shared spin-string links changed the directional sigma action");
   const auto surviving_direction = [&] {
-    const xmvb::vb::DirectCiSigmaAction temporary(alpha, beta, orthogonal);
-    return xmvb::vb::DirectCiSigmaAction(temporary, orthogonal_direction);
+    const xmvb::mcscf::DirectCiSigmaAction temporary(alpha, beta, orthogonal);
+    return xmvb::mcscf::DirectCiSigmaAction(temporary, orthogonal_direction);
   }();
   require((surviving_direction.apply(coefficients) - sigma_direction.apply(coefficients))
               .cwiseAbs().maxCoeff() < 2.0e-12,
           "shared spin-string links did not survive their original action");
-  const xmvb::vb::DirectCiSigmaAction equal_spin_action(alpha, alpha, orthogonal);
-  const xmvb::vb::DirectCiSigmaAction equal_spin_direction(
+  const xmvb::mcscf::DirectCiSigmaAction equal_spin_action(alpha, alpha, orthogonal);
+  const xmvb::mcscf::DirectCiSigmaAction equal_spin_direction(
       equal_spin_action, orthogonal_direction);
-  const xmvb::vb::DirectCiSigmaAction equal_spin_reference(
+  const xmvb::mcscf::DirectCiSigmaAction equal_spin_reference(
       alpha, alpha, orthogonal_direction);
   const Eigen::MatrixXd equal_spin_values = Eigen::MatrixXd::Ones(
       alpha.size(), 2 * alpha.size());
@@ -546,7 +546,7 @@ void check_sigma_action() {
           std::cos(0.23 * static_cast<double>((row + 2) * (column + 1)));
     }
   }
-  const xmvb::vb::DirectCiIntegralAdjoint integral_adjoint =
+  const xmvb::mcscf::DirectCiIntegralAdjoint integral_adjoint =
       sigma_action.integral_adjoint(left_coefficients, coefficients);
   check_fused_response(sigma_action, left_coefficients, coefficients);
   check_fused_response(sigma_action, coefficients, coefficients);
@@ -559,7 +559,7 @@ void check_sigma_action() {
   padded_right.middleRows(2, coefficients.rows()) = coefficients;
   check_fused_response(sigma_action, padded_left.middleRows(1, coefficients.rows()),
                        padded_right.middleRows(2, coefficients.rows()));
-  const xmvb::vb::DirectCiIntegralAdjoint reverse_integral_adjoint =
+  const xmvb::mcscf::DirectCiIntegralAdjoint reverse_integral_adjoint =
       sigma_action.integral_adjoint(coefficients, left_coefficients);
   require(
       (integral_adjoint.one_electron -
@@ -583,13 +583,13 @@ void check_sigma_action() {
       "direct-CI integral adjoint fails the bilinear directional identity");
   const auto pack_pair_kernel = [n_orbitals](
       const Eigen::MatrixXd& kernel,
-      xmvb::vb::ActiveSpaceTwoElectronResult* result) {
+      xmvb::integrals::ActiveSpaceTwoElectronResult* result) {
     result->packed_active_two_electron_integrals.resize(
-        xmvb::vb::packed_active_two_electron_integral_count(n_orbitals));
+        xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
     for (int column = 0; column < kernel.cols(); ++column) {
       for (int row = 0; row <= column; ++row) {
         result->packed_active_two_electron_integrals[
-            xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 row, column)] = kernel(row, column);
       }
     }
@@ -613,11 +613,11 @@ void check_sigma_action() {
       &minus_sigma_integrals.two_electron);
   const double plus_bilinear =
       (left_coefficients.cwiseProduct(
-           xmvb::vb::DirectCiSigmaAction(
+           xmvb::mcscf::DirectCiSigmaAction(
                alpha, beta, plus_sigma_integrals).apply(coefficients))).sum();
   const double minus_bilinear =
       (left_coefficients.cwiseProduct(
-           xmvb::vb::DirectCiSigmaAction(
+           xmvb::mcscf::DirectCiSigmaAction(
                alpha, beta, minus_sigma_integrals).apply(coefficients))).sum();
   const double finite_difference_bilinear =
       (plus_bilinear - minus_bilinear) / (2.0 * adjoint_step);
@@ -720,10 +720,10 @@ void check_sigma_action() {
 
   Eigen::MatrixXd sigma_probe = coefficients;
   const Eigen::MatrixXd plus_sigma =
-      xmvb::vb::DirectCiSigmaAction(
+      xmvb::mcscf::DirectCiSigmaAction(
           alpha, beta, plus_orthogonal).apply(sigma_probe);
   const Eigen::MatrixXd minus_sigma =
-      xmvb::vb::DirectCiSigmaAction(
+      xmvb::mcscf::DirectCiSigmaAction(
           alpha, beta, minus_orthogonal).apply(sigma_probe);
   require(
       (((plus_sigma - minus_sigma) / (2.0 * direction_step)) -
@@ -737,7 +737,7 @@ void check_sigma_action() {
         alpha, integrals.orbital_transform);
     const xmvb::vb::ExteriorOrbitalTransform beta_action_transform(
         beta, integrals.orbital_transform);
-    const xmvb::vb::DirectCiSigmaAction action_sigma(
+    const xmvb::mcscf::DirectCiSigmaAction action_sigma(
         alpha, beta, integrals);
     Eigen::MatrixXd values = input;
     alpha_action_transform.apply_left(&values);
@@ -913,7 +913,7 @@ void check_sigma_action() {
       orthogonal_state);
   const Eigen::MatrixXd orthogonal_residual =
       orthogonal_sigma - test_energy * orthogonal_state;
-  const xmvb::vb::DirectCiIntegralAdjoint state_integral_adjoint =
+  const xmvb::mcscf::DirectCiIntegralAdjoint state_integral_adjoint =
       sigma_action.integral_adjoint(
           orthogonal_state,
           orthogonal_state);
@@ -932,7 +932,7 @@ void check_sigma_action() {
     for (int row = 0; row < n_pairs; ++row) {
       original_pair_direction(row, column) =
           packed_two_electron_direction[
-              xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+              xmvb::core::PairIndex::packed_pair_of_pairs_index(
                   row, column)];
     }
   }
@@ -967,7 +967,7 @@ void check_sigma_action() {
   const Eigen::MatrixXd response_residual =
       sigma_action.apply(orthogonal_response) -
       test_energy * orthogonal_response;
-  const xmvb::vb::DirectCiIntegralAdjoint response_integral_adjoint =
+  const xmvb::mcscf::DirectCiIntegralAdjoint response_integral_adjoint =
       sigma_action.integral_adjoint(
           orthogonal_response, orthogonal_state);
   const Eigen::MatrixXd response_generator_adjoint = 2.0 *
@@ -1008,11 +1008,11 @@ void check_sigma_action() {
   const Eigen::MatrixXd directional_orthogonal_residual =
       directional_orthogonal_sigma -
       test_energy * directional_orthogonal_state;
-  const xmvb::vb::DirectCiIntegralAdjoint left_state_adjoint_direction =
+  const xmvb::mcscf::DirectCiIntegralAdjoint left_state_adjoint_direction =
       sigma_action.integral_adjoint(
           directional_orthogonal_state,
           orthogonal_state);
-  const xmvb::vb::DirectCiIntegralAdjoint right_state_adjoint_direction =
+  const xmvb::mcscf::DirectCiIntegralAdjoint right_state_adjoint_direction =
       sigma_action.integral_adjoint(
           orthogonal_state,
           directional_orthogonal_state);
@@ -1049,13 +1049,13 @@ void check_sigma_action() {
         alpha, integrals.orbital_transform);
     const xmvb::vb::ExteriorOrbitalTransform beta_state_transform(
         beta, integrals.orbital_transform);
-    const xmvb::vb::DirectCiSigmaAction state_sigma(alpha, beta, integrals);
+    const xmvb::mcscf::DirectCiSigmaAction state_sigma(alpha, beta, integrals);
     Eigen::MatrixXd state = state_coefficients;
     alpha_state_transform.apply_left(&state);
     beta_state_transform.apply_right(&state);
     const Eigen::MatrixXd sigma = state_sigma.apply(state);
     const Eigen::MatrixXd residual = sigma - test_energy * state;
-    const xmvb::vb::DirectCiIntegralAdjoint integral_gradient =
+    const xmvb::mcscf::DirectCiIntegralAdjoint integral_gradient =
         state_sigma.integral_adjoint(state, state);
     const Eigen::MatrixXd generator_gradient =
         2.0 * state_sigma.one_body_generator_adjoint(residual, state);
@@ -1509,14 +1509,39 @@ void check_sigma_action() {
       inverse_d[a*beta.size()+b]=1.0/(diagonal(a,b)-root_energy);
   const Eigen::MatrixXd reference_p =
       inverse_m*f.transpose()*inverse_d.asDiagonal()*f*inverse_m;
-  const Eigen::MatrixXd riesz = full_metric.apply(metric_rhs.leftCols(1));
-  const Eigen::MatrixXd carrier_image = full_action.apply_inverse_carrier_diagonal(
-      riesz,Eigen::VectorXd::Constant(1,root_energy),0.0);
-  const Eigen::MatrixXd correction = full_metric.apply(carrier_image);
+  const Eigen::MatrixXd correction = full_metric.apply_carrier_inverse(
+      metric_rhs.leftCols(1),Eigen::VectorXd::Constant(1,root_energy),0.0);
   const Eigen::MatrixXd expected_correction = reference_p*metric_rhs.leftCols(1);
   require((correction-expected_correction).norm()<
               1e-10*std::max(1.0,expected_correction.norm()),
           "carrier Davidson inverse differs from the dense metric pullback");
+  const Eigen::MatrixXd cancelled = full_metric.apply_carrier_inverse(
+      metric_rhs,Eigen::VectorXd::Constant(metric_rhs.cols(),root_energy),0.0);
+  require((cancelled-reference_p*metric_rhs).norm()<
+              1e-10*std::max(1.0,(reference_p*metric_rhs).norm()),
+          "cancelled multi-RHS carrier inverse differs from the independent pullback");
+  const Eigen::MatrixXd j=full_metric.to_ci_coordinates(identity);
+  const Eigen::MatrixXd ji=full_metric.from_ci_coordinates(identity);
+  require((j.transpose()*j-full_overlap).norm()<2e-11 &&
+              (j*ji-identity).norm()<2e-11,
+          "complete CI boundary maps changed the physical metric or round trip");
+  const Eigen::MatrixXd raw_h=full_expansion.transpose()*dense_hamiltonian*full_expansion;
+  const Eigen::MatrixXd ci_h=full_metric.apply_ci_hamiltonian(identity);
+  require((ci_h-ji.transpose()*raw_h*ji).norm()<2e-10 &&
+              (ci_h-ci_h.transpose()).norm()<2e-11,
+          "complete CI Hamiltonian is not the independent symmetric congruence");
+  require((full_metric.ci_covector_to_structure(metric_rhs)-j.transpose()*metric_rhs).norm()<2e-11,
+          "complete CI Ritz covector pullback is inconsistent");
+  require((full_metric.apply_ci_preconditioner(metric_rhs,
+              Eigen::VectorXd::Constant(metric_rhs.cols(),root_energy),0.0)-
+              j*reference_p*j.transpose()*metric_rhs).norm()<2e-10,
+          "complete CI preconditioner changed under the coordinate congruence");
+  const Eigen::MatrixXd restored=full_metric.from_ci_coordinates(metric_rhs);
+  const auto raw_images=full_action.apply(restored);
+  require((full_metric.ci_covector_to_structure(
+              full_metric.apply_ci_hamiltonian(metric_rhs))-raw_images.hamiltonian).norm()<2e-10 &&
+              (full_metric.ci_covector_to_structure(metric_rhs)-raw_images.overlap).norm()<2e-11,
+          "complete CI exit failed to restore H C and M C");
   auto original_action = std::make_unique<xmvb::vb::StructureAction>(
       full_terms,product_dimension,topology,packed_overlap,
       one_electron,two_electron,n_orbitals,&full_diagonal);
@@ -1667,9 +1692,9 @@ void check_sigma_tile_boundary() {
   integrals.one_electron = Eigen::MatrixXd::Zero(n_orbitals, n_orbitals);
   for (int i = 0; i < n_orbitals; ++i)
     integrals.one_electron(i, i) = 0.17 * (i + 1);
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   integrals.pair_kernel = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
-  const xmvb::vb::DirectCiSigmaAction action(spin, spin, integrals);
+  const xmvb::mcscf::DirectCiSigmaAction action(spin, spin, integrals);
   const int n_strings = static_cast<int>(spin.size());
   Eigen::MatrixXd coefficients(n_strings, block_width * n_strings);
   Eigen::VectorXd energies = Eigen::VectorXd::Zero(n_strings);
@@ -1715,7 +1740,7 @@ void check_sigma_tile_boundary() {
   require((dynamic_adjoint.pair_kernel - adjoint.pair_kernel).norm() <
               1e-11 * std::max(1.0, adjoint.pair_kernel.norm()),
           "adjoint output ownership depends on the actual team size");
-  xmvb::vb::DirectCiIntegralAdjoint nested_adjoint;
+  xmvb::mcscf::DirectCiIntegralAdjoint nested_adjoint;
 #pragma omp parallel num_threads(2)
   {
 #pragma omp single
@@ -1746,7 +1771,7 @@ void check_distinct_spin_sigma_action() {
       one_electron(column, row) = value;
     }
   }
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   Eigen::MatrixXd factor(6, n_pairs);
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row < factor.rows(); ++row) {
@@ -1757,26 +1782,26 @@ void check_distinct_spin_sigma_action() {
   const Eigen::MatrixXd pair_kernel = factor.transpose() * factor;
   const auto pack_kernel = [n_orbitals](
       const Eigen::MatrixXd& kernel) {
-    xmvb::vb::ActiveSpaceTwoElectronResult result;
+    xmvb::integrals::ActiveSpaceTwoElectronResult result;
     result.packed_active_two_electron_integrals.resize(
-        xmvb::vb::packed_active_two_electron_integral_count(n_orbitals));
+        xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
     for (int column = 0; column < kernel.cols(); ++column) {
       for (int row = 0; row <= column; ++row) {
         result.packed_active_two_electron_integrals[
-            xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(
                 row, column)] = kernel(row, column);
       }
     }
     return result;
   };
-  const xmvb::vb::ActiveSpaceTwoElectronResult two_electron =
+  const xmvb::integrals::ActiveSpaceTwoElectronResult two_electron =
       pack_kernel(pair_kernel);
-  const xmvb::vb::OrthogonalActiveIntegrals integrals{
-      Eigen::MatrixXd::Identity(n_orbitals, n_orbitals),
-      one_electron,
-      pair_kernel,
-      two_electron};
-  const xmvb::vb::DirectCiSigmaAction action(alpha, beta, integrals);
+  xmvb::vb::OrthogonalActiveIntegrals integrals;
+  integrals.orbital_transform=Eigen::MatrixXd::Identity(n_orbitals,n_orbitals);
+  integrals.one_electron=one_electron;
+  integrals.pair_kernel=pair_kernel;
+  integrals.two_electron=two_electron;
+  const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
 
   Eigen::MatrixXd coefficients(
       static_cast<int>(alpha.size()),
@@ -1857,6 +1882,320 @@ void check_distinct_spin_sigma_action() {
   }
 }
 
+void check_streamed_generator_adjoint_requests() {
+  constexpr int n_orbitals = 4;
+  const auto alpha = complete_space(n_orbitals, 1);
+  const auto beta = complete_space(n_orbitals, 2);
+  const int n_alpha = static_cast<int>(alpha.size());
+  const int n_beta = static_cast<int>(beta.size());
+  constexpr int first = 2;
+  constexpr int count = 3;
+  xmvb::vb::OrthogonalActiveIntegrals integrals;
+  integrals.one_electron = Eigen::MatrixXd::Zero(n_orbitals, n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
+  integrals.pair_kernel = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
+  const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
+
+  Eigen::MatrixXd left(n_alpha, count), right_a(n_alpha, n_beta),
+      right_b(n_alpha, n_beta);
+  for (int b = 0; b < n_beta; ++b)
+    for (int a = 0; a < n_alpha; ++a) {
+      right_a(a, b) = (b == n_beta - 1 || (a + b) % 3 == 0)
+          ? 0.0 : std::sin(0.31 * (a + 1) * (b + 2));
+      right_b(a, b) = std::cos(0.19 * (a + 2) * (b + 1));
+    }
+  for (int b = 0; b < count; ++b)
+    for (int a = 0; a < n_alpha; ++a)
+      left(a, b) = (a == 1 && b == 1) ? 0.0 :
+          std::sin(0.27 * (a + 2) * (b + 1));
+
+  // Both readers borrow this storage. Every tile or column request overwrites
+  // it, including requests belonging to the other right argument.
+  std::vector<double> borrowed_values(n_alpha);
+  std::vector<int> borrowed_rows;
+  const auto request = [&](const Eigen::MatrixXd& right, double scale,
+                           bool transpose, bool compact)
+      -> xmvb::mcscf::DirectCiStreamedGeneratorRequest {
+    const Eigen::MatrixXd* carrier = &right;
+    xmvb::mcscf::DirectCiTileReader read =
+        [&, carrier](const std::vector<int>& betas,
+                     const std::vector<int>& rows,
+                     Eigen::Ref<Eigen::MatrixXd> values) {
+          borrowed_values.assign(n_alpha, -97.0);
+          borrowed_rows.clear();
+          for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+            for (int a = 0; a < static_cast<int>(rows.size()); ++a)
+              values(a, b) = (*carrier)(rows[a], betas[b]);
+        };
+    xmvb::mcscf::DirectCiColumnReader column =
+        [&, carrier, compact](int beta_column)
+            -> xmvb::mcscf::DirectCiColumnView {
+          borrowed_values.assign(n_alpha, -97.0);
+          borrowed_rows.clear();
+          if (compact) {
+            int used = 0;
+            for (int a = 0; a < n_alpha; ++a)
+              if ((*carrier)(a, beta_column) != 0.0) {
+                borrowed_rows.push_back(a);
+                borrowed_values[used++] = (*carrier)(a, beta_column);
+              }
+            return {borrowed_values.data(), borrowed_rows.data(), used};
+          }
+          for (int a = 0; a < n_alpha; ++a)
+            borrowed_values[a] = (*carrier)(a, beta_column);
+          return {borrowed_values.data(), nullptr, n_alpha};
+        };
+    return {read, column, scale, transpose, false};
+  };
+
+  constexpr double scale_a = -0.37;
+  constexpr double scale_b = 0.61;
+  Eigen::MatrixXd padded_left = Eigen::MatrixXd::Zero(n_alpha, n_beta);
+  padded_left.middleCols(first, count) = left;
+  const Eigen::MatrixXd expected_full =
+      scale_a * action.one_body_generator_adjoint(padded_left, right_a) +
+      scale_b * action.one_body_generator_adjoint(padded_left, right_b).transpose();
+  Eigen::MatrixXd expected_upper = expected_full;
+  expected_upper.triangularView<Eigen::StrictlyLower>().setZero();
+  const Eigen::MatrixXd columns_upper = action.generator_adjoint_columns(
+      first, count, left,
+      {{right_a, scale_a, false}, {right_b, scale_b, true}}, true);
+  require((columns_upper - expected_upper).norm() < 2e-12,
+          "column-panel generator reference differs from the full adjoint");
+  const auto streamed = [&](const Eigen::MatrixXd& panel, bool symmetric_sum) {
+    return action.generator_adjoint_streamed(first, panel,
+        {request(right_a, scale_a, false, true),
+         request(right_b, scale_b, true, false)}, symmetric_sum);
+  };
+  require((streamed(left, false) - expected_upper).norm() < 2e-12,
+          "fused streamed generator differs from oriented upper adjoints");
+  Eigen::MatrixXd expected_symmetric =
+      (expected_full + expected_full.transpose()).eval();
+  expected_symmetric.triangularView<Eigen::StrictlyLower>().setZero();
+  require((streamed(left, true) - expected_symmetric).norm() < 2e-12,
+          "fused streamed generator symmetric sum differs from full adjoints");
+  const Eigen::MatrixXd zero = Eigen::MatrixXd::Zero(n_alpha, count);
+  require(streamed(zero, false).cwiseAbs().maxCoeff() == 0.0 &&
+              streamed(zero, true).cwiseAbs().maxCoeff() == 0.0,
+          "zero streamed generator panel produced a nonzero adjoint");
+
+  // Retained columns own fixed storage for the entire contraction. The first
+  // right argument uses sparse sorted rows; the second borrows dense Eigen
+  // columns directly. Neither reader changes a returned column or row list.
+  std::vector<std::vector<double>> retained_values(n_beta);
+  std::vector<std::vector<int>> retained_rows(n_beta);
+  for (int b = 0; b < n_beta; ++b)
+    for (int a = 0; a < n_alpha; ++a)
+      if (right_a(a, b) != 0.0) {
+        retained_rows[b].push_back(a);
+        retained_values[b].push_back(right_a(a, b));
+      }
+  const auto retained_request = [&](const Eigen::MatrixXd& right, double scale,
+                                    bool transpose, bool compact)
+      -> xmvb::mcscf::DirectCiStreamedGeneratorRequest {
+    const Eigen::MatrixXd* carrier = &right;
+    xmvb::mcscf::DirectCiTileReader read =
+        [carrier](const std::vector<int>& betas,
+                  const std::vector<int>& rows,
+                  Eigen::Ref<Eigen::MatrixXd> values) {
+          for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+            for (int a = 0; a < static_cast<int>(rows.size()); ++a)
+              values(a, b) = (*carrier)(rows[a], betas[b]);
+        };
+    xmvb::mcscf::DirectCiColumnReader column =
+        [&, carrier, compact](int b) -> xmvb::mcscf::DirectCiColumnView {
+          if (compact)
+            return {retained_values[b].data(), retained_rows[b].data(),
+                    static_cast<int>(retained_values[b].size())};
+          return {carrier->col(b).data(), nullptr, n_alpha};
+        };
+    return {read, column, scale, transpose, true};
+  };
+  const auto retained = [&](bool symmetric_sum) {
+    return action.generator_adjoint_streamed(first, left,
+        {retained_request(right_a, scale_a, false, true),
+         retained_request(right_b, scale_b, true, false)}, symmetric_sum);
+  };
+  require((retained(false) - expected_upper).norm() < 2e-12 &&
+              (retained(true) - expected_symmetric).norm() < 2e-12,
+          "retained streamed columns differ from oriented generator adjoints");
+  Eigen::MatrixXd other = 0.37 * left;
+  for (int b = 0; b < count; ++b)
+    for (int a = 0; a < n_alpha; ++a)
+      other(a, b) += 0.21 * std::cos(0.23 * (a + 1) * (b + 3));
+  const Eigen::MatrixXd zero_left = Eigen::MatrixXd::Zero(n_alpha, count);
+  const std::array<Eigen::Ref<const Eigen::MatrixXd>, 3> lefts{left, other, zero_left};
+  const auto check_multiple = [&](bool retained_columns, bool symmetric_sum) {
+    const auto images = retained_columns
+        ? action.generator_adjoint_streamed(first,
+            std::span<const Eigen::Ref<const Eigen::MatrixXd>>(lefts),
+            {retained_request(right_a, scale_a, false, true),
+             retained_request(right_b, scale_b, true, false)}, symmetric_sum)
+        : action.generator_adjoint_streamed(first,
+            std::span<const Eigen::Ref<const Eigen::MatrixXd>>(lefts),
+            {request(right_a, scale_a, false, true),
+             request(right_b, scale_b, true, false)}, symmetric_sum);
+    require(images.size() == lefts.size(),
+            "multi-left streamed generator returned the wrong number of cotangents");
+    for (std::size_t i = 0; i < lefts.size(); ++i) {
+      Eigen::MatrixXd padded = Eigen::MatrixXd::Zero(n_alpha, n_beta);
+      padded.middleCols(first, count) = lefts[i];
+      Eigen::MatrixXd expected =
+          scale_a * action.one_body_generator_adjoint(padded, right_a) +
+          scale_b * action.one_body_generator_adjoint(padded, right_b).transpose();
+      if (symmetric_sum) expected = (expected + expected.transpose()).eval();
+      expected.triangularView<Eigen::StrictlyLower>().setZero();
+      require((images[i] - expected).norm() < 2e-12,
+              "multi-left streamed generator differs from independent dense adjoints");
+    }
+    require(images.back().isZero(),
+            "zero left in a multi-left streamed generator produced a cotangent");
+  };
+  for (const bool retained_columns : {false, true})
+    for (const bool symmetric_sum : {false, true})
+      check_multiple(retained_columns, symmetric_sum);
+#ifdef _OPENMP
+  Eigen::MatrixXd nested, nested_retained, nested_retained_symmetric;
+#pragma omp parallel num_threads(2)
+  {
+#pragma omp single
+    {
+      nested = streamed(left, true);
+      nested_retained = retained(false);
+      nested_retained_symmetric = retained(true);
+    }
+  }
+  require((nested - expected_symmetric).norm() < 2e-12,
+          "streamed generator differs inside an existing OpenMP team");
+  require((nested_retained - expected_upper).norm() < 2e-12 &&
+              (nested_retained_symmetric - expected_symmetric).norm() < 2e-12,
+          "retained streamed columns differ inside an existing OpenMP team");
+#endif
+}
+
+void check_generated_generator_panels() {
+  constexpr int n=4;
+  const auto alpha=complete_space(n,2);
+  xmvb::vb::OrthogonalActiveIntegrals integrals;
+  integrals.one_electron=Eigen::MatrixXd::Zero(n,n);
+  integrals.pair_kernel=Eigen::MatrixXd::Zero(n*(n+1)/2,n*(n+1)/2);
+  for (const int n_beta_electrons:{1,2}) {
+    const auto beta=complete_space(n,n_beta_electrons);
+    const int na=alpha.size(),nb=beta.size();
+    const xmvb::mcscf::DirectCiSigmaAction action(alpha,beta,integrals);
+    const xmvb::mcscf::DirectCiSigmaAction alpha_action(alpha,complete_space(n,0),integrals);
+    Eigen::MatrixXd carrier(na,nb),generator(n,n);
+    for (int b=0;b<nb;++b)
+      for (int a=0;a<na;++a)
+        carrier(a,b)=(a+b)%3==0 ? 0.0:std::sin(0.27*(a+2)*(b+1));
+    for (int q=0;q<n;++q)
+      for (int p=0;p<n;++p) generator(p,q)=std::cos(0.13*(p+1)*(q+3));
+    std::vector<std::vector<int>> rows(nb);
+    std::vector<std::vector<double>> values(nb);
+    for (int b=0;b<nb;++b)
+      for (int a=0;a<na;++a)
+        if (carrier(a,b)!=0) { rows[b].push_back(a); values[b].push_back(carrier(a,b)); }
+    for (const bool compact:{false,true}) {
+      const xmvb::mcscf::DirectCiColumnReader column=[&](int b) {
+        return compact ? xmvb::mcscf::DirectCiColumnView{values[b].data(),rows[b].data(),
+                static_cast<int>(rows[b].size())}:
+            xmvb::mcscf::DirectCiColumnView{carrier.col(b).data(),nullptr,na};
+      };
+      for (const bool alpha_only:{false,true}) {
+        const Eigen::MatrixXd expected=(alpha_only ? alpha_action:action)
+            .apply_one_body_generator(carrier,generator);
+        Eigen::MatrixXd storage=Eigen::MatrixXd::Constant(na+3,nb,-97.0);
+        for (int first=0;first<nb;first+=2)
+          action.apply_one_body_generator_columns(first,column,generator,
+              storage.topRows(na).middleCols(first,std::min(2,nb-first)),alpha_only);
+        require((storage.topRows(na)-expected).norm()<2e-12 &&
+                (storage.bottomRows(3).array()==-97.0).all(),
+            "generated one-body panel differs from the independent full-carrier action");
+      }
+    }
+  }
+}
+
+void check_exchange_reduced_generator() {
+  constexpr int n=4;
+  const auto spin=complete_space(n,2);
+  const int u=spin.size(),pairs=n*(n+1)/2;
+  xmvb::vb::OrthogonalActiveIntegrals integrals;
+  integrals.one_electron=Eigen::MatrixXd::Zero(n,n);
+  integrals.pair_kernel=Eigen::MatrixXd::Zero(pairs,pairs);
+  const xmvb::mcscf::DirectCiSigmaAction action(spin,spin,integrals);
+  for (const int parity:{-1,1}) {
+    Eigen::MatrixXd left(u,u),right_a(u,u),right_b(u,u);
+    for (int b=0;b<u;++b)
+      for (int a=0;a<=b;++a) {
+        left(a,b)=std::sin(0.27*(a+2)*(b+1));
+        right_a(a,b)=std::cos(0.39*(a+1)*(b+3));
+        right_b(a,b)=(a+b)%3==0 ? 0.0:std::sin(0.13*(a+3)*(b+2));
+        left(b,a)=parity*left(a,b);
+        right_a(b,a)=parity*right_a(a,b);
+        right_b(b,a)=parity*right_b(a,b);
+        if (parity<0 && a==b) left(a,b)=right_a(a,b)=right_b(a,b)=0.0;
+      }
+    const Eigen::MatrixXd other = (0.37 * left + 0.19 * right_a).eval();
+    const auto request=[&](const Eigen::MatrixXd& right,double scale,bool transpose) {
+      const auto* carrier=&right;
+      xmvb::mcscf::DirectCiTileReader read=[carrier](const std::vector<int>& betas,
+          const std::vector<int>& rows,Eigen::Ref<Eigen::MatrixXd> values) {
+        for (int b=0;b<static_cast<int>(betas.size());++b)
+          for (int a=0;a<static_cast<int>(rows.size());++a)
+            values(a,b)=(*carrier)(rows[a],betas[b]);
+      };
+      xmvb::mcscf::DirectCiColumnReader column=[](int) -> xmvb::mcscf::DirectCiColumnView {
+        throw std::runtime_error("exchange reduction must not gather beta spectators");
+      };
+      return xmvb::mcscf::DirectCiStreamedGeneratorRequest{read,column,-scale,transpose,false};
+    };
+    Eigen::MatrixXd reference=-0.37*action.one_body_generator_adjoint(left,right_a)+
+        0.61*action.one_body_generator_adjoint(left,right_b).transpose();
+    for (const bool symmetric:{false,true}) {
+      Eigen::MatrixXd expected=reference;
+      if (symmetric) expected=(reference+reference.transpose()).eval();
+      expected.triangularView<Eigen::StrictlyLower>().setZero();
+      Eigen::MatrixXd result=Eigen::MatrixXd::Zero(n,n);
+      std::array<Eigen::MatrixXd,3> multi_result{
+          Eigen::MatrixXd::Zero(n,n), Eigen::MatrixXd::Zero(n,n),
+          Eigen::MatrixXd::Zero(n,n)};
+      // Incomplete panels intentionally have no exchange parity themselves.
+      for (int first=0;first<u;first+=2) {
+        const Eigen::MatrixXd panel=left.middleCols(first,std::min(2,u-first));
+        result+=action.generator_adjoint_streamed(first,panel,
+            {request(right_a,0.37,false),request(right_b,-0.61,true)},symmetric,true);
+        const Eigen::MatrixXd other_panel=other.middleCols(first,std::min(2,u-first));
+        const Eigen::MatrixXd zero_panel=Eigen::MatrixXd::Zero(u,panel.cols());
+        const std::array<Eigen::Ref<const Eigen::MatrixXd>,3> lefts{
+            panel,other_panel,zero_panel};
+        const auto images=action.generator_adjoint_streamed(first,
+            std::span<const Eigen::Ref<const Eigen::MatrixXd>>(lefts),
+            {request(right_a,0.37,false),request(right_b,-0.61,true)},symmetric,true);
+        require(images.size()==lefts.size(),
+            "exchange-reduced multi-left generator returned the wrong number of cotangents");
+        for (std::size_t i=0;i<images.size();++i) multi_result[i]+=images[i];
+      }
+      require((result-expected).norm()<3e-12,
+          "exchange-reduced panel sum differs from independent two-spin adjoint");
+      for (std::size_t i=0;i<multi_result.size();++i) {
+        Eigen::MatrixXd full_left=Eigen::MatrixXd::Zero(u,u);
+        if (i==0) full_left=left;
+        if (i==1) full_left=other;
+        Eigen::MatrixXd independent=
+            -0.37*action.one_body_generator_adjoint(full_left,right_a)+
+            0.61*action.one_body_generator_adjoint(full_left,right_b).transpose();
+        if (symmetric) independent=(independent+independent.transpose()).eval();
+        independent.triangularView<Eigen::StrictlyLower>().setZero();
+        require((multi_result[i]-independent).norm()<3e-12,
+            "exchange-reduced multi-left panels differ from independent two-spin adjoints");
+      }
+      require(multi_result.back().isZero(),
+          "zero exchange-reduced multi-left panel produced a cotangent");
+    }
+  }
+}
+
 void check_demand_driven_structure_diagonal() {
   // Put one demanded pair in the first cell of a unique-spin space larger
   // than the forward matrix tile. A tile-backed diagonal lookup would evaluate
@@ -1885,9 +2224,9 @@ void check_demand_driven_structure_diagonal() {
       one_electron(column, row) = value;
     }
   }
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   two_electron.packed_active_two_electron_integrals.assign(
-      xmvb::vb::packed_active_two_electron_integral_count(n_orbitals),
+      xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals),
       0.0);
 
   const auto large_topology = xmvb::vb::build_same_spin_pair_topology(
@@ -2021,7 +2360,7 @@ void check_fused_spin_sectors() {
     const int n_orbitals = sector[0];
     const auto alpha = complete_space(n_orbitals, sector[1]);
     const auto beta = complete_space(n_orbitals, sector[2]);
-    const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+    const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
     xmvb::vb::OrthogonalActiveIntegrals integrals;
     integrals.one_electron = Eigen::MatrixXd::Identity(n_orbitals, n_orbitals);
     Eigen::MatrixXd factors(5, n_pairs);
@@ -2029,7 +2368,7 @@ void check_fused_spin_sectors() {
       for (int row = 0; row < factors.rows(); ++row)
         factors(row, pair) = 0.04 * std::cos(0.13 * (row + 1) * (pair + 2));
     integrals.pair_kernel = factors.transpose() * factors;
-    const xmvb::vb::DirectCiSigmaAction action(alpha, beta, integrals);
+    const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
     Eigen::MatrixXd response(alpha.size(), 2 * beta.size());
     Eigen::MatrixXd state(response.rows(), response.cols());
     for (int column = 0; column < response.cols(); ++column)
@@ -2069,14 +2408,14 @@ void benchmark_structure_response() {
     const Eigen::MatrixXd overlap = r.transpose()*r;
     const std::vector<double> packed_overlap(overlap.data(), overlap.data()+overlap.size());
     const Eigen::MatrixXd h = -Eigen::MatrixXd::Identity(n,n);
-    const int pairs = xmvb::vb::packed_active_pair_count(n);
-    xmvb::vb::ActiveSpaceTwoElectronResult eri;
+    const int pairs = xmvb::integrals::packed_active_pair_count(n);
+    xmvb::integrals::ActiveSpaceTwoElectronResult eri;
     eri.packed_active_two_electron_integrals.resize(
-        xmvb::vb::packed_active_two_electron_integral_count(n));
+        xmvb::integrals::packed_active_two_electron_integral_count(n));
     for (int j = 0; j < pairs; ++j)
       for (int i = 0; i <= j; ++i)
         eri.packed_active_two_electron_integrals[
-            xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(i,j)] =
+            xmvb::core::PairIndex::packed_pair_of_pairs_index(i,j)] =
             0.03*std::cos(0.07*(i+1)*(j+2));
     const xmvb::vb::StructureAction action(terms, 3, topology, packed_overlap,
         h, eri, n, nullptr, xmvb::vb::StructureActionMode::ActionOnly);
@@ -2089,7 +2428,7 @@ void benchmark_structure_response() {
     states.states[0].normalized_state_weight = 1.0;
     const Eigen::Vector3d c(0.3,-0.2,0.7), q(0.4,0.6,-0.3);
     states.states[0].coefficient_matrix = action.expand_structure_block(c);
-    const auto accepted = action.prepare_active_adjoint(states, {-1.3});
+    const auto accepted = action.prepare_active_adjoint(c, {1.0}, {-1.3});
     const auto evaluate = [&](bool joint) {
       xmvb::vb::StructureActionResult images;
       xmvb::vb::StructureResponseSweep sweep;
@@ -2107,9 +2446,7 @@ void benchmark_structure_response() {
       xmvb::vb::StructureActiveIntegralAdjoint adjoint;
       if (joint) adjoint = action.finish_response(accepted,std::move(sweep),multiplier);
       else {
-        auto response = states;
-        response.states[0].coefficient_matrix = action.expand_structure_block(q);
-        adjoint = action.active_integral_response_adjoint(accepted,response,multiplier);
+        adjoint = action.active_integral_response_adjoint(accepted,q,multiplier);
       }
       return metric.squaredNorm()+images.hamiltonian.squaredNorm()+
           adjoint.overlap.squaredNorm()+adjoint.one_electron.squaredNorm()+
@@ -2131,6 +2468,628 @@ void benchmark_structure_response() {
   }
 }
 
+/** @brief Complete singlet/triplet sectors are closed without spanning all M_S products. */
+void check_spin_sector_carrier_inverse() {
+  const auto spin=complete_space(3,1);
+  Eigen::Matrix3d r=Eigen::Matrix3d::Identity();
+  r(0,1)=0.17; r(0,2)=-0.09; r(1,2)=0.12;
+  const Eigen::Matrix3d s=r.transpose()*r;
+  const std::vector<double> overlap(s.data(),s.data()+s.size());
+  const Eigen::Matrix3d h=Eigen::Vector3d(-0.8,-0.3,0.2).asDiagonal();
+  xmvb::integrals::ActiveSpaceTwoElectronResult eri;
+  eri.packed_active_two_electron_integrals.resize(xmvb::integrals::packed_active_two_electron_integral_count(3),0.0);
+  const auto orth=xmvb::vb::orthogonalize_active_integrals(overlap,h,eri,3);
+  const xmvb::mcscf::DirectCiSigmaAction sigma(spin,spin,orth);
+  const Eigen::MatrixXd diagonal=sigma.diagonal(orth.one_electron);
+  std::vector<std::vector<int>> pa,pb;
+  for (const auto& a:spin) for (const auto& b:spin) { pa.push_back(a); pb.push_back(b); }
+  const auto topology=xmvb::vb::build_same_spin_pair_topology(pa,pb,3);
+  for (int parity:{1,-1}) {
+    const int n=parity==1 ? 6:3;
+    std::vector<std::vector<xmvb::vb::StructureExpansionTerm>> terms(9);
+    int column=0;
+    for (int a=0;a<3;++a) for (int b=a+(parity<0);b<3;++b) {
+      const double scale=a==b ? 1.0:1/std::sqrt(2.0);
+      terms[3*a+b].push_back({column,scale});
+      if (a!=b) terms[3*b+a].push_back({column,parity*scale});
+      ++column;
+    }
+    const xmvb::vb::StructureAction action(terms,n,topology,overlap,h,eri,3,
+        nullptr,xmvb::vb::StructureActionMode::ActionOnly);
+    const xmvb::vb::StructureMetricInverse metric(action,spin,spin,true,65536,65536);
+    const auto carrier=action.orthogonalize_structure_block(Eigen::MatrixXd::Identity(n,n));
+    Eigen::MatrixXd f(9,n);
+    for (int j=0;j<n;++j) for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+      f(3*a+b,j)=carrier(a,3*j+b);
+    const Eigen::MatrixXd inverse=(f.transpose()*f).inverse();
+    Eigen::VectorXd dinv(9);
+    constexpr double energy=-3.0,shift=0.11;
+    for (int a=0;a<3;++a) for (int b=0;b<3;++b)
+      dinv[3*a+b]=1/(diagonal(a,b)-energy-shift);
+    const Eigen::MatrixXd reference=inverse*f.transpose()*dinv.asDiagonal()*f*inverse;
+    const auto actual=metric.apply_carrier_inverse(Eigen::MatrixXd::Identity(n,n),
+        Eigen::VectorXd::Constant(n,energy),shift);
+    require((actual-reference).norm()<1e-11,
+        "complete spin-sector cancellation changed the carrier preconditioner");
+    const Eigen::MatrixXd j=metric.to_ci_coordinates(Eigen::MatrixXd::Identity(n,n));
+    const Eigen::MatrixXd ji=metric.from_ci_coordinates(Eigen::MatrixXd::Identity(n,n));
+    require((j.transpose()*j-f.transpose()*f).norm()<2e-12 &&
+                (j*ji-Eigen::MatrixXd::Identity(n,n)).norm()<2e-12,
+            "pure-spin CI coordinates are not an isometry");
+    const auto image=action.apply(ji);
+    const auto ci_h=metric.apply_ci_hamiltonian(Eigen::MatrixXd::Identity(n,n));
+    require((ci_h-ji.transpose()*image.hamiltonian).norm()<2e-12,
+            "complete pure-spin CI action changed the restricted Hamiltonian");
+  }
+}
+
+/** @brief The streamed directional image and integral adjoint have separate oracles. */
+void check_tiled_integral_direction_case(
+    const std::vector<std::vector<int>>& alpha,
+    const std::vector<std::vector<int>>& beta, int width, int parity,
+    const xmvb::mcscf::ProductSupport* support = nullptr,
+    bool zero_direction = false, bool zero_state = false,
+    bool compact_output = false) {
+  constexpr int n_orbitals = 4;
+  const int n_alpha = static_cast<int>(alpha.size());
+  const int n_beta = static_cast<int>(beta.size());
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
+  xmvb::mcscf::ActiveIntegrals integrals, direction_integrals;
+  integrals.one_electron.resize(n_orbitals, n_orbitals);
+  direction_integrals.one_electron.resize(n_orbitals, n_orbitals);
+  integrals.pair_kernel.resize(n_pairs, n_pairs);
+  direction_integrals.pair_kernel.resize(n_pairs, n_pairs);
+  for (int q = 0; q < n_orbitals; ++q)
+    for (int p = 0; p <= q; ++p) {
+      const double h = 0.16 * std::cos(0.31 * (p + 1) * (q + 2)) +
+                       (p == q ? 0.23 : 0.0);
+      const double dh = zero_direction ? 0.0 :
+          0.07 * std::sin(0.27 * (p + 2) * (q + 1));
+      integrals.one_electron(p, q) = integrals.one_electron(q, p) = h;
+      direction_integrals.one_electron(p, q) =
+          direction_integrals.one_electron(q, p) = dh;
+    }
+  for (int q = 0; q < n_pairs; ++q)
+    for (int p = 0; p <= q; ++p) {
+      const double kernel = 0.035 * std::cos(0.17 * (p + 1) * (q + 3));
+      const double dkernel = zero_direction ? 0.0 :
+          0.021 * std::sin(0.19 * (p + 2) * (q + 1));
+      integrals.pair_kernel(p, q) = integrals.pair_kernel(q, p) = kernel;
+      direction_integrals.pair_kernel(p, q) =
+          direction_integrals.pair_kernel(q, p) = dkernel;
+    }
+  const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
+  const xmvb::mcscf::DirectCiSigmaAction direction(action, direction_integrals);
+
+  Eigen::MatrixXd response(n_alpha, width * n_beta);
+  Eigen::MatrixXd state(n_alpha, width * n_beta);
+  const auto fill = [&](int vector, Eigen::MatrixXd* values, bool cosine) {
+    Eigen::MatrixXd block(n_alpha, n_beta);
+    for (int b = 0; b < n_beta; ++b)
+      for (int a = 0; a < n_alpha; ++a)
+        block(a, b) = cosine
+            ? std::cos(0.23 * (a + 2) * (b + 1) + 0.17 * vector)
+            : std::sin(0.29 * (a + 1) * (b + 3) + 0.11 * vector);
+    if (parity != 0)
+      block = (block + parity * block.transpose()).eval();
+    values->middleCols(vector * n_beta, n_beta) = block;
+  };
+  fill(0, &response, false);                         // Y
+  if (width == 2) fill(1, &response, true);          // Z
+  if (width == 1) fill(0, &state, true);             // Z
+  else {
+    state.middleCols(0, n_beta).setZero();           // 0
+    state.middleCols(n_beta, n_beta) = response.leftCols(n_beta); // Y
+  }
+  if (zero_state) state.setZero();
+  if (support)
+    for (int b = 0; b < n_beta; ++b)
+      for (int a = 0; a < n_alpha; ++a)
+        if (!support->contains(a, b))
+          for (int vector = 0; vector < width; ++vector) {
+            response(a, vector * n_beta + b) = 0.0;
+            state(a, vector * n_beta + b) = 0.0;
+          }
+
+  const auto reader = [width, n_beta](const Eigen::MatrixXd& carrier)
+      -> xmvb::mcscf::DirectCiTileReader {
+    const Eigen::MatrixXd* source = &carrier;
+    return [source, width, n_beta](const std::vector<int>& betas,
+        const std::vector<int>& rows, Eigen::Ref<Eigen::MatrixXd> tile) {
+      for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+        for (int vector = 0; vector < width; ++vector)
+          for (int a = 0; a < static_cast<int>(rows.size()); ++a)
+            tile(a, b * width + vector) =
+                (*source)(rows[a], vector * n_beta + betas[b]);
+    };
+  };
+  const auto writer = [width, n_beta,compact_output](Eigen::MatrixXd& image)
+      -> xmvb::mcscf::DirectCiTileWriter {
+    Eigen::MatrixXd* target = &image;
+    return [target, width, n_beta,compact_output](const std::vector<int>& betas,
+        const std::vector<int>& rows,
+        const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
+      for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+        for (int vector = 0; vector < width; ++vector) {
+          if (compact_output) {
+            // Two disjoint, sorted output subsets with holes. Each receives
+            // three halo-range chunks, exercising bounds across sparse rows.
+            for (int part=0;part<2;++part) {
+              std::vector<int> selected;
+              for (int i=part;i<static_cast<int>(rows.size());i+=2) selected.push_back(rows[i]);
+              if (selected.empty()) continue;
+              Eigen::VectorXd values=Eigen::VectorXd::Zero(selected.size());
+              for (int chunk=0;chunk<3;++chunk)
+                accumulate(b,vector,rows.size()*chunk/3,rows.size()*(chunk+1)/3,
+                    values.data(),selected.data(),selected.size());
+              for (int i=0;i<static_cast<int>(selected.size());++i)
+                (*target)(selected[i],vector*n_beta+betas[b])+=values[i];
+            }
+            continue;
+          }
+          accumulate(b, vector, 0, static_cast<int>(rows.size()),
+              target->col(vector * n_beta + betas[b]).data(), nullptr, 0);
+        }
+    };
+  };
+  const auto response_reader = reader(response);
+  const auto state_reader = reader(state);
+  Eigen::MatrixXd combined = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  Eigen::MatrixXd forcing = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  const auto actual = action.apply_tiled_direction(width, response_reader,
+      state_reader, direction, writer(combined), writer(forcing), support, parity);
+  const Eigen::MatrixXd expected_forcing = direction.apply(state);
+  const Eigen::MatrixXd expected_combined =
+      action.apply(response) + expected_forcing;
+  const auto expected_adjoint = action.integral_adjoint(response, state, parity);
+  const auto project = [width, n_beta, parity](Eigen::MatrixXd image) {
+    if (parity != 0)
+      for (int vector = 0; vector < width; ++vector) {
+        const Eigen::MatrixXd block = image.middleCols(vector * n_beta, n_beta);
+        image.middleCols(vector * n_beta, n_beta) =
+            0.5 * (block + parity * block.transpose());
+      }
+    return image;
+  };
+  const auto close = [](const Eigen::MatrixXd& value,
+                        const Eigen::MatrixXd& reference) {
+    return (value - reference).norm() <
+        3e-11 * std::max(1.0, reference.norm());
+  };
+  const Eigen::MatrixXd ci_response = 0.37 * response + 0.21 * state;
+  const Eigen::MatrixXd adjoint_response = response - 0.29 * ci_response;
+  Eigen::MatrixXd ci_image = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  Eigen::MatrixXd orbital_image = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  Eigen::MatrixXd orbital_forcing = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  int state_reads = 0;
+  std::array<int, 3> response_reads{};
+  const auto counted_reader = [&](const Eigen::MatrixXd& carrier, int& count)
+      -> xmvb::mcscf::DirectCiTileReader {
+    const auto base = reader(carrier);
+    return [base, &count](const std::vector<int>& betas,
+                          const std::vector<int>& rows,
+                          Eigen::Ref<Eigen::MatrixXd> tile) {
+      ++count;
+      base(betas, rows, tile);
+    };
+  };
+  const std::array<xmvb::mcscf::DirectCiTileRequest, 3> requests{{
+      {counted_reader(ci_response, response_reads[0]), writer(ci_image), nullptr, {}},
+      {counted_reader(response, response_reads[1]), writer(orbital_image),
+       &direction, writer(orbital_forcing)},
+      {counted_reader(adjoint_response, response_reads[2]), {}, nullptr, {}}}};
+  const auto joint = action.apply_tiled_responses(width, requests,
+      counted_reader(state, state_reads), support, parity);
+  const auto expected_ci_adjoint = action.integral_adjoint(ci_response, state, parity);
+  const auto expected_empty_adjoint =
+      action.integral_adjoint(adjoint_response, state, parity);
+  require(joint.size() == requests.size(),
+          "joint tiled response lost a direction's integral adjoint");
+  require(state_reads > 0 && state_reads == response_reads[0] &&
+              state_reads == response_reads[1] &&
+              state_reads == response_reads[2],
+          "joint tiled response repeated or skipped the accepted-state tile read");
+  require(close(project(ci_image), action.apply(ci_response)) &&
+              close(project(orbital_image), expected_combined) &&
+              close(project(orbital_forcing), expected_forcing),
+          "joint tiled response changed separate CI, orbital, or forcing images");
+  require(close(joint[0].one_electron, expected_ci_adjoint.one_electron) &&
+              close(joint[0].pair_kernel, expected_ci_adjoint.pair_kernel) &&
+              close(joint[1].one_electron, expected_adjoint.one_electron) &&
+              close(joint[1].pair_kernel, expected_adjoint.pair_kernel) &&
+              close(joint[2].one_electron, expected_empty_adjoint.one_electron) &&
+              close(joint[2].pair_kernel, expected_empty_adjoint.pair_kernel),
+          "joint tiled response mixed independent integral adjoints");
+  // With the orbital direction last, its forcing may overwrite the accepted
+  // slab only after both Grams have consumed it. Exercise that smaller layout.
+  ci_image.setZero(); orbital_image.setZero(); orbital_forcing.setZero();
+  state_reads=0; response_reads={};
+  const auto ordered=action.apply_tiled_responses(width,
+      std::span<const xmvb::mcscf::DirectCiTileRequest>(requests).first(2),
+      counted_reader(state,state_reads),support,parity);
+  require(ordered.size()==2 && state_reads>0 && state_reads==response_reads[0] &&
+              state_reads==response_reads[1] &&
+              close(project(ci_image),action.apply(ci_response)) &&
+              close(project(orbital_image),expected_combined) &&
+              close(project(orbital_forcing),expected_forcing) &&
+              close(ordered[0].one_electron,expected_ci_adjoint.one_electron) &&
+              close(ordered[0].pair_kernel,expected_ci_adjoint.pair_kernel) &&
+              close(ordered[1].one_electron,expected_adjoint.one_electron) &&
+              close(ordered[1].pair_kernel,expected_adjoint.pair_kernel),
+          "ordered temporal reuse changed an independent image or cotangent");
+  // The final orbital image consumes both Hamiltonian products, but has no
+  // separate forcing consumer. Its scratch may be fused after the Grams.
+  const int ordered_state_reads=state_reads;
+  ci_image.setZero(); orbital_image.setZero(); orbital_forcing.setConstant(-97.0);
+  state_reads=0; response_reads={};
+  const std::array<xmvb::mcscf::DirectCiTileRequest,2> no_forcing_requests{{
+      {counted_reader(ci_response,response_reads[0]),writer(ci_image),nullptr,{}},
+      {counted_reader(response,response_reads[1]),writer(orbital_image),&direction,{}}}};
+  const auto no_forcing=action.apply_tiled_responses(width,no_forcing_requests,
+      counted_reader(state,state_reads),support,parity);
+  require(no_forcing.size()==2 && state_reads==ordered_state_reads &&
+              state_reads==response_reads[0] && state_reads==response_reads[1] &&
+              close(project(ci_image),action.apply(ci_response)) &&
+              close(project(orbital_image),expected_combined) &&
+              close(no_forcing[0].one_electron,expected_ci_adjoint.one_electron) &&
+              close(no_forcing[0].pair_kernel,expected_ci_adjoint.pair_kernel) &&
+              close(no_forcing[1].one_electron,expected_adjoint.one_electron) &&
+              close(no_forcing[1].pair_kernel,expected_adjoint.pair_kernel) &&
+              (orbital_forcing.array()==-97.0).all(),
+          "ordered temporal direction without forcing changed images or adjoints");
+  require(close(project(combined), expected_combined),
+          "tiled direction changed H*response + deltaH*state");
+  require(close(project(forcing), expected_forcing),
+          "tiled direction forcing differs from the direction action");
+  require(close(actual.one_electron, expected_adjoint.one_electron) &&
+              close(actual.pair_kernel, expected_adjoint.pair_kernel),
+          "tiled direction changed the unweighted integral adjoint");
+  const double derivative =
+      actual.one_electron.cwiseProduct(direction_integrals.one_electron).sum() +
+      actual.pair_kernel.cwiseProduct(direction_integrals.pair_kernel).sum();
+  const double bilinear = response.cwiseProduct(expected_forcing).sum();
+  require(std::abs(derivative - bilinear) <
+              3e-11 * std::max(1.0, std::abs(bilinear)),
+          "tiled direction adjoint has incorrect integral weighting");
+
+  Eigen::MatrixXd combined_only = Eigen::MatrixXd::Zero(n_alpha, width * n_beta);
+  const auto without_forcing = action.apply_tiled_direction(width,
+      response_reader, state_reader, direction, writer(combined_only), {},
+      support, parity);
+  require(close(project(combined_only), expected_combined) &&
+              close(combined_only, combined) &&
+              close(without_forcing.one_electron, expected_adjoint.one_electron) &&
+              close(without_forcing.pair_kernel, expected_adjoint.pair_kernel),
+          "omitting the forcing writer changed the combined image or adjoint");
+  Eigen::MatrixXd forcing_only=Eigen::MatrixXd::Zero(n_alpha,width*n_beta);
+  const auto forcing_adjoint=action.apply_tiled_direction(width,response_reader,
+      state_reader,direction,{},writer(forcing_only),support,parity);
+  const auto adjoint_only=action.apply_tiled_direction(width,response_reader,
+      state_reader,direction,{},{},support,parity);
+  require(close(project(forcing_only),expected_forcing) &&
+              close(forcing_adjoint.one_electron,expected_adjoint.one_electron) &&
+              close(forcing_adjoint.pair_kernel,expected_adjoint.pair_kernel) &&
+              close(adjoint_only.one_electron,expected_adjoint.one_electron) &&
+              close(adjoint_only.pair_kernel,expected_adjoint.pair_kernel),
+          "forcing-only or adjoint-only direction changed the physical contraction");
+  if (support) {
+    double outside = 0.0;
+    for (int b = 0; b < n_beta; ++b)
+      for (int a = 0; a < n_alpha; ++a)
+        if (!support->contains(a, b))
+          for (int vector = 0; vector < width; ++vector)
+            outside += std::abs(expected_combined(a, vector * n_beta + b));
+    require(outside > 1e-8,
+            "selected-support direction case did not exercise outside-support images");
+  }
+}
+
+/** @brief Range restriction must use actual indices, not occupation ordering. */
+void check_permuted_tiled_direction() {
+  auto alpha=complete_space(4,2),beta=complete_space(4,1);
+  std::rotate(alpha.begin(),alpha.begin()+2,alpha.end());
+  std::swap(alpha[1],alpha[4]);
+  std::reverse(beta.begin(),beta.end());
+  const auto masks=[](const auto& strings) {
+    std::vector<std::uint64_t> result;
+    for (const auto& occupied:strings) {
+      std::uint64_t mask=0;
+      for (int orbital:occupied) mask|=std::uint64_t{1}<<orbital;
+      result.push_back(mask);
+    }
+    return result;
+  };
+  const auto a=masks(alpha),b=masks(beta);
+  const int u=alpha.size();
+  const xmvb::mcscf::ProductSupport equal(4,a,a,{u-1,(u-1)*u,2*u+1,u+2});
+  const xmvb::mcscf::ProductSupport unequal(4,a,b,{0,static_cast<int>(beta.size())+2});
+  for (int parity:{0,1,-1})
+    check_tiled_integral_direction_case(alpha,alpha,2,parity,&equal,false,false,true);
+  check_tiled_integral_direction_case(alpha,beta,2,0,&unequal,false,false,true);
+}
+
+/** @brief The complete 8-orbital halo holds one full Gram tile per worker. */
+void check_full_square_tiled_gram() {
+  constexpr int n = 8, width = 2;
+  const auto spin = complete_space(n, 3);
+  const int u = static_cast<int>(spin.size());
+  const int pairs = xmvb::integrals::packed_active_pair_count(n);
+  require(u == 56 && static_cast<std::size_t>(u * u * width) >= 4u * pairs * pairs,
+          "full-square Gram fixture does not fit four partials in its input halo");
+  xmvb::mcscf::ActiveIntegrals integrals;
+  integrals.one_electron.resize(n, n);
+  integrals.pair_kernel.resize(pairs, pairs);
+  for (int q = 0; q < n; ++q)
+    for (int p = 0; p <= q; ++p)
+      integrals.one_electron(p, q) = integrals.one_electron(q, p) =
+          0.13 * std::cos(0.17 * (p + 1) * (q + 2)) + (p == q ? 0.27 : 0.0);
+  for (int q = 0; q < pairs; ++q)
+    for (int p = 0; p <= q; ++p)
+      integrals.pair_kernel(p, q) = integrals.pair_kernel(q, p) =
+          0.019 * std::sin(0.11 * (p + 2) * (q + 1));
+  const xmvb::mcscf::DirectCiSigmaAction action(spin, spin, integrals);
+  const auto reader = [u, width](const Eigen::MatrixXd& carrier)
+      -> xmvb::mcscf::DirectCiTileReader {
+    const Eigen::MatrixXd* source = &carrier;
+    return [source, u, width](const std::vector<int>& betas,
+                       const std::vector<int>& rows,
+                       Eigen::Ref<Eigen::MatrixXd> tile) {
+      for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+        for (int v = 0; v < width; ++v)
+          for (int a = 0; a < static_cast<int>(rows.size()); ++a)
+            tile(a, b * width + v) = (*source)(rows[a], v * u + betas[b]);
+    };
+  };
+  const auto writer = [u, width](Eigen::MatrixXd& image)
+      -> xmvb::mcscf::DirectCiTileWriter {
+    Eigen::MatrixXd* target = &image;
+    return [target, u, width](const std::vector<int>& betas,
+                       const std::vector<int>& rows,
+                       const xmvb::mcscf::DirectCiColumnAccumulator& accumulate) {
+      for (int b = 0; b < static_cast<int>(betas.size()); ++b)
+        for (int v = 0; v < width; ++v)
+          accumulate(b, v, 0, static_cast<int>(rows.size()),
+              target->col(v * u + betas[b]).data(), nullptr, 0);
+    };
+  };
+  const auto close = [](const Eigen::MatrixXd& actual,
+                        const Eigen::MatrixXd& expected) {
+    return (actual - expected).norm() < 3e-11 * std::max(1.0, expected.norm());
+  };
+#ifdef _OPENMP
+  const int saved_threads = omp_get_max_threads();
+  const std::vector<int> thread_counts{2, 4};
+#else
+  const std::vector<int> thread_counts{1};
+#endif
+  for (const int parity : {0, 1, -1}) {
+    Eigen::MatrixXd response(u, width * u), state(u, width * u);
+    for (int v = 0; v < width; ++v) {
+      Eigen::MatrixXd r(u, u), s(u, u);
+      for (int b = 0; b < u; ++b)
+        for (int a = 0; a < u; ++a) {
+          r(a, b) = std::sin(0.071 * (a + 1) * (b + 2) + 0.23 * v);
+          s(a, b) = std::cos(0.053 * (a + 3) * (b + 1) - 0.31 * v);
+        }
+      if (parity) {
+        r = (r + parity * r.transpose()).eval();
+        s = (s + parity * s.transpose()).eval();
+      }
+      response.middleCols(v * u, u) = r;
+      state.middleCols(v * u, u) = s;
+    }
+    require((response - state).norm() > 1.0,
+            "full-square Gram response accidentally equals its state");
+    const Eigen::MatrixXd second = 0.37 * response + 0.21 * state;
+    const std::array<Eigen::MatrixXd, 2> responses{response, second};
+    const std::array<Eigen::MatrixXd, 2> expected_images{
+        action.apply(response), action.apply(second)};
+    const std::array<xmvb::mcscf::DirectCiIntegralAdjoint, 2> expected_adjoints{
+        action.integral_adjoint(response, state, parity),
+        action.integral_adjoint(second, state, parity)};
+    const auto verify=[&](bool recursive=false,std::barrier<>* rendezvous=nullptr) {
+      std::array<Eigen::MatrixXd, 2> images{
+          Eigen::MatrixXd::Zero(u, width * u),
+          Eigen::MatrixXd::Zero(u, width * u)};
+      bool entered=false;
+      const auto base_reader=reader(responses[0]);
+      const xmvb::mcscf::DirectCiTileReader first_reader=[&](const auto& betas,
+          const auto& rows,Eigen::Ref<Eigen::MatrixXd> tile) {
+        if (!entered) {
+          entered=true;
+          // Both calls already own live scratch when they meet here.
+          if (rendezvous) rendezvous->arrive_and_wait();
+          if (recursive) {
+            Eigen::MatrixXd nested=Eigen::MatrixXd::Zero(u,width*u);
+            action.apply_tiled(width,reader(responses[1]),writer(nested));
+            require(close(nested,expected_images[1]),"recursive sigma corrupted its scratch");
+          }
+        }
+        base_reader(betas,rows,tile);
+      };
+      const std::array<xmvb::mcscf::DirectCiTileRequest, 2> requests{{
+          {first_reader, writer(images[0]), nullptr, {}},
+          {reader(responses[1]), writer(images[1]), nullptr, {}}}};
+      const auto actual = action.apply_tiled_responses(
+          width, requests, reader(state), nullptr, parity);
+      require(actual.size() == requests.size(),
+              "full-square Gram lost a temporal integral adjoint");
+      for (std::size_t i = 0; i < requests.size(); ++i) {
+        if (parity)
+          for (int v = 0; v < width; ++v) {
+            const Eigen::MatrixXd block = images[i].middleCols(v * u, u);
+            images[i].middleCols(v * u, u) =
+                0.5 * (block + parity * block.transpose());
+          }
+        require(close(images[i], expected_images[i]) &&
+                close(actual[i].one_electron, expected_adjoints[i].one_electron) &&
+                close(actual[i].pair_kernel, expected_adjoints[i].pair_kernel),
+                "full-square row-partitioned Gram differs from dense CI oracles");
+      }
+    };
+    for (const int threads : thread_counts) {
+#ifdef _OPENMP
+      omp_set_num_threads(threads);
+#else
+      (void)threads;
+#endif
+      verify();
+    }
+    verify(true);
+    std::barrier rendezvous(2);
+    const auto concurrent=[&] {
+#ifdef _OPENMP
+      omp_set_num_threads(2);
+#endif
+      verify(false,&rendezvous);
+    };
+    auto first=std::async(std::launch::async,concurrent);
+    auto second_call=std::async(std::launch::async,concurrent);
+    first.get();
+    second_call.get();
+  }
+#ifdef _OPENMP
+  omp_set_num_threads(saved_threads);
+#endif
+}
+
+void check_tiled_integral_direction() {
+  const auto unequal_alpha = complete_space(4, 1);
+  const auto unequal_beta = complete_space(4, 2);
+  const auto equal_spin = complete_space(4, 2);
+  for (int width : {1, 2}) {
+    check_tiled_integral_direction_case(unequal_alpha, unequal_beta, width, 0);
+    for (int parity : {0, 1, -1})
+      check_tiled_integral_direction_case(equal_spin, equal_spin, width, parity);
+  }
+  std::vector<std::uint64_t> alpha_masks, beta_masks;
+  for (const auto& occupied : unequal_alpha) {
+    std::uint64_t mask = 0;
+    for (int orbital : occupied) mask |= std::uint64_t{1} << orbital;
+    alpha_masks.push_back(mask);
+  }
+  for (const auto& occupied : unequal_beta) {
+    std::uint64_t mask = 0;
+    for (int orbital : occupied) mask |= std::uint64_t{1} << orbital;
+    beta_masks.push_back(mask);
+  }
+  const xmvb::mcscf::ProductSupport selected(4, alpha_masks, beta_masks,
+      std::vector<xmvb::mcscf::ProductIndex>{0, 8});
+  int halo_only = 0;
+  for (int b = 0; b < static_cast<int>(unequal_beta.size()); ++b)
+    for (int a = 0; a < static_cast<int>(unequal_alpha.size()); ++a)
+      halo_only += !selected.contains(a, b) && selected.contains(a, b, 1);
+  require(halo_only > 0, "selected support was already generator-closed");
+  check_tiled_integral_direction_case(unequal_alpha, unequal_beta, 2, 0, &selected);
+  check_tiled_integral_direction_case(unequal_alpha, unequal_beta, 1, 0,
+      nullptr, true);
+  check_tiled_integral_direction_case(equal_spin, equal_spin, 1, 1,
+      nullptr, false, true);
+  // Tiny unequal-spin halos also need correct width and worker ownership.
+#ifdef _OPENMP
+  const int saved_threads=omp_get_max_threads();
+  omp_set_num_threads(4);
+#endif
+  for (int width:{1,2})
+    check_tiled_integral_direction_case(complete_space(4,0),complete_space(4,1),width,0);
+  // One occupied full-spin carrier leaves fewer rows than four workers and a
+  // minimal input halo, which must use direct output ownership without partials.
+  for (int width:{1,2})
+    check_tiled_integral_direction_case(complete_space(4,4),complete_space(4,0),width,0);
+#ifdef _OPENMP
+  omp_set_num_threads(saved_threads);
+#endif
+#ifdef _OPENMP
+#pragma omp parallel num_threads(2)
+  {
+#pragma omp single
+    check_tiled_integral_direction_case(unequal_alpha,unequal_beta,2,0);
+  }
+#endif
+}
+
+/** @brief Check the complete response image, not just a projected scalar. */
+void check_exchange_adjoint(bool benchmark = false) {
+  using Clock = std::chrono::steady_clock;
+  if (benchmark)
+    std::cout << "n_orbitals,width,parity,kind,wall_seconds,checksum,max_error\n"
+              << std::setprecision(17);
+  for (int n : (benchmark ? std::vector<int>{6, 10, 12} : std::vector<int>{4, 10})) {
+    const auto spin = complete_space(n, n / 2);
+    const int count = static_cast<int>(spin.size());
+    const int pairs = xmvb::integrals::packed_active_pair_count(n);
+    xmvb::vb::OrthogonalActiveIntegrals integrals;
+    integrals.one_electron = Eigen::MatrixXd::Identity(n, n);
+    integrals.one_electron(0, 1) = integrals.one_electron(1, 0) = 0.13;
+    Eigen::MatrixXd factors(7, pairs);
+    for (int j = 0; j < pairs; ++j)
+      for (int i = 0; i < factors.rows(); ++i)
+        factors(i,j) = 0.07 * std::sin(0.17 * (i+1) * (j+2));
+    integrals.pair_kernel = factors.transpose() * factors;
+    const xmvb::mcscf::DirectCiSigmaAction action(spin, spin, integrals);
+    const int width = n == 12 ? 1 : 2;
+    // A row-sliced matrix exercises non-owning inputs with an outer stride.
+    Eigen::MatrixXd left_storage(count + 3, width * count);
+    Eigen::MatrixXd right_storage(count + 3, width * count);
+    auto left = left_storage.topRows(count);
+    auto right = right_storage.topRows(count);
+    for (int parity : {-1, 1}) {
+      for (int block = 0; block < width; ++block)
+        for (int beta = 0; beta < count; ++beta)
+          for (int alpha = 0; alpha <= beta; ++alpha) {
+            const double a = (alpha == beta && parity < 0) ? 0.0 :
+                std::sin(0.031 * (alpha+1) * (beta+2+block)) / count;
+            const double b = (alpha == beta && parity < 0) ? 0.0 :
+                std::cos(0.027 * (alpha+3) * (beta+1+block)) / count;
+            left(alpha, block*count+beta) = a;
+            left(beta, block*count+alpha) = parity * a;
+            right(alpha, block*count+beta) = b;
+            right(beta, block*count+alpha) = parity * b;
+          }
+      const auto full = action.apply_with_adjoint(left, right);
+      const auto quotient = action.apply_with_adjoint(left, right, parity);
+      const auto adjoint = action.integral_adjoint(left, right, parity);
+      const double error = std::max({
+          (full.sigma - quotient.sigma).cwiseAbs().maxCoeff(),
+          (full.integrals.one_electron - quotient.integrals.one_electron).cwiseAbs().maxCoeff(),
+          (full.integrals.pair_kernel - quotient.integrals.pair_kernel).cwiseAbs().maxCoeff(),
+          (adjoint.one_electron - full.integrals.one_electron).cwiseAbs().maxCoeff(),
+          (adjoint.pair_kernel - full.integrals.pair_kernel).cwiseAbs().maxCoeff()});
+      require(error < 3e-11, "exchange quotient changed the full sigma or integral adjoint");
+      require((quotient.sigma - action.apply(left)).norm() < 3e-10,
+          "reconstructed exchange sigma differs from independent full sigma");
+      require((quotient.sigma - action.apply(left, parity)).norm() < 3e-10,
+          "standalone exchange sigma differs from fused sigma");
+      const auto accepted = action.apply_with_adjoint(left, left, parity);
+      const Eigen::MatrixXd copy = left;
+      const auto independent = action.integral_adjoint(left, copy);
+      require((accepted.integrals.pair_kernel - independent.pair_kernel).norm() < 3e-11 &&
+              (accepted.integrals.one_electron - independent.one_electron).norm() < 3e-11,
+          "shared accepted-point scatter changed integral adjoint");
+      if (!benchmark) continue;
+      for (int sector : {0, parity}) {
+        const auto sigma_start = Clock::now();
+        const auto sigma = action.apply(left, sector);
+        const double sigma_wall = std::chrono::duration<double>(Clock::now() - sigma_start).count();
+        std::cout << n << ',' << width << ',' << parity << ','
+                  << (sector == 0 ? "full_sigma" : "quotient_sigma") << ',' << sigma_wall << ','
+                  << sigma.squaredNorm() << ',' << error << '\n';
+        for (bool same : {false, true}) {
+          const auto start = Clock::now();
+          const auto result = same ? action.apply_with_adjoint(left, left, sector)
+                                   : action.apply_with_adjoint(left, right, sector);
+          const double wall = std::chrono::duration<double>(Clock::now() - start).count();
+          std::cout << n << ',' << width << ',' << parity << ','
+                    << (sector == 0 ? "full_" : "quotient_")
+                    << (same ? "accepted" : "response") << ',' << wall << ','
+                    << result.sigma.squaredNorm() + result.integrals.pair_kernel.squaredNorm()
+                    << ',' << error << '\n';
+        }
+      }
+    }
+  }
+}
+
 /** @brief Bounded kernel timings; keep separate from convergence benchmarks. */
 void benchmark_sigma() {
   using Clock = std::chrono::steady_clock;
@@ -2143,7 +3102,7 @@ void benchmark_sigma() {
     const auto beta = complete_space(n_orbitals, sector[2]);
     const int n_alpha = static_cast<int>(alpha.size());
     const int n_beta = static_cast<int>(beta.size());
-    const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+    const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
     xmvb::vb::OrthogonalActiveIntegrals integrals;
     integrals.one_electron = Eigen::MatrixXd::Identity(n_orbitals, n_orbitals);
     Eigen::MatrixXd factors(7, n_pairs);
@@ -2151,7 +3110,7 @@ void benchmark_sigma() {
       for (int i = 0; i < factors.rows(); ++i)
         factors(i, j) = 0.07 * std::sin(0.17 * (i + 1) * (j + 2));
     integrals.pair_kernel = factors.transpose() * factors;
-    const xmvb::vb::DirectCiSigmaAction action(alpha, beta, integrals);
+    const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
     for (int width : {1, 4}) {
       Eigen::MatrixXd coefficients(n_alpha, width * n_beta);
       for (int j = 0; j < coefficients.cols(); ++j)
@@ -2202,6 +3161,10 @@ void benchmark_sigma() {
 
 int main(int argc, char** argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--benchmark-exchange") {
+      check_exchange_adjoint(true);
+      return 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--benchmark-response") {
       benchmark_structure_response();
       return 0;
@@ -2216,7 +3179,15 @@ int main(int argc, char** argv) {
     check_sigma_action();
     check_sigma_tile_boundary();
     check_distinct_spin_sigma_action();
+    check_streamed_generator_adjoint_requests();
+    check_generated_generator_panels();
+    check_exchange_reduced_generator();
     check_fused_spin_sectors();
+    check_tiled_integral_direction();
+    check_permuted_tiled_direction();
+    check_full_square_tiled_gram();
+    check_spin_sector_carrier_inverse();
+    check_exchange_adjoint();
     check_demand_driven_structure_diagonal();
     std::cout << "orthogonal direct-CI planner and exterior transform: passed\n";
     return 0;

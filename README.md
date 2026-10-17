@@ -1,6 +1,6 @@
 # xmvb-cpp
 
-A high-performance **Valence Bond Self-Consistent Field (VBSCF)** engine written in modern C++17.
+A high-performance **Valence Bond Self-Consistent Field (VBSCF)** engine written in C++23.
 
 Valence Bond theory provides direct chemical insight into bonding, reactivity, and electron correlation that molecular orbital methods cannot reveal. xmvb-cpp is an independent open-source VBSCF engine designed for computational chemistry researchers who need VB-level analysis of molecular electronic structure.
 
@@ -8,17 +8,22 @@ Valence Bond theory provides direct chemical insight into bonding, reactivity, a
 
 ```
 src/
-  core/            Shared eigensolver and OpenMP execution helpers
+  core/            Pair indexing and lightweight timing
+  linalg/          Eigensolvers, eigen response, metric solves, and Krylov algebra
+  parallel/        Shared OpenMP execution and work partitioning
+  integrals/       Shared exact/RI AO operators, active transforms and derivatives
+  mcscf/           Shared direct-CI, state contracts, and CIAH/NEO solvers
+  casscf/          Orthogonal CASCI model (orbital optimization not yet exposed)
   vbscf/           Canonical VBSCF implementation
     orbitals/      Sparse/full-AO charts, gauges, and pullbacks
-    integrals/     AO and active-space integral operators
+    integrals/     VB orbital-preparation and integral-adjoint adapters
     determinants/  Determinant-pair algebra and caches
     structures/    VB structure expansion and state matrices
     derivatives/   Gradient and matrix-free Hessian-vector products
-    optimization/  L-BFGS and trust-region Newton solvers
+    optimization/  VB coordinates, physical preconditioners, and solver adapters
     workflow/      End-to-end VBSCF evaluation
   input/           XMI deck contracts and VBSCF input loading
-  libcint/         libcint providers and AO integral preparation
+  libcint/         Method-independent libcint providers (no VB dependency)
   guess/           Initial orbitals and restricted-HF construction
   output/          Molden and accepted-iteration output
   cli/             Command-line entry point and reporting
@@ -26,6 +31,9 @@ src/
 basis/             Standard basis set library (Pople, Dunning, etc.)
 testdata/vbscf/    Versioned VBSCF regression decks
 tests/vbscf/       Unit and numerical-regression tests
+tests/mcscf/       Independent integrals, CI, CASCI, and common-solver tests
+tests/linalg/      Linear-algebra tests with no electronic-model dependency
+tests/parallel/    Shared-buffer and nested-team execution tests
 ```
 
 The component dependency rules and numerical naming conventions are recorded
@@ -42,7 +50,7 @@ in [Code Organization and Naming](docs/code_organization.md).
 
 ## Build
 
-Use a conda environment providing cmake, ninja, eigen, openblas (with LAPACKE headers), libxc, and libcint, then build with CMake:
+Use a C++23 compiler (tested with GCC14), CMake3.20 or newer, and an environment providing ninja, eigen, openblas (with LAPACKE headers), libxc, and libcint, then build with CMake:
 
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -66,21 +74,23 @@ OMP_NUM_THREADS=1 build/src/xmvb-cpp.exe <input.xmi>
 
 Input files use the `.xmi` format. See `testdata/vbscf/` for the versioned
 regression decks and `testdata/vbscf/F2.xmi` for the compact HAO smoke case.
-Within `$CTRL`, `ISCF=5` selects the XMVB-compatible raw-coordinate L-BFGS,
-`ISCF=7` selects TNHVP, `ISCF=8` selects nonredundant block-LBFGS, and
-`ISCF=9` selects NEO. The project default when `ISCF` is omitted is
-block-LBFGS.
+Within `$CTRL`, `ISCF=7` selects TNHVP,
+`ISCF=8` selects preconditioned L-BFGS (P-LBFGS), and
+`ISCF=9` selects co-iterative augmented Hessian (CIAH). The project default
+when `ISCF` is omitted is P-LBFGS.
 `EIGENSOLVER=DAVIDSON` selects the default matrix-free structure solver,
 while `EIGENSOLVER=DENSE` selects the explicit dense reference solver. An
 explicit `--optimizer-backend` or `--eigensolver` command-line option overrides
 the corresponding input keyword.
 
-Block-LBFGS uses the same local orbital-block initial inverse and transported
+P-LBFGS uses the same local orbital-block initial inverse and transported
 secant recursion as the TNHVP predictor, without exact HVP correction. The
-`ISCF=5` baseline instead follows XMVB 4.0: standard L-BFGS in the stored raw
-orbital coefficients, 100 correction pairs, an initial step of 0.2, and a
-Moré--Thuente strong-Wolfe line search. The corresponding command-line names
-are `--optimizer-backend lbfgs` and `--optimizer-backend block_lbfgs`.
+native raw-coordinate L-BFGS backend and its Moré--Thuente line search have
+been removed. `ISCF=5` and `--optimizer-backend lbfgs` are rejected, not
+redirected to another method. Use `--optimizer-backend plbfgs` for P-LBFGS.
+Use `--optimizer-backend ciah` and `--ciah-trace path.tsv` for CIAH. The retired
+`neo`, `block_lbfgs`, and `--neo-trace` CLI spellings are not aliases; numeric
+`ISCF=7/8/9` selections are unchanged.
 
 `NSTATE=n` selects an equal-weight average over the consecutive lowest `n`
 VB states. Omitting it is equivalent to `NSTATE=1`. The optimizer uses the

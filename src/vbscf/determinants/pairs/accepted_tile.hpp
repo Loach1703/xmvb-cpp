@@ -59,7 +59,7 @@ class AcceptedPairTileProvider {
       int right_end,
       const std::vector<double>& active_overlap,
       const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-      const ActiveSpaceTwoElectronResult& active_two_electron,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron,
       AcceptedPairTileBuildOptions options = {}) const;
 
  private:

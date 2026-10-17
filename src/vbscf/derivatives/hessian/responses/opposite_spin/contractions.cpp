@@ -6,9 +6,9 @@
 
 #include <Eigen/Core>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/derivatives/hessian/responses/opposite_spin/pair_response_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/opposite_spin/packed_contractions_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/opposite_spin/selected_state_pair_graph_internal.hpp"
@@ -91,7 +91,7 @@ void accumulate_ordered_packed_gradient_from_pair_graph(
             continue;
           }
           const int packed_index =
-              TwoElectronIndexer::packed_pair_of_pairs_index(
+              xmvb::core::PairIndex::packed_pair_of_pairs_index(
                   beta_channel,
                   alpha_channel);
 #pragma omp atomic update

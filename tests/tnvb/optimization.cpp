@@ -158,13 +158,10 @@ int main(int argc,char** argv) {
     reference_input.tnvb.enabled=false;
     reference_input.structure_data=expanded;
     xmvb::vb::VbScfOptimizerOptions options;
-    if (loaded.scf_optimizer==xmvb::vb::InputScfOptimizer::Lbfgs) {
-      options.backend=xmvb::vb::VbScfOptimizerBackend::Lbfgs;
-    } else if (loaded.scf_optimizer==xmvb::vb::InputScfOptimizer::BlockLbfgs) {
-      options.backend=xmvb::vb::VbScfOptimizerBackend::BlockLbfgs;
-    } else {
-      throw std::invalid_argument("TNVB optimization acceptance requires explicit input ISCF=5 or ISCF=8");
+    if (loaded.scf_optimizer!=xmvb::vb::InputScfOptimizer::Plbfgs) {
+      throw std::invalid_argument("TNVB optimization acceptance requires explicit input ISCF=8");
     }
+    options.backend=xmvb::vb::VbScfOptimizerBackend::Plbfgs;
     options.structure_eigensolver=xmvb::vb::StructureEigensolver::Dense;
     options.max_iterations=iterations;
     options.verbose=false;
@@ -219,11 +216,7 @@ int main(int argc,char** argv) {
         << ",\n\"optimizer\":\"" << xmvb::vb::vbscf_optimizer_backend_name(options.backend) << "\""
         << ",\n\"energy_tolerance\":" << options.energy_tolerance
         << ",\n\"gradient_tolerance\":" << options.gradient_tolerance
-        << ",\n\"gradient_metric\":\"" << (options.backend==xmvb::vb::VbScfOptimizerBackend::Lbfgs
-            ? "raw_l2" : "projected_inf") << "\"";
-    if (options.backend==xmvb::vb::VbScfOptimizerBackend::Lbfgs) {
-      report << ",\n\"gradient_l2_tolerance\":" << options.gradient_tolerance;
-    }
+        << ",\n\"gradient_metric\":\"projected_inf\"";
     report
         << ",\n\"final_energy_error_limit\":" << energy_limit
         << ",\n\"final_energy_error\":" << de << ",\n\"final_coefficient_error\":" << dc

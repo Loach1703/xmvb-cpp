@@ -6,7 +6,7 @@ nao=14
 nae=14
 ncharge=0
 nmul=1
-iscf=5
+iscf=8
 tnvb
 tnbond=200
 tnsumbond=400

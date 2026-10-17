@@ -1,0 +1,39 @@
+{
+  "slurm_job": 1256345,
+  "cluster": "Hanhai22",
+  "threads": 32,
+  "node": "anode01",
+  "case": "ethylene dimer 3.5 Angstrom, OEO CAS(3e,4o), doublet, two equal-weight states",
+  "native_binary_sha256": "cff4f5adb192a44b775086c95bd10fadf679231c37bd78a34ea63efd8d2e0100",
+  "native": {
+    "converged": true,
+    "initial_energy_Eh": -155.764871923548,
+    "energy_Eh": -155.765274181894,
+    "macros": 2,
+    "orbital_hvp": 14,
+    "optimization_s": 2.669130,
+    "preparation_s": 3.314941,
+    "process_wall_s": 6.24,
+    "peak_rss_KiB": 3375868,
+    "phase_ao_response_s": 0.511981627,
+    "phase_ci_response_s": 0.002086945,
+    "phase_ciah_keyframe_s": 0.496695917
+  },
+  "pyscf_default_ah": {
+    "converged": true,
+    "initial_energy_Eh": -155.76487192431657,
+    "energy_Eh": -155.76527418201198,
+    "macros": 2,
+    "optimization_s": 1.7067024614661932,
+    "process_wall_s": 16.97,
+    "peak_rss_KiB": 1857116
+  },
+  "limitations": [
+    "Native uses the current committed optimizer binary; unrelated dirty RI edits excluded.",
+    "Runs sequentially in the same Slurm allocation to preserve native Molden basis ordering for PySCF.",
+    "PySCF process time includes Molden loading, orbital conversion, a separate initial CASCI check and interpreter startup; do not claim end-to-end speedup from it.",
+    "Phase scopes overlap; do not sum them as disjoint wall-time contributions.",
+    "Historical native result on Hanhai25 was six macros; timings are not matched across clusters.",
+    "This is one native stage-timing investigation, not a sampled CPU-hotspot or allocation profile."
+  ]
+}

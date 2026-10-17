@@ -18,11 +18,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix="cpp-tnvb-cli-") as directory:
         path = Path(directory) / "input.xmi"
 
-        def run(configuration, iterations, options=(), forbidden=True, molden=False, iscf=5,
+        def run(configuration, iterations, options=(), forbidden=True, molden=False, iscf=8,
                 guess_body=None):
             text = original.replace("tnvb\ntnbond=128\ntnsumbond=256\n", configuration + "\n")
             text = text.replace("itmax=0", f"itmax={iterations}")
-            text = text.replace("iscf=5", f"iscf={iscf}")
+            text = text.replace("iscf=8", f"iscf={iscf}")
             if guess_body is not None:
                 text, count = re.subn(r"(?ims)^\$gus\s*\n.*?^\$end\s*$",
                                       lambda _: "$gus\n" + guess_body + "$end\n", text)
@@ -75,12 +75,15 @@ def main():
                 ("TNVB TNBOND=128", ("--max-iterations", "1"), "requires explicit TNSUMBOND"),
                 ("TNVB TNBOND=128 TNSUMBOND=64", ("--max-iterations", "1"), "requires explicit TNSUMBOND"),
                 ("TNVB TNBOND=128", ("--eigensolver", "davidson"), "dense H/S"),
-                ("TNVB TNBOND=128", ("--optimizer-backend", "neo"), "ISCF=5"),
-                ("TNVB TNBOND=128", ("--optimizer-backend", "nonredundant_truncated_newton"), "ISCF=5"),
-                ("TNVB TNBOND=128", ("--max-iterations", "-1"), "ISCF=5")]:
+                ("TNVB TNBOND=128", ("--optimizer-backend", "ciah"), "ISCF=8"),
+                ("TNVB TNBOND=128", ("--optimizer-backend", "nonredundant_truncated_newton"), "ISCF=8"),
+                ("TNVB TNBOND=128", ("--max-iterations", "-1"), "ISCF=8")]:
             status, output = run(configuration, 0, options)
             assert status != 0 and "XMVB-CPP error:" in output and message in output, output
             assert "[TNVB-MPS]" not in output, "capability failure launched tensor calculations"
+        status, output = run("TNVB TNBOND=128", 0, iscf=5)
+        assert status != 0 and "unsupported ISCF value 5" in output, output
+        assert "[TNVB-MPS]" not in output, output
         # Each structure is exact here, but cap 16 truncates the sum (exact rank 21).
         status, output = run("TNVB TNBOND=16 TNSUMBOND=16", 1, forbidden=False)
         assert status in (0, 2) and "XMVB-CPP error:" not in output, output
@@ -94,22 +97,22 @@ def main():
         for label in ("COMPUTED NATURAL ORBITALS", "XMVB ATOMIC POPULATION ANALYSIS",
                       "POPULATION AND CHARGE", "MULL.POP.", "LOW.POP."):
             assert label in output, label
-        # Input ISCF=8 and its CLI override use the existing block optimizer.
+        # Input ISCF=8 and its CLI override use the shared P-LBFGS optimizer.
         # ENERGY still must not build a total MPS or call any RDM.
         status, output = run("TNVB TNBOND=128", 0, iscf=8)
         assert status == 0 and "energy_only" in output, output
         assert "[TNVB-RDM]" not in output and "[TNVB-SUM]" not in output, output
-        for iscf, options in [(8, ()), (5, ("--optimizer-backend", "block_lbfgs"))]:
+        for iscf, options in [(8, ()), (9, ("--optimizer-backend", "plbfgs"))]:
             status, output = run("TNVB TNBOND=128 TNSUMBOND=256", 1, options,
                                  forbidden=False, molden=True, iscf=iscf)
             assert status in (0, 2) and "XMVB-CPP error:" not in output, output
-            for label in ("block-LBFGS (nonredundant orbital-block inverse)",
+            for label in ("P-LBFGS (nonredundant orbital-block inverse)",
                           "projected |g|_inf", "Final projected |g|_inf",
                           "COMPUTED NATURAL ORBITALS", "XMVB ATOMIC POPULATION ANALYSIS"):
                 assert label in output, label
-            assert "block_lbfgs_line_search_failed" not in output, output
+            assert "plbfgs_line_search_failed" not in output, output
         # Cover the conflict-resolved production entrypoint end to end: TNVB
-        # block-LBFGS convergence must retain master's restart-file export.
+        # P-LBFGS convergence must retain master's restart-file export.
         status, output = run("TNVB TNBOND=128 TNSUMBOND=256", 100,
                              forbidden=False, molden=True, iscf=8)
         assert status == 0 and "VBSCF converged" in output, output
@@ -123,7 +126,7 @@ def main():
         assert "[TNVB-RDM]" not in output, output
         restart_energy = float(re.search(r"Final total energy\s*:\s*([-0-9.]+)", output).group(1))
         assert abs(restart_energy - final_energy) <= 1e-9, (restart_energy, final_energy)
-    print("TNVB CLI ISCF=5/8, ENERGY, override, capability, fit-warning and analysis/export tests passed")
+    print("TNVB CLI ISCF=8, ENERGY, override, capability, fit-warning and analysis/export tests passed")
     return 0
 
 

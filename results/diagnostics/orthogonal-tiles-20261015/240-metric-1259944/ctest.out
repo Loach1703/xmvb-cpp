@@ -1,0 +1,16 @@
+Internal ctest changing into directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build
+Test project /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build
+    Start  5: product_frontier
+1/5 Test  #5: product_frontier .................   Passed    0.09 sec
+    Start 19: ci_transport
+2/5 Test #19: ci_transport .....................   Passed    0.02 sec
+    Start 20: representation_overlap
+3/5 Test #20: representation_overlap ...........   Passed    0.01 sec
+    Start 22: selected_ci_transport
+4/5 Test #22: selected_ci_transport ............   Passed    0.03 sec
+    Start 36: structure_tiles
+5/5 Test #36: structure_tiles ..................   Passed    0.13 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   0.30 sec

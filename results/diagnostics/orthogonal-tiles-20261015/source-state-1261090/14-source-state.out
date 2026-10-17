@@ -1,0 +1,17 @@
+orbitals=14
+structures=2
+accepted_seconds=1.714800104
+direction_checked=1
+direction_seconds=2.9742936740000001
+hvp_seconds=4.7546236979999996
+lagrangian_fd_error=3.9143814166593682e-11
+accepted_product_doubles=0
+direction_product_doubles=0
+direction_workspace_bound=58316544
+native_max_rss_kib=80924
+reference_checked=0
+gradient_error=0
+image_error=0
+hvp_error=0
+reference_direction_seconds=0
+reference_hvp_seconds=0

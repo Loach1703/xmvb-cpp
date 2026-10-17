@@ -1,0 +1,11 @@
+case=CAS(12,12)_selected
+structures=132
+products=924
+terms=8448
+support0_products=226512
+support1_products=608751
+cold_apply_seconds=0.176689915
+warm_apply_seconds=0.136939545
+max_rss_kib=59320
+rayleigh_energy=-5.6584170266362639
+reference_checked=0

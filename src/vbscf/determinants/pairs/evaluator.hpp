@@ -98,7 +98,7 @@ public:
       const std::vector<double>& ovlp_act,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       bool retain_derivative_payload = true) const;
 
   /**
@@ -128,7 +128,7 @@ public:
       const std::vector<int>& beta_occ_R,
       const SpinDeterminantPairEvaluation& beta_result,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       bool retain_spin_pair_evaluations = true) const;
 
   DeterminantPairEvaluation evaluate(
@@ -153,7 +153,7 @@ public:
       const std::vector<double>& ovlp_act,
       const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
       int n_orbitals,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       bool retain_spin_pair_evaluations = true) const;
 
 private:
@@ -184,6 +184,6 @@ double evaluate_opposite_spin_coulomb_coupling(
     const std::vector<int>& beta_occ_R,
     const SpinDeterminantPairEvaluation& beta_result,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result);
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result);
 
 }  // namespace xmvb::vb

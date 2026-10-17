@@ -1,0 +1,12 @@
+[  6%] Built target xmvb_mcscf
+[  6%] Built target xmvb_assets
+[ 81%] Built target xmvb_vbscf
+[ 83%] Built target xmvb_libcint
+[ 87%] Built target xmvb_input_deck
+[ 89%] Built target xmvb_guess
+[ 91%] Built target xmvb_input
+[ 97%] Built target xmvb_output
+[100%] Built target xmvb
+[  7%] Built target xmvb_mcscf
+[ 97%] Built target xmvb_vbscf
+[100%] Built target test_orthogonal_direct_ci

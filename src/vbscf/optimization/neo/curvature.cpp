@@ -9,13 +9,13 @@
 
 namespace xmvb::vb {
 
-NeoResult probe_neo_curvature(
+mcscf::NeoResult probe_neo_curvature(
     ExactHvpOperator& orbital_hessian,
     const StructureTangentOperator& structure_hessian,
     const OrbitalChart& chart) {
   const Eigen::Index n_orbital = chart.reduced_size();
   const Eigen::Index n_structure = structure_hessian.tangent_size();
-  const NeoProblem problem(
+  const mcscf::QuadraticProblem problem(
       Eigen::VectorXd::Zero(n_orbital + n_structure),
       [&](const Eigen::VectorXd& vector) -> Eigen::VectorXd {
         const auto orbital = orbital_hessian.apply_orbital_coupling(
@@ -50,10 +50,10 @@ NeoResult probe_neo_curvature(
             vector.tail(n_structure), 0.0);
         return image;
       });
-  NeoOptions options;
+  mcscf::NeoOptions options;
   options.stop_on_negative_curvature = true;
   options.relative_residual_tolerance = std::sqrt(std::numeric_limits<double>::epsilon());
-  return solve_neo(problem, options);
+  return mcscf::solve_neo(problem, options);
 }
 
 }  // namespace xmvb::vb

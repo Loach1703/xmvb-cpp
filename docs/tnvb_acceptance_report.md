@@ -1,5 +1,9 @@
 # Independent TNVB final acceptance report — 2026-10-12
 
+> Historical acceptance evidence, not acceptance of the 2026-10-17 master
+> merge. Current TNVB uses ISCF=8/P-LBFGS; native ISCF=5 has been removed by
+> master. See `tnvb_usage.md` for the current interfaces and input examples.
+
 Status: implementation and acceptance complete under the user-confirmed
 acceptance policy below. All results refer to the `tnvb` branch, based on `df85712`.
 Changes remain uncommitted. No legacy XMVB numerical source is modified by

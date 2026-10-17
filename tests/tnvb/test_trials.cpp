@@ -93,10 +93,10 @@ int main(int argc,char** argv) {
     objective.commit(std::move(value));
     require(objective.call_count()==2 && objective.input().orbital_preparation_input.orbital_value_table!=accepted_orbitals,"explicit trial commit failed");
     // A successful CLI exit at an iteration cap is not proof of a usable
-    // optimizer: require an actual accepted block-LBFGS orbital step here.
+    // optimizer: require an actual accepted P-LBFGS orbital step here.
     auto block_input=xmvb::vb::load_vbscf_input_with_timings(argv[1]);
     xmvb::vb::VbScfOptimizerOptions block_options;
-    block_options.backend=xmvb::vb::VbScfOptimizerBackend::BlockLbfgs;
+    block_options.backend=xmvb::vb::VbScfOptimizerBackend::Plbfgs;
     block_options.structure_eigensolver=xmvb::vb::StructureEigensolver::Dense;
     block_options.max_iterations=1;
     block_options.verbose=false;

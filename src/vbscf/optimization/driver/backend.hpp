@@ -5,9 +5,8 @@
 namespace xmvb::vb {
 
 enum class VbScfOptimizerBackend {
-  Lbfgs,
-  BlockLbfgs,
-  Neo,
+  Plbfgs,
+  Ciah,
   NonredundantProjectedGradient,
   NonredundantTruncatedNewton,
 };
@@ -15,12 +14,10 @@ enum class VbScfOptimizerBackend {
 inline const char* vbscf_optimizer_backend_name(
     VbScfOptimizerBackend backend) {
   switch (backend) {
-    case VbScfOptimizerBackend::Lbfgs:
-      return "lbfgs";
-    case VbScfOptimizerBackend::BlockLbfgs:
-      return "block_lbfgs";
-    case VbScfOptimizerBackend::Neo:
-      return "neo";
+    case VbScfOptimizerBackend::Plbfgs:
+      return "plbfgs";
+    case VbScfOptimizerBackend::Ciah:
+      return "ciah";
     case VbScfOptimizerBackend::NonredundantProjectedGradient:
       return "nonredundant_projected_gradient";
     case VbScfOptimizerBackend::NonredundantTruncatedNewton:

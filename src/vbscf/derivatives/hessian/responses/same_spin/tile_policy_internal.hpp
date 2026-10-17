@@ -4,10 +4,10 @@
 #include <cmath>
 #include <cstddef>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/accepted_tile.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb::detail {
 
@@ -100,7 +100,7 @@ inline int plan_pair_tile_extent(
       static_cast<std::size_t>(std::max(0, n_electrons)) *
       static_cast<std::size_t>(std::max(0, n_electrons));
   const std::size_t n_packed_pairs = static_cast<std::size_t>(
-      packed_active_pair_count(std::max(0, n_active_orbitals)));
+      xmvb::integrals::packed_active_pair_count(std::max(0, n_active_orbitals)));
 
   const std::size_t occupied_pair_count =
       static_cast<std::size_t>(std::max(0, n_electrons)) *
@@ -192,7 +192,7 @@ inline int plan_parallel_pair_tile_extent(
 inline PairTileExtents plan_pair_tile_extents(
     const SameSpinPairCacheContext& cache,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     bool include_opposite_spin = true,
     std::size_t workspace_bytes = kPairTileWorkspaceBytes) {
   const auto extent = [&](const std::vector<std::vector<int>>& strings) {
@@ -224,7 +224,7 @@ inline PairTileExtents plan_pair_tile_extents(
 inline LocalResponseTilePlan plan_local_response_tiles(
     const SameSpinPairCacheContext& cache,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     int n_states,
     int action_vector_sets = 1,
     std::size_t workspace_bytes = kPairTileWorkspaceBytes) {
@@ -236,7 +236,7 @@ inline LocalResponseTilePlan plan_local_response_tiles(
       cache.beta_reuse_table.unique_determinants.size());
   const std::size_t opposite_workspace_per_pair =
       2 * static_cast<std::size_t>(
-              packed_active_pair_count(std::max(0, n_active_orbitals))) *
+              xmvb::integrals::packed_active_pair_count(std::max(0, n_active_orbitals))) *
           sizeof(double);
   const std::size_t alpha_action_bytes = std::min(
       workspace_bytes,
@@ -285,7 +285,7 @@ inline LocalResponseTilePlan plan_local_response_tiles(
 inline OppositeSpinTilePlan plan_opposite_spin_backward_tiles(
     const SameSpinPairCacheContext& cache,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     std::size_t workspace_bytes = kPairTileWorkspaceBytes) {
   const std::size_t alpha_partner_bytes = std::min(
       workspace_bytes,
@@ -297,7 +297,7 @@ inline OppositeSpinTilePlan plan_opposite_spin_backward_tiles(
           cache.alpha_provider(), n_active_orbitals));
   const std::size_t channel_bytes_per_primary_pair =
       2 * static_cast<std::size_t>(
-              packed_active_pair_count(std::max(0, n_active_orbitals))) *
+              xmvb::integrals::packed_active_pair_count(std::max(0, n_active_orbitals))) *
           sizeof(double);
   const auto extent = [&](
                           const std::vector<std::vector<int>>& strings,

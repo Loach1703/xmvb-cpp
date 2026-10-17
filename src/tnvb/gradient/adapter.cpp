@@ -4,7 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 
 namespace xmvb::tnvb {
 
@@ -44,7 +44,7 @@ void populate_active_space_adjoints(const WorkerResponse& response,
   // including the reduced multiplicities when indices coincide.
   for (int l=0; l<n_ao; ++l) for (int k=0; k<n_ao; ++k)
     for (int j=0; j<n_ao; ++j) for (int i=0; i<n_ao; ++i) {
-      const auto index=vb::TwoElectronIndexer::two_electron_storage_index(i,j,k,l);
+      const auto index=core::PairIndex::two_electron_storage_index(i,j,k,l);
       result->packed_active_two_electron_gradient[index] += 0.5*pi(l,j,k,i);
     }
 }

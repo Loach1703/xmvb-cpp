@@ -72,9 +72,7 @@ vb::ActiveSpaceGradientResult ElectronicEvaluator::evaluate(
     throw std::invalid_argument("TNVB received nonfinite orbitals or nuclear energy");
   }
   const auto started=std::chrono::steady_clock::now();
-  auto timed=vb::prepare_timed_active_space_context(input,
-      vb::ActiveSpaceOrbitalPreparer{}, vb::AoEffectiveOneElectronBuilder{},
-      vb::ActiveSpaceOneElectronBuilder{}, vb::ActiveSpaceTwoElectronBuilder{});
+  auto timed=vb::prepare_timed_active_space_context(input);
   auto& prepared=timed.prepared_active_space;
   WorkerResponse response=process_.evaluate(input,prepared,gradient);
   validate_response(response);
@@ -131,8 +129,8 @@ vb::ActiveSpaceGradientResult ElectronicEvaluator::complete_gradient(
     std::unique_ptr<vb::ElectronicStateForwardEvaluation> forward) const {
   const auto* state=dynamic_cast<Forward*>(forward.get());
   if (state==nullptr) throw std::invalid_argument("TNVB backend received foreign forward state");
-  // Energy-screened requests intentionally built no total state. ISCF=5
-  // complete trials call evaluate_energy_gradient directly, avoiding this
+  // Energy-screened requests intentionally built no total state. Complete
+  // trials call evaluate_energy_gradient directly, avoiding this
   // second H/S build; this method is the generic lazy-completion capability.
   return evaluate(input,state->request,true);
 }

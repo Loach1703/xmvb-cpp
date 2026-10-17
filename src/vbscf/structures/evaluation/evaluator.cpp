@@ -2,37 +2,6 @@
 
 namespace xmvb::vb {
 
-StructureMatrixEvaluator::StructureMatrixEvaluator()
-    : orbital_preparer_(),
-      ao_effective_one_electron_builder_(),
-      active_space_one_electron_builder_(),
-      active_space_two_electron_builder_(),
-      structure_builder_() {}
-
-StructureMatrixEvaluator::
-    StructureMatrixEvaluator(
-        ActiveSpaceOrbitalPreparer orbital_preparer,
-        AoEffectiveOneElectronBuilder ao_effective_one_electron_builder,
-        ActiveSpaceOneElectronBuilder active_space_one_electron_builder,
-        ActiveSpaceTwoElectronBuilder active_space_two_electron_builder,
-        FullDeterminantStructureHamiltonianOverlapBuilder structure_builder)
-    : orbital_preparer_(std::move(orbital_preparer)),
-      ao_effective_one_electron_builder_(std::move(ao_effective_one_electron_builder)),
-      active_space_one_electron_builder_(std::move(active_space_one_electron_builder)),
-      active_space_two_electron_builder_(std::move(active_space_two_electron_builder)),
-      structure_builder_(std::move(structure_builder)) {}
-
-PreparedActiveSpaceContext StructureMatrixEvaluator::prepare_active_space(
-    const VbScfInput& input) const {
-  return prepare_timed_active_space_context(
-             input,
-             orbital_preparer_,
-             ao_effective_one_electron_builder_,
-             active_space_one_electron_builder_,
-             active_space_two_electron_builder_)
-      .prepared_active_space;
-}
-
 StructureAccumulationResult StructureMatrixEvaluator::evaluate(
     const VbScfInput& input,
     const PreparedActiveSpaceContext& prepared_active_space) const {

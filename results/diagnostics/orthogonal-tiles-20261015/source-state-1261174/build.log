@@ -1,0 +1,69 @@
+[ 75%] Built target xmvb_mcscf
+[100%] Built target test_ci_factors
+[  7%] Built target xmvb_mcscf
+[ 10%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/assembly/action.cpp.o
+[ 10%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/assembly/overlap_tiles.cpp.o
+[ 10%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/assembly/source_tiles.cpp.o
+[ 10%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/assembly/orthogonal_tiles.cpp.o
+[ 10%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/assembly/source_image.cpp.o
+[ 10%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/assembly/source_direction.cpp.o
+[ 12%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/assembly/source_response.cpp.o
+[ 12%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/orthogonal_ci/metric.cpp.o
+[ 15%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/orthogonal_ci/restricted_metric.cpp.o
+[ 15%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/structures/overlap/representation.cpp.o
+[ 15%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/gradient/active_space/evaluator.cpp.o
+[ 17%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/gradient/orbital/evaluator.cpp.o
+[ 17%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/coupled/structure.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/exact/apply.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/exact/batch.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/exact/direction.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/exact/structure_response_schur.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/exact/operator.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/context/response_cache.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/context/metric.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/responses/active_space/local_tile_accumulator.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/responses/active_space/outer_response.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/derivatives/hessian/responses/structure/directional.cpp.o
+[ 20%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/optimization/coupled/ci_transport.cpp.o
+[ 22%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/optimization/backends/ciah.cpp.o
+[ 22%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/optimization/backends/neo.cpp.o
+[ 25%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/optimization/backends/truncated_newton.cpp.o
+[ 27%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/optimization/preconditioners/hessian_diagonal.cpp.o
+[ 30%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/optimization/objective/function.cpp.o
+[ 30%] Building CXX object src/CMakeFiles/xmvb_vbscf.dir/vbscf/optimization/driver/optimizer.cpp.o
+[ 32%] Linking CXX static library libxmvb-vbscf.a
+[ 97%] Built target xmvb_vbscf
+[100%] Building CXX object src/CMakeFiles/test_structure_tiles.dir/__/tests/vbscf/unit/test_structure_tiles.cpp.o
+[100%] Linking CXX executable test_structure_tiles
+[100%] Built target test_structure_tiles
+[  7%] Built target xmvb_mcscf
+[ 97%] Built target xmvb_vbscf
+[ 97%] Building CXX object src/CMakeFiles/test_orthogonal_direct_ci.dir/__/tests/vbscf/unit/test_orthogonal_direct_ci.cpp.o
+[100%] Linking CXX executable test_orthogonal_direct_ci
+[100%] Built target test_orthogonal_direct_ci
+[  7%] Built target xmvb_mcscf
+[ 97%] Built target xmvb_vbscf
+[ 97%] Building CXX object src/CMakeFiles/test_coupled_structure.dir/__/tests/vbscf/unit/test_coupled_structure.cpp.o
+[100%] Linking CXX executable test_coupled_structure
+[100%] Built target test_coupled_structure
+[100%] Built target xmvb_mcscf
+[100%] Built target test_product_frontier
+[  7%] Built target xmvb_mcscf
+[ 97%] Built target xmvb_vbscf
+[ 97%] Building CXX object src/CMakeFiles/test_representation_overlap.dir/__/tests/vbscf/unit/test_representation_overlap.cpp.o
+[100%] Linking CXX executable test_representation_overlap
+[100%] Built target test_representation_overlap
+[  7%] Built target xmvb_mcscf
+[100%] Built target xmvb_vbscf
+[100%] Linking CXX executable test_ci_transport
+[100%] Built target test_ci_transport
+[  7%] Built target xmvb_mcscf
+[100%] Built target xmvb_vbscf
+[100%] Building CXX object src/CMakeFiles/test_selected_ci_transport.dir/__/tests/vbscf/unit/test_selected_ci_transport.cpp.o
+[100%] Linking CXX executable test_selected_ci_transport
+[100%] Built target test_selected_ci_transport
+[  7%] Built target xmvb_mcscf
+[100%] Built target xmvb_vbscf
+[100%] Building CXX object src/CMakeFiles/test_restricted_metric.dir/__/tests/vbscf/unit/test_restricted_metric.cpp.o
+[100%] Linking CXX executable test_restricted_metric
+[100%] Built target test_restricted_metric

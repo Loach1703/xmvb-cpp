@@ -7,15 +7,15 @@
 #include <string>
 #include <vector>
 
-#include "core/eigen_response.hpp"
-#include "core/eigensolver.hpp"
+#include "linalg/eigen_response.hpp"
+#include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
-#include "vbscf/structures/orthogonal_ci/planner.hpp"
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "mcscf/ci/planner.hpp"
+#include "vbscf/integrals/active/space.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace {
 
@@ -154,25 +154,17 @@ int main(int argc, char** argv) {
     const auto load_result =
         xmvb::vb::load_vbscf_input_with_timings(options.input_path, load_options);
 
-    xmvb::vb::ActiveSpaceOrbitalPreparer orbital_preparer;
-    xmvb::vb::AoEffectiveOneElectronBuilder ao_effective_one_electron_builder;
-    xmvb::vb::ActiveSpaceOneElectronBuilder active_space_one_electron_builder;
-    xmvb::vb::ActiveSpaceTwoElectronBuilder active_space_two_electron_builder;
+
     const auto prepared_active_space =
-        xmvb::vb::prepare_timed_active_space_context(
-            load_result.input,
-            orbital_preparer,
-            ao_effective_one_electron_builder,
-            active_space_one_electron_builder,
-            active_space_two_electron_builder)
+        xmvb::vb::prepare_timed_active_space_context(load_result.input)
             .prepared_active_space;
 
     std::vector<double> packed_active_eri =
         prepared_active_space.active_space_two_electron_result
             .packed_active_two_electron_integrals;
     if (packed_active_eri.empty()) {
-      packed_active_eri = xmvb::vb::reconstruct_packed_active_two_electron_integrals(
-          xmvb::vb::make_active_space_two_electron_view(
+      packed_active_eri = xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
+          xmvb::integrals::make_active_space_two_electron_view(
               prepared_active_space.active_space_two_electron_result),
           load_result.input.orbital_preparation_input.n_active_orbitals);
     }
@@ -236,7 +228,7 @@ int main(int argc, char** argv) {
     const Eigen::MatrixXd reference_overlap_action =
         dense_overlap * trial_vectors;
     const auto direct_ci_plan =
-        xmvb::vb::plan_orthogonal_direct_ci_action(
+        xmvb::mcscf::plan_orthogonal_direct_ci_action(
             same_spin_pair_cache.alpha_reuse_table.unique_determinants,
             same_spin_pair_cache.beta_reuse_table.unique_determinants,
             load_result.input.orbital_preparation_input.n_active_orbitals,
@@ -265,8 +257,6 @@ int main(int argc, char** argv) {
       std::cout << "direct_ci_complete_carrier = "
                 << (direct_ci_plan.carrier_complete() ? "true" : "false")
                 << '\n';
-      std::cout << "direct_ci_minimum_action_workspace_bytes = "
-                << direct_ci_plan.minimum_action_workspace_bytes << '\n';
       std::cout << "direct_ci_kronecker_flops = "
                 << static_cast<double>(direct_ci_plan.kronecker_flops) << '\n';
       std::cout << "direct_ci_sigma_flops = "
@@ -322,7 +312,7 @@ int main(int argc, char** argv) {
     const auto compact_action_end = std::chrono::high_resolution_clock::now();
     const auto compact_diagonal =
         compact_structure_action.preconditioner_diagonal();
-    xmvb::core::GeneralizedEigensolver eigensolver;
+    xmvb::linalg::GeneralizedEigensolver eigensolver;
     const auto dense_eigensolve_start = std::chrono::high_resolution_clock::now();
     const auto dense_eigenpairs = eigensolver.solve_dense(
         fast_result.hamiltonian_matrix,
@@ -330,7 +320,7 @@ int main(int argc, char** argv) {
         n_structures);
     const auto dense_eigensolve_end = std::chrono::high_resolution_clock::now();
     double davidson_action_seconds = 0.0;
-    const xmvb::core::GeneralizedEigenAction davidson_action =
+    const xmvb::linalg::GeneralizedEigenAction davidson_action =
         [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
           const auto action_call_start =
               std::chrono::high_resolution_clock::now();
@@ -338,11 +328,11 @@ int main(int argc, char** argv) {
           davidson_action_seconds += std::chrono::duration<double>(
               std::chrono::high_resolution_clock::now() - action_call_start)
                                          .count();
-          return xmvb::core::GeneralizedEigenActionResult{
+          return xmvb::linalg::GeneralizedEigenActionResult{
               std::move(images.hamiltonian),
               std::move(images.overlap)};
         };
-    const xmvb::core::DavidsonOptions davidson_options{
+    const xmvb::linalg::DavidsonOptions davidson_options{
         1,
         2 * n_structures,
         std::min(n_structures, 128),
@@ -376,7 +366,7 @@ int main(int argc, char** argv) {
         compact_structure_action.apply(selected_vector).overlap;
     const auto response_start = std::chrono::high_resolution_clock::now();
     const auto matrix_free_response =
-        xmvb::core::solve_generalized_eigen_response(
+        xmvb::linalg::solve_generalized_eigen_response(
             davidson_action,
             compact_diagonal.hamiltonian,
             compact_diagonal.overlap,
@@ -385,7 +375,7 @@ int main(int argc, char** argv) {
             selected_overlap,
             delta_hamiltonian_selected,
             delta_overlap_selected,
-            xmvb::core::EigenResponseOptions{
+            xmvb::linalg::EigenResponseOptions{
                 n_structures + 1,
                 1.0e-8});
     const auto response_end = std::chrono::high_resolution_clock::now();
@@ -477,8 +467,6 @@ int main(int argc, char** argv) {
     std::cout << "direct_ci_complete_carrier = "
               << (direct_ci_plan.carrier_complete() ? "true" : "false")
               << '\n';
-    std::cout << "direct_ci_minimum_action_workspace_bytes = "
-              << direct_ci_plan.minimum_action_workspace_bytes << '\n';
     std::cout << "direct_ci_favored_by_flops = "
               << (direct_ci_plan.favors_direct_ci() ? "true" : "false")
               << '\n';

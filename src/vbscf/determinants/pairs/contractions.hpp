@@ -7,15 +7,17 @@
 #include "vbscf/determinants/algebra/overlap.hpp"
 #include "vbscf/determinants/pairs/evaluator.hpp"
 #include "vbscf/determinants/contracts/types.hpp"
-#include "vbscf/integrals/active/two_electron/construction/result.hpp"
+#include "integrals/active/two_electron_result.hpp"
+
+namespace xmvb::integrals {
+struct ActiveSpaceTwoElectronView;
+}
 
 namespace xmvb::vb {
 
-struct ActiveSpaceTwoElectronView;
-
 Eigen::MatrixXd build_spin_antisymmetrized_interaction_matrix(
     const std::vector<int>& occ_L, const std::vector<int>& occ_R,
-    int n_active_orbitals, const ActiveSpaceTwoElectronView& view);
+    int n_active_orbitals, const xmvb::integrals::ActiveSpaceTwoElectronView& view);
 
 Eigen::MatrixXd build_spin_antisymmetrized_interaction_direction(
     const std::vector<int>& occ_L, const std::vector<int>& occ_R,
@@ -144,13 +146,13 @@ double contract_opposite_spin_first_order_projections(
 double project_sparse_projection_onto_packed_pair(
     const OppositeSpinPackedPairProjection& sparse_projection,
     int target_packed_pair_index,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     int n_active_orbitals);
 
 Eigen::VectorXd gather_projected_values_for_packed_pair_indices(
     const OppositeSpinPackedPairProjection& sparse_projection,
     const std::vector<int>& target_packed_pair_indices,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     int n_active_orbitals);
 
 Eigen::MatrixXd build_inverse_overlap_submatrix_from_result(
@@ -220,7 +222,7 @@ SameSpinPhiResult compute_same_spin_original_phi(
     const std::vector<int>& occ_R,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_active_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const DeterminantOverlapResult& det_ovlp_result,
     Eigen::MatrixXd* inverse_overlap_gradient);
 
@@ -246,7 +248,7 @@ double compute_opposite_spin_original_phi(
     const std::vector<int>& beta_occ_R,
     const DeterminantOverlapResult& beta_overlap_result,
     const OppositeSpinPairCache* beta_pair_cache,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     Eigen::MatrixXd* alpha_inverse_overlap_gradient,
     Eigen::MatrixXd* beta_inverse_overlap_gradient);
 
@@ -268,7 +270,7 @@ double compute_opposite_spin_original_phi(
     const std::vector<int>& beta_occ_L,
     const std::vector<int>& beta_occ_R,
     const DeterminantOverlapResult& beta_overlap_result,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     Eigen::MatrixXd* alpha_inverse_overlap_gradient,
     Eigen::MatrixXd* beta_inverse_overlap_gradient);
 

@@ -143,7 +143,7 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
   }
   std::vector<double> packed = prepared.active_space_two_electron_result.packed_active_two_electron_integrals;
   if (packed.empty() && prepared.active_space_two_electron_result.representation ==
-      vb::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
+      integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
     const auto& factors = prepared.active_space_two_electron_result.ri_active_pair_factors;
     if (factors.cols() != static_cast<Eigen::Index>(n_pair)) {
       throw std::invalid_argument("TNVB RI active-pair dimensions are inconsistent");

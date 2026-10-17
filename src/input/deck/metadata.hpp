@@ -11,10 +11,9 @@ namespace xmvb::vb {
 /** @brief Orbital optimizer selected by the `.xmi` `ISCF` keyword. */
 enum class InputScfOptimizer {
   Unspecified,
-  Lbfgs,
   Tnhvp,
-  BlockLbfgs,
-  Neo,
+  Plbfgs,
+  Ciah,
 };
 
 /**

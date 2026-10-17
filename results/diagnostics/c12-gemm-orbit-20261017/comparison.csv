@@ -1,0 +1,11 @@
+variant,job,node,affinity,steps,hvp,structure_responses,energy_Eh,scf_s,application_s,process_s,rss_MiB,user_s,system_s,minor_faults,termination
+saved_parent_before_workspace,1264878,anode42,96-127,4,36,36,-399.106646267331,16.8717,19.492537,19.68,2719.125,505.24,35.97,4351525,ciah_projected_gradient_tolerance
+saved_workspace_lease,1264887,anode42,96-127,4,36,36,-399.106646267331,15.740349,18.280541,18.48,2689.91796875,477.33,28.1,2293315,ciah_projected_gradient_tolerance
+gemm_orbit_rejected,1264911,anode42,96-127,4,36,36,-399.106646267330,16.13734,18.686125,18.89,2749.19140625,485.2,33.85,2631437,ciah_projected_gradient_tolerance
+blocked_output_rejected,1264919,anode42,96-127,4,36,36,-399.106646267332,17.085589,19.693073,19.89,2735.0,515.42,32.25,2473168,ciah_projected_gradient_tolerance
+callback_fusion_rejected,1264943,anode42,96-127,4,36,36,-399.106646267332,16.158468,18.698483,18.9,2774.51171875,488.94,30.67,2271297,ciah_projected_gradient_tolerance
+compact_beta_targets_rejected,1264949,anode42,96-127,4,36,36,-399.106646267330,16.073809,18.667509,18.87,2658.71875,485.17,31.76,2463052,ciah_projected_gradient_tolerance
+shared_exterior_only,1264950,anode42,96-127,4,36,36,-399.106646267331,15.49347,18.142712,18.34,2703.640625,466.07,30.29,2408978,ciah_projected_gradient_tolerance
+per_shear_edge_list_rejected,1264963,anode42,96-127,4,36,36,-399.106646267332,15.957373,18.566209,18.76,2756.85546875,481.54,29.41,2295656,ciah_projected_gradient_tolerance
+shared_rhs_and_output_batch_not_retained,1264964,anode42,96-127,4,36,36,-399.106646267329,15.055876,17.690658,17.89,2739.12109375,453.31,31.71,2440231,ciah_projected_gradient_tolerance
+identity_shears_and_output_batch_retained,1264965,anode42,96-127,4,36,36,-399.106646267332,15.287966,17.764194,17.96,2720.46875,461.39,31.55,2477480,ciah_projected_gradient_tolerance

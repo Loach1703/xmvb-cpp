@@ -9,8 +9,8 @@
 #include <Eigen/Core>
 
 #include "vbscf/core/contracts/input.hpp"
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "mcscf/optimization/trace.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_tile_stream_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
@@ -118,7 +118,8 @@ build_selected_structure_direction(
     const AcceptedOuterResponseContext& accepted,
     const ActiveSpaceIntegralDirectionView& direction,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors,
-    const Eigen::MatrixXd* directional_ri_active_pair_factors) {
+    const Eigen::MatrixXd* directional_ri_active_pair_factors,
+    StructureResponseRequest* ci_response) {
   if (accepted.input == nullptr ||
       accepted.accepted_point_context == nullptr) {
     throw std::invalid_argument(
@@ -130,7 +131,7 @@ build_selected_structure_direction(
 
   const int n_active_orbitals =
       input.orbital_preparation_input.n_active_orbitals;
-  const int n_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   const int n_alpha = static_cast<int>(
       same_spin.alpha_reuse_table.unique_determinants.size());
   const int n_beta = static_cast<int>(
@@ -161,18 +162,19 @@ build_selected_structure_direction(
   if (!accepted_point.structure_adjoint_state.has_value()) {
     accepted_point.structure_adjoint_state =
         structure_action->prepare_active_adjoint(
-            accepted_point.selected_state_matrices,
+            accepted_point.selected_state_eigenvectors,
+            accepted_point.normalized_state_weights,
             accepted_point.selected_state_energies);
   }
   StructureIntegralDirection direct_ci_direction;
-  direct_ci_direction.capture_connection = diagnostics::neo_trace_enabled();
+  direct_ci_direction.capture_connection = mcscf::diagnostics::ciah_trace_enabled();
   const StructureActionResult direct_direction =
       structure_action->apply_integral_direction(
           *accepted_point.structure_adjoint_state,
           direction.overlap,
           direction.one_electron,
           direction.packed_two_electron,
-          &direct_ci_direction);
+          &direct_ci_direction,ci_response);
   require_finite(
       direct_direction.hamiltonian,
       "orthogonal direct-CI directional Hamiltonian images");
@@ -191,7 +193,8 @@ build_selected_structure_direction_from_pair_tiles(
     const ActiveSpaceIntegralDirectionView& direction,
     const Eigen::MatrixXd* accepted_ri_active_pair_factors,
     const Eigen::MatrixXd* directional_ri_active_pair_factors,
-    const detail::DirectionalPairTileConsumer& additional_consumer) {
+    const detail::DirectionalPairTileConsumer& additional_consumer,
+    StructureResponseRequest* ci_response) {
   if (accepted.input == nullptr ||
       accepted.accepted_point_context == nullptr) {
     throw std::invalid_argument(
@@ -210,7 +213,7 @@ build_selected_structure_direction_from_pair_tiles(
         accepted,
         direction,
         accepted_ri_active_pair_factors,
-        directional_ri_active_pair_factors);
+        directional_ri_active_pair_factors,ci_response);
   }
   if (!accepted_point.same_spin_pair_cache.has_pair_providers() ||
       accepted.structure_state == nullptr) {
@@ -222,7 +225,7 @@ build_selected_structure_direction_from_pair_tiles(
   const auto& selected_states = accepted.structure_state->selected_states;
   const int n_active_orbitals =
       input.orbital_preparation_input.n_active_orbitals;
-  const int n_pairs = packed_active_pair_count(n_active_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   const int n_alpha = selected_states.n_unique_alpha;
   const int n_beta = selected_states.n_unique_beta;
   const int n_states = static_cast<int>(selected_states.states.size());

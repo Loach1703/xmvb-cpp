@@ -8,7 +8,7 @@ namespace xmvb::vb {
 
 Eigen::MatrixXd ClosedShellFockBuilder::build(
     const Eigen::Ref<const Eigen::MatrixXd>& density_projector,
-    const AoIntegralInput& ao_integral_input) const {
+    const xmvb::integrals::AoIntegralInput& ao_integral_input) const {
   // The closed-shell projector and inactive VB density have the same 2J-K
   // convention. Share the exact forward operator and its bounded OpenMP workspace.
   const int n_bf = ao_integral_input.n_basis_functions;
@@ -24,7 +24,7 @@ Eigen::MatrixXd ClosedShellFockBuilder::build(
 Eigen::MatrixXd ClosedShellFockBuilder::build(
     const Eigen::Ref<const Eigen::MatrixXd>& density_projector,
     const Eigen::Ref<const Eigen::MatrixXd>& core_hamiltonian_matrix,
-    const RiAoFactorization& ri_factorization) const {
+    const xmvb::integrals::RiAoFactorization& ri_factorization) const {
   const int n_basis_functions = ri_factorization.n_basis_functions;
   if (n_basis_functions <= 0 ||
       density_projector.rows() != n_basis_functions ||

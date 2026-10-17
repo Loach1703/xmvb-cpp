@@ -3,6 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "input/deck/keywords.hpp"
 #include "input/deck/model.hpp"
@@ -70,12 +71,24 @@ int main() {
         explicit_unit.metadata.guess_type == xmvb::vb::kGuessTypeUnit,
         "explicit GUESS=UNIT must override the $GUS default");
 
-    const auto neo_path = root / "neo.xmi";
-    write_deck(neo_path, "iscf=9");
-    const auto neo = xmvb::vb::parse_input_deck_model(neo_path.string());
-    require(
-        neo.metadata.scf_optimizer == xmvb::vb::InputScfOptimizer::Neo,
-        "ISCF=9 must select NEO");
+    using xmvb::vb::InputScfOptimizer;
+    const std::pair<int, InputScfOptimizer> optimizers[] = {
+        {7, InputScfOptimizer::Tnhvp},
+        {8, InputScfOptimizer::Plbfgs}, {9, InputScfOptimizer::Ciah}};
+    for (const auto& [iscf, expected] : optimizers) {
+      const auto path = root / ("iscf" + std::to_string(iscf) + ".xmi");
+      write_deck(path, "iscf=" + std::to_string(iscf));
+      const auto deck = xmvb::vb::parse_input_deck_model(path.string());
+      require(deck.metadata.scf_optimizer == expected,
+          "numeric ISCF mapping changed during optimizer rename");
+    }
+
+    const auto retired_path = root / "iscf5.xmi";
+    write_deck(retired_path, "iscf=5");
+    bool rejected = false;
+    try { (void)xmvb::vb::parse_input_deck_model(retired_path.string()); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    require(rejected, "retired ISCF=5 must not select another optimizer");
 
     const auto state_average_path = root / "state-average.xmi";
     write_deck(state_average_path, "nstate=3");

@@ -35,39 +35,39 @@ std::optional<xmvb::cli::Options> parse(
 int main() {
   const xmvb::vb::VbScfOptimizerOptions api_defaults;
   require(
-      api_defaults.backend == xmvb::vb::VbScfOptimizerBackend::BlockLbfgs,
-      "optimizer API must default to block-LBFGS");
+      api_defaults.backend == xmvb::vb::VbScfOptimizerBackend::Plbfgs,
+      "optimizer API must default to P-LBFGS");
   const auto defaults = parse({"xmvb-cpp.exe", "unused.xmi"});
   require(defaults.has_value(), "default CLI options must parse");
   require(
       defaults->optimizer.backend ==
-          xmvb::vb::VbScfOptimizerBackend::BlockLbfgs,
-      "CLI must default to block-LBFGS");
+          xmvb::vb::VbScfOptimizerBackend::Plbfgs,
+      "CLI must default to P-LBFGS");
 
-  const auto block = parse({
+  const auto plbfgs = parse({
       "xmvb-cpp.exe",
       "unused.xmi",
       "--optimizer-backend",
-      "block_lbfgs"});
-  require(block.has_value(), "block-LBFGS option must parse");
+      "plbfgs"});
+  require(plbfgs.has_value(), "P-LBFGS option must parse");
   require(
-      block->optimizer.backend ==
-          xmvb::vb::VbScfOptimizerBackend::BlockLbfgs,
-      "block-LBFGS option selected the wrong backend");
+      plbfgs->optimizer.backend ==
+          xmvb::vb::VbScfOptimizerBackend::Plbfgs,
+      "P-LBFGS option selected the wrong backend");
 
-  const auto neo = parse({
+  const auto ciah = parse({
       "xmvb-cpp.exe",
       "unused.xmi",
       "--optimizer-backend",
-      "neo"});
-  require(neo.has_value(), "NEO option must parse");
+      "ciah"});
+  require(ciah.has_value(), "CIAH option must parse");
   require(
-      neo->optimizer.backend == xmvb::vb::VbScfOptimizerBackend::Neo,
-      "NEO option selected the wrong backend");
+      ciah->optimizer.backend == xmvb::vb::VbScfOptimizerBackend::Ciah,
+      "CIAH option selected the wrong backend");
   require(
       std::string(xmvb::vb::vbscf_optimizer_backend_name(
-          neo->optimizer.backend)) == "neo",
-      "NEO backend must have the canonical name neo");
+          ciah->optimizer.backend)) == "ciah",
+      "CIAH backend must have the canonical name ciah");
 
   const auto hessian_preconditioner = parse({
       "xmvb-cpp.exe",
@@ -81,29 +81,18 @@ int main() {
           xmvb::vb::OrbitalPreconditioner::HessianDiagonal,
       "Hessian diagonal preconditioner option selected the wrong model");
 
-  const auto neo_trace = parse({
+  const auto ciah_trace = parse({
       "xmvb-cpp.exe",
       "unused.xmi",
-      "--neo-trace",
-      "neo.tsv"});
-  require(neo_trace.has_value(), "NEO trace option must parse");
+      "--ciah-trace",
+      "ciah.tsv"});
+  require(ciah_trace.has_value(), "CIAH trace option must parse");
   require(
-      neo_trace->neo_trace_path == "neo.tsv",
-      "NEO trace option selected the wrong path");
+      ciah_trace->ciah_trace_path == "ciah.tsv",
+      "CIAH trace option selected the wrong path");
   require(
-      neo_trace->tnhvp_trace_path.empty(),
-      "NEO trace option must not set the TNHVP trace path");
-
-  const auto xmvb_lbfgs = parse({
-      "xmvb-cpp.exe",
-      "unused.xmi",
-      "--optimizer-backend",
-      "lbfgs"});
-  require(xmvb_lbfgs.has_value(), "XMVB L-BFGS option must parse");
-  require(
-      xmvb_lbfgs->optimizer.backend ==
-          xmvb::vb::VbScfOptimizerBackend::Lbfgs,
-      "XMVB L-BFGS option selected the wrong backend");
+      ciah_trace->tnhvp_trace_path.empty(),
+      "CIAH trace option must not set the TNHVP trace path");
 
   const auto invalid = parse({
       "xmvb-cpp.exe",
@@ -111,6 +100,16 @@ int main() {
       "--optimizer-backend",
       "unknown"});
   require(!invalid.has_value(), "invalid optimizer backend must be rejected");
+
+  require(!parse({"xmvb-cpp.exe", "unused.xmi", "--optimizer-backend", "lbfgs"}),
+      "removed native L-BFGS backend must not remain as an alias");
+
+  require(!parse({"xmvb-cpp.exe", "unused.xmi", "--optimizer-backend", "neo"}),
+      "retired neo CLI alias must not remain");
+  require(!parse({"xmvb-cpp.exe", "unused.xmi", "--optimizer-backend", "block_lbfgs"}),
+      "retired block_lbfgs CLI alias must not remain");
+  require(!parse({"xmvb-cpp.exe", "unused.xmi", "--neo-trace", "trace.tsv"}),
+      "retired neo trace option must not remain");
 
   const auto invalid_preconditioner = parse({
       "xmvb-cpp.exe",

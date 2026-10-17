@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -13,16 +14,19 @@
 
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
+#include "vbscf/derivatives/hessian/exact/operator.hpp"
+#include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/active/two_electron.hpp"
+#include "integrals/ao/graph.hpp"
 #include "vbscf/optimization/neo/coordinates.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
-#include "core/metric_solve.hpp"
+#include "linalg/metric_solve.hpp"
 
 namespace {
 
@@ -43,10 +47,10 @@ void check_metric_recycling() {
   const auto inverse = [&](const Eigen::VectorXd& x) {
     return (x.array() / metric.diagonal().array()).matrix().eval();
   };
-  xmvb::core::MetricSolveWorkspace workspace(3);
+  xmvb::linalg::MetricSolveWorkspace workspace(3);
   const Eigen::VectorXd a = Eigen::VectorXd::LinSpaced(n, -0.37, 0.62);
   const Eigen::VectorXd b = Eigen::VectorXd::LinSpaced(n, 0.29, -0.43);
-  xmvb::core::MetricSolveStats stats;
+  xmvb::linalg::MetricSolveStats stats;
   const auto xa = workspace.solve(a, action, inverse, &stats);
   const auto xb = workspace.solve(b, action, inverse, &stats);
   const Eigen::VectorXd rhs = 0.4 * a - 0.7 * b;
@@ -66,7 +70,7 @@ void check_metric_recycling() {
   }
   const auto zero = workspace.solve(Eigen::VectorXd::Zero(n), action, inverse, &stats);
   require(zero.isZero() && stats.actions == 0, "zero covector requires no metric action");
-  xmvb::core::MetricSolveWorkspace observed(2);
+  xmvb::linalg::MetricSolveWorkspace observed(2);
   const Eigen::VectorXd direction = Eigen::VectorXd::LinSpaced(n,-0.42,0.73);
   observed.observe(direction, action(direction));
   const auto known = observed.solve(action(direction), action, inverse, &stats);
@@ -76,7 +80,7 @@ void check_metric_recycling() {
       "an existing AH metric image relaunched CG");
 
   // The captured component is exactly zero, but the complete residual is large.
-  xmvb::core::MetricSolveWorkspace decisions(2);
+  xmvb::linalg::MetricSolveWorkspace decisions(2);
   Eigen::Matrix3d diagonal = Eigen::Vector3d(2.0, 0.001, 7.0).asDiagonal();
   const Eigen::VectorXd e0 = Eigen::VectorXd::Unit(3, 0);
   decisions.observe(e0, diagonal * e0);
@@ -137,19 +141,19 @@ StructureFixture make_fixture() {
   one_electron << -1.1, 0.16,
                    0.16, -0.45;
 
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_orbitals);
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   Eigen::MatrixXd pair_factor(3, n_pairs);
   pair_factor << 0.31, 0.07, -0.02,
                  0.04, 0.26,  0.08,
                 -0.03, 0.05,  0.22;
   const Eigen::MatrixXd pair_kernel = pair_factor.transpose() * pair_factor;
-  xmvb::vb::ActiveSpaceTwoElectronResult two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
   two_electron.packed_active_two_electron_integrals.resize(
-      xmvb::vb::packed_active_two_electron_integral_count(n_orbitals));
+      xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
   for (int column = 0; column < n_pairs; ++column) {
     for (int row = 0; row <= column; ++row) {
       two_electron.packed_active_two_electron_integrals[
-          xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(
               row, column)] = pair_kernel(row, column);
     }
   }
@@ -322,12 +326,9 @@ void check_equal_weight_multistate(const StructureFixture& fixture) {
       (joint.metric_coordinates-coordinate_action.metric_coordinates).norm() < 3e-13 &&
       (joint.adjoint_multipliers-coordinate_action.adjoint_multipliers).norm() < 3e-13,
       "joint response changed horizontal Hessian, metric or multipliers");
-  auto response_states = accepted->selected_state_matrices;
-  for (int i = 0; i < structure.n_states(); ++i)
-    response_states.states[i].coefficient_matrix = fixture.action.expand_structure_block(
-        coordinate_action.coefficient_response.col(i));
   const auto separate_adjoint = fixture.action.active_integral_response_adjoint(
-      *accepted->structure_adjoint_state, response_states, coordinate_action.adjoint_multipliers);
+      *accepted->structure_adjoint_state, coordinate_action.coefficient_response,
+      coordinate_action.adjoint_multipliers);
   require((joint_adjoint.overlap-separate_adjoint.overlap).norm() < 3e-13 &&
       (joint_adjoint.one_electron-separate_adjoint.one_electron).norm() < 3e-13 &&
       (joint_adjoint.pair_kernel-separate_adjoint.pair_kernel).norm() < 3e-13,
@@ -505,8 +506,8 @@ void check_metric_factorization(const StructureFixture& fixture) {
         "complete horizontal overlap inverse differs from its dense reference");
     require(std::abs(structure.dual_norm(rhs)-std::sqrt(rhs.dot(expected))) < 1e-12,
         "factorized structure norm changed the physical metric");
-    xmvb::core::MetricSolveStats stats;
-    const auto certified = xmvb::core::solve_metric(rhs,
+    xmvb::linalg::MetricSolveStats stats;
+    const auto certified = xmvb::linalg::solve_metric(rhs,
         [&](const Eigen::VectorXd& x) { return structure.apply_metric_coordinates(x); },
         [&](const Eigen::VectorXd& x) { return structure.apply_inverse_metric_model(x); }, &stats);
     require(stats.iterations <= 2 && stats.certifications >= 1 &&
@@ -568,23 +569,13 @@ void check_connection(const StructureFixture& fixture) {
   one_direction << 0.11, 0.02, 0.02, -0.07;
   const std::vector<double> overlap(overlap_direction.data(), overlap_direction.data()+4);
   const std::vector<double> one(one_direction.data(), one_direction.data()+4);
-  std::vector<double> two(xmvb::vb::packed_active_two_electron_integral_count(2), 0.0);
+  std::vector<double> two(xmvb::integrals::packed_active_two_electron_integral_count(2), 0.0);
   for (const bool stationary : {true, false}) {
     Eigen::VectorXd coefficients = fixture.eigenvectors.col(0);
     if (!stationary) coefficients += 0.4 * fixture.eigenvectors.col(1);
     coefficients /= std::sqrt(coefficients.dot(fixture.overlap * coefficients));
     const double energy = coefficients.dot(fixture.hamiltonian * coefficients);
-    xmvb::vb::SelectedStateDeterminantMatrices selected;
-    selected.n_structures = 4;
-    selected.n_unique_alpha = selected.n_unique_beta = 2;
-    selected.normalized_state_weights = {1.0};
-    selected.states.resize(1);
-    selected.states[0].normalized_state_weight = 1.0;
-    selected.states[0].coefficient_matrix.resize(2, 2);
-    for (int a = 0; a < 2; ++a)
-      for (int b = 0; b < 2; ++b)
-        selected.states[0].coefficient_matrix(a,b) = coefficients[2*a+b];
-    const auto state = fixture.action.prepare_active_adjoint(selected, {energy});
+    const auto state = fixture.action.prepare_active_adjoint(coefficients, {1.0}, {energy});
     xmvb::vb::StructureIntegralDirection captured, plain;
     captured.capture_connection = true;
     const auto images = fixture.action.apply_integral_direction(state, overlap, one, two, &captured);
@@ -616,9 +607,101 @@ void check_connection(const StructureFixture& fixture) {
           tangent.apply_hessian_coordinates(gamma)).norm() < 1e-12,
           "complete stationary carrier connection is not C gamma");
     } else {
-      require(state.residuals[0].norm() > 1e-3,
+      const auto image=fixture.action.apply(state.structure_coefficients);
+      require((image.hamiltonian-energy*image.overlap).norm() > 1e-3,
           "nonstationary connection test accidentally has zero carrier residual");
     }
+  }
+}
+
+/** Compare the complete orbital/CI coupling action with its separate calls. */
+void check_joint_coupling_action() {
+  xmvb::vb::VbScfInput input;
+  input.standard_two_electron_mode = xmvb::vb::StandardTwoElectronMode::Exact;
+  auto& orbitals = input.orbital_preparation_input;
+  orbitals.n_basis_functions = 3;
+  orbitals.n_orbitals = orbitals.n_active_orbitals = 2;
+  orbitals.n_total_electrons = orbitals.n_active_electrons = 2;
+  orbitals.orbital_value_table = {1.0, 0.13, -0.17, 0.21, 0.94, 0.12};
+  orbitals.orbital_basis_index_table = {1, 2, 3, 1, 2, 3};
+  orbitals.orbital_basis_counts = {3, 3};
+  orbitals.ao_overlap_matrix = Eigen::Matrix3d::Identity();
+  orbitals.ao_overlap_matrix(0, 1) = orbitals.ao_overlap_matrix(1, 0) = 0.1;
+  auto& ao = input.ao_integral_input;
+  ao.n_basis_functions = 3;
+  ao.ao_core_hamiltonian_matrix.resize(3, 3);
+  ao.ao_core_hamiltonian_matrix << -1.1, 0.13, 0.04,
+                                    0.13, -0.6, -0.08,
+                                    0.04, -0.08, 0.2;
+  std::vector<int> left, right;
+  std::vector<double> values;
+  for (int p = 0; p < 6; ++p) {
+    for (int q = 0; q <= p; ++q) {
+      left.push_back(p);
+      right.push_back(q);
+      values.push_back(0.07 * std::cos(0.2 * (p - q)));
+    }
+  }
+  ao.pair_graph = xmvb::integrals::build_ao_pair_graph(left, right, values, 3);
+  auto& data = input.structure_data;
+  for (int a = 0; a < 2; ++a) {
+    for (int b = 0; b < 2; ++b) {
+      data.alpha_det.push_back({a});
+      data.beta_det.push_back({b});
+      data.determinant_to_structure_terms.push_back({{data.n_structures++, 1.0}});
+    }
+  }
+
+  const auto accepted = xmvb::vb::OrbitalGradientEvaluator().evaluate(
+      input, {0, 3}, {0.5, 0.5}, 0.4);
+  const xmvb::vb::SparseParameterLayout layout(orbitals);
+  const auto& prepared = accepted.orbital_preparation_result;
+  const xmvb::vb::OrbitalChart chart(
+      orbitals, layout,
+      prepared.auxiliary_orbital_matrix.leftCols(orbitals.n_orbitals),
+      prepared.physical_orbital_frame.normalized_orbital_matrix,
+      nullptr, false, false, nullptr,
+      xmvb::vb::OrbitalChart::Coordinates::Unwhitened);
+  const xmvb::vb::ExactHvpOperator hessian(
+      accepted.second_order_context, &input, layout, &chart);
+  const xmvb::vb::StructureTangentOperator structure(
+      accepted.second_order_context, hessian.structure_action());
+  require(hessian.structure_action().supports_integral_direction() &&
+          chart.reduced_size() > 0 && structure.tangent_size() > 0,
+          "joint coupling fixture lacks orbital or direct-CI directions");
+  Eigen::VectorXd orbital = Eigen::VectorXd::LinSpaced(
+      chart.reduced_size(), 0.23, 0.57);
+  orbital.normalize();
+  const Eigen::VectorXd ci = Eigen::VectorXd::LinSpaced(
+      structure.tangent_size(), -0.31, 0.42);
+  const auto close = [](const auto& actual, const auto& expected) {
+    return (actual - expected).norm() <= 3e-11 * std::max(1.0, expected.norm());
+  };
+  for (const int direction : {0, 1, 2}) {
+    Eigen::VectorXd p = orbital;
+    Eigen::VectorXd q = ci;
+    if (direction == 1) p.setZero();
+    if (direction == 2) q.setZero();
+    const auto separate_p = hessian.apply_orbital_coupling(p);
+    xmvb::vb::StructureActiveIntegralAdjoint separate_adjoint;
+    const auto separate_ci = structure.apply_coupling_coordinates(q, &separate_adjoint);
+    const Eigen::MatrixXd raw = structure.coefficient_response_coordinates(q);
+    xmvb::vb::StructureResponseRequest request{raw};
+    const auto joint_p = hessian.apply_orbital_coupling(p, &request);
+    xmvb::vb::StructureActiveIntegralAdjoint joint_adjoint;
+    const auto joint_ci = structure.finish_coupling_coordinates(
+        raw, std::move(request.result), &joint_adjoint);
+    require(close(joint_p.orbital_hessian, separate_p.orbital_hessian) &&
+            close(joint_p.scaled_structure_forcing, separate_p.scaled_structure_forcing),
+            "joint coupling changed orbital Hessian or structure forcing");
+    require(close(joint_ci.hessian_coordinates, separate_ci.hessian_coordinates) &&
+            close(joint_ci.metric_coordinates, separate_ci.metric_coordinates) &&
+            close(joint_ci.coefficient_response, separate_ci.coefficient_response) &&
+            close(joint_ci.adjoint_multipliers, separate_ci.adjoint_multipliers),
+            "joint coupling changed CI Hessian, metric, response, or multipliers");
+    require(close(hessian.apply_structure_coupling_adjoint(joint_adjoint),
+                  hessian.apply_structure_coupling_adjoint(separate_adjoint)),
+            "joint coupling changed the orbital image of the CI adjoint");
   }
 }
 
@@ -634,6 +717,7 @@ int main() {
     check_connection(fixture);
     check_carrier_diagonal(fixture);
     check_metric_factorization(fixture);
+    check_joint_coupling_action();
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

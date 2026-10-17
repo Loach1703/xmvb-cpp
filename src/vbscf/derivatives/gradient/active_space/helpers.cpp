@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb {
 
@@ -45,7 +45,7 @@ void initialize_active_space_gradient_probe_result(
       prepared_active_space.active_space_one_electron_result.h1e_act.size(),
       0.0);
   result->packed_active_two_electron_gradient.assign(
-      packed_active_two_electron_integral_count(
+      xmvb::integrals::packed_active_two_electron_integral_count(
           input.orbital_preparation_input.n_active_orbitals),
       0.0);
 }
@@ -90,7 +90,7 @@ void initialize_active_space_gradient_probe_result(
       result->active_space_one_electron_result.h1e_act.size(),
       0.0);
   result->packed_active_two_electron_gradient.assign(
-      packed_active_two_electron_integral_count(
+      xmvb::integrals::packed_active_two_electron_integral_count(
           input.orbital_preparation_input.n_active_orbitals),
       0.0);
 }

@@ -1,0 +1,4 @@
+variant,energy_Eh,steps,hvp,scf_s,app_s,rss_kib
+saved address plan,-399.106646267331,4,36,28.207024,30.863387,2892468
+density reuse first,-399.106646267331,4,36,29.361272,32.10821,2721076
+density reuse repeat,-399.106646267331,4,36,28.839069,31.809545,2706596

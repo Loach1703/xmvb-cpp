@@ -1,6 +1,6 @@
 #include "vbscf/optimization/objective/function.hpp"
-#include "vbscf/diagnostics/performance/phases.hpp"
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "core/timing.hpp"
+#include "mcscf/optimization/trace.hpp"
 
 #include <stdexcept>
 #include <utility>
@@ -141,7 +141,7 @@ VbScfObjective::evaluate_trial_energy_with_initial_eigenvectors(
     bool canonicalize_sparse_gauge,
     const Eigen::Ref<const Eigen::MatrixXd>& initial_eigenvectors,
     bool complete_external_gradient) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::TrialForward);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::TrialForward);
   if (input_.tnvb.enabled && !parameter_vector.allFinite()) {
     throw std::invalid_argument("TNVB trial coordinates are nonfinite");
   }
@@ -190,7 +190,7 @@ VbScfObjective::evaluate_trial_energy_with_initial_eigenvectors(
           structure_eigensolver_,
           structure_solve_accuracy_,
           initial_eigenvectors));
-  evaluation.energy = evaluation.forward_evaluation->total_energy();
+    evaluation.energy = evaluation.forward_evaluation->total_energy();
   }
   evaluation.chart_changed = chart_changed;
   evaluation.wall_time_seconds =
@@ -224,7 +224,7 @@ VbScfObjective::evaluate_coupled_keyframe(
   result.structure_residuals = std::move(fixed.structure_residuals);
   result.coefficient_gradient = std::move(fixed.coefficient_gradient);
   result.energy = fixed.gradient.scf_result.total_energy;
-  diagnostics::neo_trace("ciah_keyframe_cost",
+  mcscf::diagnostics::ciah_trace("ciah_keyframe_cost",
       "seconds=%.17g,active=%.17g,two_electron_backward=%.17g,ao_backward=%.17g,orbital_backward=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(),
       fixed.gradient.active_space_gradient_wall_time_seconds,
@@ -265,7 +265,7 @@ VbScfObjective::evaluate_trial_energy_with_structure_guess(
 }
 
 void VbScfObjective::complete_trial(TrialEvaluation* evaluation) const {
-  diagnostics::ScopedPhase phase(diagnostics::Phase::TrialGradient);
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::TrialGradient);
   if (evaluation == nullptr || !evaluation->valid ||
       evaluation->gradient_ready ||
       (!evaluation->forward_evaluation.has_value() && !evaluation->electronic_forward)) {
@@ -285,7 +285,7 @@ void VbScfObjective::complete_trial(TrialEvaluation* evaluation) const {
     evaluation->gradient_result = gradient_evaluator_->complete_gradient(
       input_,
       std::move(*evaluation->forward_evaluation));
-  evaluation->forward_evaluation.reset();
+    evaluation->forward_evaluation.reset();
   }
   if ((!electronic_backend_ || electronic_backend_->provides_second_order_context()) &&
       evaluation->gradient_result.second_order_context == nullptr) {

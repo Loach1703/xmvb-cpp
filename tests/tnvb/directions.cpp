@@ -27,7 +27,7 @@ Eigen::VectorXd symmetric_direction(int n,double phase) {
   return Eigen::Map<const Eigen::VectorXd>(matrix.data(),matrix.size());
 }
 
-void materialize_active_eri(xmvb::vb::ActiveSpaceTwoElectronResult* value,int n) {
+void materialize_active_eri(xmvb::integrals::ActiveSpaceTwoElectronResult* value,int n) {
   if (!value->packed_active_two_electron_integrals.empty()) return;
   const auto& factors=value->ri_active_pair_factors;
   const int np=n*(n+1)/2;

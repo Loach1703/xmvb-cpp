@@ -14,7 +14,7 @@
 #include <omp.h>
 #endif
 
-namespace xmvb::vb {
+namespace xmvb::libcint {
 
 namespace {
 
@@ -93,15 +93,15 @@ void scatter_three_center_shell_block(
 
 }  // namespace
 
-RiAoFactorization build_libcint_ri_factorization(
-    const LibcintInput& primary_input,
-    const LibcintInput& auxiliary_input,
+xmvb::integrals::RiAoFactorization build_libcint_ri_factorization(
+    const xmvb::integrals::LibcintInput& primary_input,
+    const xmvb::integrals::LibcintInput& auxiliary_input,
     double metric_eigenvalue_cutoff) {
   if (!(metric_eigenvalue_cutoff >= 0.0)) {
     throw std::invalid_argument("metric_eigenvalue_cutoff must be non-negative");
   }
 
-  RiAoFactorization result;
+  xmvb::integrals::RiAoFactorization result;
   LibcintDirectShellEvaluator evaluator(primary_input, auxiliary_input);
   LibcintShellWorkspace workspace;
 
@@ -237,18 +237,18 @@ RiAoFactorization build_libcint_ri_factorization(
   return result;
 }
 
-RiAoFactorization LibcintRiIntegralProvider::build(
-    const LibcintInput& primary_input,
-    const LibcintInput& auxiliary_input) const {
+xmvb::integrals::RiAoFactorization LibcintRiIntegralProvider::build(
+    const xmvb::integrals::LibcintInput& primary_input,
+    const xmvb::integrals::LibcintInput& auxiliary_input) const {
   return build(
       primary_input,
       auxiliary_input,
       LibcintRiIntegralProviderOptions{});
 }
 
-RiAoFactorization LibcintRiIntegralProvider::build(
-    const LibcintInput& primary_input,
-    const LibcintInput& auxiliary_input,
+xmvb::integrals::RiAoFactorization LibcintRiIntegralProvider::build(
+    const xmvb::integrals::LibcintInput& primary_input,
+    const xmvb::integrals::LibcintInput& auxiliary_input,
     const LibcintRiIntegralProviderOptions& options) const {
   return build_libcint_ri_factorization(
       primary_input,
@@ -256,4 +256,4 @@ RiAoFactorization LibcintRiIntegralProvider::build(
       options.metric_eigenvalue_cutoff);
 }
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::libcint

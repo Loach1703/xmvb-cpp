@@ -7,10 +7,10 @@
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
 
-#include "core/openmp.hpp"
-#include "vbscf/core/storage/eigen.hpp"
-#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
-#include "vbscf/integrals/ao/one_electron/ri_operator.hpp"
+#include "parallel/openmp.hpp"
+#include "linalg/storage.hpp"
+#include "integrals/ao/exact.hpp"
+#include "integrals/ao/ri_operator.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -76,7 +76,7 @@ SignedFactors factor_symmetric_matrix(
   return result;
 }
 
-AoEffectiveOneElectronRiLowRankFactors build_ri_factors(
+xmvb::integrals::AoEffectiveOneElectronRiLowRankFactors build_ri_factors(
     const std::vector<double>& active_gradient_storage,
     const OrbitalPreparationResult& orbitals,
     int n_bf,
@@ -119,7 +119,7 @@ AoEffectiveOneElectronRiLowRankFactors build_ri_factors(
 
 AoEffectiveOneElectronBackpropagationResult backpropagate_ri(
     const std::vector<double>& gradient_storage,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf) {
   const std::size_t size =
       static_cast<std::size_t>(n_bf) * static_cast<std::size_t>(n_bf);
@@ -130,7 +130,7 @@ AoEffectiveOneElectronBackpropagationResult backpropagate_ri(
   const Eigen::Map<const Eigen::MatrixXd> gradient(
       gradient_storage.data(), n_bf, n_bf);
   const Eigen::MatrixXd symmetric = gradient + gradient.transpose();
-  auto density_gradient = apply_ao_effective_one_electron_ri_operator(
+  auto density_gradient = xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
       std::vector<double>(symmetric.data(), symmetric.data() + symmetric.size()),
       ri,
       n_bf,
@@ -144,11 +144,11 @@ AoEffectiveOneElectronBackpropagationResult backpropagate_ri(
 AoEffectiveOneElectronBackpropagationResult backpropagate_ri(
     const std::vector<double>& active_gradient,
     const OrbitalPreparationResult& orbitals,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf,
     int n_inactive,
     int n_active) {
-  auto density_gradient = apply_ao_effective_one_electron_ri_operator(
+  auto density_gradient = xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
       build_ri_factors(
           active_gradient, orbitals, n_bf, n_inactive, n_active),
       ri,
@@ -164,7 +164,7 @@ AoEffectiveOneElectronBackpropagationResult backpropagate_ri(
 AoEffectiveOneElectronBackpropagationResult
 AoEffectiveOneElectronBackpropagator::backpropagate(
     const std::vector<double>& gradient,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf) const {
   return backpropagate_ri(gradient, ri, n_bf);
 }
@@ -172,16 +172,16 @@ AoEffectiveOneElectronBackpropagator::backpropagate(
 AoEffectiveOneElectronBackpropagationResult
 AoEffectiveOneElectronBackpropagator::backpropagate(
     const Eigen::Ref<const Eigen::MatrixXd>& gradient,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf) const {
-  return backpropagate_ri(flatten_matrix_column_major(gradient), ri, n_bf);
+  return backpropagate_ri(xmvb::linalg::flatten_matrix_column_major(gradient), ri, n_bf);
 }
 
 AoEffectiveOneElectronBackpropagationResult
 AoEffectiveOneElectronBackpropagator::backpropagate(
     const std::vector<double>& active_gradient,
     const OrbitalPreparationResult& orbitals,
-    const RiAoFactorization& ri,
+    const xmvb::integrals::RiAoFactorization& ri,
     int n_bf,
     int n_inactive,
     int n_active) const {
@@ -192,7 +192,7 @@ AoEffectiveOneElectronBackpropagator::backpropagate(
 AoEffectiveOneElectronBackpropagationResult
 AoEffectiveOneElectronBackpropagator::backpropagate(
     const std::vector<double>& gradient_storage,
-    const AoIntegralInput& ao) const {
+    const xmvb::integrals::AoIntegralInput& ao) const {
   const int n_bf = ao.n_basis_functions;
   const std::size_t size =
       static_cast<std::size_t>(n_bf) * static_cast<std::size_t>(n_bf);
@@ -203,7 +203,7 @@ AoEffectiveOneElectronBackpropagator::backpropagate(
       gradient_storage.data(), n_bf, n_bf);
   const Eigen::MatrixXd symmetric = gradient + gradient.transpose();
   AoEffectiveOneElectronBackpropagationResult result;
-  result.inactive_density_gradient = apply_ao_h1e_transpose(
+  result.inactive_density_gradient = xmvb::integrals::apply_ao_h1e_transpose(
       symmetric.data(), ao, effective_openmp_thread_count());
   return result;
 }
@@ -211,12 +211,12 @@ AoEffectiveOneElectronBackpropagator::backpropagate(
 AoEffectiveOneElectronBackpropagationResult
 AoEffectiveOneElectronBackpropagator::backpropagate(
     const Eigen::Ref<const Eigen::MatrixXd>& gradient,
-    const AoIntegralInput& ao) const {
+    const xmvb::integrals::AoIntegralInput& ao) const {
   if (gradient.rows() != ao.n_basis_functions ||
       gradient.cols() != ao.n_basis_functions) {
     throw std::invalid_argument("invalid AO-H1E gradient dimensions");
   }
-  return backpropagate(flatten_matrix_column_major(gradient), ao);
+  return backpropagate(xmvb::linalg::flatten_matrix_column_major(gradient), ao);
 }
 
 }  // namespace xmvb::vb

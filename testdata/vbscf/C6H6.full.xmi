@@ -1,7 +1,7 @@
 C6H6
 $ctrl
 vbscf
-str=full nao=6 nae=6 iscf=5
+str=full nao=6 nae=6 iscf=8
 orbtyp=hao frgtyp=sao
 int=libcint basis=cc-pvdz
 $end

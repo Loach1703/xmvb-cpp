@@ -156,7 +156,7 @@ void record_accepted_iteration_snapshot(
     // A gradient snapshot requires the quotient pullback only. Do not build
     // one-electron curvature blocks that no snapshot consumer uses.
     snapshot_chart.emplace(build_orbital_geometry(*objective, parameter_view,
-        options.backend == VbScfOptimizerBackend::Neo
+        options.backend == VbScfOptimizerBackend::Ciah
             ? OrbitalChart::Coordinates::Unwhitened : OrbitalChart::Coordinates::Whitened));
     chart = &*snapshot_chart;
     const Eigen::VectorXd packed_gradient = parameter_view.gather_from_full(

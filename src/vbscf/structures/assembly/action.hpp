@@ -7,29 +7,54 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include "mcscf/ci/product_index.hpp"
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
-#include "vbscf/structures/assembly/selected_coefficients.hpp"
+#include "integrals/active/two_electron.hpp"
 #include "vbscf/structures/assembly/connection.hpp"
 #include "vbscf/structures/expansion/types.hpp"
+#include "vbscf/structures/overlap/representation.hpp"
+
+namespace xmvb::mcscf {
+class DirectCiSigmaAction;
+class ProductSupport;
+struct DirectCiIntegralAdjoint;
+struct SpinFactorSource;
+class FactorActionWorkspace;
+}
 
 namespace xmvb::vb {
+namespace detail { struct ProductImages; }
+
+class ExteriorOrbitalTransform;
+struct ExteriorTransformDirection;
+struct OrthogonalActiveIntegrals;
 
 class StructureMetricInverse;
+struct SpinSources;
 
 /** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
 enum class StructureActionMode { Davidson, ActionOnly };
 
-/**
- * @brief Result of applying the structure Hamiltonian and overlap to a vector block.
- *
- * Both matrices have shape `(n_structures, block_width)`. No dense
- * `n_structures x n_structures` matrix is formed.
+/** @brief Tile replay counts and retained panel payload (not process peak RSS). */
+struct StructureTileWork {
+  std::size_t expansions = 0, structure_projections = 0;
+  std::size_t input_panels = 0, hamiltonian_projections = 0, overlap_projections = 0;
+  std::size_t input_evictions = 0, output_evictions = 0;
+  std::size_t input_resident_bytes = 0, output_resident_bytes = 0;
+  std::size_t source_tiles = 0, source_columns = 0, channel_blocks = 0;
+  std::size_t source_workspace_bound = 0;
+  /** Generated sigma sweeps that also collect the integral cotangent. */
+  std::size_t integral_adjoint_sweeps = 0;
+};
+
+/** @brief Structure H/S images, each of shape `(n_structures, block_width)`.
+ * No dense structure-by-structure matrix is formed.
  */
 struct StructureActionResult {
   Eigen::MatrixXd hamiltonian;
   Eigen::MatrixXd overlap;
+  StructureTileWork tiles;
 };
 
 /** @brief Active-integral adjoint of selected structure-space states. */
@@ -46,14 +71,24 @@ struct StructureResponseSweep {
   StructureActionResult images;
   Eigen::MatrixXd one_electron;
   Eigen::MatrixXd pair_kernel;
+  /** Cholesky-generator cotangent; only its upper triangle is physical. */
   Eigen::MatrixXd generator;
+};
+
+/** @brief Borrowed CI direction and its independently accumulated response. */
+struct StructureResponseRequest {
+  const Eigen::MatrixXd& coefficients;
+  StructureResponseSweep result{};
 };
 
 /** @brief Direction-independent selected-state data for direct-CI adjoints. */
 struct StructureAdjointState {
-  std::vector<Eigen::MatrixXd> source_coefficients;
-  std::vector<Eigen::MatrixXd> orthogonal_coefficients;
-  std::vector<Eigen::MatrixXd> residuals;
+  /** Accepted coefficients in the originating selected structure space. */
+  Eigen::MatrixXd structure_coefficients;
+  /** Exact source representation; accepted orthogonal/residual arrays are absent. */
+  bool source_factors = false;
+  /** Shared, bounded accepted panels; never a full-carrier mandate. */
+  std::shared_ptr<detail::ProductImages> product_images;
   std::vector<double> weights;
   std::vector<double> energies;
   Eigen::MatrixXd one_electron_gradient;
@@ -65,8 +100,12 @@ struct StructureAdjointState {
 
 /** @brief Direct-CI intermediates shared by structure and adjoint directions. */
 struct StructureIntegralDirection {
-  Eigen::MatrixXd coefficient_direction;
-  Eigen::MatrixXd sigma_direction;
+  /** Prepared once by the forward direction; borrowed by its reverse consumer. */
+  std::shared_ptr<const OrthogonalActiveIntegrals> integrals;
+  /** Weighted generator-gradient direction accumulated before source images are released. */
+  Eigen::MatrixXd generator_direction;
+  /** Integral cotangents from the same orbital-direction tile sweep. */
+  Eigen::MatrixXd one_electron_direction, pair_kernel_direction;
   /** Full-trace diagnostic request; never changes the physical action. */
   bool capture_connection = false;
   std::optional<StructureConnectionDirection> connection;
@@ -79,7 +118,9 @@ struct StructureActionStorage {
   std::size_t expansion_bytes = 0;
   /** Hamiltonian and overlap diagonal model retained by Davidson. */
   std::size_t diagonal_bytes = 0;
-  /** Whether the action uses the complete-space orthogonal direct-CI form. */
+  /** Whether complete one-spin carriers permit orthogonal direct CI.
+   * The selected VB structure space itself need not be complete.
+   */
   bool orthogonal_direct_ci = false;
   /** Persistent bytes owned by the orthogonal direct-CI representation. */
   std::size_t direct_ci_bytes = 0;
@@ -89,18 +130,18 @@ struct StructureActionStorage {
  * @brief Matrix-free structure-space Hamiltonian and overlap action.
  *
  * Let `C` map structure coefficients directly onto unique alpha/beta string
- * products, and reshape `X = C V` over those two spin spaces. The spin-product
- * Hamiltonian action is factorized as
+ * products, and reshape `X = C V` over those two spin spaces. Complete one-spin
+ * carriers use the exact orthogonal-CI congruence `C^T T^T H_orth T C`, with
+ * no closure assumption on the selected structure space. Its contraction uses
+ * minimum row/column source factors or generated product tiles, sharing sparse
+ * Slater--Condon spin links and bounded numerical slabs. Incomplete one-spin
+ * carriers use the mathematically distinct accepted-pair representation.
  *
- * `H_alpha X S_beta^T + S_alpha X H_beta^T`
- *
- * plus one factored alpha/beta product per active-orbital pair channel. This
- * replaces the quadratic full-determinant pair traversal with dense spin-space
- * contractions. The sparse `C` and `C^T` contractions are applied without an
- * intermediate determinant vector, and dense structure-space matrices are
- * never allocated. The constructed action owns every expansion, factor, and
- * diagonal needed by `apply()`; its lifetime is independent of the
- * construction inputs.
+ * H/M application introduces no determinant coefficient vector, complete
+ * transformed product array, or dense structure matrix. The constructed action
+ * owns its expansion, numerical data and shared support plans independently
+ * of the construction inputs. Derivative preparation has separate storage
+ * contracts; bounded H/M application does not imply bounded derivative storage.
  */
 class StructureAction {
 public:
@@ -111,7 +152,7 @@ public:
       const SameSpinPairCacheContext& same_spin_pair_cache,
       const std::vector<double>& active_overlap,
       const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-      const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
       int n_active_orbitals,
       const StructureDiagonal* precomputed_preconditioner = nullptr,
       StructureActionMode mode = StructureActionMode::Davidson);
@@ -131,6 +172,12 @@ public:
   StructureActionResult apply(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
 
+  /** @brief Hamiltonian image when the caller already owns the selected metric.
+   * Product tiles omit the redundant overlap back-projection.
+   */
+  Eigen::MatrixXd apply_hamiltonian(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
+
   /** @brief Exact overlap image; direct-CI needs only forward/adjoint transforms.
    * Shares the accepted-point representation and the existing block budget.
    * Pair-based representations retain their exact combined action.
@@ -141,12 +188,21 @@ public:
   /**
    * @brief Applies H/S with bounded spin-product and pair-tile workspaces.
    *
-   * This path never materializes a full `U_alpha x U_beta` intermediate and
-   * is therefore the explicit large-space action contract.  `apply()` selects
-   * it automatically when the full-grid fast path exceeds its byte budget.
+   * Complete carriers use the orthogonal panel pipeline unconditionally.
+   * Incomplete carriers use accepted-pair tiles. Neither path materializes
+   * a full `U_alpha x U_beta` intermediate in this entry point.
    */
   StructureActionResult apply_streamed(
-      const Eigen::Ref<const Eigen::MatrixXd>& vectors) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
+
+  /** @brief Exact H/M through minimum row/column source factors and channel tiles.
+   * Arbitrary selected structures need no closure. This explicit contraction
+   * order also permits independent comparisons against the product-tile order.
+   */
+  StructureActionResult apply_sources(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
 
   /**
    * @brief Applies the exact first derivative of a complete-space direct-CI action.
@@ -161,15 +217,20 @@ public:
       const std::vector<double>& overlap_direction,
       const std::vector<double>& one_electron_direction,
       const std::vector<double>& packed_two_electron_direction,
-      StructureIntegralDirection* direct_ci_direction) const;
+      StructureIntegralDirection* direct_ci_direction,
+      StructureResponseRequest* ci_response=nullptr) const;
 
   /** @brief Whether exact orthogonal direct-CI directional actions are available. */
   bool supports_integral_direction() const noexcept;
 
-  /** @brief Precomputes direction-independent selected-state adjoint data. */
+  /** @brief Precomputes direction-independent selected-state adjoint data.
+   * Optional H/M images are consumed from the same sigma sweep, not replayed.
+   */
   StructureAdjointState prepare_active_adjoint(
-      const SelectedStateDeterminantMatrices& selected_states,
-      const std::vector<double>& state_energies) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+      const std::vector<double>& state_weights,
+      const std::vector<double>& state_energies,
+      StructureActionResult* images = nullptr) const;
 
   /** @brief Pulls a prepared direct-CI adjoint back to active integrals. */
   StructureActiveIntegralAdjoint active_integral_adjoint(
@@ -181,10 +242,14 @@ public:
    * `directional_state_multipliers` is the full multiplier @f$M@f$ in
    * @f$HZ-SZ\Lambda+SCM@f$. Equal-weight selected states therefore retain
    * their off-diagonal horizontal-gauge coupling.
+   * `coefficient_response` contains columns in this action's selected
+   * structure space. Orbital representation directions are supplied separately
+   * and need not lie in the selected VB subspace.
+   * Coefficient and multiplier directions are independent; either may be null.
    */
   StructureActiveIntegralAdjoint active_integral_adjoint_direction(
       const StructureAdjointState& state,
-      const SelectedStateDeterminantMatrices* directional_selected_states,
+      const Eigen::MatrixXd* coefficient_response,
       const Eigen::MatrixXd* directional_state_multipliers,
       const std::vector<double>& overlap_direction,
       const std::vector<double>& one_electron_direction,
@@ -195,7 +260,7 @@ public:
   /**
    * @brief Applies the selected-subspace coupling adjoint to active integrals.
    *
-   * `directional_selected_states` stores the coefficient block @f$Z@f$ and
+   * `coefficient_response` stores the structure coefficient block @f$Z@f$ and
    * `state_multipliers` stores the full selected-state multiplier @f$M@f$ in
    * the accepted-state ordering.  The latter must remain a matrix: within an
    * equal-weight state cluster its off-diagonal entries enforce the horizontal
@@ -204,7 +269,7 @@ public:
    */
   StructureActiveIntegralAdjoint active_integral_response_adjoint(
       const StructureAdjointState& state,
-      const SelectedStateDeterminantMatrices& directional_selected_states,
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficient_response,
       const Eigen::Ref<const Eigen::MatrixXd>& state_multipliers) const;
 
   /** @brief Computes Hq, Mq and the response adjoint in one direct-CI sweep. */
@@ -259,15 +324,6 @@ public:
   /** @brief Whether the carrier diagonal and one-column workspace fit the action budget. */
   bool supports_carrier_diagonal() const noexcept;
 
-  /** @brief Applies F^T(diag(H_orth)-E-omega)^-1 F to structure vectors.
-   * F is the exact exterior/structure map, not an assumed orthogonal VB basis.
-   * Callers supply the two horizontal Riesz maps for a coordinate-space inverse.
-   * Carrier storage is shared and columns are processed sequentially.
-   */
-  Eigen::MatrixXd apply_inverse_carrier_diagonal(
-      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
-      const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const;
-
   /** @brief Physical Ritz residual in the orthogonal spin-string carrier.
    * Valid as a structure-space certificate only for a complete variational
    * spin sector, not an arbitrary selected structure subspace. The caller
@@ -290,6 +346,47 @@ public:
    */
   Eigen::MatrixXd contract_spin_product_block(
       const Eigen::Ref<const Eigen::MatrixXd>& spin_images) const;
+
+  /** @brief Selected cross Gram action in a bounded exact contraction order.
+   * Uses touched beta factors or one shared carrier for broad support.
+   * Computes F_left^T F_right V without enlarging the selected structure space.
+   * If all four directions are supplied, returns its directional derivative.
+   * The workspace budget controls panel/RHS batching, never the physical space.
+   */
+  Eigen::MatrixXd cross_overlap(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const ExteriorOrbitalTransform& left_alpha,
+      const ExteriorOrbitalTransform& left_beta,
+      const ExteriorOrbitalTransform& right_alpha,
+      const ExteriorOrbitalTransform& right_beta,
+      const ExteriorTransformDirection* delta_left_alpha = nullptr,
+      const ExteriorTransformDirection* delta_left_beta = nullptr,
+      const ExteriorTransformDirection* delta_right_alpha = nullptr,
+      const ExteriorTransformDirection* delta_right_beta = nullptr,
+      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
+
+  /** @brief Bounded pullback of left^T F(left_chart)^T F(right_chart) right.
+   * Broad-support common spatial charts use direct one-body generator moments.
+   * Optional chart directions request the derivative of the pullback.
+   */
+  UpperPair cross_overlap_adjoint(const Eigen::VectorXd& left,
+      const Eigen::VectorXd& right, const ExteriorOrbitalTransform& la,
+      const ExteriorOrbitalTransform& lb, const ExteriorOrbitalTransform& ra,
+      const ExteriorOrbitalTransform& rb, const Eigen::MatrixXd* delta_left = nullptr,
+      const Eigen::MatrixXd* delta_right = nullptr,
+      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL,
+      OverlapSide side = OverlapSide::Both) const;
+
+  /** @brief Shared finite-transport VJP and reference coefficient image. */
+  OverlapTransportGradient cross_overlap_transport_gradient(
+      const Eigen::VectorXd& lambda, const Eigen::VectorXd& base,
+      const Eigen::VectorXd& reference, const Eigen::VectorXd& transported,
+      const ExteriorOrbitalTransform& current_alpha,
+      const ExteriorOrbitalTransform& current_beta,
+      const ExteriorOrbitalTransform& origin_alpha,
+      const ExteriorOrbitalTransform& origin_beta,
+      const Eigen::MatrixXd& origin_direction,
+      std::size_t workspace_bytes = 64ULL * 1024ULL * 1024ULL) const;
 
   /**
    * @brief Contracts one rectangular unique-string-product image tile.
@@ -316,20 +413,124 @@ public:
   StructureActionStorage storage() const noexcept;
 
 private:
+  using FactorImageConsumer = std::function<void(const Eigen::Ref<const Eigen::MatrixXd>&,
+      const Eigen::Ref<const Eigen::MatrixXd>&, double)>;
+  struct SourceImageAdjoint {
+    StructureActionResult images;
+    Eigen::MatrixXd generator;
+  };
+  /** @brief Expand one structure vector only on original touched products. */
+  Eigen::VectorXd expand_support(
+      const Eigen::Ref<const Eigen::VectorXd>& coefficients) const;
+  /** @brief Oriented transition density from structure coefficients and spin factors. */
+  Eigen::MatrixXd source_generator_adjoint(
+      const StructureAdjointState& state, int left, int right) const;
+  /** @brief Bounded resident panels through expansion, sigma and projection. */
+  StructureActionResult apply_orthogonal_tiled(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const ExteriorOrbitalTransform& alpha_transform,
+      const ExteriorOrbitalTransform& beta_transform,
+      const mcscf::DirectCiSigmaAction& sigma,
+      bool overlap_only = false,
+      std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
+  /** @brief Generated accepted/tangent jet with immediate shared consumers. */
+  StructureResponseSweep product_jet(const StructureAdjointState& state,
+      const Eigen::MatrixXd* response, const Eigen::MatrixXd* delta_upper,
+      const mcscf::DirectCiSigmaAction* delta_sigma,
+      const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma,bool collect_images,
+      StructureIntegralDirection* diagnostic=nullptr,
+      StructureResponseSweep* ci_sweep=nullptr) const;
+
+  /** @brief Shared generated product graph for structure H/M actions. */
+  StructureResponseSweep contract_product_tiles(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,
+      std::size_t workspace_bytes,bool collect_overlap=true) const;
+  StructureActionResult apply_source_tiles(
+      const Eigen::Ref<const Eigen::MatrixXd>& vectors,
+      const ExteriorOrbitalTransform& alpha_transform,
+      const ExteriorOrbitalTransform& beta_transform,
+      const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
+      std::size_t workspace_bytes) const;
+  /** @brief Shared source sweep over already expanded original-support columns. */
+  StructureActionResult apply_source_columns(int width,
+      const std::function<Eigen::VectorXd(int)>& support_column,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
+      std::size_t workspace_bytes) const;
+  /** @brief Project one factor image; an optional generator acts on its output. */
+  StructureActionResult project_factor_source(const mcscf::SpinFactorSource& source,
+      mcscf::FactorActionWorkspace& workspace,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, bool overlap_only,
+      const Eigen::MatrixXd* output_generator = nullptr,
+      const FactorImageConsumer& image_consumer = {}, bool project_output = true,
+      double residual_energy = 0.0) const;
+  /** @brief Shared H projection and (H-E) generator VJP; no separate overlap sweep. */
+  SourceImageAdjoint project_source_adjoint(const mcscf::SpinFactorSource& source,
+      const mcscf::SpinFactorSource& right,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, const Eigen::MatrixXd* output_generator,
+      bool project_output = true, double residual_energy = 0.0) const;
+  /** @brief Direction H/M images without accepted or directional product arrays. */
+  StructureActionResult source_integral_action(const StructureAdjointState& state,
+      const Eigen::MatrixXd& generator,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma,
+      const mcscf::DirectCiSigmaAction& delta_sigma,
+      const OrthogonalActiveIntegrals& delta,
+      StructureIntegralDirection* direction) const;
+  /** @brief Complete source-factor gradient direction, including the moving pullback. */
+  StructureActiveIntegralAdjoint source_adjoint_direction(const StructureAdjointState& state,
+      const Eigen::Ref<const Eigen::MatrixXd>& response, const Eigen::MatrixXd* multipliers,
+      const OrthogonalActiveIntegrals& integrals, const OrthogonalActiveIntegrals& delta,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, bool include_integrals,
+      const StructureIntegralDirection* cached_direction) const;
+  /** @brief Weight-symmetrized gauge shared by response and orbital directions. */
+  void add_response_gauge(const StructureAdjointState& state,
+      const Eigen::Ref<const Eigen::MatrixXd>& multipliers,
+      Eigen::Ref<Eigen::MatrixXd> generator) const;
+  /** @brief Includes both residual-generator contractions and the H/M images. */
+  bool prefer_factor_response(const mcscf::DirectCiSigmaAction& sigma) const;
+  /** @brief Coupled coefficient response directly from structure-space columns. */
+  StructureResponseSweep source_response(const StructureAdjointState& state,
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
+      const ExteriorOrbitalTransform& alpha, const ExteriorOrbitalTransform& beta,
+      const mcscf::DirectCiSigmaAction& sigma, bool collect_images = true) const;
+  /** @brief Compares algebraic operation counts; independent of memory budgets. */
+  bool prefer_source_contraction(const ExteriorOrbitalTransform& alpha_transform,
+      const ExteriorOrbitalTransform& beta_transform,
+      const mcscf::DirectCiSigmaAction& sigma) const;
   StructureResponseSweep contract_response(
       const StructureAdjointState& state,
-      const std::function<Eigen::MatrixXd(int)>& coefficients,
+      const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       bool collect_images) const;
   friend class StructureMetricInverse;
+  /** @brief Sigma in the orthogonal carrier; inner contraction remains tiled. */
+  Eigen::MatrixXd apply_carrier_hamiltonian(const Eigen::Ref<const Eigen::MatrixXd>& carrier) const;
+  void adjoint_orbital_transform(Eigen::MatrixXd* carrier) const;
+  /** @brief Shared in-place carrier denominator, with the existing signed floor. */
+  void divide_carrier_diagonal(Eigen::Ref<Eigen::MatrixXd> carrier,
+      const Eigen::Ref<const Eigen::VectorXd>& energies,double eigenvalue) const;
   struct OrthogonalDirectCiData;
   struct TiledPairData;
   struct StructureTerm {
-    int spin_product = 0;
+    /** Index into shared original support, not the full product-grid address. */
+    int group = 0;
     int structure = 0;
     double coefficient = 0.0;
   };
 
-  std::vector<int> spin_products_;
+  /** @brief Exact common transpose parity of all sparse structure columns. */
+  int detect_spin_exchange() const;
+  int spin_exchange_parity_ = 0;
+  bool source_contraction_ = false;
+  std::unique_ptr<const SpinSources> sources_;
+
+  std::vector<mcscf::ProductIndex> spin_products_;
   std::vector<std::size_t> spin_term_offsets_;
   std::vector<StructureTerm> spin_terms_;
   /** Structure-major permutation of `spin_terms_` for race-free C^T actions. */
@@ -342,6 +543,7 @@ private:
   int n_unique_alpha_ = 0;
   int n_unique_beta_ = 0;
   std::unique_ptr<OrthogonalDirectCiData> direct_ci_;
+  std::unique_ptr<const mcscf::ProductSupport> product_support_;
   std::unique_ptr<TiledPairData> tiled_pairs_;
 };
 

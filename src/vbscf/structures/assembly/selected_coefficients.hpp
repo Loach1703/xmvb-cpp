@@ -68,12 +68,6 @@ struct SelectedStateDeterminantMatrices {
 };
 
 /**
- * @brief Normalizes non-negative state-average weights to unit sum.
- */
-std::vector<double> normalize_state_average_weights(
-    const std::vector<double>& state_average_weights);
-
-/**
  * @brief Builds `c_d^(n)` and `C^(n)` from raw (possibly unnormalized) weights.
  */
 SelectedStateDeterminantMatrices build_selected_state_determinant_matrices(

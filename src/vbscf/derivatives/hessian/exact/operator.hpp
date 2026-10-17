@@ -14,6 +14,7 @@ class OrbitalChart;
 class SparseParameterLayout;
 class StructureAction;
 struct StructureActiveIntegralAdjoint;
+struct StructureResponseRequest;
 struct AcceptedPointContext;
 struct VbScfInput;
 
@@ -130,6 +131,8 @@ public:
     std::size_t resident_exact_pair_elements = 0;
     std::size_t exact_pair_tile_rows = 0;
     std::size_t apply_count = 0;
+    /** Exact within-state coefficient responses reused from accepted adjoints. */
+    std::size_t normalization_adjoint_reuses = 0;
     std::size_t batch_apply_count = 0;
     std::size_t orbital_coupling_batch_count = 0;
     std::size_t orbital_coupling_batch_chunk_count = 0;
@@ -205,7 +208,8 @@ public:
    * The accepted-point forward/integral direction is evaluated only once.
    */
   OrbitalCouplingAction apply_orbital_coupling(
-      const Eigen::VectorXd& reduced_direction) const;
+      const Eigen::VectorXd& reduced_direction,
+      StructureResponseRequest* ci_response=nullptr) const;
 
   /**
    * @brief Applies the complete orbital operator without horizontal response.

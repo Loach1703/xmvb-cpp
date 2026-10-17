@@ -4,9 +4,9 @@
 
 #include <vector>
 
-#include "vbscf/integrals/ao/contracts/input.hpp"
+#include "integrals/ao/input.hpp"
 #include "vbscf/integrals/ao/one_electron/result.hpp"
-#include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "integrals/ao/ri.hpp"
 #include "vbscf/orbitals/preparation/result.hpp"
 
 namespace xmvb::vb {
@@ -24,13 +24,13 @@ public:
   AoEffectiveOneElectronResult build(
       const std::vector<double>& inactive_density_matrix,
       const Eigen::Ref<const Eigen::MatrixXd>& ao_core_hamiltonian_matrix,
-      const RiAoFactorization& ri_factorization,
+      const xmvb::integrals::RiAoFactorization& ri_factorization,
       int n_basis_functions) const;
 
   AoEffectiveOneElectronResult build(
       const Eigen::Ref<const Eigen::MatrixXd>& inactive_density_matrix,
       const Eigen::Ref<const Eigen::MatrixXd>& ao_core_hamiltonian_matrix,
-      const RiAoFactorization& ri_factorization,
+      const xmvb::integrals::RiAoFactorization& ri_factorization,
       int n_basis_functions) const;
 
   /**
@@ -43,7 +43,7 @@ public:
   AoEffectiveOneElectronResult build(
       const OrbitalPreparationResult& orbital_result,
       const Eigen::Ref<const Eigen::MatrixXd>& ao_core_hamiltonian_matrix,
-      const RiAoFactorization& ri_factorization,
+      const xmvb::integrals::RiAoFactorization& ri_factorization,
       int n_basis_functions,
       int n_inactive_doubly_occupied_orbitals) const;
 
@@ -55,23 +55,23 @@ public:
   AoEffectiveOneElectronResult build(
       const std::vector<double>& inactive_density_matrix,
       const Eigen::Ref<const Eigen::MatrixXd>& ao_core_hamiltonian_matrix,
-      const AoIntegralInput& ao_integral_input) const;
+      const xmvb::integrals::AoIntegralInput& ao_integral_input) const;
 
   AoEffectiveOneElectronResult build(
       const Eigen::Ref<const Eigen::MatrixXd>& inactive_density_matrix,
       const Eigen::Ref<const Eigen::MatrixXd>& ao_core_hamiltonian_matrix,
-      const AoIntegralInput& ao_integral_input) const;
+      const xmvb::integrals::AoIntegralInput& ao_integral_input) const;
 
   /**
    * @brief Evaluates exact `G11` and `F11` from the canonical AO operator.
    */
   AoEffectiveOneElectronResult build(
       const std::vector<double>& inactive_density_matrix,
-      const AoIntegralInput& ao_integral_input) const;
+      const xmvb::integrals::AoIntegralInput& ao_integral_input) const;
 
   AoEffectiveOneElectronResult build(
       const Eigen::Ref<const Eigen::MatrixXd>& inactive_density_matrix,
-      const AoIntegralInput& ao_integral_input) const;
+      const xmvb::integrals::AoIntegralInput& ao_integral_input) const;
 
 };
 

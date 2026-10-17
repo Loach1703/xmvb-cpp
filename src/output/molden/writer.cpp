@@ -60,7 +60,7 @@ std::string atomic_symbol(int atomic_number) {
   return symbol.empty() ? "X" : symbol;
 }
 
-void validate_libcint_input(const LibcintInput& libcint_input) {
+void validate_libcint_input(const xmvb::integrals::LibcintInput& libcint_input) {
   if (libcint_input.n_atoms <= 0) {
     throw std::invalid_argument("Molden export requires at least one atom");
   }
@@ -143,7 +143,7 @@ char shell_tag(int angular_momentum) {
 
 std::vector<double> expand_dense_orbital_coefficients_in_molden_order(
     const OrbitalPreparationInput& orbital_input,
-    const LibcintInput& libcint_input,
+    const xmvb::integrals::LibcintInput& libcint_input,
     int orbital_index) {
   const std::vector<double> dense_coefficients =
       expand_dense_orbital_coefficients(orbital_input, orbital_index);
@@ -159,7 +159,7 @@ std::vector<double> expand_dense_orbital_coefficients_in_molden_order(
     const int ao_offset = libcint_input.basidx[shell_index * 2];
     const int ao_count = libcint_input.basidx[shell_index * 2 + 1];
     if (ao_offset < 0 ||
-        ao_count != cartesian_ao_count(angular_momentum) ||
+        ao_count != xmvb::libcint::cartesian_ao_count(angular_momentum) ||
         ao_offset + ao_count > orbital_input.n_basis_functions) {
       throw std::runtime_error("shell AO layout is inconsistent during Molden export");
     }
@@ -194,7 +194,7 @@ std::vector<double> expand_dense_orbital_coefficients_in_molden_order(
 
 void write_atoms_section(
     std::ostream& output,
-    const LibcintInput& libcint_input) {
+    const xmvb::integrals::LibcintInput& libcint_input) {
   output << "[Molden Format]\n"
          << "[N_Atoms]\n"
          << std::setw(21) << libcint_input.n_atoms << '\n'
@@ -231,7 +231,7 @@ void write_charge_section(
 
 void write_gto_section(
     std::ostream& output,
-    const LibcintInput& libcint_input) {
+    const xmvb::integrals::LibcintInput& libcint_input) {
   output << "[GTO] (AU)\n";
   for (int atom_index = 0; atom_index < libcint_input.n_atoms; ++atom_index) {
     output << std::setw(4) << atom_index + 1 << '\n';
@@ -274,7 +274,7 @@ void write_gto_section(
                // by the historical XMVB/cartesian normalization factor.
                // Molden viewers expect the corresponding de-normalized values.
                << normalized_coefficient /
-                      shell_normalization(angular_momentum, exponent)
+                      xmvb::libcint::shell_normalization(angular_momentum, exponent)
                << '\n';
       }
     }
@@ -284,7 +284,7 @@ void write_gto_section(
 
 void write_mo_section(
     std::ostream& output,
-    const LibcintInput& libcint_input,
+    const xmvb::integrals::LibcintInput& libcint_input,
     const OrbitalPreparationInput& orbital_input) {
   output << "[MO]\n";
   for (int orbital_index = 0; orbital_index < orbital_input.n_orbitals; ++orbital_index) {

@@ -14,7 +14,7 @@
 #include "output/molden/writer.hpp"
 #include "output/orbitals/writer.hpp"
 #include "output/trace/accepted_iteration.hpp"
-#include "output/trace/neo.hpp"
+#include "output/trace/ciah.hpp"
 #include "output/trace/tnhvp.hpp"
 #include "input/loading/loader.hpp"
 #include "vbscf/optimization/driver/optimizer.hpp"
@@ -33,7 +33,7 @@ int run(Options command_line) {
   auto& options = command_line.optimizer;
   const std::string& dump_trace_dir = command_line.trace_directory;
   const std::string& tnhvp_trace_path = command_line.tnhvp_trace_path;
-  const std::string& neo_trace_path = command_line.neo_trace_path;
+  const std::string& ciah_trace_path = command_line.ciah_trace_path;
   const std::string& dump_final_orbital_value_table_bin =
       command_line.final_orbitals_path;
   const bool user_specified_max_iterations =
@@ -47,18 +47,15 @@ int run(Options command_line) {
       command_line.exact_exchange_memory_budget_bytes;
   if (!command_line.optimizer_backend_explicit) {
     switch (load_result.scf_optimizer) {
-      case xmvb::vb::InputScfOptimizer::Lbfgs:
-        options.backend = xmvb::vb::VbScfOptimizerBackend::Lbfgs;
-        break;
       case xmvb::vb::InputScfOptimizer::Tnhvp:
         options.backend =
             xmvb::vb::VbScfOptimizerBackend::NonredundantTruncatedNewton;
         break;
-      case xmvb::vb::InputScfOptimizer::BlockLbfgs:
-        options.backend = xmvb::vb::VbScfOptimizerBackend::BlockLbfgs;
+      case xmvb::vb::InputScfOptimizer::Plbfgs:
+        options.backend = xmvb::vb::VbScfOptimizerBackend::Plbfgs;
         break;
-      case xmvb::vb::InputScfOptimizer::Neo:
-        options.backend = xmvb::vb::VbScfOptimizerBackend::Neo;
+      case xmvb::vb::InputScfOptimizer::Ciah:
+        options.backend = xmvb::vb::VbScfOptimizerBackend::Ciah;
         break;
       case xmvb::vb::InputScfOptimizer::Unspecified:
         break;
@@ -84,12 +81,11 @@ int run(Options command_line) {
 #else
     const auto& orbitals=load_result.input.orbital_preparation_input;
     if (options.max_iterations < 0 || load_result.state_average_count != 1 ||
-        (options.backend != xmvb::vb::VbScfOptimizerBackend::Lbfgs &&
-         options.backend != xmvb::vb::VbScfOptimizerBackend::BlockLbfgs) ||
+        options.backend != xmvb::vb::VbScfOptimizerBackend::Plbfgs ||
         options.structure_eigensolver != xmvb::vb::StructureEigensolver::Dense ||
         (orbitals.orbital_type != xmvb::vb::kOrbitalTypeHao &&
          orbitals.orbital_type != xmvb::vb::kOrbitalTypeOeo)) {
-      throw std::invalid_argument("TNVB supports ISCF=5/8, one singlet state, HAO/OEO and dense H/S");
+      throw std::invalid_argument("TNVB supports ISCF=8 (P-LBFGS), one singlet state, HAO/OEO and dense H/S");
     }
     if (options.max_iterations > 0 && load_result.input.tnvb.total_bond <
         load_result.input.tnvb.structure_bond) {
@@ -110,7 +106,7 @@ int run(Options command_line) {
   if (options.verbose && options.max_iterations > 0) {
     options.accepted_iteration_callback = xmvb::output::combine_callbacks(
         std::move(options.accepted_iteration_callback),
-        xmvb::output::iteration_logger(options.backend));
+        xmvb::output::iteration_logger());
   }
   if (!dump_trace_dir.empty()) {
     trace_writer = std::make_shared<xmvb::output::AcceptedIterationTraceWriter>(
@@ -128,13 +124,13 @@ int run(Options command_line) {
         });
   }
 
-  std::shared_ptr<xmvb::output::NeoTraceWriter> neo_trace_writer;
-  if (!neo_trace_path.empty()) {
-    neo_trace_writer =
-        std::make_shared<xmvb::output::NeoTraceWriter>(neo_trace_path);
-    options.neo_iteration_callback =
-        [neo_trace_writer](const xmvb::vb::NeoIterationRecord& record) {
-          neo_trace_writer->write(record);
+  std::shared_ptr<xmvb::output::CiahTraceWriter> ciah_trace_writer;
+  if (!ciah_trace_path.empty()) {
+    ciah_trace_writer =
+        std::make_shared<xmvb::output::CiahTraceWriter>(ciah_trace_path);
+    options.ciah_iteration_callback =
+        [ciah_trace_writer](const xmvb::vb::CiahIterationRecord& record) {
+          ciah_trace_writer->write(record);
         };
   }
 

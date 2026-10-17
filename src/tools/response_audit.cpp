@@ -14,7 +14,7 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/QR>
 
-#include "core/eigen_response.hpp"
+#include "linalg/eigen_response.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
@@ -232,21 +232,21 @@ void audit_structure_response(
                 << "\nfactorized_response_bordered_relative_residual = " << max_relative << '\n';
       if (!std::isfinite(max_relative) || max_relative > tolerance)
         throw std::runtime_error("metric-PCG control failed its independent bordered certificate");
-      const xmvb::core::GeneralizedEigenAction reference_action =
+      const xmvb::linalg::GeneralizedEigenAction reference_action =
           [&](const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
             auto image = action.apply(vectors);
-            return xmvb::core::GeneralizedEigenActionResult{
+            return xmvb::linalg::GeneralizedEigenActionResult{
                 std::move(image.hamiltonian), std::move(image.overlap)};
           };
       // Use the identical production MINRES recurrence and certificate. This
       // separates metric conditioning from the preceding PCG control.
-      const xmvb::core::EigenResponsePreconditioner metric_preconditioner{
+      const xmvb::linalg::EigenResponsePreconditioner metric_preconditioner{
           [&](const Eigen::Ref<const Eigen::VectorXd>& residual, Eigen::Index) -> Eigen::VectorXd {
             const Eigen::MatrixXd column = residual;
             return precondition(column).col(0);
           },
           1.0 / m.trace()};
-      const auto metric_response = xmvb::core::solve_generalized_eigen_response(
+      const auto metric_response = xmvb::linalg::solve_generalized_eigen_response(
           reference_action, h.diagonal(), m.diagonal(),
           Eigen::VectorXd::Constant(rhs.cols(), energy),
           c.replicate(1, rhs.cols()), mc.replicate(1, rhs.cols()),
@@ -258,7 +258,7 @@ void audit_structure_response(
                 << "\nmetric_minres_control_relative_residual = "
                 << metric_response.relative_residual_norms.maxCoeff() << '\n';
       try {
-        const auto jacobi_response = xmvb::core::solve_generalized_eigen_response(
+        const auto jacobi_response = xmvb::linalg::solve_generalized_eigen_response(
             reference_action, h.diagonal(), m.diagonal(),
             Eigen::VectorXd::Constant(rhs.cols(), energy),
             c.replicate(1, rhs.cols()), mc.replicate(1, rhs.cols()),

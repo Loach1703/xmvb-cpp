@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include "input/loading/loader.hpp"
-#include "vbscf/integrals/active/preparation/space.hpp"
+#include "vbscf/integrals/active/space.hpp"
 
 int main(int argc,char** argv) {
   try {
@@ -20,9 +20,7 @@ int main(int argc,char** argv) {
     if (!input.tnvb.enabled || loaded.structure_expansion_seconds!=0 || !input.structure_data.alpha_det.empty()) {
       throw std::invalid_argument("requires unexpanded TNVB input");
     }
-    const auto timed=xmvb::vb::prepare_timed_active_space_context(input,
-        xmvb::vb::ActiveSpaceOrbitalPreparer{},xmvb::vb::AoEffectiveOneElectronBuilder{},
-        xmvb::vb::ActiveSpaceOneElectronBuilder{},xmvb::vb::ActiveSpaceTwoElectronBuilder{});
+    const auto timed=xmvb::vb::prepare_timed_active_space_context(input);
     const auto& prepared=timed.prepared_active_space;
     const auto& raw=input.raw_structure_data;
     const int k=input.orbital_preparation_input.n_active_orbitals;

@@ -11,7 +11,7 @@
 
 #include "libcint/direct_shell.hpp"
 
-namespace xmvb::vb {
+namespace xmvb::libcint {
 
 namespace {
 
@@ -25,7 +25,7 @@ int pair_index(int first, int second) {
 }  // namespace
 
 MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
-    const LibcintInput& input,
+    const xmvb::integrals::LibcintInput& input,
     const LibcintMaterializedIntegralProviderOptions& options) const {
   if (!(options.integral_tolerance >= 0.0)) {
     throw std::invalid_argument("integral_tolerance must be non-negative");
@@ -359,4 +359,4 @@ MaterializedAoIntegralBuffers LibcintMaterializedIntegralProvider::build(
   return buffers;
 }
 
-}  // namespace xmvb::vb
+}  // namespace xmvb::libcint

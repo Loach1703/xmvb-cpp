@@ -22,6 +22,16 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/spinor/action.cpp
   vbscf/structures/analysis/spin.cpp
   vbscf/structures/assembly/action.cpp
+  vbscf/structures/assembly/states.cpp
+  vbscf/structures/assembly/transport_tiles.cpp
+  vbscf/structures/assembly/orthogonal_tiles.cpp
+  vbscf/structures/assembly/product_jet.cpp
+  vbscf/structures/assembly/overlap_tiles.cpp
+  vbscf/structures/assembly/source_tiles.cpp
+  vbscf/structures/assembly/source_response.cpp
+  vbscf/structures/assembly/source_direction.cpp
+  vbscf/structures/assembly/source_image.cpp
+  vbscf/structures/assembly/sources.cpp
   vbscf/structures/assembly/hamiltonian_overlap.cpp
   vbscf/structures/reference/overlap.cpp
   vbscf/structures/assembly/selected_coefficients.cpp
@@ -31,8 +41,6 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/orthogonal_ci/metric.cpp
   vbscf/structures/overlap/representation.cpp
   vbscf/structures/orthogonal_ci/integrals.cpp
-  vbscf/structures/orthogonal_ci/planner.cpp
-  vbscf/structures/orthogonal_ci/sigma.cpp
   vbscf/structures/selection/subspace/selector.cpp
   vbscf/structures/selection/union_graph/rank_predictor.cpp
   vbscf/structures/selection/union_graph/screening.cpp
@@ -59,31 +67,11 @@ set(XMVB_VBSCF_ORBITAL_SOURCES
 set(XMVB_VBSCF_AO_INTEGRAL_SOURCES
   vbscf/integrals/ao/one_electron/backpropagator.cpp
   vbscf/integrals/ao/one_electron/builder.cpp
-  vbscf/integrals/ao/one_electron/direct_operator.cpp
-  vbscf/integrals/ao/one_electron/rows.cpp
-  vbscf/integrals/ao/one_electron/ri_operator.cpp
-  vbscf/integrals/ao/libcint/validation.cpp
   vbscf/integrals/ao/ri/cache.cpp
-  vbscf/integrals/ao/pairs/two_electron_index.cpp
 )
 
 set(XMVB_VBSCF_ACTIVE_INTEGRAL_SOURCES
-  vbscf/integrals/active/matrix/backpropagator.cpp
-  vbscf/integrals/active/one_electron/builder.cpp
-  vbscf/integrals/active/two_electron/response/backpropagator.cpp
-  vbscf/integrals/active/two_electron/construction/builder.cpp
-  vbscf/integrals/active/two_electron/construction/kernel.cpp
-  vbscf/integrals/active/two_electron/response/adjoint.cpp
-  vbscf/integrals/active/two_electron/response/exchange.cpp
-  vbscf/integrals/active/two_electron/response/directional.cpp
-  vbscf/integrals/active/two_electron/response/ri.cpp
-  vbscf/integrals/active/two_electron/transformation/pair_transforms.cpp
-  vbscf/integrals/active/two_electron/transformation/packed_pair_map.cpp
-  vbscf/integrals/active/two_electron/transformation/ao_pair_operator.cpp
-  vbscf/integrals/active/two_electron/transformation/generated_rows.cpp
-  vbscf/integrals/active/two_electron/construction/ri_builder.cpp
-  vbscf/integrals/active/preparation/space.cpp
-  vbscf/integrals/active/two_electron/construction/indexer.cpp
+  vbscf/integrals/active/space.cpp
 )
 
 set(XMVB_VBSCF_DERIVATIVE_SOURCES
@@ -132,25 +120,17 @@ set(XMVB_VBSCF_DIAGNOSTIC_SOURCES
 
 set(XMVB_VBSCF_OPTIMIZATION_SOURCES
   vbscf/optimization/coupled/ci_transport.cpp
+  vbscf/optimization/backends/ciah_step.cpp
+  vbscf/optimization/backends/plbfgs.cpp
   vbscf/optimization/backends/ciah.cpp
-  vbscf/optimization/backends/lbfgs.cpp
-  vbscf/optimization/backends/neo.cpp
   vbscf/optimization/backends/projected_gradient.cpp
   vbscf/optimization/backends/truncated_newton.cpp
-  vbscf/optimization/krylov/minres.cpp
   vbscf/optimization/globalization/line_search.cpp
   vbscf/optimization/driver/session.cpp
   vbscf/optimization/neo/coordinates.cpp
-  vbscf/optimization/neo/ciah.cpp
   vbscf/optimization/neo/curvature.cpp
-  vbscf/optimization/neo/globalization.cpp
-  vbscf/optimization/neo/problem.cpp
-  vbscf/optimization/neo/solver.cpp
-  vbscf/optimization/preconditioners/block_inverse_bfgs.cpp
   vbscf/optimization/preconditioners/hessian_diagonal.cpp
   vbscf/optimization/preconditioners/density.cpp
-  vbscf/optimization/preconditioners/coarse.cpp
-  vbscf/optimization/preconditioners/shifted_metric.cpp
   vbscf/optimization/preconditioners/transported_lbfgs.cpp
   vbscf/optimization/objective/reduced_hvp.cpp
   vbscf/optimization/trust_region/retraction.cpp
@@ -216,8 +196,6 @@ unset(_xmvb_vbscf_dependency_file)
 unset(_xmvb_vbscf_dependency_files)
 
 set(XMVB_VBSCF_SOURCES
-  core/eigen_response.cpp
-  core/eigensolver.cpp
   ${XMVB_VBSCF_DETERMINANT_SOURCES}
   ${XMVB_VBSCF_STRUCTURE_SOURCES}
   ${XMVB_VBSCF_ORBITAL_SOURCES}

@@ -26,7 +26,7 @@ AcceptedSpinPairActionResult apply_accepted_spin_pair_action(
     const AcceptedPairTileProvider& provider,
     const std::vector<double>& active_overlap,
     const Eigen::Ref<const Eigen::MatrixXd>& active_one_electron,
-    const ActiveSpaceTwoElectronResult& active_two_electron,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_two_electron,
     const Eigen::Ref<const Eigen::MatrixXd>& vectors,
     std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL);
 

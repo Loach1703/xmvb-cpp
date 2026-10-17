@@ -7,12 +7,12 @@
 
 #include <Eigen/Core>
 
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
+#include "core/pair_index.hpp"
 #include "vbscf/optimization/preconditioners/hessian_diagonal.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
-#include "vbscf/integrals/ao/pairs/two_electron_index.hpp"
-#include "vbscf/integrals/ao/ri/factorization.hpp"
-#include "vbscf/integrals/ao/one_electron/direct_operator.hpp"
+#include "integrals/ao/graph.hpp"
+#include "integrals/ao/ri.hpp"
+#include "integrals/ao/exact.hpp"
 
 namespace {
 
@@ -169,7 +169,7 @@ void check_contracted_density_span() {
           values.push_back(eri(g,p,q,r,s,n));
         }
   input.ao_integral_input.pair_graph =
-      xmvb::vb::build_ao_pair_graph(left,right,values,n);
+      xmvb::integrals::build_ao_pair_graph(left,right,values,n);
   Eigen::MatrixXd frame = Eigen::MatrixXd::Identity(n,n);
   for (int p = 1; p < n; ++p) {
     Eigen::MatrixXd rotation = Eigen::MatrixXd::Identity(n,n);
@@ -180,24 +180,24 @@ void check_contracted_density_span() {
     frame = (frame * rotation).eval();
   }
   // Independent four-index reference, including diagonal/repeated AO indices.
-  for (int width : {1,2,3,8,16}) {
+  for (int width : {1,2,3,8,16,52}) {
     Eigen::MatrixXd sources(n*n,width);
     for (int channel=0;channel<width;++channel)
       for (int mu=0;mu<n;++mu)
         for (int nu=0;nu<n;++nu)
           sources(mu+nu*n,channel)=std::cos(0.13*(mu+nu+1)*(channel+1));
     for (int threads : {1,4}) {
-      xmvb::vb::AoH1eBatchWorkspace workspace;
+      xmvb::integrals::AoH1eBatchWorkspace workspace;
       Eigen::MatrixXd result;
       workspace.sources=sources;
-      xmvb::vb::apply_symmetric_ao_h1e_channels(input.ao_integral_input,
+      xmvb::integrals::apply_symmetric_ao_h1e_channels(input.ao_integral_input,
           threads,&workspace,&result);
-      xmvb::vb::AoH1eBatchWorkspace::Channels row_sources(n*n,width);
+      xmvb::integrals::AoH1eBatchWorkspace::Channels row_sources(n*n,width);
       for (int row = 0; row < n*n; ++row)
         for (int channel = 0; channel < width; ++channel)
           row_sources(row,channel) = sources(row,channel);
-      xmvb::vb::AoH1eBatchWorkspace::Channels row_result;
-      xmvb::vb::apply_symmetric_ao_h1e_rows(input.ao_integral_input,
+      xmvb::integrals::AoH1eBatchWorkspace::Channels row_result;
+      xmvb::integrals::apply_symmetric_ao_h1e_rows(input.ao_integral_input,
           threads,row_sources,&row_result);
       for (int channel=0;channel<width;++channel)
         for (int mu=0;mu<n;++mu)
@@ -214,16 +214,26 @@ void check_contracted_density_span() {
       if ((row_result-result).cwiseAbs().maxCoeff()>5.0e-12)
         throw std::runtime_error("row-owned and packed AO contractions disagree");
       for (int n_core_sources : {0,width/2,width}) {
-        xmvb::vb::AoDensityDiagonalWorkspace diagonal_workspace;
+       for (int n_mo : {n,n-2}) {
+        xmvb::integrals::AoDensityDiagonalWorkspace diagonal_workspace;
         Eigen::MatrixXd exchange_diagonal, coulomb_diagonal;
-        xmvb::vb::apply_ao_density_diagonals(input.ao_integral_input,
-            row_sources,frame,n_core_sources,threads,3,&diagonal_workspace,
+        xmvb::integrals::apply_ao_density_diagonals(input.ao_integral_input,
+            row_sources,frame.leftCols(n_mo),n_core_sources,threads,&diagonal_workspace,
             &exchange_diagonal,&coulomb_diagonal);
-        if (exchange_diagonal.rows()!=n || exchange_diagonal.cols()!=width ||
-            coulomb_diagonal.rows()!=n || coulomb_diagonal.cols()!=n_core_sources)
+        if (exchange_diagonal.rows()!=n_mo || exchange_diagonal.cols()!=width ||
+            coulomb_diagonal.rows()!=n_mo || coulomb_diagonal.cols()!=n_core_sources)
           throw std::runtime_error("projected density diagonal dimensions changed");
+        const int columns=width+n_core_sources;
+        for (std::size_t worker=0; worker<diagonal_workspace.rows.size(); ++worker)
+          if (diagonal_workspace.rows[worker].rows()!=n ||
+              diagonal_workspace.rows[worker].cols()!=columns ||
+              diagonal_workspace.images[worker].rows()!=n_mo ||
+              diagonal_workspace.images[worker].cols()!=columns ||
+              diagonal_workspace.partial[worker].rows()!=n_mo ||
+              diagonal_workspace.partial[worker].cols()!=columns)
+            throw std::runtime_error("projected density retained a worker AO response matrix");
         for (int channel=0;channel<width;++channel)
-          for (int orbital=0;orbital<n;++orbital) {
+          for (int orbital=0;orbital<n_mo;++orbital) {
             double expected_k=0.0, expected_j=0.0;
             for (int mu=0;mu<n;++mu)
               for (int nu=0;nu<n;++nu) {
@@ -245,12 +255,13 @@ void check_contracted_density_span() {
                 std::abs(coulomb_diagonal(orbital,channel)-expected_j)>5.0e-12)
               throw std::runtime_error("projected Coulomb diagonal disagrees with four-index reference");
           }
+       }
       }
       for (const auto& partial : workspace.partial)
         if (partial.rows()!=n*(n+1)/2)
           throw std::runtime_error("symmetric density batch retained a full worker matrix");
       Eigen::MatrixXd full;
-      xmvb::vb::apply_symmetric_ao_h1e_batch(sources,input.ao_integral_input,
+      xmvb::integrals::apply_symmetric_ao_h1e_batch(sources,input.ao_integral_input,
           threads,&workspace,&full);
       if ((full-result).cwiseAbs().maxCoeff()>5.0e-12)
         throw std::runtime_error("full and packed AO channel contractions disagree");
@@ -258,23 +269,23 @@ void check_contracted_density_span() {
   }
   // An empty CSR graph is the sparse zero-integral limit of the same paths.
   auto zero_ao = input.ao_integral_input;
-  zero_ao.pair_graph = xmvb::vb::build_ao_pair_graph({}, {}, {}, n);
-  xmvb::vb::AoH1eBatchWorkspace::Channels zero_sources(n*n,2);
+  zero_ao.pair_graph = xmvb::integrals::build_ao_pair_graph({}, {}, {}, n);
+  xmvb::integrals::AoH1eBatchWorkspace::Channels zero_sources(n*n,2);
   zero_sources.setOnes();
   for (int threads : {1,4}) {
-    xmvb::vb::AoH1eBatchWorkspace::Channels zero_response;
-    xmvb::vb::apply_symmetric_ao_h1e_rows(
+    xmvb::integrals::AoH1eBatchWorkspace::Channels zero_response;
+    xmvb::integrals::apply_symmetric_ao_h1e_rows(
         zero_ao,threads,zero_sources,&zero_response);
     if (zero_response.cwiseAbs().maxCoeff()!=0.0)
       throw std::runtime_error("empty CSR graph produced a nonzero AO response");
-    xmvb::vb::AoDensityDiagonalWorkspace zero_workspace;
+    xmvb::integrals::AoDensityDiagonalWorkspace zero_workspace;
     Eigen::MatrixXd zero_k, zero_j;
-    xmvb::vb::apply_ao_density_diagonals(zero_ao,zero_sources,frame,1,
-        threads,3,&zero_workspace,&zero_k,&zero_j);
+    xmvb::integrals::apply_ao_density_diagonals(zero_ao,zero_sources,frame,1,
+        threads,&zero_workspace,&zero_k,&zero_j);
     if (zero_k.cwiseAbs().maxCoeff()!=0.0 || zero_j.cwiseAbs().maxCoeff()!=0.0)
       throw std::runtime_error("empty CSR graph produced nonzero projected diagonals");
   }
-  auto ri = std::make_shared<xmvb::vb::RiAoFactorization>();
+  auto ri = std::make_shared<xmvb::integrals::RiAoFactorization>();
   ri->n_basis_functions = n;
   ri->n_auxiliary_functions = 4;
   ri->n_packed_ao_pairs = n*(n+1)/2;
@@ -289,9 +300,9 @@ void check_contracted_density_span() {
       for (int r = 0; r < n; ++r)
         for (int s = 0; s < n; ++s)
           ri_g[eri_index(p,q,r,s,n)] = ri->metric_whitened_ao_pair_factors.col(
-              xmvb::vb::TwoElectronIndexer::packed_pair_index(p,q)).dot(
+              xmvb::core::PairIndex::packed_pair_index(p,q)).dot(
               ri->metric_whitened_ao_pair_factors.col(
-                  xmvb::vb::TwoElectronIndexer::packed_pair_index(r,s)));
+                  xmvb::core::PairIndex::packed_pair_index(r,s)));
   input.ri_factorization = ri;
   for (const bool use_ri : {false,true}) {
   input.standard_two_electron_mode = use_ri
@@ -356,14 +367,14 @@ int main() {
   std::vector<double> packed(static_cast<std::size_t>(n_pairs)*(n_pairs+1)/2);
   for (int p = 0; p < na; ++p)
     for (int q = 0; q <= p; ++q) {
-      const int pq = xmvb::vb::TwoElectronIndexer::packed_pair_index(p,q);
+      const int pq = xmvb::core::PairIndex::packed_pair_index(p,q);
       for (int r = 0; r < na; ++r)
         for (int s = 0; s <= r; ++s) {
-          const int rs = xmvb::vb::TwoElectronIndexer::packed_pair_index(r,s);
+          const int rs = xmvb::core::PairIndex::packed_pair_index(r,s);
           if (rs > pq) continue;
           const int multiplicity =
               (p==q ? 1 : 2) * (r==s ? 1 : 2) * (pq==rs ? 1 : 2);
-          packed[xmvb::vb::TwoElectronIndexer::packed_pair_of_pairs_index(pq,rs)] =
+          packed[xmvb::core::PairIndex::packed_pair_of_pairs_index(pq,rs)] =
               0.5 * multiplicity * dm2[eri_index(p,q,r,s,na)];
         }
     }
@@ -406,7 +417,7 @@ int main() {
           values.push_back(eri(g,p,q,r,s,n));
         }
   input.ao_integral_input.pair_graph =
-      xmvb::vb::build_ao_pair_graph(left,right,values,n);
+      xmvb::integrals::build_ao_pair_graph(left,right,values,n);
   xmvb::vb::AcceptedPointContext accepted;
   accepted.n_active_orbitals = na;
   auto& prepared = accepted.prepared_active_space;
@@ -431,7 +442,7 @@ int main() {
     return 1;
   }
   // Independent factorized-ERI reference for signed rank-two RI sources.
-  auto ri = std::make_shared<xmvb::vb::RiAoFactorization>();
+  auto ri = std::make_shared<xmvb::integrals::RiAoFactorization>();
   ri->n_basis_functions = n;
   ri->n_auxiliary_functions = 3;
   ri->n_packed_ao_pairs = n*(n+1)/2;
@@ -445,8 +456,8 @@ int main() {
     for (int q = 0; q < n; ++q)
       for (int r = 0; r < n; ++r)
         for (int s = 0; s < n; ++s) {
-          const int pq = xmvb::vb::TwoElectronIndexer::packed_pair_index(p,q);
-          const int rs = xmvb::vb::TwoElectronIndexer::packed_pair_index(r,s);
+          const int pq = xmvb::core::PairIndex::packed_pair_index(p,q);
+          const int rs = xmvb::core::PairIndex::packed_pair_index(r,s);
           ri_g[eri_index(p,q,r,s,n)] =
               ri->metric_whitened_ao_pair_factors.col(pq).dot(
                   ri->metric_whitened_ao_pair_factors.col(rs));

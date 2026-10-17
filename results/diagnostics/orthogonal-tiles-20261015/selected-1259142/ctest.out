@@ -1,0 +1,30 @@
+Internal ctest changing into directory: /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build
+Test project /home/guqqgroup/xiatao/work/xmvb-casscf-20261015/build
+      Start 15: eigensolver_equivalence_f2
+ 1/12 Test #15: eigensolver_equivalence_f2 .......   Passed    0.19 sec
+      Start 16: eigensolver_equivalence_f2_oeo
+ 2/12 Test #16: eigensolver_equivalence_f2_oeo ...   Passed    0.19 sec
+      Start 17: ciah
+ 3/12 Test #17: ciah .............................   Passed    0.01 sec
+      Start 18: ci_transport
+ 4/12 Test #18: ci_transport .....................   Passed    0.01 sec
+      Start 19: representation_overlap
+ 5/12 Test #19: representation_overlap ...........   Passed    0.02 sec
+      Start 21: selected_ci_transport
+ 6/12 Test #21: selected_ci_transport ............   Passed    0.03 sec
+      Start 34: orthogonal_direct_ci
+ 7/12 Test #34: orthogonal_direct_ci .............   Passed    1.86 sec
+      Start 35: structure_tiles
+ 8/12 Test #35: structure_tiles ..................   Passed    0.10 sec
+      Start 37: coupled_structure
+ 9/12 Test #37: coupled_structure ................   Passed    0.02 sec
+      Start 38: davidson
+10/12 Test #38: davidson .........................   Passed    2.96 sec
+      Start 41: neo
+11/12 Test #41: neo ..............................   Passed    0.02 sec
+      Start 65: neo_f2
+12/12 Test #65: neo_f2 ...........................   Passed    0.08 sec
+
+100% tests passed, 0 tests failed out of 12
+
+Total Test time (real) =   5.51 sec

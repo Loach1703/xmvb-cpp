@@ -1,0 +1,6 @@
+raw_seeds=4830 frontier_seeds=2
+original depth=0 products=4899 prefixes=9980 words=753160
+frontier depth=0 products=4899 prefixes=9980 words=9910
+original depth=1 products=4900 prefixes=9981 words=2240480
+frontier depth=1 products=4900 prefixes=9981 words=29480
+exact_closure_parity=PASS

@@ -1,0 +1,9 @@
+{
+  "job": 1264833,
+  "sweeps": 129,
+  "beta_candidates": 1353631268,
+  "beta_visits": 710376084,
+  "excluded": 643255184,
+  "excluded_fraction": 0.47520709605830413,
+  "note": "Structural row visits only, not FLOPs or physical HVP actions. Instrumentation removed after this diagnostic."
+}

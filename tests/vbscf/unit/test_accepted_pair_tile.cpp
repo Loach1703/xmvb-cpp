@@ -9,7 +9,7 @@
 #include "vbscf/determinants/pairs/accepted_action.hpp"
 #include "vbscf/determinants/pairs/accepted_tile.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace {
 
@@ -94,10 +94,10 @@ int main() {
   }
   h1e = 0.5 * (h1e + h1e.transpose()).eval();
 
-  const int n_pairs = xmvb::vb::packed_active_pair_count(n_active);
-  xmvb::vb::ActiveSpaceTwoElectronResult ri;
+  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active);
+  xmvb::integrals::ActiveSpaceTwoElectronResult ri;
   ri.representation =
-      xmvb::vb::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
   ri.n_auxiliary_functions = 7;
   ri.ri_active_pair_factors.resize(ri.n_auxiliary_functions, n_pairs);
   for (int auxiliary = 0; auxiliary < ri.n_auxiliary_functions; ++auxiliary) {
@@ -215,7 +215,7 @@ int main() {
       singular_overlap.data(),
       singular_overlap.data() + singular_overlap.size());
   const Eigen::Matrix3d singular_h1e = Eigen::Matrix3d::Identity();
-  xmvb::vb::ActiveSpaceTwoElectronResult singular_two_electron;
+  xmvb::integrals::ActiveSpaceTwoElectronResult singular_two_electron;
   singular_two_electron.packed_active_two_electron_integrals.assign(21, 0.0);
   const xmvb::vb::AcceptedPairTileProvider singular_provider(
       singular_strings, 3);

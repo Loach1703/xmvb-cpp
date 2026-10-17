@@ -17,12 +17,12 @@ struct VbScfOptimizerOptions {
    * @brief Optimization backend implementation.
    */
   VbScfOptimizerBackend backend =
-      VbScfOptimizerBackend::BlockLbfgs;
+      VbScfOptimizerBackend::Plbfgs;
 
   /** @brief Structure-space eigensolver used by objective evaluations. */
   StructureEigensolver structure_eigensolver = StructureEigensolver::Davidson;
 
-  /** @brief Orbital preconditioner used by the NEO matrix-free solve. */
+  /** @brief Orbital preconditioner used by the CIAH matrix-free solve. */
   OrbitalPreconditioner orbital_preconditioner =
       OrbitalPreconditioner::Automatic;
 
@@ -74,8 +74,8 @@ struct VbScfOptimizerOptions {
    */
   bool verbose = true;
 
-  /** @brief Observes each completed NEO step without retaining heavy snapshots. */
-  std::function<void(const NeoIterationRecord&)> neo_iteration_callback;
+  /** @brief Observes each completed CIAH step without retaining heavy snapshots. */
+  std::function<void(const CiahIterationRecord&)> ciah_iteration_callback;
 
   /**
    * @brief Whether to retain accepted-iterate trace snapshots in memory.

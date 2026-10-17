@@ -9,16 +9,16 @@
 #include <Eigen/Cholesky>
 #include <Eigen/Eigenvalues>
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/optimization/preconditioners/density.hpp"
 #include "vbscf/core/contracts/input.hpp"
-#include "vbscf/diagnostics/performance/neo_trace.hpp"
+#include "mcscf/optimization/trace.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/two_electron/response/types.hpp"
-#include "vbscf/integrals/active/two_electron/transformation/ao_pair_operator.hpp"
-#include "vbscf/integrals/active/two_electron/transformation/packed_pair_map.hpp"
-#include "vbscf/integrals/ao/ri/factorization.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/response/types.hpp"
+#include "integrals/response/ao_pair_operator.hpp"
+#include "integrals/active/pair_map.hpp"
+#include "integrals/ao/ri.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -180,10 +180,10 @@ Eigen::MatrixXd build_pair_transform(
   Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
   for (int new_p = 0; new_p < n; ++new_p) {
     for (int new_q = 0; new_q <= new_p; ++new_q) {
-      const int new_pair = TwoElectronIndexer::packed_pair_index(new_p, new_q);
+      const int new_pair = xmvb::core::PairIndex::packed_pair_index(new_p, new_q);
       for (int old_p = 0; old_p < n; ++old_p) {
         for (int old_q = 0; old_q <= old_p; ++old_q) {
-          const int old_pair = TwoElectronIndexer::packed_pair_index(old_p, old_q);
+          const int old_pair = xmvb::core::PairIndex::packed_pair_index(old_p, old_q);
           double value =
               orbital_transform(old_p, new_p) *
               orbital_transform(old_q, new_q);
@@ -200,10 +200,10 @@ Eigen::MatrixXd build_pair_transform(
   return result;
 }
 
-ExactCtxPairMatrix apply_ao_pair_operator(
+xmvb::integrals::ExactCtxPairMatrix apply_ao_pair_operator(
     const VbScfInput& input,
-    const Eigen::Ref<const ExactCtxPairMatrix>& coefficients) {
-  ExactCtxPairMatrix result;
+    const Eigen::Ref<const xmvb::integrals::ExactCtxPairMatrix>& coefficients) {
+  xmvb::integrals::ExactCtxPairMatrix result;
   const int n_bf = input.orbital_preparation_input.n_basis_functions;
   if (input.standard_two_electron_mode ==
       StandardTwoElectronMode::ResolutionOfIdentity) {
@@ -213,7 +213,7 @@ ExactCtxPairMatrix apply_ao_pair_operator(
     const auto& factors = input.ri_factorization->metric_whitened_ao_pair_factors;
     result.noalias() = factors.transpose() * (factors * coefficients);
   } else {
-    detail::apply_exact_ao_pair_kernel(
+    xmvb::integrals::detail::apply_exact_ao_pair_kernel(
         input.ao_integral_input,
         coefficients,
         n_bf,
@@ -257,14 +257,14 @@ std::vector<double> pack_symmetric_dm2(
   std::vector<double> packed(packed_eri_count(n), 0.0);
   for (int p = 0; p < n; ++p) {
     for (int q = 0; q <= p; ++q) {
-      const int pq = TwoElectronIndexer::packed_pair_index(p, q);
+      const int pq = xmvb::core::PairIndex::packed_pair_index(p, q);
       for (int r = 0; r < n; ++r) {
         for (int s = 0; s <= r; ++s) {
-          const int rs = TwoElectronIndexer::packed_pair_index(r, s);
+          const int rs = xmvb::core::PairIndex::packed_pair_index(r, s);
           if (rs > pq) continue;
           const int multiplicity =
               (p == q ? 1 : 2) * (r == s ? 1 : 2) * (pq == rs ? 1 : 2);
-          packed[TwoElectronIndexer::packed_pair_of_pairs_index(pq, rs)] =
+          packed[xmvb::core::PairIndex::packed_pair_of_pairs_index(pq, rs)] =
               0.5 * multiplicity * dm2[tensor4_index(p, q, r, s, n)];
         }
       }
@@ -286,12 +286,12 @@ std::vector<double> unpack_symmetric_active_two_rdm(
       0.0);
   for (int p = 0; p < n_active; ++p) {
     for (int q = 0; q < n_active; ++q) {
-      const int pq = TwoElectronIndexer::packed_pair_index(p, q);
+      const int pq = xmvb::core::PairIndex::packed_pair_index(p, q);
       for (int r = 0; r < n_active; ++r) {
         for (int s = 0; s < n_active; ++s) {
-          const int rs = TwoElectronIndexer::packed_pair_index(r, s);
+          const int rs = xmvb::core::PairIndex::packed_pair_index(r, s);
           const int packed =
-              TwoElectronIndexer::packed_pair_of_pairs_index(pq, rs);
+              xmvb::core::PairIndex::packed_pair_of_pairs_index(pq, rs);
           const int multiplicity =
               (p == q ? 1 : 2) * (r == s ? 1 : 2) * (pq == rs ? 1 : 2);
           dm2[tensor4_index(p, q, r, s, n_active)] =
@@ -369,7 +369,7 @@ Eigen::MatrixXd build_analytic_rotation_hessian_diagonal(
 AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
     const VbScfInput& input,
     const AcceptedPointContext& accepted) {
-  const bool trace = diagnostics::neo_event_trace_enabled();
+  const bool trace = mcscf::diagnostics::ciah_event_trace_enabled();
   const auto start = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   const auto& orbital_input = input.orbital_preparation_input;
@@ -433,9 +433,9 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
   const auto& active_two_electron = prepared.active_space_two_electron_result;
   const Eigen::MatrixXd active_pair_transform =
       build_pair_transform(inverse_active_transform);
-  ExactCtxPairMatrix active_pair_products;
+  xmvb::integrals::ExactCtxPairMatrix active_pair_products;
   if (active_two_electron.representation ==
-      ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
     if (active_two_electron.ri_active_pair_factors.size() == 0 ||
         !input.ri_factorization) {
       throw std::invalid_argument(
@@ -452,8 +452,8 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
   } else {
     // The memory-bounded exact forward path deliberately does not retain
     // G*Q_active. Rebuild only that absent accepted tensor from the AO graph.
-    ExactCtxPairMatrix active_pair_map;
-    build_packed_orbital_pair_map(
+    xmvb::integrals::ExactCtxPairMatrix active_pair_map;
+    xmvb::integrals::build_packed_orbital_pair_map(
         mo.middleCols(n_core, n_active), &active_pair_map);
     active_pair_products = apply_ao_pair_operator(input, active_pair_map);
   }
@@ -474,10 +474,10 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
     for (int a = 0; a < n_active; ++a)
       for (int b = 0; b < n_active; ++b)
         x.j_active[slice_index(p, a, b, n_active)] =
-            contraction[TwoElectronIndexer::packed_pair_index(a, b)];
+            contraction[xmvb::core::PairIndex::packed_pair_index(a, b)];
   }
-  ExactCtxPairMatrix active_pair_map;
-  build_packed_orbital_pair_map(
+  xmvb::integrals::ExactCtxPairMatrix active_pair_map;
+  xmvb::integrals::build_packed_orbital_pair_map(
       mo.middleCols(n_core, n_active), &active_pair_map);
   const Eigen::MatrixXd active_pairs =
       active_pair_map.transpose() * active_pair_products;
@@ -488,8 +488,8 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
       for (int c = 0; c < n_active; ++c)
         for (int d = 0; d < n_active; ++d)
           x.active_eri[tensor4_index(a, b, c, d, n_active)] = active_pairs(
-              TwoElectronIndexer::packed_pair_index(a, b),
-              TwoElectronIndexer::packed_pair_index(c, d));
+              xmvb::core::PairIndex::packed_pair_index(a, b),
+              xmvb::core::PairIndex::packed_pair_index(c, d));
   const auto dm2 = unpack_symmetric_active_two_rdm(packed_dm2,n_active);
   const auto active_end = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
@@ -534,8 +534,8 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
   if (densities.core_coulomb.rows()==n_bf) {
     x.j_pc=densities.core_coulomb;
   } else {
-    const ExactCtxPairMatrix core_diagonal_products = [&] {
-      ExactCtxPairMatrix map(n_ao_pairs,n_core);
+    const xmvb::integrals::ExactCtxPairMatrix core_diagonal_products = [&] {
+      xmvb::integrals::ExactCtxPairMatrix map(n_ao_pairs,n_core);
       Eigen::Index pair=0;
       for (int mu=0;mu<n_bf;++mu)
         for (int nu=0;nu<=mu;++nu,++pair)
@@ -578,9 +578,9 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
           .localized_representative_selector
           .inactive_inverse_transpose_right_transform.transpose();
   result.active_inverse_transform = inverse_active_transform;
-  if (trace) diagnostics::neo_trace("ciah_diagonal_cost", "seconds=%.17g",
+  if (trace) mcscf::diagnostics::ciah_trace("ciah_diagonal_cost", "seconds=%.17g",
       std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
-  if (trace) diagnostics::neo_trace("ciah_diagonal_sections",
+  if (trace) mcscf::diagnostics::ciah_trace("ciah_diagonal_sections",
       "frame_active_seconds=%.17g,active_density_seconds=%.17g,density_contraction_seconds=%.17g,core_pair_seconds=%.17g,core_projection_seconds=%.17g,core_exchange_seconds=%.17g,projection_workers=%d,projection_worker_bytes=%zu",
       std::chrono::duration<double>(active_end-start).count(),
       std::chrono::duration<double>(density_end-active_end).count(),

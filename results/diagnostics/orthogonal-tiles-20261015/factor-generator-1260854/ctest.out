@@ -1,0 +1,24 @@
+Internal ctest changing into directory: /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/build
+Test project /home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/build
+    Start  1: ci_factors
+1/9 Test  #1: ci_factors .......................   Passed    0.07 sec
+    Start  6: product_frontier
+2/9 Test  #6: product_frontier .................   Passed    0.05 sec
+    Start 20: ci_transport
+3/9 Test #20: ci_transport .....................   Passed    0.01 sec
+    Start 21: representation_overlap
+4/9 Test #21: representation_overlap ...........   Passed    0.01 sec
+    Start 22: restricted_metric
+5/9 Test #22: restricted_metric ................   Passed    0.01 sec
+    Start 24: selected_ci_transport
+6/9 Test #24: selected_ci_transport ............   Passed    0.03 sec
+    Start 37: orthogonal_direct_ci
+7/9 Test #37: orthogonal_direct_ci .............   Passed    1.93 sec
+    Start 38: structure_tiles
+8/9 Test #38: structure_tiles ..................   Passed    0.21 sec
+    Start 40: coupled_structure
+9/9 Test #40: coupled_structure ................   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 9
+
+Total Test time (real) =   2.34 sec

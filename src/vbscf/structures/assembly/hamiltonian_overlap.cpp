@@ -22,14 +22,14 @@
 #include <omp.h>
 #endif
 
-#include "core/openmp.hpp"
+#include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "vbscf/structures/assembly/block_kernels.hpp"
 #include "vbscf/structures/assembly/coefficient_blocks.hpp"
-#include "vbscf/integrals/active/two_electron/construction/indexer.hpp"
-#include "vbscf/integrals/active/two_electron/construction/kernel.hpp"
+#include "core/pair_index.hpp"
+#include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb {
 
@@ -154,7 +154,7 @@ OppositeSpinPackedPairProjection build_sparse_packed_pair_projection(
     const Eigen::MatrixXd& coefficient_matrix,
     bool coefficient_matrix_is_right_by_left,
     int n_orbitals) {
-  const int n_packed_active_pairs = packed_active_pair_count(n_orbitals);
+  const int n_packed_active_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   OppositeSpinPackedPairProjection projection;
   if (occ_L.empty()) {
     return projection;
@@ -178,7 +178,7 @@ OppositeSpinPackedPairProjection build_sparse_packed_pair_projection(
          ++right_row) {
       const int orbital_index_right = occ_R[right_row];
       const int packed_pair_index =
-          TwoElectronIndexer::packed_pair_index(
+          xmvb::core::PairIndex::packed_pair_index(
               orbital_index_right,
               orbital_index_left);
       if (touched_mask[packed_pair_index] == 0u) {
@@ -774,7 +774,7 @@ LocalOppositeSpinChannelFamily build_local_channel_family(
 void build_local_projected_channel(
     const LocalSpinProjectionBlock& local_projection_block,
     int target_packed_pair_index,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     int n_orbitals,
     Eigen::MatrixXd* projected_channel_block) {
   if (projected_channel_block == nullptr) {
@@ -809,7 +809,7 @@ double contract_local_opposite_spin_block(
     const Eigen::MatrixXd& right_coefficients,
     const LocalSpinProjectionBlock& alpha_projection_block,
     const LocalSpinProjectionBlock& beta_projection_block,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     int n_orbitals,
     Eigen::MatrixXd* beta_projected_channel_block,
     Eigen::MatrixXd* beta_push,
@@ -821,7 +821,7 @@ double contract_local_opposite_spin_block(
         "opposite-spin local contraction outputs must not be null");
   }
 
-  const int n_packed_active_pairs = packed_active_pair_count(n_orbitals);
+  const int n_packed_active_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   const int alpha_channel_count =
       count_local_projection_block_distinct_pairs(
           alpha_projection_block,
@@ -906,7 +906,7 @@ ForwardStructurePairResult contract_forward_structure_pair(
     bool shared_same_spin_pair_kernels,
     ForwardSpinPairProvider<TwoElectronInput>* alpha_provider,
     ForwardSpinPairProvider<TwoElectronInput>* beta_provider,
-    const ActiveSpaceTwoElectronView& two_electron_view,
+    const xmvb::integrals::ActiveSpaceTwoElectronView& two_electron_view,
     int n_orbitals,
     ForwardStructurePairWorkspace* workspace) {
   if (alpha_provider == nullptr || beta_provider == nullptr ||
@@ -984,7 +984,7 @@ ForwardStructurePairResult contract_forward_structure_pair(
     const LocalOppositeSpinChannelFamily channels =
         build_local_channel_family(
             workspace->alpha_projection,
-            packed_active_pair_count(n_orbitals));
+            xmvb::integrals::packed_active_pair_count(n_orbitals));
     for (std::size_t channel = 0;
          channel < channels.packed_pair_indices.size();
          ++channel) {
@@ -1047,8 +1047,8 @@ StructureAccumulationResult build_tiled_matrix_form_structure_matrices(
           alpha_reuse_table,
           beta_reuse_table,
           true);
-  const ActiveSpaceTwoElectronView two_electron_view =
-      make_active_space_two_electron_view(two_electron_input);
+  const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
+      xmvb::integrals::make_active_space_two_electron_view(two_electron_input);
   const int n_threads =
       forward_structure_matrix_thread_count(n_structures);
 
@@ -1182,6 +1182,7 @@ StructureAccumulationResult build_tiled_matrix_form_structure_matrices(
 template <typename TwoElectronInput>
 std::vector<ForwardSpinPairEntry> build_unique_spin_self_entries(
     const std::vector<std::vector<int>>& unique_spin_determinants,
+    const std::vector<unsigned char>& touched,
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
@@ -1194,8 +1195,8 @@ std::vector<ForwardSpinPairEntry> build_unique_spin_self_entries(
     return entries;
   }
 
-  const ActiveSpaceTwoElectronView two_electron_view =
-      make_active_space_two_electron_view(two_electron_input);
+  const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
+      xmvb::integrals::make_active_space_two_electron_view(two_electron_input);
   int n_threads = std::min(
       xmvb::effective_openmp_thread_count(),
       static_cast<int>(entries.size()));
@@ -1209,7 +1210,7 @@ std::vector<ForwardSpinPairEntry> build_unique_spin_self_entries(
     for (int unique_index = 0;
          unique_index < static_cast<int>(entries.size());
          ++unique_index) {
-      if (failed.load(std::memory_order_relaxed)) {
+      if (!touched[unique_index] || failed.load(std::memory_order_relaxed)) {
         continue;
       }
       try {
@@ -1225,7 +1226,7 @@ std::vector<ForwardSpinPairEntry> build_unique_spin_self_entries(
         if (retain_projected_pair_values &&
             !entry.first_order_projection.packed_pair_indices.empty()) {
           entry.first_order_projection.projected_pair_values =
-              apply_active_space_two_electron_kernel_to_sparse_projection(
+              xmvb::integrals::apply_active_space_two_electron_kernel_to_sparse_projection(
                   two_electron_view,
                   n_orbitals,
                   entry.first_order_projection.packed_pair_indices,
@@ -1470,9 +1471,22 @@ StructureDiagonal build_determinant_diagonal_jacobi_preconditioner(
   const bool project_alpha = shared_spin_entries ||
       alpha_reuse_table.unique_determinants.size() <=
           beta_reuse_table.unique_determinants.size();
+  // Completing the ambient indices must not evaluate added zero-support
+  // strings in the Davidson diagonal. Only original expansion rows matter.
+  std::vector<unsigned char> alpha_touched(alpha_reuse_table.unique_determinants.size(),0);
+  std::vector<unsigned char> beta_touched(beta_reuse_table.unique_determinants.size(),0);
+  for (std::size_t d=0; d<determinant_to_structure_terms.size(); ++d) {
+    if (determinant_to_structure_terms[d].empty()) continue;
+    alpha_touched[alpha_reuse_table.determinant_to_unique_id[d]]=1;
+    beta_touched[beta_reuse_table.determinant_to_unique_id[d]]=1;
+  }
+  if (shared_spin_entries)
+    for (std::size_t i=0; i<alpha_touched.size(); ++i)
+      alpha_touched[i] |= beta_touched[i];
   std::vector<ForwardSpinPairEntry> alpha_entries =
       build_unique_spin_self_entries(
           alpha_reuse_table.unique_determinants,
+          alpha_touched,
           ovlp_act,
           h1e_act,
           n_orbitals,
@@ -1483,6 +1497,7 @@ StructureDiagonal build_determinant_diagonal_jacobi_preconditioner(
   if (!shared_spin_entries) {
     beta_entries = build_unique_spin_self_entries(
         beta_reuse_table.unique_determinants,
+        beta_touched,
         ovlp_act,
         h1e_act,
         n_orbitals,
@@ -1622,8 +1637,8 @@ StructureDiagonal build_demand_driven_structure_diagonal(
       alpha_reuse_table,
       beta_reuse_table,
       true);
-  const ActiveSpaceTwoElectronView two_electron_view =
-      make_active_space_two_electron_view(two_electron_input);
+  const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
+      xmvb::integrals::make_active_space_two_electron_view(two_electron_input);
   const ForwardSpinPairCacheOptions entry_cache_options{
       .mode = ForwardSpinPairCacheMode::Entries,
       .tile_size = 0,
@@ -1736,7 +1751,7 @@ StructureAccumulationResult FullDeterminantStructureHamiltonianOverlapBuilder::b
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_structures) const {
   return build_impl(
       alpha_det,
@@ -1783,7 +1798,7 @@ StructureAccumulationResult FullDeterminantStructureHamiltonianOverlapBuilder::b
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_structures,
     const SameSpinPairCacheContext& same_spin_pair_cache) const {
   return build_impl(
@@ -1808,7 +1823,7 @@ FullDeterminantStructureHamiltonianOverlapBuilder::build_diagonal(
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_structures,
     const SameSpinPairCacheContext& same_spin_pair_cache) const {
   validate_full_determinant_input(
@@ -1851,7 +1866,7 @@ build_davidson_jacobi_preconditioner(
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_structures,
     const SameSpinPairCacheContext& same_spin_pair_cache) const {
   validate_full_determinant_input(
@@ -2028,7 +2043,7 @@ FullDeterminantStructureHamiltonianOverlapBuilder::build_impl(
     const std::vector<double>& ovlp_act,
     const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
     int n_orbitals,
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
+    const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     int n_structures,
     const SameSpinPairCacheContext* same_spin_pair_cache,
     bool store_pair_evaluations) const {
