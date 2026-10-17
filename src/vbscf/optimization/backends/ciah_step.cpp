@@ -349,30 +349,34 @@ bool build_ciah_macro_step(
   bool energy_model_stopped = false;
   const char* micro_stop = "unset";
   mcscf::CiahResult candidate;
+  mcscf::CiahStepPath path;
   setup_phase.stop();
   while (true) {
-    candidate = workspace.next(predicted_gradient);
-    ++record->micro_iterations;
+    const bool replayed = path.pending();
+    if (!replayed) {
+      candidate = workspace.next(predicted_gradient);
+      ++record->micro_iterations;
+    }
     const double rhs_norm = coordinate_norm(predicted_gradient);
     // A cached-only candidate can be consumed if the CURRENT AH equation is
     // resolved. Otherwise enrich using its current residual before consuming
     // an approximate step. The Ritz residual includes the reference alpha.
-    const bool forcing_resolved = candidate.resolved(rhs_norm, 1.0 / gradient_trust);
-    const bool ready = candidate.converged || candidate.exhaustion ||
+    const bool forcing_resolved = !replayed &&
+        candidate.resolved(rhs_norm, 1.0 / gradient_trust);
+    const bool ready = replayed || candidate.converged || candidate.exhaustion ||
         (candidate.basis_size >= ah_start_cycle &&
          (forcing_resolved || candidate.new_hvp_actions != 0));
     if (!ready) continue;
 
-    Eigen::VectorXd step = candidate.step;
-    Eigen::VectorXd image = candidate.hessian_step;
-    double largest = chart.maximum_rotation_component(step.head(no));
+    if (!replayed) path.set(candidate);
+    else candidate.converged = false; // The source Ritz root is not the current RHS.
+    double largest = chart.maximum_rotation_component(path.direction().head(no));
     if (ns) largest = std::max(largest,
-        structure.maximum_coefficient_component_coordinates(step.tail(ns)));
+        structure.maximum_coefficient_component_coordinates(path.direction().tail(ns)));
+    largest *= path.remaining_fraction();
     const double step_scale = largest > max_component ? max_component / largest : 1.0;
-    if (step_scale < 1.0) {
-      step *= step_scale;
-      image *= step_scale;
-    }
+    auto [step, image] = path.take(step_scale);
+    if (step_scale < 1.0) candidate.converged = false;
     if (step_audit) {
       diagnostics::audit_orbital_step(
           orbitals, chart, step.head(no), "micro_origin", micro_steps + 1);
@@ -445,11 +449,13 @@ bool build_ciah_macro_step(
     ++since_keyframe;
     const double predicted_norm = coordinate_norm(predicted_gradient);
     mcscf::diagnostics::ciah_trace("ciah_micro",
-        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g,rhs_norm=%.17g,forcing_target=%.17g,forcing_resolved=%d",
+        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g,rhs_norm=%.17g,forcing_target=%.17g,forcing_resolved=%d,replayed=%d,new_hvp=%d,remaining_fraction=%.17g,residual_rhs_current=%d",
         candidate.basis_size, micro_steps, candidate.eigenvalue,
         candidate.reference_component, candidate.residual_norm, predicted_norm,
         step_scale, largest, candidate.residual.head(no).norm(), candidate.residual.tail(ns).norm(),
-        rhs_norm,rhs_norm / gradient_trust,static_cast<int>(forcing_resolved));
+        rhs_norm,rhs_norm / gradient_trust,static_cast<int>(forcing_resolved),
+        static_cast<int>(replayed),replayed ? 0 : candidate.new_hvp_actions,
+        path.remaining_fraction(),static_cast<int>(!replayed));
     if (micro_steps > 3 && predicted_norm > gradient_trust * keyframe_norm) {
       displacement -= step;
       hessian_displacement -= image;
@@ -542,6 +548,7 @@ bool build_ciah_macro_step(
         xmvb::profiling::ScopedPhase refresh_phase(xmvb::profiling::Phase::CiahRefresh);
         predicted_gradient = exact.gradient;
         energy_model.refresh(exact.energy, exact.gradient);
+        path.clear(); // Never continue an old proposal after a true gradient refresh.
         mcscf::diagnostics::ciah_trace("ciah_model_refresh",
             "energy=%.17g,source_energy=%.17g,anchored_prediction=%.17g,origin_prediction=%.17g",
             exact.energy, energy, energy - exact.energy,
@@ -563,10 +570,10 @@ bool build_ciah_macro_step(
         break;
       }
     }
-    // The microstep and possibly a keyframe changed the RHS. Reproject that
-    // RHS in the retained space before spending an HVP on enrichment; a
-    // residual from the previously consumed equation is no longer current.
-    workspace.reset_rhs();
+    // Finish the clipped proposal without another Ritz solve. Once reached,
+    // or invalidated by a true keyframe, reproject the CURRENT full gradient
+    // before allowing any enrichment from an obsolete residual.
+    if (!path.pending()) workspace.reset_rhs();
   }
 
   if (mcscf::diagnostics::ciah_event_trace_enabled()) {

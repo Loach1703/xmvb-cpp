@@ -114,6 +114,34 @@ struct CiahResult {
   bool resolved(double rhs_norm, double relative_accuracy) const noexcept;
 };
 
+/** @brief Follow one clipped AH proposal without reevaluating its operator.
+ * A true keyframe invalidates the remaining path. This is step advancement,
+ * not a Ritz solve for the gradient at an intermediate point.
+ * The borrowed proposal must outlive the path and retain its operator images.
+ */
+class CiahStepPath {
+public:
+  void set(const CiahResult& proposal) {
+    proposal_ = &proposal;
+    remaining_ = 1.0;
+  }
+  void clear() noexcept { remaining_ = 0.0; }
+  bool pending() const noexcept { return remaining_ > 0.0; }
+  double remaining_fraction() const noexcept { return remaining_; }
+  const Eigen::VectorXd& direction() const noexcept { return proposal_->step; }
+
+  /** @brief Take a positive fraction, at most one, of the remaining path. */
+  std::pair<Eigen::VectorXd, Eigen::VectorXd> take(double fraction) {
+    const double part = fraction * remaining_;
+    remaining_ = fraction < 1.0 ? remaining_ - part : 0.0;
+    return {part * proposal_->step, part * proposal_->hessian_step};
+  }
+
+private:
+  const CiahResult* proposal_ = nullptr;
+  double remaining_ = 0.0;
+};
+
 /** @brief Direction from the lowest origin-gradient AH root in the retained span.
  *
  * This is an unscaled direction, not a certified Ritz Newton step. The tail

@@ -94,6 +94,7 @@ struct CiahIterationRecord {
   /** Exact-gradient keyframes accepted inside this nonlinear macro step. */
   int keyframes = 0;
   int model_dimension = 0;
+  /** AH Ritz solves; replayed pieces of a clipped proposal do not count. */
   int micro_iterations = 0;
   int coupled_block_actions = 0;
   int orbital_hvp_actions = 0;

@@ -19,6 +19,7 @@ namespace {
 using xmvb::mcscf::CiahOptions;
 using xmvb::mcscf::CiahOriginRay;
 using xmvb::mcscf::CiahResult;
+using xmvb::mcscf::CiahStepPath;
 using xmvb::mcscf::CiahWorkspace;
 using xmvb::mcscf::QuadraticProblem;
 
@@ -622,6 +623,119 @@ void check_accumulated_microstep_images() {
           "macro residual diagnostics repeated a cached Hessian action");
 }
 
+/** @brief Component-limited microsteps can consume one cached AH image exactly. */
+void check_clipped_ah_step_path() {
+  Eigen::Matrix3d hessian;
+  hessian << 2.0, 0.6, 0.0,
+             0.6, 4.0, 0.3,
+             0.0, 0.3, 6.0;
+  const Eigen::Matrix3d metric = Eigen::Vector3d(2.0, 0.7, 3.0).asDiagonal();
+  const Eigen::Vector3d gradient(1.0, 0.0, 0.0);
+  int actions = 0;
+  const auto problem = dense_problem(hessian, metric, gradient, &actions);
+  CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(3, 0));
+  const CiahResult proposal = workspace.next(gradient);
+  require(actions == 1 && proposal.basis_size == 1 && !proposal.converged,
+          "AH path test needs one unresolved physical Hessian image");
+
+  CiahStepPath path;
+  path.set(proposal);
+  require(path.pending() && path.remaining_fraction() == 1.0,
+          "new AH path is not pending in full");
+  require_close(path.direction(), proposal.step, 0.0,
+                "AH path changed its cached direction");
+  Eigen::VectorXd displacement = Eigen::VectorXd::Zero(3);
+  Eigen::VectorXd image = Eigen::VectorXd::Zero(3);
+  const double cap = 0.03;
+  const double largest = proposal.step.cwiseAbs().maxCoeff();
+  require(largest > 3.0 * cap,
+          "AH path fixture does not exercise repeated component clipping");
+  int segments = 0;
+  while (path.pending()) {
+    const double fraction = std::min(1.0,
+        cap / (path.remaining_fraction() * largest));
+    const auto [part, hessian_part] = path.take(fraction);
+    require(part.cwiseAbs().maxCoeff() <= cap * (1.0 + 2.0e-14),
+            "AH path segment exceeded the component cap");
+    require_close(hessian_part, hessian * part, 2.0e-14,
+                  "AH path segment lost its matching Hessian image");
+    displacement += part;
+    image += hessian_part;
+    ++segments;
+    require(segments < 100, "AH path did not finish bounded segmentation");
+  }
+  require(segments >= 4 && path.remaining_fraction() == 0.0,
+          "AH path did not retain and finish the clipped remainder");
+  require_close(displacement, proposal.step, 2.0e-14,
+                "clipped AH segments did not reconstruct the proposal");
+  require_close(image, proposal.hessian_step, 2.0e-14,
+                "clipped AH image segments did not reconstruct H times proposal");
+  require(actions == 1 && workspace.basis_size() == 1,
+          "advancing a cached AH path repeated a physical Hessian action");
+
+  path.set(proposal);
+  const auto [whole, whole_image] = path.take(1.0);
+  require((whole.array() == proposal.step.array()).all() &&
+              (whole_image.array() == proposal.hessian_step.array()).all() &&
+              !path.pending(),
+          "unclipped AH path did not return the exact cached proposal and image");
+  require(actions == 1, "unclipped AH path evaluated the operator again");
+}
+
+/** @brief A true keyframe replaces the path; its unused residual remains expandable. */
+void check_ah_step_path_keyframe_refresh() {
+  Eigen::Matrix3d hessian;
+  hessian << 2.0, 0.8, 0.0,
+             0.8, 3.0, 0.4,
+             0.0, 0.4, 5.0;
+  const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
+  const Eigen::Vector3d gradient(1.0, 0.0, 0.0);
+  int actions = 0;
+  const auto problem = dense_problem(hessian, metric, gradient, &actions);
+  CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(3, 0));
+  const CiahResult original = workspace.next(gradient);
+  require(!original.converged && original.residual_norm > 1.0e-3,
+          "keyframe test needs a full residual outside the first AH direction");
+  CiahStepPath path;
+  path.set(original);
+  const auto [prefix, prefix_image] = path.take(0.25);
+  require(path.pending() && std::abs(path.remaining_fraction() - 0.75) < 1.0e-15,
+          "partial AH step did not retain its unused fraction");
+  require_close(prefix_image, hessian * prefix, 2.0e-14,
+                "keyframe prefix has an inconsistent frozen Hessian image");
+
+  // The frozen model predicts gradient + H*prefix; a true keyframe can add
+  // nonlinear correction. Neither gradient is a convergence certificate for
+  // the original AH Ritz solve.
+  const Eigen::Vector3d keyframe_gradient =
+      gradient + prefix_image + Eigen::Vector3d(0.0, 0.3, 0.0);
+  workspace.reset_rhs();
+  const CiahResult refreshed = workspace.next(keyframe_gradient);
+  require(refreshed.new_hvp_actions == 0 && actions == 1 &&
+              refreshed.basis_size == 1 && !refreshed.converged &&
+              refreshed.residual_norm > 1.0e-3,
+          "intermediate keyframe RHS was falsely converged or repeated an HVP");
+  require((refreshed.step - original.step).norm() > 1.0e-3,
+          "changed keyframe RHS did not alter the cached AH proposal");
+  path.clear();
+  require(!path.pending() && path.remaining_fraction() == 0.0,
+          "true keyframe did not invalidate the old path remainder");
+  path.set(refreshed);
+  require_close(path.direction(), refreshed.step, 0.0,
+                "keyframe restart retained the obsolete AH direction");
+  const auto [replacement, replacement_image] = path.take(1.0);
+  require((replacement.array() == refreshed.step.array()).all() &&
+              (replacement_image.array() == refreshed.hessian_step.array()).all(),
+          "keyframe replacement did not return the refreshed cached images");
+  require(actions == 1, "keyframe replacement alone evaluated the operator");
+
+  const CiahResult expanded = workspace.next(keyframe_gradient);
+  require(expanded.new_hvp_actions == 1 && actions == 2 &&
+              expanded.basis_size == 2,
+          "finishing a path suppressed needed out-of-span residual enrichment");
+  check_images_and_residual(hessian, metric, keyframe_gradient, expanded);
+}
+
 /** @brief Energy anchoring must follow the same keyframe as the refreshed RHS. */
 void check_keyframe_energy_model() {
   using xmvb::mcscf::CiahEnergyModel;
@@ -918,6 +1032,8 @@ int main() {
     check_incremental_projection();
     check_metric_validation();
     check_accumulated_microstep_images();
+    check_clipped_ah_step_path();
+    check_ah_step_path_keyframe_refresh();
     check_keyframe_energy_model();
     check_converged_root_reuse();
     check_coarse_balancing_inverse();
