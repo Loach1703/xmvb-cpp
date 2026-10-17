@@ -349,16 +349,37 @@ bool build_ciah_macro_step(
   bool energy_model_stopped = false;
   const char* micro_stop = "unset";
   mcscf::CiahResult candidate;
+  int keyframe_generation = 0, newton_basis = -1, newton_keyframe = -1;
   setup_phase.stop();
   while (true) {
     candidate = workspace.next(predicted_gradient);
     ++record->micro_iterations;
+    bool projected_newton = false;
+    if (candidate.basis_size >= ah_start_cycle &&
+        (newton_basis != candidate.basis_size || newton_keyframe != keyframe_generation)) {
+      auto correction = workspace.projected_newton(predicted_gradient);
+      if (correction) {
+        double largest = chart.maximum_rotation_component(correction->step.head(no));
+        if (ns) largest = std::max(largest,
+            structure.maximum_coefficient_component_coordinates(correction->step.tail(ns)));
+        if (largest <= max_component) {
+          correction->new_hvp_actions = candidate.new_hvp_actions;
+          correction->exhaustion = candidate.exhaustion;
+          candidate = std::move(*correction);
+          projected_newton = true;
+          // The same span is stationary after this correction. Another one
+          // can only be useful after enrichment or a true keyframe refresh.
+          newton_basis = candidate.basis_size;
+          newton_keyframe = keyframe_generation;
+        }
+      }
+    }
     const double rhs_norm = coordinate_norm(predicted_gradient);
     // A cached-only candidate can be consumed if the CURRENT AH equation is
     // resolved. Otherwise enrich using its current residual before consuming
     // an approximate step. The Ritz residual includes the reference alpha.
     const bool forcing_resolved = candidate.resolved(rhs_norm, 1.0 / gradient_trust);
-    const bool ready = candidate.converged || candidate.exhaustion ||
+    const bool ready = projected_newton || candidate.converged || candidate.exhaustion ||
         (candidate.basis_size >= ah_start_cycle &&
          (forcing_resolved || candidate.new_hvp_actions != 0));
     if (!ready) continue;
@@ -445,11 +466,12 @@ bool build_ciah_macro_step(
     ++since_keyframe;
     const double predicted_norm = coordinate_norm(predicted_gradient);
     mcscf::diagnostics::ciah_trace("ciah_micro",
-        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g,rhs_norm=%.17g,forcing_target=%.17g,forcing_resolved=%d",
+        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g,rhs_norm=%.17g,forcing_target=%.17g,forcing_resolved=%d,projected_newton=%d,new_hvp=%d",
         candidate.basis_size, micro_steps, candidate.eigenvalue,
         candidate.reference_component, candidate.residual_norm, predicted_norm,
         step_scale, largest, candidate.residual.head(no).norm(), candidate.residual.tail(ns).norm(),
-        rhs_norm,rhs_norm / gradient_trust,static_cast<int>(forcing_resolved));
+        rhs_norm,rhs_norm / gradient_trust,static_cast<int>(forcing_resolved),
+        static_cast<int>(projected_newton),candidate.new_hvp_actions);
     if (micro_steps > 3 && predicted_norm > gradient_trust * keyframe_norm) {
       displacement -= step;
       hessian_displacement -= image;
@@ -542,6 +564,7 @@ bool build_ciah_macro_step(
         xmvb::profiling::ScopedPhase refresh_phase(xmvb::profiling::Phase::CiahRefresh);
         predicted_gradient = exact.gradient;
         energy_model.refresh(exact.energy, exact.gradient);
+        ++keyframe_generation;
         mcscf::diagnostics::ciah_trace("ciah_model_refresh",
             "energy=%.17g,source_energy=%.17g,anchored_prediction=%.17g,origin_prediction=%.17g",
             exact.energy, energy, energy - exact.energy,

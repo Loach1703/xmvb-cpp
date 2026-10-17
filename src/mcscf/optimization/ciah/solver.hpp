@@ -211,6 +211,15 @@ public:
    */
   CiahResult next(const Eigen::VectorXd& current_gradient);
 
+  /** @brief Minimize the positive quadratic in the cached span, without HVPs.
+   * Returns an unshifted Newton correction only for positive projected
+   * curvature and a nonzero descent direction. The residual includes the
+   * complement of the span; projected stationarity is not convergence.
+   * Call after next(), which validates the frozen H/G projections. The
+   * caller owns step feasibility, keyframes and nonlinear acceptance.
+   */
+  std::optional<CiahResult> projected_newton(const Eigen::VectorXd& gradient);
+
   /** @brief Re-solve the lowest AH root at an origin gradient using cached data.
    *
    * Requires a completed Ritz solve in the retained span. This does not
@@ -253,6 +262,9 @@ private:
   double basis_squared_norm_ = 0.0;
   double hessian_squared_norm_ = 0.0, metric_squared_norm_ = 0.0;
   Eigen::MatrixXd projected_metric_;
+  /** Positive projected factor, reused until a new basis direction arrives. */
+  Eigen::MatrixXd newton_lower_;
+  int newton_dimension_ = 0;
   bool exhausted_ = false;
 };
 
