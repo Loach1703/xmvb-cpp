@@ -1,0 +1,40 @@
+{
+  "cluster": "hanhai22",
+  "job_id": "1265637",
+  "array": {"0": "singlet", "1": "triplet", "2": "quintet"},
+  "status_at_submission": "pending_priority",
+  "source_revision": "c491230b",
+  "qualified_build_job": "1265582",
+  "qualified_tests": "14/14",
+  "executable_sha256": "7f1aec8c5a36661027427f92c667e83d3e0c5ed7582aba0098188e50b146033e",
+  "unrelated_local_ri_changes": "excluded; existing user changes preserved",
+  "cpus_per_task": 32,
+  "memory_per_task_gib": 192,
+  "active_space": "CAS(8e,11o)",
+  "basis": "cc-pVDZ; all-electron; same saved XMI/basis as historical runs",
+  "integrals": "exact Libcint",
+  "orbitals": "OEO",
+  "structure_space": "FULL",
+  "optimizer": "CIAH (ISCF=9)",
+  "eigensolver": "Davidson",
+  "preconditioner": "analytic Hessian diagonal",
+  "gradient_tolerance": 0.001,
+  "energy_tolerance_hartree": 1e-7,
+  "exact_exchange_memory_mib": 256,
+  "initial_guess": "original per-spin XMI GUS, not optimized restart orbitals",
+  "input_sha256": {
+    "singlet": "e7d58d653a5d99f6acee301e0096e582dedd7a9f47c22b4d2c2ace013ab351fb",
+    "triplet": "79edd76ddc6902f84492592cfd70054a449b403ea150b4429ce5306e415ce8eb",
+    "quintet": "67cb154bc8d22ff69bdbee836da5295fc7962687e61a11559246bc9bab56f0f0"
+  },
+  "basis_sha256": "d53e7e02d55fb99cdf823d50cf13fec375e0cbe1220ff61816aee7ab38e38ec9",
+  "bundle": "/home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/porphine-bundle-c491230b-20261017",
+  "remote_results": "/home/guqqgroup/xiatao/work/xmvb-source-tiles-20261015/porphine-current-1265637",
+  "historical_runs_not_rerun": {
+    "singlet_main": "1255488_0",
+    "singlet_horizontal_17_step": "1254797_0",
+    "triplet_main": "1255593_1",
+    "quintet": "1255635_0"
+  },
+  "notes": "Native timing only; no profiler or short macrostep cap. Reuses the qualified executable because production sources have not changed. PySCF/Molcas and historical executables are not rerun."
+}
