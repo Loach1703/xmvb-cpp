@@ -104,3 +104,57 @@ actual consumed pieces, including replayed ones.
 The proposal targets action count in clipped phases. It does not promise
 improvement in an unclipped tail or assume that fewer HVPs imply faster
 end-to-end convergence. Changed nonlinear trajectories must be measured.
+
+## Why an unclipped tail still requires complement directions
+
+For an AH root with reference amplitude $\alpha\ne0$, write the full residual
+as
+
+$$
+r=\alpha\left(g+Ht-\omega Gt\right),\qquad Q^Tr=0.
+$$
+
+Here $Q$ spans the retained AH directions and $t$ belongs to their span.
+After taking the full, unclipped proposal in the frozen model,
+
+$$
+g_{\mathrm{next}}=g+Ht=\alpha^{-1}r+\omega Gt,
+\qquad
+Q^Tg_{\mathrm{next}}=\omega Q^TGt.
+$$
+
+Near a Newton solution, $|\omega|$ is small. Thus the gradient left in the
+existing span is small even when $r$ outside that span remains substantial.
+Resolving the small projected equation more accurately does not supply the
+missing component. This statement concerns the frozen model; it does not
+replace the true keyframe gradient. In finite precision, Galerkin
+orthogonality holds to the accuracy of the cached actions and projections.
+
+### A restricted redundancy identity for the coarse inverse
+
+Let $L=H-\omega G$, let $V$ contain coarse sample directions, and suppose
+$E=V^TLV$ is nonsingular. With a base inverse $P_0$, the symmetric balancing
+preconditioner used in the implementation has the form
+
+$$
+P_{\mathrm{bal}}
+=VE^{-1}V^T
++\left(I-VE^{-1}V^TL\right)P_0
+ \left(I-LVE^{-1}V^T\right).
+$$
+
+For the special case $V=Q$, Galerkin orthogonality implies
+
+$$
+P_{\mathrm{bal}}r
+=P_0r-QE^{-1}(LQ)^TP_0r.
+$$
+
+Subsequent orthogonalization against $Q$ removes the second term. In exact
+arithmetic both preconditioners then generate the same complement direction.
+Finite-precision rank decisions can still differ. Crucially, production
+coarse samples include separate orbital and CI components: their span can
+be larger than $Q$, so this identity does **not** prove that the actual
+coarse inverse is redundant. Its removal is an empirical ablation, not an
+algebraically equivalent optimization. The five-case test in
+`benchmarks/ciah-tail-20261017/README.md` rejects that removal as a default.

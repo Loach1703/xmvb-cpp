@@ -13,12 +13,14 @@
 #SBATCH --output=run-%A_%a.out
 #SBATCH --error=run-%A_%a.err
 set -eo pipefail
-[[ -n ${SLURM_JOB_ID:-} && $# == 1 && $SLURM_CPUS_PER_TASK == 32 ]] || exit 64
+[[ -n ${SLURM_JOB_ID:-} && $# -ge 1 && $# -le 2 && $SLURM_CPUS_PER_TASK == 32 ]] || exit 64
 . /etc/profile
 module purge
 module load gcc/14.3.0
 set -u
 source_dir=$(realpath -e "$1")
+preconditioner=${2:-hessian-diagonal}
+case "$preconditioner" in hessian-diagonal|one-electron) ;; *) exit 64 ;; esac
 baseline=/home/guqqgroup/taoxia/xmvb-runs/porphine-current-20261017-c491230b/bundle
 cases=(240 241 FeCl2 F2 MnF2)
 case_name=${cases[$SLURM_ARRAY_TASK_ID]}
@@ -39,13 +41,14 @@ lscpu > cpu.txt
 module list > modules.txt 2>&1
 env | sort | grep -E '^(OMP_|OPENBLAS_|MKL_|BLIS_|SLURM_|XMVB_)' > environment.txt
 sha256sum "$CIAH_PATH_EXECUTABLE" input.xmi "$baseline/lib/"* > hashes.txt
+printf '%s\n' "$preconditioner" > preconditioner.txt
 status=0
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores bash -c '
   grep Cpus_allowed_list /proc/self/status > affinity.txt
   exec /usr/bin/time -v -o resource.time "$CIAH_PATH_EXECUTABLE" input.xmi \
-    --optimizer-backend ciah --eigensolver davidson --orbital-preconditioner hessian-diagonal \
+    --optimizer-backend ciah --eigensolver davidson --orbital-preconditioner "$1" \
     --gradient-tolerance 1e-3 --energy-tolerance 1e-7 --ciah-trace ciah.tsv
-' > output.out 2> run.err || status=$?
+' bash "$preconditioner" > output.out 2> run.err || status=$?
 printf '%s\n' "$status" > run.exit
 [[ $status == 0 ]] || exit "$status"
 grep -q '^Termination reason *: ciah_projected_gradient_tolerance' output.out
