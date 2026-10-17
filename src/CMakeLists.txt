@@ -69,15 +69,23 @@ set(XMVB_MCSCF_SOURCES
   mcscf/ci/spin.cpp
   mcscf/states/weights.cpp
   mcscf/optimization/ciah/solver.cpp
+  mcscf/optimization/ciah/driver.cpp
   mcscf/optimization/neo/globalization.cpp
   mcscf/optimization/problem.cpp
   mcscf/optimization/neo/solver.cpp
   mcscf/optimization/preconditioners/block_inverse_bfgs.cpp
   mcscf/optimization/preconditioners/coarse.cpp
+  mcscf/optimization/preconditioners/orbital_diagonal.cpp
   mcscf/optimization/preconditioners/shifted_metric.cpp)
 set(XMVB_CASSCF_SOURCES
   casscf/integrals/active.cpp
-  casscf/driver/casci.cpp)
+  casscf/orbitals/rotation.cpp
+  casscf/orbitals/frame.cpp
+  casscf/derivatives/point.cpp
+  casscf/derivatives/diagonal.cpp
+  casscf/derivatives/coupled.cpp
+  casscf/driver/casci.cpp
+  casscf/driver/casscf.cpp)
 
 set(XMVB_INPUT_DECK_SOURCES
   input/deck/model.cpp
@@ -104,6 +112,7 @@ set(XMVB_GUESS_SOURCES
 set(XMVB_INPUT_SOURCES
   input/loading/generated_structures.cpp
   input/loading/loader.cpp
+  input/loading/casscf.cpp
 )
 
 set(XMVB_OUTPUT_SOURCES
@@ -269,12 +278,34 @@ if (XMVB_BUILD_DEV_TARGETS)
   target_link_libraries(test_ci_factors PRIVATE xmvb_mcscf)
   add_executable(test_casci ${CMAKE_SOURCE_DIR}/tests/mcscf/test_casci.cpp)
   target_link_libraries(test_casci PRIVATE xmvb_casscf)
+  add_executable(test_casscf_derivatives ${CMAKE_SOURCE_DIR}/tests/mcscf/test_casscf_derivatives.cpp)
+  target_link_libraries(test_casscf_derivatives PRIVATE xmvb_casscf)
+  add_executable(test_casscf_coupled ${CMAKE_SOURCE_DIR}/tests/mcscf/test_casscf_coupled.cpp)
+  target_link_libraries(test_casscf_coupled PRIVATE xmvb_casscf)
+  add_executable(casscf_fixture
+    ${CMAKE_SOURCE_DIR}/tools/casscf/main.cpp
+    ${CMAKE_SOURCE_DIR}/tools/casscf/fixture.cpp)
+  target_link_libraries(casscf_fixture PRIVATE xmvb_casscf)
   add_executable(test_integrals ${CMAKE_SOURCE_DIR}/tests/mcscf/test_integrals.cpp)
   target_link_libraries(test_integrals PRIVATE xmvb_integrals)
   if (BUILD_TESTING)
     add_test(NAME ci_factors COMMAND test_ci_factors)
+    add_test(NAME casscf_xmi
+      COMMAND ${CMAKE_COMMAND}
+        -DPROGRAM=$<TARGET_FILE:xmvb>
+        -DINPUT=${CMAKE_SOURCE_DIR}/testdata/casscf/H2.xmi
+        -DRUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/casscf-xmi-test
+        -P ${CMAKE_SOURCE_DIR}/tests/mcscf/check_casscf_xmi.cmake)
+    set_tests_properties(casscf_xmi PROPERTIES
+      ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
     set_tests_properties(ci_factors PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
     add_test(NAME casci COMMAND test_casci)
+    add_test(NAME casscf_derivatives COMMAND test_casscf_derivatives)
+    add_test(NAME casscf_coupled COMMAND test_casscf_coupled)
+    set_tests_properties(casscf_derivatives PROPERTIES
+      ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+    set_tests_properties(casscf_coupled PROPERTIES
+      ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
     add_test(NAME integrals COMMAND test_integrals)
     set_tests_properties(integrals PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
     set_tests_properties(casci PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
@@ -296,6 +327,7 @@ target_link_libraries(
     xmvb_vbscf)
 
 xmvb_add_component(xmvb_input ${XMVB_INPUT_SOURCES})
+target_link_libraries(xmvb_input PUBLIC xmvb_casscf)
 target_link_libraries(
   xmvb_input
   PUBLIC
@@ -330,12 +362,14 @@ endfunction()
 add_executable(xmvb
   cli/main.cpp
   cli/options.cpp
-  cli/run.cpp)
+  cli/run.cpp
+  cli/casscf.cpp)
 set_target_properties(xmvb PROPERTIES OUTPUT_NAME xmvb-cpp.exe)
 target_link_libraries(xmvb
   PRIVATE
     xmvb_input
     xmvb_output
+    xmvb_casscf
     xmvb_vbscf)
 
 file(

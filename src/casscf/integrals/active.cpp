@@ -42,7 +42,7 @@ CasIntegrals make_active_integrals(
   return result;
 }
 
-CasIntegrals make_active_integrals(
+PreparedCasIntegrals prepare_active_integrals(
     const integrals::AoIntegralInput& ao,
     const Eigen::Ref<const Eigen::MatrixXd>& orbitals,
     int core, int active, double nuclear) {
@@ -51,22 +51,25 @@ CasIntegrals make_active_integrals(
       orbitals.rows()!=n_bf || orbitals.cols()!=n_bf ||
       ao.ao_core_hamiltonian_matrix.rows()!=n_bf ||
       ao.ao_core_hamiltonian_matrix.cols()!=n_bf ||
-      !orbitals.allFinite() || !std::isfinite(nuclear))
+      ao.pair_graph.empty() || !orbitals.allFinite() ||
+      !ao.ao_core_hamiltonian_matrix.allFinite() || !std::isfinite(nuclear))
     throw std::invalid_argument("invalid AO integrals, MO frame or CAS partition");
 
-  const Eigen::MatrixXd density=orbitals.leftCols(core)*orbitals.leftCols(core).transpose();
-  const Eigen::Map<const Eigen::MatrixXd> source(density.data(),density.size(),1);
+  PreparedCasIntegrals result;
+  result.core_density=orbitals.leftCols(core)*orbitals.leftCols(core).transpose();
+  const Eigen::Map<const Eigen::MatrixXd> source(
+      result.core_density.data(),result.core_density.size(),1);
   integrals::AoH1eBatchWorkspace workspace;
   Eigen::MatrixXd response;
   integrals::apply_symmetric_ao_h1e_batch(
       source,ao,effective_openmp_thread_count(),&workspace,&response);
   const Eigen::Map<const Eigen::MatrixXd> potential(response.data(),n_bf,n_bf);
-  const Eigen::MatrixXd fock=ao.ao_core_hamiltonian_matrix+potential;
-  CasIntegrals result;
-  result.core_energy=nuclear+
-      (density.array()*(2*ao.ao_core_hamiltonian_matrix+potential).array()).sum();
-  result.active.one_electron=integrals::ActiveSpaceOneElectronBuilder{}.build(
-      fock,orbitals,n_bf,core,active).h1e_act;
+  result.fock=ao.ao_core_hamiltonian_matrix+potential;
+  result.integrals.core_energy=nuclear+
+      (result.core_density.array()*
+       (2*ao.ao_core_hamiltonian_matrix+potential).array()).sum();
+  result.integrals.active.one_electron=integrals::ActiveSpaceOneElectronBuilder{}.build(
+      result.fock,orbitals,n_bf,core,active).h1e_act;
 
   // Borrow sparse orbital support in the same numerical transform as VBSCF.
   std::vector<int> offsets(1,0),indices;
@@ -80,16 +83,23 @@ CasIntegrals make_active_integrals(
     }
     offsets.push_back(static_cast<int>(indices.size()));
   }
-  const auto transformed=integrals::transform_exact_active_integrals(
+  result.two_electron=integrals::transform_exact_active_integrals(
       ao,offsets,indices,coefficients,active);
-  const auto view=integrals::make_active_space_two_electron_view(transformed);
+  const auto view=integrals::make_active_space_two_electron_view(result.two_electron);
   const int pairs=integrals::packed_active_pair_count(active);
-  result.active.pair_kernel.resize(pairs,pairs);
+  result.integrals.active.pair_kernel.resize(pairs,pairs);
   for (int p=0; p<pairs; ++p)
     for (int q=0; q<pairs; ++q)
-      result.active.pair_kernel(p,q)=
+      result.integrals.active.pair_kernel(p,q)=
           integrals::lookup_active_space_two_electron_kernel_value(view,p,q,active);
   return result;
+}
+
+CasIntegrals make_active_integrals(
+    const integrals::AoIntegralInput& ao,
+    const Eigen::Ref<const Eigen::MatrixXd>& orbitals,
+    int core, int active, double nuclear) {
+  return prepare_active_integrals(ao,orbitals,core,active,nuclear).integrals;
 }
 
 }  // namespace xmvb::casscf

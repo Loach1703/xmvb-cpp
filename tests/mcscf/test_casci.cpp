@@ -79,6 +79,53 @@ void check_casci() {
   require(rejected,"CAS(16,16) allocated a carrier before checking its budget");
 }
 
+void check_operator_casci_warm_start() {
+  const auto input = hubbard();
+  xmvb::mcscf::SpinSpace space(2,1,1);
+  xmvb::mcscf::DirectCiSigmaAction sigma(space.alpha().occupations(),
+      space.beta().occupations(),input.active);
+  const auto cold = xmvb::casscf::solve_casci(input,2,0);
+  const Eigen::Map<const Eigen::MatrixXd> guess(
+      cold.active_ci.eigenpairs.eigenvector_matrix.data(),
+      space.alpha().size(),space.beta().size());
+  const auto warm = xmvb::casscf::solve_casci(
+      sigma,space,input.active.one_electron,0,input.core_energy,{},guess);
+  close(warm.energy(),cold.energy(),"operator-backed warm CASCI changed the singlet energy");
+  close(warm.spin_squared[0],0,"operator-backed warm CASCI lost pure spin");
+  require(warm.active_ci.block_actions <= cold.active_ci.block_actions,
+      "an exact CI warm start used more sigma blocks than a diagonal start");
+
+  xmvb::casscf::CasciOptions options;
+  options.n_roots = 3;
+  const auto roots = xmvb::casscf::solve_casci(
+      sigma,space,input.active.one_electron,0,input.core_energy,options,guess);
+  close(roots.energy(0),cold.energy(),"partial warm block changed the ground root");
+  close(roots.energy(1),3.25+4,"partial warm block lost the second singlet root");
+  close(roots.energy(2),3.25+2+std::sqrt(8.0),
+      "partial warm block lost the third singlet root");
+
+  bool rejected = false;
+  try {
+    const Eigen::MatrixXd malformed = Eigen::MatrixXd::Zero(1,2);
+    (void)xmvb::casscf::solve_casci(
+        sigma,space,input.active.one_electron,0,input.core_energy,{},malformed);
+  } catch (const std::invalid_argument&) { rejected = true; }
+  require(rejected,"CASCI accepted a malformed warm coefficient shape");
+
+  xmvb::mcscf::ActiveIntegrals disconnected;
+  disconnected.one_electron=Eigen::Matrix3d::Zero();
+  disconnected.one_electron.diagonal()<<-2.0,0.0,1.0;
+  disconnected.pair_kernel=Eigen::MatrixXd::Zero(6,6);
+  xmvb::mcscf::SpinSpace one_electron(3,1,0);
+  xmvb::mcscf::DirectCiSigmaAction diagonal_action(one_electron.alpha().occupations(),
+      one_electron.beta().occupations(),disconnected);
+  Eigen::MatrixXd excited=Eigen::MatrixXd::Zero(3,1);
+  excited(1,0)=1.0;
+  const auto lowest=xmvb::casscf::solve_casci(diagonal_action,one_electron,
+      disconnected.one_electron,1,0.0,{},excited);
+  close(lowest.energy(),-2.0,"an exact excited warm seed hid the lower diagonal root");
+}
+
 void check_inactive_energy() {
   xmvb::mcscf::ActiveIntegrals mo;
   mo.one_electron=Eigen::Matrix3d::Zero();
@@ -139,6 +186,7 @@ int main(int argc,char** argv) {
   try {
     check_spin();
     check_casci();
+    check_operator_casci_warm_start();
     check_inactive_energy();
     if (argc==2) {
       // Independent molecular reference: active h, packed-pair ERIs, and

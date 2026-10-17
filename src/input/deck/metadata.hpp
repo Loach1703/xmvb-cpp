@@ -15,6 +15,9 @@ enum class InputScfOptimizer {
   Ciah,
 };
 
+/** Electronic wavefunction selected by a bare `$CTRL` method flag. */
+enum class ElectronicMethod { Vbscf, Casscf };
+
 /**
  * @brief Pure C++ summary of the `$CTRL` metadata needed by the standalone loader.
  *
@@ -25,6 +28,8 @@ enum class InputScfOptimizer {
  * keeps the pure loader independent of external parser state.
  */
 struct InputDeckMetadata {
+  ElectronicMethod electronic_method = ElectronicMethod::Vbscf;
+  bool electronic_method_explicit = false;
   std::string basis_name;
   /** @brief Optional explicit RI fitting basis; defaults to `BASIS-jkfit`. */
   std::string auxiliary_basis_name;

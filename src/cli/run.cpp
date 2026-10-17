@@ -1,4 +1,5 @@
 #include "cli/run.hpp"
+#include "cli/casscf.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -17,6 +18,7 @@
 #include "output/trace/ciah.hpp"
 #include "output/trace/tnhvp.hpp"
 #include "input/loading/loader.hpp"
+#include "input/deck/model.hpp"
 #include "vbscf/optimization/driver/optimizer.hpp"
 
 namespace xmvb::cli {
@@ -25,6 +27,10 @@ namespace fs = std::filesystem;
 
 int run(Options command_line) {
   const std::string& input_path = command_line.input_path;
+  const auto deck = vb::parse_input_deck_model(input_path);
+  if (deck.metadata.electronic_method == vb::ElectronicMethod::Casscf) {
+    return run_casscf(command_line, deck);
+  }
   auto& load_options = command_line.load;
   auto& options = command_line.optimizer;
   const std::string& dump_trace_dir = command_line.trace_directory;
@@ -139,7 +145,10 @@ int run(Options command_line) {
   std::optional<fs::path> molden_output_path;
   if (load_result.request_molden_output) {
     molden_output_path =
-        xmvb::vb::write_molden_file(fs::path(input_path), result.optimized_input);
+        xmvb::vb::write_molden_file(
+            fs::path(input_path),
+            result.optimized_input.libcint_input,
+            result.optimized_input.orbital_preparation_input);
   }
 
   std::optional<fs::path> trace_sample_directory;

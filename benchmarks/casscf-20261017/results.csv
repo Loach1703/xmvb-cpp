@@ -1,0 +1,6 @@
+case,interface,solver,initial_energy,energy,macros,hvp,solver_seconds,process_seconds,peak_rss_mib,node,artifact
+F2,shared_fixture,PySCF newton_casscf coupled second order,-198.74294987810882,-198.7611115415457,3,24,2.994550209492445,3.52,92.0,anode041,casscf-F2-291884
+F2,shared_fixture,C++ coupled CIAH,-198.74294987810879,-198.76111154174802,4,16,0.15641777600000001,0.16,58.0,anode041,casscf-F2-291884
+F2,shared_fixture,PySCF standard CASSCF orbital-only AH,-198.74294987810882,-198.76111154007793,4,,5.756816014647484,6.49,112.0,anode042,casscf-ah-F2-291888
+F2,xmi,C++ coupled CIAH,-198.742949879074,-198.761111541653,4,18,0.216995974,0.24,58.0,anode042,native-F2-291885
+FeCl2,xmi,C++ coupled CIAH,-2181.61763191227,-2181.6244646528,25,355,4.807956668,5.13,400.45703125,anode082,native-FeCl2-291886

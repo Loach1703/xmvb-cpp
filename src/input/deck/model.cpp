@@ -369,14 +369,22 @@ void apply_ctrl_flag(
     throw std::invalid_argument("metadata must not be null");
   }
   const std::string token = to_ascii_upper(raw_token);
-  if (token == "TBVBSCF") {
+  if (token == "VBSCF" || token == "CASSCF") {
+    const ElectronicMethod requested = token == "CASSCF"
+        ? ElectronicMethod::Casscf : ElectronicMethod::Vbscf;
+    if (metadata->electronic_method_explicit &&
+        metadata->electronic_method != requested)
+      throw std::invalid_argument("$CTRL cannot request both VBSCF and CASSCF");
+    metadata->electronic_method = requested;
+    metadata->electronic_method_explicit = true;
+  } else if (token == "TBVBSCF") {
     throw std::invalid_argument(
-        "TBVBSCF is no longer supported; only the standard VBSCF path remains");
+        "TBVBSCF is no longer supported");
   } else if (token == "MOLDEN") {
     metadata->request_molden_output = true;
   } else if (token == "VBPDFT") {
     throw std::invalid_argument(
-        "VBPDFT is no longer supported; only the standard VBSCF path remains");
+        "VBPDFT is no longer supported");
   }
 }
 
