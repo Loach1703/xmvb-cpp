@@ -1,0 +1,247 @@
+diff --git a/src/casscf/derivatives/coupled.cpp b/src/casscf/derivatives/coupled.cpp
+index 581e31b4..364c6cee 100644
+--- a/src/casscf/derivatives/coupled.cpp
++++ b/src/casscf/derivatives/coupled.cpp
+@@ -69,6 +69,14 @@ Eigen::VectorXd CoupledModel::apply(const Eigen::VectorXd& direction) const {
+   return images.orbital+images.ci;
+ }
+ 
++Eigen::VectorXd CoupledModel::apply_metric(const Eigen::VectorXd& direction) const {
++  if (direction.size()!=size() || !direction.allFinite())
++    throw std::invalid_argument("invalid coupled metric direction");
++  Eigen::VectorXd result=direction;
++  result.head(orbital_size()).array()*=chart_.metric_diagonal().array();
++  return result;
++}
++
+ Eigen::VectorXd CoupledModel::project_direction(const Eigen::VectorXd& direction) const {
+   const Eigen::MatrixXd ci=ci_direction(direction);
+   return pack(direction.head(orbital_size()),ci);
+@@ -80,7 +88,8 @@ Eigen::VectorXd CoupledModel::precondition(const Eigen::VectorXd& residual,
+     throw std::invalid_argument("invalid coupled preconditioner residual");
+   Eigen::VectorXd result(residual.size());
+   for (Eigen::Index i=0; i<size(); ++i) {
+-    double denominator=diagonal_[i]-shift;
++    const double weight=i<orbital_size() ? chart_.metric_diagonal()[i] : 1;
++    double denominator=diagonal_[i]-shift*weight;
+     // Same signed AH denominator protection as the shared VB diagonal model.
+     if (std::abs(denominator)<1e-8) denominator=1e-8;
+     result[i]=residual[i]/denominator;
+diff --git a/src/casscf/derivatives/coupled.hpp b/src/casscf/derivatives/coupled.hpp
+index effd524e..ab4ddbfd 100644
+--- a/src/casscf/derivatives/coupled.hpp
++++ b/src/casscf/derivatives/coupled.hpp
+@@ -26,6 +26,8 @@ public:
+   const Eigen::VectorXd& gradient() const noexcept { return gradient_; }
+   CoupledImages apply_split(const Eigen::VectorXd& direction) const;
+   Eigen::VectorXd apply(const Eigen::VectorXd& direction) const;
++  /** Joint span metric; CI is identity in the existing sqrt(2)-scaled tangent. */
++  Eigen::VectorXd apply_metric(const Eigen::VectorXd& direction) const;
+   /** Project a recycled initial guess into this point's pure-spin CI tangent.
+    * Orbital indices retain their labels across macros; no old H image is reused.
+    */
+diff --git a/src/casscf/driver/casscf.cpp b/src/casscf/driver/casscf.cpp
+index 986e92cf..719ba5c6 100644
+--- a/src/casscf/driver/casscf.cpp
++++ b/src/casscf/driver/casscf.cpp
+@@ -91,7 +91,8 @@ CasscfResult solve_casscf(const integrals::AoIntegralInput& ao,
+     };
+     const auto norm=[](const Eigen::VectorXd& vector) { return vector.norm(); };
+     const auto identity=[](const Eigen::VectorXd& vector) -> Eigen::VectorXd { return vector; };
+-    mcscf::QuadraticProblem problem(model.gradient(),action,identity,norm);
++    const auto metric=[&](const Eigen::VectorXd& vector) { return model.apply_metric(vector); };
++    mcscf::QuadraticProblem problem(model.gradient(),action,metric,norm);
+     mcscf::CiahOptions inner;
+     mcscf::CoarsePreconditioner coarse(static_cast<int>(model.size()),
+         2*inner.max_cycle,inner.lindep,inner.operator_relative_accuracy);
+@@ -101,15 +102,19 @@ CasscfResult solve_casscf(const integrals::AoIntegralInput& ao,
+         return model.precondition(value,shift-1e-8);
+       });
+     };
+-    inner.observe_images=[&](const Eigen::VectorXd& direction,const Eigen::VectorXd&) {
++    inner.observe_images=[&](const Eigen::VectorXd& direction,const Eigen::VectorXd& metric_image) {
+       // The physical action already computed both split images. The separate
+       // block samples add coupling information beyond the mixed Ritz vectors.
+-      Eigen::VectorXd orbital=Eigen::VectorXd::Zero(model.size());
+-      orbital.head(no)=direction.head(no);
+-      coarse.observe(orbital,images.orbital,orbital);
+-      Eigen::VectorXd ci=Eigen::VectorXd::Zero(model.size());
+-      ci.tail(model.size()-no)=direction.tail(model.size()-no);
+-      coarse.observe(ci,images.ci,ci);
++      Eigen::VectorXd sample=Eigen::VectorXd::Zero(model.size());
++      sample.head(no)=direction.head(no);
++      Eigen::VectorXd metric_sample=Eigen::VectorXd::Zero(model.size());
++      metric_sample.head(no)=metric_image.head(no);
++      coarse.observe(sample,images.orbital,metric_sample);
++      sample.head(no).setZero();
++      metric_sample.head(no).setZero();
++      sample.tail(model.size()-no)=direction.tail(model.size()-no);
++      metric_sample.tail(model.size()-no)=metric_image.tail(model.size()-no);
++      coarse.observe(sample,images.ci,metric_sample);
+     };
+     inner.residual_direction=identity;
+     Eigen::VectorXd seed=direction_guess.size()!=0
+@@ -118,7 +123,7 @@ CasscfResult solve_casscf(const integrals::AoIntegralInput& ao,
+     mcscf::CiahWorkspace workspace(problem,std::move(seed),inner);
+     mcscf::CiahMicroCallbacks callbacks;
+     callbacks.coordinate_norm=norm;
+-    callbacks.metric_action=identity;
++    callbacks.metric_action=metric;
+     callbacks.maximum_component=[&](const Eigen::VectorXd& vector) {
+       return model.maximum_component(vector);
+     };
+diff --git a/src/casscf/orbitals/rotation.cpp b/src/casscf/orbitals/rotation.cpp
+index 0f50057e..6a4d62af 100644
+--- a/src/casscf/orbitals/rotation.cpp
++++ b/src/casscf/orbitals/rotation.cpp
+@@ -14,6 +14,11 @@ RotationChart::RotationChart(int nmo, int ncore, int nactive) : nmo_(nmo) {
+   for (int i=0; i<nmo; ++i)
+     for (int j=i+1; j<nmo; ++j)
+       if (sector(i)!=sector(j)) pairs_.emplace_back(i,j);
++  metric_diagonal_=Eigen::VectorXd::Ones(size());
++  for (int k=0; k<size(); ++k) {
++    const auto [i,j]=pairs_[k];
++    if (i<ncore && j<ncore+nactive) metric_diagonal_[k]=2;
++  }
+ }
+ 
+ void RotationChart::check_matrix(const Eigen::MatrixXd& matrix) const {
+diff --git a/src/casscf/orbitals/rotation.hpp b/src/casscf/orbitals/rotation.hpp
+index 3ad85a14..c72a5efe 100644
+--- a/src/casscf/orbitals/rotation.hpp
++++ b/src/casscf/orbitals/rotation.hpp
+@@ -13,6 +13,8 @@ public:
+   int size() const noexcept { return static_cast<int>(pairs_.size()); }
+   int nmo() const noexcept { return nmo_; }
+   const std::vector<std::pair<int,int>>& pairs() const noexcept { return pairs_; }
++  /** Inactive/active span metric: weights 2 for c–a rotations, 1 otherwise. */
++  const Eigen::VectorXd& metric_diagonal() const noexcept { return metric_diagonal_; }
+ 
+   /** For pair (i<j), K(j,i)=p and K(i,j)=-p. */
+   Eigen::MatrixXd generator(const Eigen::VectorXd& parameters) const;
+@@ -32,6 +34,7 @@ public:
+ private:
+   int nmo_;
+   std::vector<std::pair<int,int>> pairs_;
++  Eigen::VectorXd metric_diagonal_;
+   void check_matrix(const Eigen::MatrixXd& matrix) const;
+ };
+ 
+diff --git a/tests/mcscf/test_casscf_coupled.cpp b/tests/mcscf/test_casscf_coupled.cpp
+index fbe073a4..1b0ebf47 100644
+--- a/tests/mcscf/test_casscf_coupled.cpp
++++ b/tests/mcscf/test_casscf_coupled.cpp
+@@ -8,8 +8,10 @@
+ #include <Eigen/QR>
+ 
+ #include "casscf/derivatives/coupled.hpp"
++#include "casscf/derivatives/diagonal.hpp"
+ #include "casscf/derivatives/point.hpp"
+ #include "casscf/driver/casscf.hpp"
++#include "casscf/orbitals/rotation.hpp"
+ #include "integrals/ao/graph.hpp"
+ #include "mcscf/ci/spin.hpp"
+ 
+@@ -57,6 +59,18 @@ Eigen::MatrixXd make_frame(int n) {
+   return qr.householderQ()*Eigen::MatrixXd::Identity(n,n);
+ }
+ 
++void check_rotation_metric_partition(int ncore, int nactive, int nvirtual) {
++  const xmvb::casscf::RotationChart chart(ncore+nactive+nvirtual,ncore,nactive);
++  const Eigen::VectorXd diagonal=chart.metric_diagonal();
++  require(diagonal.size()==chart.size(),"rotation metric has the wrong dimension");
++  for (int k=0; k<chart.size(); ++k) {
++    const auto [i,j]=chart.pairs()[k];
++    const double expected=i<ncore && j<ncore+nactive ? 2.0 : 1.0;
++    require(diagonal[k]==expected,"rotation metric has the wrong sector weight");
++    require(diagonal[k]>0.0,"rotation metric is not positive");
++  }
++}
++
+ void check_case(int nactive, int electrons, int spin) {
+   using xmvb::casscf::CoupledModel;
+   using xmvb::casscf::FixedCiPoint;
+@@ -77,9 +91,73 @@ void check_case(int nactive, int electrons, int spin) {
+   const Eigen::MatrixXd c = pure/pure.norm();
+   FixedCiPoint point(ao,u,ncore,nactive,nuclear,electrons,spin,c);
+   CoupledModel model(point,ao,ncore,nactive);
++  const xmvb::casscf::RotationChart chart(n,ncore,nactive);
+   const Eigen::Index no = model.orbital_size(), nc = c.size();
+   require(model.size() == no+nc && model.size() > 0,
+       "coupled model has an inconsistent coordinate size");
++  check_rotation_metric_partition(ncore,nactive,nvirtual);
++
++  // The quotient metric is the sum of the core-span and active-span
++  // projector metrics. The CI coordinates already contain sqrt(2)*dc.
++  Eigen::VectorXd metric_direction(model.size()), metric_other(model.size());
++  for (Eigen::Index k=0; k<model.size(); ++k) {
++    metric_direction[k]=std::sin(0.37*(k+1))+0.17*std::cos(0.83*(k+2));
++    metric_other[k]=std::cos(0.61*(k+1))-0.13*std::sin(0.47*(k+3));
++  }
++  metric_direction=model.project_direction(metric_direction);
++  metric_other=model.project_direction(metric_other);
++  const Eigen::MatrixXd du=u*chart.generator(metric_direction.head(no));
++  const Eigen::MatrixXd core=u.leftCols(ncore), active=u.middleCols(ncore,nactive);
++  const Eigen::MatrixXd dcore=du.leftCols(ncore), dactive=du.middleCols(ncore,nactive);
++  const Eigen::MatrixXd dcore_projector=dcore*core.transpose()+core*dcore.transpose();
++  const Eigen::MatrixXd dactive_projector=dactive*active.transpose()+active*dactive.transpose();
++  const double explicit_squared=0.5*(dcore_projector.squaredNorm()+
++      dactive_projector.squaredNorm())+metric_direction.tail(nc).squaredNorm();
++  const Eigen::VectorXd metric_image=model.apply_metric(metric_direction);
++  const Eigen::VectorXd other_image=model.apply_metric(metric_other);
++  require(metric_image.allFinite() && other_image.allFinite(),
++      "coupled physical metric returned nonfinite images");
++  require(std::abs(metric_direction.dot(metric_image)-explicit_squared)<
++      2e-11*std::max(1.0,explicit_squared),
++      "coupled metric disagrees with independent projector derivatives");
++  require(metric_direction.dot(metric_image)>0.0,
++      "coupled metric is not positive on a physical direction");
++  require(std::abs(metric_direction.dot(other_image)-metric_other.dot(metric_image))<2e-11,
++      "coupled metric is not bilinear symmetric");
++  const Eigen::VectorXd orbital_diagonal=
++      xmvb::casscf::orbital_hessian_diagonal(point,chart,ao,ncore,nactive);
++  constexpr double diagonal_shift=-17.0;
++  int inactive_active=-1;
++  for (int k=0; k<chart.size(); ++k) {
++    const auto [i,j]=chart.pairs()[k];
++    Eigen::VectorXd unit=Eigen::VectorXd::Zero(model.size());
++    unit[k]=1.0;
++    const double weight=i<ncore && j<ncore+nactive ? 2.0 : 1.0;
++    if (weight==2.0) inactive_active=k;
++    require((model.apply_metric(unit)-weight*unit).norm()<2e-12,
++        "orbital metric unit vector has the wrong weight");
++    const Eigen::VectorXd preconditioned=model.precondition(unit,diagonal_shift);
++    const double expected=1.0/(orbital_diagonal[k]-diagonal_shift*weight);
++    require((preconditioned-expected*unit).norm()<2e-11*std::max(1.0,std::abs(expected)),
++        "shifted orbital preconditioner ignored the metric weight");
++  }
++  require(inactive_active>=0,"fixture has no inactive-active rotation");
++  Eigen::VectorXd one_rotation=Eigen::VectorXd::Zero(model.size());
++  one_rotation[inactive_active]=0.03;
++  require(std::abs(model.maximum_component(one_rotation)-0.03)<2e-14 &&
++      std::abs(std::sqrt(one_rotation.dot(model.apply_metric(one_rotation)))-
++          std::sqrt(2.0)*0.03)<2e-14,
++      "rotation component cap was confused with metric length");
++  if (space.dimension(spin)>1) {
++    Eigen::VectorXd ci_tangent=Eigen::VectorXd::Zero(model.size());
++    ci_tangent.tail(nc)=metric_direction.tail(nc);
++    require(ci_tangent.tail(nc).norm()>1e-8,"physical CI test direction collapsed");
++    const double expected=ci_tangent.tail(nc).cwiseAbs().maxCoeff()/std::sqrt(2.0);
++    require(std::abs(model.maximum_component(ci_tangent)-expected)<2e-14 &&
++        std::abs(ci_tangent.dot(model.apply_metric(ci_tangent))-
++            ci_tangent.squaredNorm())<2e-12,
++        "CI component cap or sqrt(2) coordinate metric changed");
++  }
+ 
+   const auto energy_at = [&](const Eigen::VectorXd& p) {
+     FixedCiPoint trial(ao,model.orbitals(p),ncore,nactive,nuclear,
+@@ -216,6 +294,9 @@ void check_case(int nactive, int electrons, int spin) {
+ 
+ int main() {
+   try {
++    check_rotation_metric_partition(0,2,1); // No core: active-virtual only.
++    check_rotation_metric_partition(1,2,0); // No virtual: core-active only.
++    check_rotation_metric_partition(0,2,0); // All active: no orbital rotations.
+     check_case(2,2,0); // Singlet: active CI and orbital response.
+     check_case(3,3,1); // Unbalanced alpha/beta doublet carrier.
+     check_case(4,4,4); // Quintet: no physical CI tangent.

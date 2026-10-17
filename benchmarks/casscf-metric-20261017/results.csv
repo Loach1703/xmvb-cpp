@@ -1,0 +1,4 @@
+case,interface,solver,initial_energy,energy,macros,hvp,solver_seconds,process_seconds,peak_rss_mib,node,artifact
+FeCl2,shared_fixture,C++ coupled CIAH,-2181.6176319123533,-2181.6244648540851,14,204,11.200599055,11.96,1664.0,anode034,fixture-FeCl2-291979
+F2,xmi,C++ coupled CIAH,-198.742949879074,-198.76111154165,4,18,0.214160286,0.24,53.91796875,anode022,native-F2-291980
+FeCl2,xmi,C++ coupled CIAH,-2181.61763191227,-2181.62446485235,20,267,3.839494803,4.18,402.24609375,anode029,native-FeCl2-291981
