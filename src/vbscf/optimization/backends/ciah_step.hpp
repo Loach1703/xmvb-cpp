@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
 
@@ -18,6 +20,12 @@ struct CiahMacroStep {
   Eigen::VectorXd parameters;
   Eigen::VectorXd next_orbital_guess_packed;
   Eigen::MatrixXd next_structure_guess;
+  /** @brief Retained only after both existing terminal conditions pass. */
+  std::optional<OrbitalChart> converged_geometry;
+  /** @brief Check this trial's energy change and true gradient in its own chart. */
+  bool check_convergence(const SparseParameterLayout& layout,
+      const VbScfOptimizerOptions& options, bool complete_active_space,
+      double source_energy);
   /** @brief Align the recycled CI block with the relaxed equal-weight frame. */
   void align_structure_frame(const Eigen::MatrixXd& reference,
       const Eigen::MatrixXd& overlap_roots);

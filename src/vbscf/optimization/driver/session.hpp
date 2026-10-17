@@ -12,6 +12,8 @@ class SparseParameterLayout;
 class VbScfObjective;
 struct VbScfOptimizerResult;
 struct TnhvpIterationRecord;
+struct OrbitalPreparationInput;
+struct OrbitalPreparationResult;
 
 namespace optimizer_detail {
 
@@ -19,6 +21,13 @@ namespace optimizer_detail {
 OrbitalChart build_orbital_geometry(
     const VbScfObjective& objective, const SparseParameterLayout& parameter_view,
     OrbitalChart::Coordinates coordinates = OrbitalChart::Coordinates::Whitened);
+
+/** @brief Same geometry for an evaluated trial, without committing the objective. */
+OrbitalChart build_orbital_geometry(
+    const OrbitalPreparationInput& orbitals,
+    const OrbitalPreparationResult& prepared,
+    const SparseParameterLayout& parameter_view, bool complete_active_space,
+    OrbitalChart::Coordinates coordinates);
 
 /** @brief Attach the next-step model without reconstructing the chart. */
 void prepare_orbital_curvature(
@@ -38,7 +47,7 @@ OrbitalChart build_orbital_chart(
  * manifolds retain their established projected-gradient infinity criterion.
  */
 bool orbital_gradient_converged(
-    const VbScfObjective& objective,
+    const OrbitalPreparationInput& orbitals,
     const SparseParameterLayout& parameter_view,
     const OrbitalChart& chart,
     const Eigen::VectorXd& reduced_gradient,

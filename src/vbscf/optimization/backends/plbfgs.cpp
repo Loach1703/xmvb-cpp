@@ -50,7 +50,7 @@ BackendRunResult run_plbfgs_backend(
     const double reduced_gradient_inf_norm =
         gradient_infinity_norm(current_projection.reduced_gradient);
     if (iteration == 0 &&
-        orbital_gradient_converged(*objective, parameter_view, current_space,
+        orbital_gradient_converged(objective->input().orbital_preparation_input, parameter_view, current_space,
             current_projection.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason = "plbfgs_initial_tolerance";
@@ -218,7 +218,7 @@ BackendRunResult run_plbfgs_backend(
     const double energy_change = energy - previous_energy;
     previous_energy = energy;
     if (std::abs(energy_change) < options.energy_tolerance &&
-        orbital_gradient_converged(*objective, parameter_view, next_space,
+        orbital_gradient_converged(objective->input().orbital_preparation_input, parameter_view, next_space,
             next_projection.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason =

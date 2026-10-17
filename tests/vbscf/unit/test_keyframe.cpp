@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <sys/resource.h>
@@ -15,11 +16,62 @@
 #include "vbscf/orbitals/charts/layout.hpp"
 #include "vbscf/structures/expansion/expander.hpp"
 #include "vbscf/optimization/backends/ciah_step.hpp"
+#include "vbscf/optimization/driver/options.hpp"
+#include "vbscf/orbitals/preparation/preparer.hpp"
 
 namespace {
 
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
+}
+
+/** @brief A terminal trial must meet both unchanged criteria at its own point. */
+void check_terminal_trial() {
+  using namespace xmvb::vb;
+  OrbitalPreparationInput orbitals;
+  orbitals.n_basis_functions = 3;
+  orbitals.n_orbitals = orbitals.n_active_orbitals = 2;
+  orbitals.n_total_electrons = orbitals.n_active_electrons = 2;
+  orbitals.orbital_value_table = {1.0, 0.13, -0.17, 0.21, 0.94, 0.12};
+  orbitals.orbital_basis_index_table = {1, 2, 3, 1, 2, 3};
+  orbitals.orbital_basis_counts = {3, 3};
+  orbitals.ao_overlap_matrix = Eigen::Matrix3d::Identity();
+  const SparseParameterLayout layout(orbitals);
+  const VbScfOptimizerOptions options;
+  for (bool complete : {false, true}) {
+    optimizer_detail::CiahMacroStep point;
+    point.trial.orbital_preparation_input = orbitals;
+    point.trial.gradient_result.orbital_preparation_result =
+        ActiveSpaceOrbitalPreparer{}.prepare(orbitals);
+    point.trial.gradient_ready = true;
+    point.trial.gradient = Eigen::VectorXd::Zero(layout.pack(orbitals).size());
+    const double origin = -399.397232509251;
+    for (double energy : {origin, std::nextafter(origin, 0.0),
+                          std::nextafter(origin, -std::numeric_limits<double>::infinity())}) {
+      point.trial.energy = energy;
+      require(point.check_convergence(layout, options, complete, origin) &&
+                  point.converged_geometry.has_value(),
+          "terminal trial depends on the sign of a sub-threshold energy change");
+    }
+    point.trial.energy = origin + 2.0 * options.energy_tolerance;
+    require(!point.check_convergence(layout, options, complete, origin) &&
+                !point.converged_geometry.has_value(),
+        "small gradient accepted an excessive energy change");
+    point.trial.energy = options.energy_tolerance;
+    require(!point.check_convergence(layout, options, complete, 0.0),
+        "CIAH changed the strict energy convergence threshold");
+    point.trial.energy = origin;
+    point.trial.gradient.setOnes();
+    require(!point.check_convergence(layout, options, complete, origin) &&
+                !point.converged_geometry.has_value(),
+        "equal energy substituted for a small true trial gradient");
+    point.trial.gradient.setZero();
+    point.trial.gradient_ready = false;
+    bool rejected = false;
+    try { point.check_convergence(layout, options, complete, origin); }
+    catch (const std::logic_error&) { rejected = true; }
+    require(rejected, "energy-only candidate was certified without its true gradient");
+  }
 }
 
 /** @brief Recycled CI directions transform with a relaxed root's arbitrary phase. */
@@ -336,6 +388,7 @@ void check_keyframe(bool complete_carrier) {
 
 int main(int argc, char** argv) {
   try {
+    check_terminal_trial();
     check_restart_phase();
     if (argc == 2 && (std::string(argv[1]) == "--accepted-state16" ||
                       std::string(argv[1]) == "--accepted-hvp16")) {

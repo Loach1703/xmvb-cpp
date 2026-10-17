@@ -18,10 +18,16 @@ OrbitalChart build_orbital_geometry(
     const VbScfObjective& objective,
     const SparseParameterLayout& parameter_view,
     OrbitalChart::Coordinates coordinates) {
-  const auto& orbital_preparation_input =
-      objective.input().orbital_preparation_input;
-  const auto& orbital_preparation_result =
-      objective.gradient_result().orbital_preparation_result;
+  return build_orbital_geometry(objective.input().orbital_preparation_input,
+      objective.gradient_result().orbital_preparation_result, parameter_view,
+      objective.input().complete_active_space, coordinates);
+}
+
+OrbitalChart build_orbital_geometry(
+    const OrbitalPreparationInput& orbital_preparation_input,
+    const OrbitalPreparationResult& orbital_preparation_result,
+    const SparseParameterLayout& parameter_view, bool complete_active_space,
+    OrbitalChart::Coordinates coordinates) {
   const auto& normalized_orbital_matrix =
       orbital_preparation_result.physical_orbital_frame.normalized_orbital_matrix;
   if (normalized_orbital_matrix.size() == 0) {
@@ -39,7 +45,7 @@ OrbitalChart build_orbital_geometry(
       parameter_view,
       orbital_preparation_result.auxiliary_orbital_matrix.leftCols(n_occupied_orbitals),
       normalized_orbital_matrix,
-      nullptr, false, objective.input().complete_active_space, nullptr, coordinates);
+      nullptr, false, complete_active_space, nullptr, coordinates);
 }
 
 void prepare_orbital_curvature(
@@ -83,7 +89,7 @@ OrbitalChart build_orbital_chart(
 }
 
 bool orbital_gradient_converged(
-    const VbScfObjective& objective,
+    const OrbitalPreparationInput& orbitals,
     const SparseParameterLayout& parameter_view,
     const OrbitalChart& chart,
     const Eigen::VectorXd& reduced_gradient,
@@ -101,7 +107,7 @@ bool orbital_gradient_converged(
   }
   if (!chart.uses_active_subspace_gauge()) return true;
   const NonredundantRetractionMetric metric(
-      chart, parameter_view, objective.input().orbital_preparation_input);
+      chart, parameter_view, orbitals);
   return metric.dual_norm(reduced_gradient) < tolerance;
 }
 

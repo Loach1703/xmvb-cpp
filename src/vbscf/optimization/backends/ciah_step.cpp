@@ -21,6 +21,7 @@
 #include "core/timing.hpp"
 #include "vbscf/optimization/driver/options.hpp"
 #include "vbscf/optimization/driver/result.hpp"
+#include "vbscf/optimization/driver/session.hpp"
 #include "vbscf/optimization/globalization/line_search.hpp"
 #include "mcscf/optimization/ciah/solver.hpp"
 #include "vbscf/optimization/coupled/ci_transport.hpp"
@@ -46,6 +47,23 @@ struct Keyframe {
 };
 
 }  // namespace
+
+bool CiahMacroStep::check_convergence(const SparseParameterLayout& layout,
+    const VbScfOptimizerOptions& options, bool complete_active_space,
+    double source_energy) {
+  converged_geometry.reset();
+  if (!(std::abs(trial.energy - source_energy) < options.energy_tolerance)) return false;
+  if (!trial.gradient_ready)
+    throw std::logic_error("CIAH terminal candidate requires its true gradient");
+  auto geometry = build_orbital_geometry(trial.orbital_preparation_input,
+      trial.gradient_result.orbital_preparation_result, layout,
+      complete_active_space, OrbitalChart::Coordinates::Unwhitened);
+  const auto projected = geometry.project_gradient(trial.gradient);
+  if (!orbital_gradient_converged(trial.orbital_preparation_input, layout,
+          geometry, projected.reduced_gradient, options.gradient_tolerance)) return false;
+  converged_geometry.emplace(std::move(geometry));
+  return true;
+}
 
 void CiahMacroStep::align_structure_frame(
     const Eigen::MatrixXd& reference, const Eigen::MatrixXd& overlap_roots) {
@@ -672,7 +690,21 @@ bool build_ciah_macro_step(
     const double reduction = energy - accepted->trial.energy;
     const double ratio = prediction > 0.0 ? reduction / prediction
         : -std::numeric_limits<double>::infinity();
-    const bool keep_trial = reduction > 0.0;
+    bool keep_trial = reduction > 0.0;
+    // Strict descent globalizes nonterminal steps. Near stationarity, first
+    // give the EXISTING energy/true-gradient stopping rule its candidate.
+    // Ordinary descent trials do not add any convergence work here. A
+    // non-descent candidate with small energy change needs its OWN gradient,
+    // not the source gradient or a model-based substitute.
+    if (!keep_trial && std::abs(reduction) < options.energy_tolerance) {
+      objective->complete_trial(&accepted->trial);
+      keep_trial = accepted->check_convergence(layout, options,
+          objective->input().complete_active_space, energy);
+      mcscf::diagnostics::ciah_trace("ciah_terminal_trial",
+          "energy_change=%.17g,energy_tolerance=%.17g,gradient_tolerance=%.17g,converged=%d",
+          -reduction, options.energy_tolerance, options.gradient_tolerance,
+          static_cast<int>(keep_trial));
+    }
     mcscf::diagnostics::ciah_trace("ciah_macro_trial",
         "scale=%.17g,linear=%.17g,quadratic=%.17g,current_energy=%.17g,trial_energy=%.17g,predicted=%.17g,actual=%.17g,rho=%.17g,accepted=%d",
         scale, model_linear, scale * scale * quadratic, energy,
@@ -726,7 +758,7 @@ bool build_ciah_macro_step(
   // Only the accepted point needs gradient backpropagation and its context.
   // Complete the retained forward evaluation, rather than rebuilding it.
   xmvb::profiling::ScopedPhase completion_phase(xmvb::profiling::Phase::CiahCompletion, true);
-  objective->complete_trial(&accepted->trial);
+  if (!accepted->trial.gradient_ready) objective->complete_trial(&accepted->trial);
   completion_phase.stop();
   displacement *= scale;
   hessian_displacement *= scale;
