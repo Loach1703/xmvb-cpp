@@ -13,13 +13,38 @@
 #include "integrals/response/ri.hpp"
 
 namespace {
+using PairIndex=xmvb::core::PairIndex;
+
 void require(bool condition,const char* message) {
   if (!condition) throw std::runtime_error(message);
+}
+
+/** @brief Integer ordering/symmetries and unchanged public error handling. */
+void check_pair_indices() {
+  require(PairIndex::packed_pair_index(3,1)==7 &&
+      PairIndex::packed_pair_of_pairs_index(7,3)==31 &&
+      PairIndex::two_electron_storage_index(3,1,2,0)==31,"packed index examples changed");
+  int expected=0;
+  for (int p=0;p<64;++p) for (int q=0;q<=p;++q,++expected) {
+    require(PairIndex::packed_pair_index(p,q)==expected &&
+        PairIndex::packed_pair_index(q,p)==expected &&
+        PairIndex::packed_pair_of_pairs_index(p,q)==expected &&
+        PairIndex::packed_pair_of_pairs_index(q,p)==expected,"packed index ordering changed");
+  }
+  int failures=0;
+  try { PairIndex::packed_pair_index(-1,0); }
+  catch (const std::invalid_argument&) { ++failures; }
+  try { PairIndex::packed_pair_of_pairs_index(0,-1); }
+  catch (const std::invalid_argument&) { ++failures; }
+  try { PairIndex::two_electron_storage_index(0,1,-1,2); }
+  catch (const std::invalid_argument&) { ++failures; }
+  require(failures==3,"packed index validation changed");
 }
 }
 
 int main() {
   try {
+    check_pair_indices();
     using namespace xmvb::integrals;
     constexpr int n_bf=3, active=2, pairs=6;
     RiAoFactorization ri;

@@ -1,0 +1,5 @@
+variant,job,node,affinity,steps,hvp,structure_responses,energy_Eh,scf_s,application_s,process_s,rss_MiB,termination
+saved_retained_d54c9095,1264965,anode42,96-127,4,36,36,-399.106646267332,15.287966,17.764194,17.96,2720.46875,ciah_projected_gradient_tolerance
+alpha_scalar_clones_rejected,1264980,anode42,96-127,4,36,36,-399.106646267329,16.00933,18.652149,18.84,2652.47265625,ciah_projected_gradient_tolerance
+alpha_safe_mask_rejected,1264985,anode42,96-127,4,36,36,-399.106646267330,15.695614,18.255819,18.45,2709.3203125,ciah_projected_gradient_tolerance
+constexpr_index_rejected,1264994,anode42,96-127,4,36,36,-399.106646267330,15.545137,18.131653,18.33,2653.78125,ciah_projected_gradient_tolerance

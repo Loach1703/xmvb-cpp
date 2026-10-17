@@ -12,3 +12,11 @@ foreach(name IN LISTS _xmvb_mcscf_tests)
   endif()
 endforeach()
 unset(_xmvb_mcscf_tests)
+
+add_executable(audit_channel_support ${CMAKE_CURRENT_LIST_DIR}/audit_channel_support.cpp)
+target_link_libraries(audit_channel_support PRIVATE xmvb_mcscf)
+if (BUILD_TESTING)
+  add_test(NAME channel_support COMMAND audit_channel_support --oracle)
+  set_tests_properties(channel_support PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()

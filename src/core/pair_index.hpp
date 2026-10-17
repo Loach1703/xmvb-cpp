@@ -5,13 +5,9 @@ namespace xmvb::core {
 /**
  * @brief Utility for the packed index convention used by two-electron tensors.
  *
- * Antisymmetrized two-electron quantities use two nested packed symmetric
- * index maps:
- * 1. Convert an orbital pair `(p, q)` to a packed one-based index.
- * 2. Convert two packed pair indices to a final packed one-based index.
- *
- * This helper exposes the same convention with zero-based C++ arguments while
- * returning a zero-based linear offset for use with `std::vector<double>`.
+ * Both arguments and results are zero based. Pair exchange is an indexing
+ * symmetry, not antisymmetrization. Two nested unordered-pair maps address
+ * the corresponding symmetric two-electron tensor.
  */
 class PairIndex {
 public:
