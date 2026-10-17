@@ -18,6 +18,18 @@ namespace xmvb::vb::detail {
 /** @brief Existing structure-action workspace; panels share equal quarters. */
 inline constexpr std::size_t kStructureTileWorkspaceBytes=256ULL*1024*1024;
 
+/** @brief Compare exact beta contractions, independently of residency.
+ * Row sampling costs touched_products * sampled_beta_columns multiply-adds. Applying the
+ * ordered exterior factors costs n_alpha * (n_beta + shear_pairs). Alpha
+ * transforms and structure incidence are common to both orders. Neither
+ * order assumes closure of the selected structure space.
+ */
+inline bool prefer_ordered_beta(std::size_t touched_products, int n_alpha,
+    int n_beta, std::size_t shear_pairs,int sampled_beta_columns) noexcept {
+  return static_cast<long double>(touched_products)*sampled_beta_columns >
+      static_cast<long double>(n_alpha)*(n_beta+static_cast<long double>(shear_pairs));
+}
+
 /** @brief Exact generated support of beta columns, shared by primal/image tiles. */
 struct ColumnPattern {
   bool full=false;

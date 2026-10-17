@@ -79,6 +79,11 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     while (cursor.next_column(b)) reachable_mask[b/extent]=true;
   } else std::fill(reachable_mask.begin(),reachable_mask.end(),true);
   for (int p=0;p<panels;++p) if (reachable_mask[p]) reachable.push_back(p);
+  int sampled_beta_columns=0;
+  for (const int panel:reachable)
+    sampled_beta_columns+=std::min(extent,n_unique_beta_-panel*extent);
+  const bool ordered_beta=detail::prefer_ordered_beta(spin_products_.size(),
+      n_unique_alpha_,n_unique_beta_,beta.shear_pair_count(),sampled_beta_columns);
   std::vector<std::weak_ptr<const detail::ColumnPattern>> patterns(panels);
   const auto pattern_at=[&](int panel) -> std::shared_ptr<const detail::ColumnPattern> {
     if (auto p=patterns[panel].lock()) return p;
@@ -137,7 +142,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     const bool anchored=cached && delta_upper;
     const int sigma_width=cached ? 1:width;
     const std::size_t product_count=static_cast<std::size_t>(n_unique_alpha_)*n_unique_beta_;
-    const bool resident_input=!anchored && spin_products_.size()==product_count &&
+    const bool resident_input=!anchored && ordered_beta &&
         product_count<=cache_bytes/(input_width*sizeof(double));
     Eigen::MatrixXd primal_image,direction_image,ci_image;
     std::size_t input_bytes=0;
@@ -378,7 +383,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     // Associativity removes the per-panel beta-row reconstruction on broad
     // support. Primal and left-direction images share the existing budget.
     const bool resident_projection=(collect_images || capture) &&
-        spin_products_.size()==products && products<=cache_bytes/
+        ordered_beta && products<=cache_bytes/
             (sizeof(double)*projection_count*(delta_upper ? 2:1));
     std::vector<Eigen::MatrixXd> projected(projection_count),left_projected(projection_count);
     const auto group_extent=std::max<std::size_t>(1,std::min<std::size_t>(
@@ -535,9 +540,17 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
           // The next coefficient response then needs neither a new Y
           // transform nor a separate -E*D(Y,q) generator contraction.
           detail::ColumnTile accepted{tile.pattern,Eigen::MatrixXd(tile.values.rows(),2)};
-          if (resident_input)
-            accepted.values.col(0)=Eigen::Map<const Eigen::VectorXd>(
-                primal_image.col(first).data(),accepted.values.rows());
+          if (resident_input) {
+            // Missing raw products may leave holes in the exact output
+            // support. A contiguous prefix would shift subsequent columns.
+            const auto& pattern=*tile.pattern;
+            if (pattern.full)
+              accepted.values.col(0)=Eigen::Map<const Eigen::VectorXd>(
+                  primal_image.col(first).data(),accepted.values.rows());
+            else for (int b=0;b<count;++b)
+              for (int i=pattern.offsets[b];i<pattern.offsets[b+1];++i)
+                accepted.values(i,0)=primal_image(pattern.rows[i],first+b);
+          }
           else accepted.values.col(0)=input.get(panel).values.col(0);
           accepted.values.col(1)=tile.values.col(0)-energy*accepted.values.col(0);
           state.product_images->bytes+=accepted.bytes();

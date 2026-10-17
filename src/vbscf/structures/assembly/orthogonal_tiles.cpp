@@ -109,6 +109,11 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     while (columns.next_column(beta)) include_panel(beta/extent);
     std::sort(reachable_panels.begin(),reachable_panels.end());
   } else for (int panel=0;panel<count;++panel) include_panel(panel);
+  int sampled_beta_columns=0;
+  for (const int panel:reachable_panels)
+    sampled_beta_columns+=std::min(extent,n_unique_beta_-panel*extent);
+  const bool ordered_beta=detail::prefer_ordered_beta(spin_products_.size(),
+      n_unique_alpha_,n_unique_beta_,beta_transform.shear_pair_count(),sampled_beta_columns);
   // Weak references share input/output patterns without an unbounded support
   // table. Their strong lifetime and byte charge belong to the bounded LRUs.
   std::vector<std::weak_ptr<const ColumnPattern>> patterns(count);
@@ -144,18 +149,30 @@ StructureResponseSweep StructureAction::contract_product_tiles(
   for (int vector_begin = 0; vector_begin < vectors.cols(); vector_begin += batch_width) {
     ++result.tiles.expansions;
     const int width = std::min<int>(batch_width, vectors.cols() - vector_begin);
+    const bool ordered=ordered_beta && resident_rhs>=static_cast<std::size_t>(width);
+    // Replace the input/output LRU payloads within the same workspace quarters.
+    // Zero-scattering a selected raw support does not assume CAS completeness.
+    Eigen::MatrixXd input_image,h_image;
+    if (ordered) {
+      profiling::ScopedPhase phase(profiling::Phase::CiProductGenerate);
+      input_image=expand_structure_block(vectors.middleCols(vector_begin,width));
+      alpha_transform.apply_left(&input_image);
+      for (int v=0;v<width;++v)
+        beta_transform.apply_right_block(input_image.middleCols(v*n_unique_beta_,n_unique_beta_));
+      if (!overlap_only) h_image=Eigen::MatrixXd::Zero(input_image.rows(),input_image.cols());
+    }
     // Expand once per RHS, not once per beta panel. For a covalent space
     // these groups are exactly (A, complement(A)): only O(U) coefficients.
-    Eigen::MatrixXd coefficients = Eigen::MatrixXd::Zero(spin_products_.size(), width);
+    Eigen::MatrixXd coefficients = Eigen::MatrixXd::Zero(ordered ? 0:spin_products_.size(), width);
 #pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
-    for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group)
+    for (int group = 0; group < coefficients.rows(); ++group)
       for (int vector = 0; vector < width; ++vector)
         for (std::size_t term = spin_term_offsets_[group];
              term < spin_term_offsets_[group + 1]; ++term)
           coefficients(group, vector) += spin_terms_[term].coefficient *
               vectors(spin_terms_[term].structure, vector_begin + vector);
-    Eigen::MatrixXd h_products = Eigen::MatrixXd::Zero(collect_images ? spin_products_.size():0, width);
-    Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(collect_images && collect_overlap ? spin_products_.size():0, width);
+    Eigen::MatrixXd h_products = Eigen::MatrixXd::Zero(!ordered ? spin_products_.size():0, width);
+    Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(!ordered && collect_overlap ? spin_products_.size():0, width);
     const auto project = [&](int panel, const Eigen::MatrixXd& rows,
                              Eigen::MatrixXd& image, Eigen::MatrixXd& target) {
       profiling::ScopedPhase phase(profiling::Phase::CiProductProjection);
@@ -178,6 +195,26 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     const auto contract = [&]() {
       if (!collect_images) return;
       ++result.tiles.structure_projections;
+      if (ordered) {
+        profiling::ScopedPhase phase(profiling::Phase::CiProductProjection);
+        // Sigma has finished reading Y. Its storage becomes the overlap
+        // pullback; a third full carrier is unnecessary.
+        const auto pullback=[&](Eigen::MatrixXd& image) {
+          alpha_transform.apply_adjoint_left(&image);
+          for (int v=0;v<width;++v)
+            beta_transform.apply_adjoint_right_block(image.middleCols(v*n_unique_beta_,n_unique_beta_));
+          return contract_spin_product_block(image);
+        };
+        if (!overlap_only) {
+          ++result.tiles.hamiltonian_projections;
+          result.hamiltonian.middleCols(vector_begin,width)=pullback(h_image);
+        }
+        if (collect_overlap) {
+          ++result.tiles.overlap_projections;
+          result.overlap.middleCols(vector_begin,width)=pullback(input_image);
+        }
+        return;
+      }
       // Apply P^T only after all panels have contributed to each spin pair.
 #pragma omp parallel for schedule(static) if(n_structures_ > 32)
       for (int structure = 0; structure < n_structures_; ++structure) {
@@ -232,16 +269,17 @@ StructureResponseSweep StructureAction::contract_product_tiles(
       return detail::pack_columns(std::move(values),pattern);
     });
     if (overlap_only) {
-      for (const int panel:reachable_panels) input.get(panel);
+      if (!ordered) for (const int panel:reachable_panels) input.get(panel);
       result.tiles.input_evictions += input.evictions;
-      result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes, input.peak_bytes);
+      result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes,
+          ordered ? sizeof(double)*input_image.size():input.peak_bytes);
       contract();
       continue;
     }
     // Prepare resident panels while outside the persistent sigma team, so
     // exterior transforms and overlap projection retain their own parallelism.
     // Larger carriers simply generate panels on demand; their space is unchanged.
-    if (resident_rhs >= static_cast<std::size_t>(width))
+    if (!ordered && resident_rhs >= static_cast<std::size_t>(width))
       for (const int panel:reachable_panels) input.get(panel);
     ColumnPanels output(cache_bytes,
         [&](int panel) -> ColumnTile {
@@ -264,6 +302,15 @@ StructureResponseSweep StructureAction::contract_product_tiles(
 #ifdef _OPENMP
           team = omp_get_num_threads();
 #endif
+          if (ordered) {
+#pragma omp taskloop num_tasks(team) shared(betas, alpha_rows, input_image, columns)
+            for (int packed=0;packed<static_cast<int>(betas.size())*width;++packed) {
+              const int j=packed/width,v=packed%width;
+              for (int row=0;row<static_cast<int>(alpha_rows.size());++row)
+                columns(row,packed)=input_image(alpha_rows[row],v*n_unique_beta_+betas[j]);
+            }
+            return;
+          }
           for (int i=0;i<static_cast<int>(alpha_rows.size());++i) alpha_position[alpha_rows[i]]=i;
           for (int first = 0; first < static_cast<int>(betas.size());) {
             const int panel_id = betas[first] / extent;
@@ -311,6 +358,19 @@ StructureResponseSweep StructureAction::contract_product_tiles(
 #ifdef _OPENMP
           team = omp_get_num_threads();
 #endif
+          if (ordered) {
+            const int chunks=std::min<int>(team,alpha_rows.size());
+            const int column_count=betas.size()*width;
+#pragma omp taskloop num_tasks(team) shared(betas, alpha_rows, accumulate, h_image)
+            for (int packed=0;packed<column_count*chunks;++packed) {
+              const int column=packed%column_count,chunk=packed/column_count;
+              const int j=column/width,v=column%width;
+              accumulate(j,v,alpha_rows.size()*chunk/chunks,
+                  alpha_rows.size()*(chunk+1)/chunks,
+                  h_image.col(v*n_unique_beta_+betas[j]).data(),nullptr,0);
+            }
+            return;
+          }
           for (int first = 0; first < static_cast<int>(betas.size());) {
             const int panel_id = betas[first] / extent;
             int last = first + 1;
@@ -349,19 +409,21 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     output.finish();
     // Exchange quotienting may never request some input columns. The overlap
     // is still the complete Gram action, independent of the Hamiltonian sweep.
-    for (const int panel:reachable_panels)
+    if (!ordered) for (const int panel:reachable_panels)
       if (!overlap_consumed[panel]) input.get(panel);
     result.tiles.input_evictions += input.evictions;
     result.tiles.output_evictions += output.evictions;
-    result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes, input.peak_bytes);
-    result.tiles.output_resident_bytes = std::max(result.tiles.output_resident_bytes, output.peak_bytes);
+    result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes,
+        ordered ? sizeof(double)*input_image.size():input.peak_bytes);
+    result.tiles.output_resident_bytes = std::max(result.tiles.output_resident_bytes,
+        ordered ? sizeof(double)*h_image.size():output.peak_bytes);
     contract();
   }
   if (profiling::phase_totals().enabled)
-    std::fprintf(stderr,"XMVB_PRODUCT_ACTION,rhs=%ld,overlap=%d,batches=%zu,input=%zu,output=%zu,input_evictions=%zu,output_evictions=%zu\n",
+    std::fprintf(stderr,"XMVB_PRODUCT_ACTION,rhs=%ld,overlap=%d,batches=%zu,input=%zu,output=%zu,input_evictions=%zu,output_evictions=%zu,ordered_beta=%d,resident_rhs=%zu\n",
         static_cast<long>(vectors.cols()),overlap_only,result.tiles.expansions,
         result.tiles.input_panels,result.tiles.hamiltonian_projections,
-        result.tiles.input_evictions,result.tiles.output_evictions);
+        result.tiles.input_evictions,result.tiles.output_evictions,ordered_beta,resident_rhs);
   return sweep;
 }
 

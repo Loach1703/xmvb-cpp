@@ -2395,6 +2395,76 @@ order. The selected VB adapter supplies the sparse-support map, while
 product-tile contractions remain distinct exact arithmetic orders; these
 identities do not force them through a more expensive source expansion.
 
+\section{Eliminating repeated beta-row contractions in product tiles}
+\label{sec:ordered-product}
+
+Let $\Omega$ denote the touched original spin-string products and let $W$
+expand the selected structure coefficients onto those products. Define
+\begin{equation}
+ Z_{ab}=\begin{cases}(Wc)_{ab},&(a,b)\in\Omega,\\0,&\text{otherwise}.
+ \end{cases}
+\end{equation}
+There is no requirement that $\Omega$ or the selected structure space be
+invariant under an exterior transform. For any emitted physical image $F$,
+the exact forward and reverse maps are
+\begin{equation}\label{eq:ordered-product}
+ Y=T_\alpha ZT_\beta\Tr,\qquad
+ f=W\Tr\operatorname{vec}_{\Omega}(T_\alpha\Tr F T_\beta).
+\end{equation}
+Here $\operatorname{vec}_{\Omega}$ gathers the matrix entries in the same
+original-product ordering as the rows of $W$.
+Only the final restriction is to the original selected structure space.
+The complete fixed-spin tables define the exterior operators and do not
+introduce additional independent structure coefficients.
+
+An implementation that generates each beta panel by sampled transform rows
+repeatedly evaluates $Z(T_\beta[J,:])\Tr$. Its reverse repeatedly samples
+$(T_\alpha\Tr F_J)T_\beta[J,:]$ at every original product. Across all beta
+panels, each such beta contraction costs
+$O(|\Omega|\widetilde U_\beta)$ per right-hand side, where
+$\widetilde U_\beta$ counts the actually reachable panel columns and is at
+most $U_\beta$. Tiling alone does not remove this
+sum. Let $L_\beta$ be the number of retained beta shear edges. Applying the
+ordered exterior factors instead costs
+\begin{equation}\label{eq:ordered-beta-cost}
+ O\!\left(U_\alpha(U_\beta+L_\beta)\right).
+\end{equation}
+The alpha transforms and the structure incidence contractions are shared
+by these two algebraic orders. Comparing
+$|\Omega|\widetilde U_\beta$ with $U_\alpha(U_\beta+L_\beta)$ therefore distinguishes
+narrow-support sampling from broad-support ordered multiplication without
+a numerical threshold or an assumption of physical-space closure.
+The estimate is an arithmetic comparison, not a predicted wall-time ratio.
+
+When a right-hand-side batch fits the existing input workspace, form its
+zero-scattered $Z$, apply both exterior operators once, and let every sigma
+halo borrow columns of the same $Y$. Accumulate emitted image contributions
+in the existing output workspace, then apply the adjoint exterior operators
+once and contract with $W\Tr$. This replaces the numerical payloads of the
+input and output panel caches; it does not add full images to those caches.
+After sigma has finished reading $Y$, the input workspace can be overwritten
+by its overlap pullback, avoiding a third overlap carrier. The workspace
+cap controls batch residency only. A larger carrier remains tiled and is
+not denied access to the same exact orthogonal-CI operator.
+
+For an orbital direction, both differentiated exterior factors remain:
+\begin{align}
+ \dot Y&=\dot T_\alpha ZT_\beta\Tr+
+          T_\alpha\dot ZT_\beta\Tr+
+          T_\alpha Z\dot T_\beta\Tr,\\
+ \dot f&=W\Tr\operatorname{vec}_{\Omega}\!\left(
+       \dot T_\alpha\Tr F T_\beta+
+       T_\alpha\Tr\dot F T_\beta+
+       T_\alpha\Tr F\dot T_\beta\right).
+\end{align}
+The product jet can sum the alpha-pulled panel contributions before its
+single beta adjoint, including the two beta terms in the differentiated
+pullback. Missing original products remain zeros during expansion, whereas
+retained accepted images are gathered using their exact column offsets and
+row indices. A contiguous-prefix copy is invalid for sparse column support.
+The orbital--structure response, oriented generator contractions, and
+nonstationary residual contributions are unchanged.
+
 \section{Correspondence with the current implementation}
 
 The original column contraction corresponds to revision \texttt{a5004add};

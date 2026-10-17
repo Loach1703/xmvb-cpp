@@ -944,16 +944,22 @@ void check_product_response(int parity,bool unequal) {
 }
 
 /** @brief Broad selected support: one final projection, independent of closure. */
-void check_broad_product_projection(bool unequal) {
+void check_broad_product_projection(bool unequal,bool partial=false,int parity=0) {
   const auto fixture=unequal ? make_fixture(5,2,1):make_fixture(6,3,3);
   Terms terms;
   Strings alpha,beta;
   for (int a=0;a<static_cast<int>(fixture.alpha.size());++a)
     for (int b=0;b<static_cast<int>(fixture.beta.size());++b) {
+      // A broad but nonclosed raw support, including an interior column hole.
+      // Ordered transforms must not assume all Ua*Ub products were selected.
+      if (partial && a==static_cast<int>(fixture.alpha.size())-1 && b>=3) continue;
+      if (parity<0 && a==b) continue;
       alpha.push_back(fixture.alpha[a]); beta.push_back(fixture.beta[b]);
-      terms.push_back({{0,0.1*std::sin(a+2*b+1)},
-                       {1,0.2*std::cos(2*a+b+1)},
-                       {2,0.15*std::sin(3*a+b+2)}});
+      const int i=parity ? std::min(a,b):a,j=parity ? std::max(a,b):b;
+      const double sign=parity && a>b ? parity:1;
+      terms.push_back({{0,sign*0.1*std::sin(i+2*j+1)},
+                       {1,sign*0.2*std::cos(2*i+j+1)},
+                       {2,sign*0.15*std::sin(3*i+j+2)}});
     }
   const auto cache=topology(fixture,alpha,beta);
   const auto build=[&](const Fixture& f) {
@@ -962,6 +968,15 @@ void check_broad_product_projection(bool unequal) {
   };
   const auto action=build(fixture);
   const Eigen::MatrixXd c=test_vectors(3,2),q=0.02*c.array().cos().matrix();
+  if (partial || parity) {
+    const auto hs=action.apply_streamed(c);
+    require(hs.tiles.source_workspace_bound==0 && hs.tiles.input_resident_bytes>0,
+        "broad selected H/M regression did not execute the product contraction");
+    check_images(hs,reference_images(fixture,terms,alpha,beta,c));
+    check_images(hs,action.apply_streamed(c,128));
+    require((action.apply_hamiltonian(c)-hs.hamiltonian).norm()<3e-11,
+        "ordered Hamiltonian-only contraction changed selected-space projection");
+  }
   auto wide=action.prepare_active_adjoint(c,{0.4,0.6},{-1.1,-0.7});
   wide.source_factors=false;
   wide.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
@@ -1004,6 +1019,20 @@ void check_broad_product_projection(bool unequal) {
   // Independently populate immutable accepted Y/(H-E)Y panels. This exercises
   // accepted-state jet reuse without generating it through the implementation.
   const auto oracle=explicit_product_state(fixture,cache,action,wide);
+  if (partial) {
+    // Populate the real compact accepted cache, not only the independent
+    // full-column oracle below. Interior holes must survive ordered input.
+    auto compact=action.prepare_active_adjoint(c,{0.4,0.6},{-1.1,-0.7});
+    require(!compact.source_factors && compact.product_images &&
+        !compact.product_images->states.empty() && !compact.product_images->states.front().empty(),
+        "broad selected regression did not retain accepted product tiles");
+    xmvb::vb::StructureIntegralDirection dcompact;
+    dcompact.capture_connection=true;
+    const auto compact_image=action.apply_integral_direction(compact,overlap,one,two,&dcompact);
+    check_images(compact_image,image);
+    require((dcompact.generator_direction-dw.generator_direction).norm()<3e-11,
+        "sparse accepted-image retention changed the orbital generator jet");
+  }
   auto resident=wide;
   resident.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
   resident.product_images->extent=fixture.beta.size();
@@ -3182,6 +3211,11 @@ int main(int argc, char** argv) {
       check_product_response(0,true);
       check_broad_product_projection(false);
       check_broad_product_projection(true);
+      check_broad_product_projection(true,true);
+      for (int parity:{-1,1}) check_broad_product_projection(false,false,parity);
+      require(!xmvb::vb::detail::prefer_ordered_beta(32,10,5,10,4) &&
+          xmvb::vb::detail::prefer_ordered_beta(48,10,5,10,5),
+          "beta contraction planner counted unreachable columns");
       check_factor_accepted_gradient();
       check_factor_accepted_gradient(true);
       for (int parity : {0,1,-1}) check_scalar_source_direction(parity);
