@@ -5,7 +5,6 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include <Eigen/Cholesky>
 #include <Eigen/Core>
@@ -453,158 +452,6 @@ void check_fixed_rhs_forcing_and_reprojection() {
   require(!small_rhs.resolved(0.0, 1.0 / 3.0) &&
           small_rhs.resolved(1.0e-9, 1.0 / 3.0),
           "small-RHS forcing lost its reference-component scaling");
-}
-
-void check_projected_newton_differs_from_ah() {
-  const Eigen::MatrixXd hessian = Eigen::MatrixXd::Identity(1, 1);
-  const Eigen::MatrixXd metric = Eigen::MatrixXd::Identity(1, 1);
-  const Eigen::VectorXd gradient = Eigen::VectorXd::Constant(1, 0.01);
-  int actions = 0, metric_calls = 0, norm_calls = 0;
-  int coordinate_calls = 0, preconditioner_calls = 0;
-  CiahOptions options;
-  options.coordinate_norm = [&](const Eigen::VectorXd& value) {
-    ++coordinate_calls;
-    return value.norm();
-  };
-  options.residual_preconditioner =
-      [&](const Eigen::VectorXd& value, double) {
-        ++preconditioner_calls;
-        return Eigen::VectorXd(value);
-      };
-  const QuadraticProblem problem = dense_problem(hessian, metric, gradient,
-      &actions, &metric_calls, &norm_calls);
-  CiahWorkspace workspace(problem, Eigen::VectorXd::Ones(1), options);
-  const CiahResult ah = workspace.next(gradient);
-  const int coordinate_before = coordinate_calls;
-  const auto newton = workspace.projected_newton(gradient);
-  require(newton.has_value(), "positive one-dimensional projected Newton step is missing");
-  require_close(newton->step, -gradient, 1.0e-14,
-      "one-dimensional projected Newton step differs from the exact Newton step");
-  require(std::abs(ah.step[0] - newton->step[0]) > 1.0e-7,
-      "projected Newton step was replaced by the shifted AH step");
-  require(newton->reference_component == 1.0 && newton->eigenvalue == 0.0 &&
-          !newton->converged && newton->new_hvp_actions == 0,
-      "projected Newton step claimed AH convergence or a new Hessian action");
-  check_images_and_residual(hessian, metric, gradient, *newton);
-  require(actions == 1 && metric_calls == 1 && norm_calls == 0 &&
-          preconditioner_calls == 0 && coordinate_calls == coordinate_before + 1,
-      "cached projected Newton step evaluated an operator or physical norm");
-}
-
-void check_projected_newton_full_residual_and_refresh() {
-  Eigen::Matrix2d hessian;
-  hessian << 1.0, 4.0,
-             4.0, 17.0;
-  const Eigen::Matrix2d metric = Eigen::Matrix2d::Identity();
-  const Eigen::Vector2d gradient(0.01, 0.0);
-  const Eigen::Vector2d changed_gradient(0.02, 0.0);
-  int actions = 0, metric_calls = 0, norm_calls = 0;
-  const QuadraticProblem problem = dense_problem(hessian, metric, gradient,
-      &actions, &metric_calls, &norm_calls);
-  CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(2, 0));
-  const CiahResult early = workspace.next(gradient);
-  require(early.basis_size == 1 && actions == 1,
-      "strong-coupling fixture did not start in a one-direction space");
-  const auto newton = workspace.projected_newton(gradient);
-  require(newton.has_value(), "strong-coupling projected Newton step is missing");
-  require_close(newton->step, Eigen::Vector2d(-0.01, 0.0), 1.0e-14,
-      "strong-coupling projected Newton step is incorrect");
-  require(std::abs(newton->residual[0]) < 1.0e-14 &&
-          std::abs(newton->residual[1]) > 0.03 &&
-          newton->residual_norm > 0.03 && !newton->converged,
-      "projected stationarity hid the full-space residual");
-  check_images_and_residual(hessian, metric, gradient, *newton);
-
-  workspace.reset_rhs();
-  const CiahResult reprojected = workspace.next(changed_gradient);
-  require(reprojected.new_hvp_actions == 0 && actions == 1 &&
-          metric_calls == 1 && norm_calls == 0,
-      "changed RHS triggered an action before cached reprojection");
-  const auto refreshed = workspace.projected_newton(changed_gradient);
-  require(refreshed.has_value(), "changed RHS lost the cached Newton direction");
-  require_close(refreshed->step, Eigen::Vector2d(-0.02, 0.0), 1.0e-14,
-      "cached Newton factor did not use the changed RHS");
-  require(refreshed->residual_norm > newton->residual_norm &&
-          !refreshed->converged && actions == 1 && metric_calls == 1,
-      "changed RHS falsely converged or recomputed cached images");
-  check_images_and_residual(hessian, metric, changed_gradient, *refreshed);
-  const CiahResult expanded = workspace.next(changed_gradient);
-  require(expanded.new_hvp_actions == 1 && expanded.basis_size == 2 &&
-          actions == 2 && metric_calls == 2 && norm_calls == 0,
-      "changed RHS expansion did not use exactly one new Hessian image");
-}
-
-void check_projected_newton_generalized_metric_and_null_cases() {
-  Eigen::Matrix3d hessian;
-  hessian << 3.0, 0.5, 0.1,
-             0.5, 2.5, 0.4,
-             0.1, 0.4, 4.0;
-  Eigen::Matrix3d metric;
-  metric << 2.0, 0.2, 0.0,
-            0.2, 1.5, 0.1,
-            0.0, 0.1, 3.0;
-  const Eigen::Vector3d gradient(0.4, -0.3, 0.2);
-  int actions = 0, metric_calls = 0, norm_calls = 0;
-  std::vector<Eigen::VectorXd> directions;
-  CiahOptions options;
-  options.observe_images = [&](const Eigen::VectorXd& value,
-                               const Eigen::VectorXd&) {
-    directions.push_back(value);
-  };
-  options.residual_preconditioner = [&](const Eigen::VectorXd&, double) {
-    return Eigen::VectorXd::Unit(3, static_cast<Eigen::Index>(directions.size()));
-  };
-  const QuadraticProblem problem = dense_problem(hessian, metric, gradient,
-      &actions, &metric_calls, &norm_calls);
-  CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(3, 0), options);
-  workspace.next(gradient);
-  for (int dimension = 2; dimension <= 3; ++dimension) {
-    const CiahResult expanded = workspace.next(gradient);
-    require(expanded.new_hvp_actions == 1 && expanded.basis_size == dimension &&
-            static_cast<int>(directions.size()) == dimension,
-        "generalized Newton fixture did not admit the requested subspace");
-    Eigen::MatrixXd q(3, dimension);
-    for (int i = 0; i < dimension; ++i) q.col(i) = directions[i];
-    const Eigen::MatrixXd projected_hessian = q.transpose() * hessian * q;
-    const Eigen::VectorXd changed_gradient = gradient +
-        Eigen::Vector3d(0.03 * dimension, -0.02, 0.01);
-    for (const Eigen::VectorXd& rhs : {Eigen::VectorXd(gradient),
-                                       Eigen::VectorXd(changed_gradient)}) {
-      const int actions_before = actions, metrics_before = metric_calls;
-      const auto newton = workspace.projected_newton(rhs);
-      require(newton.has_value(), "positive generalized projected Newton step is missing");
-      const Eigen::VectorXd expected =
-          -q * projected_hessian.ldlt().solve(q.transpose() * rhs);
-      require_close(newton->step, expected, 2.0e-12,
-          "generalized projected Newton step differs from the dense oracle");
-      check_images_and_residual(hessian, metric, rhs, *newton);
-      require((q.transpose() * newton->residual).norm() < 2.0e-12 &&
-              newton->new_hvp_actions == 0 && !newton->converged &&
-              actions == actions_before && metric_calls == metrics_before &&
-              norm_calls == 0,
-          "repeated generalized Newton RHS evaluated an action or claimed convergence");
-    }
-  }
-
-  const Eigen::Matrix2d identity = Eigen::Matrix2d::Identity();
-  const Eigen::Vector2d nonzero_gradient(0.1, 0.0);
-  for (const double curvature : {-1.0, 0.0}) {
-    Eigen::Matrix2d bad_hessian = Eigen::Matrix2d::Identity();
-    bad_hessian(0, 0) = curvature;
-    const QuadraticProblem bad_problem = dense_problem(bad_hessian, identity,
-        nonzero_gradient);
-    CiahWorkspace bad(bad_problem, Eigen::VectorXd::Unit(2, 0));
-    bad.next(nonzero_gradient);
-    require(!bad.projected_newton(nonzero_gradient).has_value(),
-        "indefinite or singular projected Hessian produced a Newton step");
-  }
-  const Eigen::Vector2d zero_gradient = Eigen::Vector2d::Zero();
-  const QuadraticProblem zero_problem = dense_problem(identity, identity,
-      zero_gradient);
-  CiahWorkspace zero(zero_problem, Eigen::VectorXd::Unit(2, 0));
-  zero.next(zero_gradient);
-  require(!zero.projected_newton(zero_gradient).has_value(),
-      "zero projected gradient produced a Newton direction");
 }
 
 /** @brief An RHS-specific dependent expansion must not exhaust future RHSs. */
@@ -1067,9 +914,6 @@ int main() {
     check_origin_ray_macro_energy();
     check_gradient_refresh_and_preconditioner();
     check_fixed_rhs_forcing_and_reprojection();
-    check_projected_newton_differs_from_ah();
-    check_projected_newton_full_residual_and_refresh();
-    check_projected_newton_generalized_metric_and_null_cases();
     check_rhs_reset_clears_expansion_exhaustion();
     check_incremental_projection();
     check_metric_validation();

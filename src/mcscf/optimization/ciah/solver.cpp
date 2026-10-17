@@ -357,51 +357,6 @@ std::optional<CiahOriginRay> CiahWorkspace::origin_ray(
   return ray;
 }
 
-std::optional<CiahResult> CiahWorkspace::projected_newton(
-    const Eigen::VectorXd& gradient) {
-  if (gradient.size() != problem_.size() || !gradient.allFinite())
-    throw std::invalid_argument("invalid projected Newton gradient");
-  const int m = basis_size();
-  if (!m || projected_metric_.rows() != m)
-    throw std::logic_error("projected Newton requires a completed AH projection");
-  if (newton_dimension_ != m) {
-    const Eigen::MatrixXd raw = hessian_projection_.topLeftCorner(m, m);
-    const Eigen::LLT<Eigen::MatrixXd> factor(0.5 * (raw + raw.transpose()));
-    newton_lower_.resize(0, 0);
-    if (factor.info() == Eigen::Success) newton_lower_ = factor.matrixL();
-    newton_dimension_ = m;
-  }
-  if (newton_lower_.rows() == 0) return std::nullopt;
-  Eigen::VectorXd rhs(m);
-  for (int i = 0; i < m; ++i) rhs[i] = -basis_[i].dot(gradient);
-  Eigen::VectorXd coefficients = newton_lower_.triangularView<Eigen::Lower>().solve(rhs);
-  newton_lower_.transpose().triangularView<Eigen::Upper>().solveInPlace(coefficients);
-  if (!coefficients.allFinite()) return std::nullopt;
-  CiahResult result;
-  result.reference_component = 1.0;
-  result.basis_size = m;
-  result.step = Eigen::VectorXd::Zero(problem_.size());
-  result.hessian_step = result.step;
-  result.metric_step = result.step;
-  for (int i = 0; i < m; ++i) {
-    result.step.noalias() += coefficients[i] * basis_[i];
-    result.hessian_step.noalias() += coefficients[i] * hessian_images_[i];
-    result.metric_step.noalias() += coefficients[i] * metric_images_[i];
-  }
-  const double reduction = -gradient.dot(result.step) -
-      0.5 * result.step.dot(result.hessian_step);
-  if (!result.step.allFinite() || !result.hessian_step.allFinite() ||
-      !std::isfinite(reduction) || !(reduction > 0.0)) return std::nullopt;
-  result.residual = gradient + result.hessian_step;
-  result.residual_norm = options_.coordinate_norm
-      ? options_.coordinate_norm(result.residual) : result.residual.stableNorm();
-  if (!result.metric_step.allFinite() || !result.residual.allFinite() ||
-      !std::isfinite(result.residual_norm)) return std::nullopt;
-  result.model_gradient_norm = result.residual_norm;
-  // No AH-root convergence claim accompanies a projected Newton correction.
-  return result;
-}
-
 CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   xmvb::profiling::ScopedPhase next_phase(xmvb::profiling::Phase::CiahNext);
   if (current_gradient.size() != problem_.size() ||
