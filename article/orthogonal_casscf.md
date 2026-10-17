@@ -139,6 +139,54 @@ CIAH driver controls subspace expansion, clipping, keyframes and microstep
 progress. CI is relaxed by the shared Davidson solver for physical macro
 acceptance. No extra terminal stability condition is introduced.
 
+## Coupled coarse inverse and initial directions
+
+The orthogonal model uses the same `mcscf::CoarsePreconditioner` as VBSCF.
+For an admitted joint direction $x=(p,q)$, one physical action already supplies
+the two separate images
+
+$$
+H\begin{pmatrix}p\\0\end{pmatrix}
+=\begin{pmatrix}A_op\\\sqrt{2}Q\delta H_a[p]c\end{pmatrix},\qquad
+H\begin{pmatrix}0\\q\end{pmatrix}
+=\begin{pmatrix}\sqrt{2}B^Tq\\Q(H_a-E_a)q\end{pmatrix}.
+$$
+
+These split samples enlarge the coarse space beyond
+the mixed Ritz directions, with no extra AO response or sigma sweep. Let
+$V$ contain its independent samples, $L=H-\lambda I$, and
+$Z=V(V^TLV)^{-1}V^T$. For the original diagonal inverse $D^{-1}$, the common
+balancing correction applies
+
+$$
+P^{-1}=Z+(I-ZL)D^{-1}(I-LZ).
+$$
+
+It is symmetric and satisfies $P^{-1}LV=V$ on the retained coarse space.
+The basis, images and correction belong to one frozen macro point and are
+discarded at the next point. There is no extra physical action, dense Hessian
+or per-thread copy of the coarse model.
+
+The retained samples must also support a numerically symmetric projected
+operator. QR transforms a source-image error $\Delta Y$ into
+$\Delta YR^{-1}$; independence alone does not control that amplification.
+Candidate coarse samples therefore satisfy the existing projected symmetry
+certificate before admission. The dot-product term uses the full coordinate
+dimension through $\gamma_n=nu/(1-nu)$, where $u$ is unit roundoff. Samples
+that do not satisfy this certificate are not retained in the optional
+preconditioner. The complete physical CIAH action and its separate symmetry
+test are unchanged. Certified small Hessian and metric projections are
+cached on admission and reused for every subsequent shifted coarse solve.
+
+Only the last accepted microstep is recycled as the next macro's initial
+direction, following the existing VB and PySCF `dr0` policy. MO indices are
+not canonicalized or reordered. The CI eigenvector sign is aligned with the
+finite predictor, and the recycled CI tail is projected into the new point's
+target-spin tangent. This is an initial search direction, not transported
+curvature, a reused physical gradient or a Hessian image. Every new model
+computes its own exact images. Backtracking or a checkpoint restart updates
+the recycled step consistently with the actually accepted path.
+
 ## Verification contract
 
 Small nonsymmetric test Hamiltonians check energy derivatives, finite

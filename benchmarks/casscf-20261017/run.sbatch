@@ -70,7 +70,7 @@ if [[ $case_name == FeCl2 ]]; then
 fi
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores \
   /usr/bin/time -v -o "$artifact/export.time" \
-  "$python_bin" -u "$scripts/export_fixture.py" \
+  env -u OMP_PLACES OMP_PROC_BIND=false "$python_bin" -u "$scripts/export_fixture.py" \
   "$case_name" "$source_dir" "$artifact/fixture" "${export_options[@]}" \
   > "$artifact/export.out" 2> "$artifact/export.err"
 sha256sum "$artifact/fixture/ao-mo.bin" "$artifact/fixture/metadata.json" \
@@ -84,7 +84,7 @@ srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores \
   > "$artifact/initial-parity.out"
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores \
   /usr/bin/time -v -o "$artifact/pyscf.time" \
-  "$python_bin" -u "$scripts/pyscf_newton.py" \
+  env -u OMP_PLACES OMP_PROC_BIND=false "$python_bin" -u "$scripts/pyscf_newton.py" \
   "$artifact/fixture/ao-mo.bin" "$artifact/fixture/metadata.json" \
   "$source_dir" "$artifact/pyscf" \
   > "$artifact/pyscf.out" 2> "$artifact/pyscf.err"

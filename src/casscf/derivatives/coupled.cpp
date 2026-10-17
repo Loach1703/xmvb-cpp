@@ -44,7 +44,7 @@ Eigen::VectorXd CoupledModel::pack(const Eigen::VectorXd& orbital,
   return result;
 }
 
-Eigen::VectorXd CoupledModel::apply(const Eigen::VectorXd& direction) const {
+CoupledImages CoupledModel::apply_split(const Eigen::VectorXd& direction) const {
   const auto& u=point_.orbitals();
   const auto& c=point_.coefficients();
   const Eigen::MatrixXd q=ci_direction(direction);
@@ -55,12 +55,23 @@ Eigen::VectorXd CoupledModel::apply(const Eigen::VectorXd& direction) const {
   // One response sweep supplies Hq and the integral adjoint for B^Tq.
   const auto response=point_.sigma().apply_with_adjoint(q,c);
   const Eigen::VectorXd zero=Eigen::VectorXd::Zero(orbital_size());
-  const Eigen::VectorXd orbital=chart_.origin_hessian_vector(u,raw_gradient_,
-      orbital_response.orbital_hessian,p)+sqrt_two*chart_.pullback(u,
-          point_.orbital_gradient_from_adjoint(response.integrals),zero);
-  const Eigen::MatrixXd ci=response.sigma-point_.active_energy()*q+
-      sqrt_two*delta_sigma.apply(c);
-  return pack(orbital,ci);
+  const Eigen::VectorXd orbital_image=chart_.origin_hessian_vector(u,raw_gradient_,
+      orbital_response.orbital_hessian,p);
+  const Eigen::VectorXd ci_orbital_image=sqrt_two*chart_.pullback(u,
+      point_.orbital_gradient_from_adjoint(response.integrals),zero);
+  return {
+      pack(orbital_image,sqrt_two*delta_sigma.apply(c)),
+      pack(ci_orbital_image,response.sigma-point_.active_energy()*q)};
+}
+
+Eigen::VectorXd CoupledModel::apply(const Eigen::VectorXd& direction) const {
+  const auto images=apply_split(direction);
+  return images.orbital+images.ci;
+}
+
+Eigen::VectorXd CoupledModel::project_direction(const Eigen::VectorXd& direction) const {
+  const Eigen::MatrixXd ci=ci_direction(direction);
+  return pack(direction.head(orbital_size()),ci);
 }
 
 Eigen::VectorXd CoupledModel::precondition(const Eigen::VectorXd& residual,

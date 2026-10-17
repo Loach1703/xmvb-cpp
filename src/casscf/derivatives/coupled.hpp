@@ -7,6 +7,12 @@
 
 namespace xmvb::casscf {
 
+/** @brief Full-coordinate Hessian images from orbital and CI directions. */
+struct CoupledImages {
+  Eigen::VectorXd orbital;
+  Eigen::VectorXd ci;
+};
+
 /** @brief Joint orbital/CI actions in one immutable origin chart.
  * CI directions use dc=q/sqrt(2), are target-spin pure and orthogonal to c.
  * The redundant coefficient directions are projected without a dense basis.
@@ -18,7 +24,12 @@ public:
   Eigen::Index orbital_size() const noexcept { return chart_.size(); }
   Eigen::Index size() const noexcept { return chart_.size()+ci_size_; }
   const Eigen::VectorXd& gradient() const noexcept { return gradient_; }
+  CoupledImages apply_split(const Eigen::VectorXd& direction) const;
   Eigen::VectorXd apply(const Eigen::VectorXd& direction) const;
+  /** Project a recycled initial guess into this point's pure-spin CI tangent.
+   * Orbital indices retain their labels across macros; no old H image is reused.
+   */
+  Eigen::VectorXd project_direction(const Eigen::VectorXd& direction) const;
   Eigen::VectorXd precondition(const Eigen::VectorXd& residual, double shift) const;
   Eigen::MatrixXd orbitals(const Eigen::VectorXd& displacement) const;
   Eigen::MatrixXd coefficients(const Eigen::VectorXd& displacement) const;

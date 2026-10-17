@@ -107,6 +107,10 @@ void check_case(int nactive, int electrons, int spin) {
   }
   v.normalize();
   w.normalize();
+  const Eigen::VectorXd seed=model.project_direction(v);
+  require((model.project_direction(seed)-seed).norm()<2e-10 &&
+      (seed.head(no)-v.head(no)).norm()<2e-12,
+      "recycled direction projection changed orbital labels or is not idempotent");
   const Eigen::VectorXd p = 0.08*v;
   const auto displaced = keyframe_at(p);
   require(displaced.gradient.allFinite() && std::isfinite(displaced.energy),
@@ -136,6 +140,30 @@ void check_case(int nactive, int electrons, int spin) {
   const Eigen::VectorXd hv = model.apply(v);
   const Eigen::VectorXd hw = model.apply(w);
   require(hv.allFinite() && hw.allFinite(),"coupled HVP is nonfinite");
+  for (const Eigen::VectorXd* direction : {&v,&w}) {
+    const auto images = model.apply_split(*direction);
+    Eigen::VectorXd orbital_direction = Eigen::VectorXd::Zero(model.size());
+    orbital_direction.head(no) = direction->head(no);
+    Eigen::VectorXd ci_direction = Eigen::VectorXd::Zero(model.size());
+    ci_direction.tail(nc) = direction->tail(nc);
+    const Eigen::VectorXd full_image = model.apply(*direction);
+    const double scale = std::max(1.0,full_image.norm());
+    require(images.orbital.size() == model.size() && images.ci.size() == model.size() &&
+        images.orbital.allFinite() && images.ci.allFinite(),
+        "split coupled images have invalid coordinates");
+    require((images.orbital+images.ci-full_image).norm() < 2e-10*scale,
+        "split coupled images do not sum to the full action");
+    require((images.orbital-model.apply(orbital_direction)).norm() < 2e-10*scale,
+        "orbital split image differs from the orbital-only action");
+    require((images.ci-model.apply(ci_direction)).norm() < 2e-10*scale,
+        "CI split image differs from the CI-only action");
+    for (const Eigen::VectorXd* image : {&images.orbital,&images.ci}) {
+      const Eigen::Map<const Eigen::MatrixXd> tail(image->data()+no,c.rows(),c.cols());
+      require((space.project(tail,spin)-tail).norm() < 2e-9 &&
+          std::abs((tail.array()*c.array()).sum()) < 2e-9,
+          "split coupled CI image left the physical target-spin tangent");
+    }
+  }
   const Eigen::VectorXd fd_hv =
       (keyframe_at(h*v).gradient-keyframe_at(-h*v).gradient)/(2*h);
   const Eigen::VectorXd fd_hw =
@@ -164,6 +192,8 @@ void check_case(int nactive, int electrons, int spin) {
   // The carrier retains c, but the physical CI tangent excludes it.
   Eigen::VectorXd null_ci = Eigen::VectorXd::Zero(model.size());
   null_ci.tail(nc) = Eigen::Map<const Eigen::VectorXd>(c.data(),nc);
+  require(model.project_direction(null_ci).norm()<2e-10,
+      "recycled initial guess retained the CI scale direction");
   require(model.apply(null_ci).norm() < 2e-9,
       "coefficient normalization direction survived tangent projection");
   require((model.coefficients(null_ci)-c).norm() < 2e-10,

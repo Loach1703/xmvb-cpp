@@ -26,7 +26,7 @@ def main():
     args = parser.parse_args()
     rows = []
     for artifact in sorted(args.root.iterdir()):
-        if not artifact.is_dir() or not artifact.name.startswith(("casscf-", "native-")):
+        if not artifact.is_dir() or not artifact.name.startswith(("casscf-", "native-", "fixture-")):
             continue
         common = dict(artifact=artifact.name)
         node = artifact / "node.txt"
@@ -42,16 +42,22 @@ def main():
                 hvp=data["hvp_actions"], solver_seconds=data["elapsed_seconds"],
                 **resources(artifact / (result.parent.name + ".time"))))
         cpp = artifact / "cpp.out"
+        if artifact.name.startswith("fixture-"):
+            cpp = artifact / "output.out"
         if cpp.exists():
             values = dict(line.split("=", 1) for line in cpp.read_text().splitlines()
                           if "=" in line)
             if values.get("converged") == "1":
-                meta = json.loads((artifact / "fixture/metadata.json").read_text())
-                rows.append(dict(common, case=meta["case"], interface="shared_fixture",
+                metadata = artifact / "fixture/metadata.json"
+                case = (json.loads(metadata.read_text())["case"] if metadata.exists()
+                        else artifact.name.split("-")[1])
+                time_file = artifact / ("resource.time" if artifact.name.startswith("fixture-")
+                                        else "cpp.time")
+                rows.append(dict(common, case=case, interface="shared_fixture",
                     solver="C++ coupled CIAH", initial_energy=values["initial_energy"],
                     energy=values["energy"], macros=values["macros"],
                     hvp=values["hvp_actions"], solver_seconds=values["solver_wall_seconds"],
-                    **resources(artifact / "cpp.time")))
+                    **resources(time_file)))
         output = artifact / "output.out"
         if output.exists() and artifact.name.startswith("native-"):
             text = output.read_text()

@@ -64,7 +64,16 @@ partition/QOS/limits before submission. Builds and molecular workloads must
 execute on a Hanhai25 Slurm compute node.
 
 After a shared `fixture/` already exists, `reference.sbatch SOURCE_DIR
-FIXTURE_DIR CASE` runs only the standard AH PySCF solver, with the same 32-core
-binding and wheel. It does not repeat integral export, preparatory SCF, native
-CASSCF, or the coupled Newton reference. The expected case is checked against
-the saved fixture; output lives in a new `casscf-ah-CASE-JOBID` directory.
+FIXTURE_DIR CASE [ah|newton]` runs one PySCF solver (default standard AH),
+with the same 32-core Slurm allocation and wheel. It does not repeat integral export, preparatory SCF, native
+CASSCF, or the other PySCF reference. The expected case is checked against
+the saved fixture; output lives in a new `casscf-SOLVER-CASE-JOBID` directory.
+
+In this mixed Anaconda/PySCF-wheel runtime, do not use process-internal
+`OMP_PROC_BIND=close`/`OMP_PLACES=cores` for Python: the two OpenMP runtimes
+can leave all workers confined to the master CPU. The scripts retain Slurm
+`--cpu-bind=cores`, use `OMP_PROC_BIND=false` and unset `OMP_PLACES` for
+PySCF only; C++ keeps its qualified close/core settings. Evidence:
+`benchmarks/casscf-threads-20261017/RESULTS.md`. The original jobs 291883 and
+291887 are numerically valid but their one-core timings are not properly
+parallel performance baselines.

@@ -35,12 +35,20 @@ both micro and macro updates: **12 callback records are not 12 macros**.
 No AH HVP count is reported because that kernel does not expose `tot_hop`
 through this callback. Coupled and orbital-only actions are not equated.
 
-FeCl2 same-fixture PySCF coupled Newton (291883) and standard AH (291887)
-were still running at this report snapshot. Their final energy agreement
-and speed comparison remain pending. The native C++ result alone is not
-a completed same-fixture comparison. Its 25 macros / 355 HVPs also leave
-clear optimizer-performance work; no claim of uniformly improved macro
-convergence is made.
+FeCl2 same-fixture PySCF coupled Newton (291883) subsequently converged in
+24 macros / 326 actions to -2181.624464854347 Eh. The C++ fixture run used
+20 macros / 277 HVPs and reached -2181.6244648289626 Eh (2.54e-8 Eh gap).
+Standard AH (291887) converged in 35 macros to -2181.6244648112297 Eh.
+The native C++ result used 25 macros / 355 HVPs; this native AO-loader path
+must not be conflated with the unscreened same-fixture path.
+
+**Timing correction:** the original Python runs suffered a runtime-affinity
+problem and used about one effective CPU despite a 32-core allocation.
+Their energies remain valid, but their timings (including the F2 reference
+above) are not qualified 32-core speed baselines. Corrected full FeCl2
+references and the new coarse-preconditioned C++ runs are reported in
+`benchmarks/casscf-coarse-20261017/RESULTS.md`; the matched affinity diagnosis
+is in `benchmarks/casscf-threads-20261017/RESULTS.md`.
 
 The main F2 fixture uses a sigma-bonding/sigma-antibonding CAS(2,2) at
 1.4 Angstrom, cc-pVDZ Cartesian, rather than the older VB F2 test's active

@@ -868,6 +868,37 @@ void check_coarse_balancing_inverse() {
   }
 }
 
+/** @brief Full-length projection roundoff is not a coarse-size tolerance. */
+void check_coarse_projection_roundoff() {
+  constexpr int n=4096;
+  Eigen::VectorXd first(n);
+  for (int i=0; i<n; ++i) first[i]=(i%2 ? -1.0 : 1.0)/64.0;
+  const Eigen::VectorXd second=Eigen::VectorXd::Constant(n,1.0/64.0);
+  for (const double skew : {1e-12,1e-5}) {
+    xmvb::mcscf::CoarsePreconditioner coarse(n,2,1e-14);
+    coarse.observe(first,2*first,first);
+    const Eigen::VectorXd source_image=3*second+skew*first;
+    coarse.observe(second,source_image,second);
+    require(coarse.size()==(skew>1e-6 ? 1 : 2),
+        "coarse admission rejects certified roundoff or admits physical asymmetry");
+    const auto first_inverse=coarse.apply(first,0,
+        [](const Eigen::VectorXd& r) -> Eigen::VectorXd { return r; });
+    require((first_inverse-0.5*first).norm()<2e-12,
+        "coarse rejection damaged its retained certified sample");
+    require(std::abs(first.dot(source_image)-second.dot(2*first)-skew)<1e-13,
+        "coarse admission changed the source operator reciprocity defect");
+    if (skew>1e-6) {
+      coarse.observe(second,3*second,second);
+      require(coarse.size()==2,
+          "coarse rejected a valid sample after an uncertifiable image");
+    }
+    const auto second_inverse=coarse.apply(second,0,
+        [](const Eigen::VectorXd& r) -> Eigen::VectorXd { return r; });
+    require((second_inverse-second/3.0).norm()<2e-12,
+        "coarse certified second sample lost its inverse action");
+  }
+}
+
 /** @brief Cached-image rank tests use Gram eigenvalues, not singular values. */
 void check_coarse_sample_rank() {
   xmvb::mcscf::CoarsePreconditioner coarse(3,3,1.0e-14);
@@ -879,6 +910,9 @@ void check_coarse_sample_rank() {
   require(coarse.size()==1,
       "coarse inverse admitted a sample with an unresolved Gram eigenvalue");
   const Eigen::Vector3d resolved=first+1.0e-3*Eigen::Vector3d::Unit(1);
+  coarse.observe(resolved,h*resolved+1e-5*first,resolved);
+  require(coarse.size()==1,
+      "coarse admitted an image rejected after a rank-deficient sample");
   coarse.observe(resolved,h*resolved,resolved);
   require(coarse.size()==2,"coarse inverse rejected a resolved independent sample");
   xmvb::mcscf::CoarsePreconditioner chained(3,3,1.0e-14);
@@ -891,6 +925,16 @@ void check_coarse_sample_rank() {
   chained.observe(third,h*third,third);
   require(chained.size()==2,
       "coarse inverse certified local rank but missed global sample dependence");
+  xmvb::mcscf::CoarsePreconditioner metric_rejected(3,2,1.0e-14);
+  const Eigen::Vector3d second_direction=Eigen::Vector3d::Unit(1);
+  metric_rejected.observe(first,h*first,first);
+  metric_rejected.observe(second_direction,h*second_direction,
+      second_direction+1e-5*first);
+  require(metric_rejected.size()==1,
+      "coarse admitted an uncertifiable metric image");
+  metric_rejected.observe(second_direction,h*second_direction,second_direction);
+  require(metric_rejected.size()==2,
+      "coarse metric rejection damaged a later valid sample");
 }
 
 void check_projected_dual_norm() {
@@ -1037,6 +1081,7 @@ int main() {
     check_keyframe_energy_model();
     check_converged_root_reuse();
     check_coarse_balancing_inverse();
+    check_coarse_projection_roundoff();
     check_keyframe_checkpoint();
     check_coarse_sample_rank();
     check_projected_dual_norm();

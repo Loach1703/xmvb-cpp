@@ -10,6 +10,7 @@
 #include "casscf/derivatives/coupled.hpp"
 #include "mcscf/ci/strings.hpp"
 #include "mcscf/optimization/problem.hpp"
+#include "mcscf/optimization/preconditioners/coarse.hpp"
 #include "mcscf/optimization/trace.hpp"
 
 namespace xmvb::casscf {
@@ -48,7 +49,11 @@ CasscfResult solve_casscf(const integrals::AoIntegralInput& ao,
         point->integrals().active.one_electron,spin,point->core_energy(),options.ci,c);
     result.ci_actions+=ci.active_ci.block_actions;
     const auto& values=ci.active_ci.eigenpairs.eigenvector_matrix;
-    point->set_coefficients(Eigen::Map<const Eigen::MatrixXd>(values.data(),c.rows(),c.cols()));
+    Eigen::MatrixXd relaxed=Eigen::Map<const Eigen::MatrixXd>(values.data(),c.rows(),c.cols());
+    // Fix the arbitrary eigenvector sign against the finite CI predictor.
+    // This is a phase choice, needed when recycling coefficient directions.
+    if ((relaxed.array()*c.array()).sum()<0) relaxed=-relaxed;
+    point->set_coefficients(relaxed);
     return point;
   };
   auto point=prepare(orbitals,initial_ci(nactive,electrons,spin,options.ci.workspace_bytes));
@@ -71,25 +76,46 @@ CasscfResult solve_casscf(const integrals::AoIntegralInput& ao,
     return result;
   }
 
+  Eigen::VectorXd direction_guess;
   for (int iteration=1; iteration<=options.max_iterations; ++iteration) {
     const auto start=Clock::now();
     const int ci_before=result.ci_actions;
     const double energy=point->energy();
     CoupledModel model(*point,ao,ncore,nactive);
+    const Eigen::Index no=model.orbital_size();
+    CoupledImages images;
     const auto action=[&](const Eigen::VectorXd& direction) {
       ++result.hvp_actions;
-      return model.apply(direction);
+      images=model.apply_split(direction);
+      return Eigen::VectorXd(images.orbital+images.ci);
     };
     const auto norm=[](const Eigen::VectorXd& vector) { return vector.norm(); };
     const auto identity=[](const Eigen::VectorXd& vector) -> Eigen::VectorXd { return vector; };
     mcscf::QuadraticProblem problem(model.gradient(),action,identity,norm);
     mcscf::CiahOptions inner;
+    mcscf::CoarsePreconditioner coarse(static_cast<int>(model.size()),
+        2*inner.max_cycle,inner.lindep,inner.operator_relative_accuracy);
     inner.coordinate_norm=norm;
     inner.residual_preconditioner=[&](const Eigen::VectorXd& r,double shift) {
-      return model.precondition(r,shift-1e-8);
+      return coarse.apply(r,shift,[&](const Eigen::VectorXd& value) {
+        return model.precondition(value,shift-1e-8);
+      });
+    };
+    inner.observe_images=[&](const Eigen::VectorXd& direction,const Eigen::VectorXd&) {
+      // The physical action already computed both split images. The separate
+      // block samples add coupling information beyond the mixed Ritz vectors.
+      Eigen::VectorXd orbital=Eigen::VectorXd::Zero(model.size());
+      orbital.head(no)=direction.head(no);
+      coarse.observe(orbital,images.orbital,orbital);
+      Eigen::VectorXd ci=Eigen::VectorXd::Zero(model.size());
+      ci.tail(model.size()-no)=direction.tail(model.size()-no);
+      coarse.observe(ci,images.ci,ci);
     };
     inner.residual_direction=identity;
-    mcscf::CiahWorkspace workspace(problem,-model.precondition(model.gradient(),0),inner);
+    Eigen::VectorXd seed=direction_guess.size()!=0
+        ? model.project_direction(direction_guess)
+        : -model.precondition(model.gradient(),0);
+    mcscf::CiahWorkspace workspace(problem,std::move(seed),inner);
     mcscf::CiahMicroCallbacks callbacks;
     callbacks.coordinate_norm=norm;
     callbacks.metric_action=identity;
@@ -111,6 +137,7 @@ CasscfResult solve_casscf(const integrals::AoIntegralInput& ao,
     // The small AH space remains available for an origin descent/curvature
     // restart; this uses only its existing H images, never another HVP.
     Eigen::VectorXd displacement=micro.displacement;
+    Eigen::VectorXd last_step=micro.last_step;
     bool restarted=false;
     const auto restart_origin=[&]() {
       if (restarted) return false;
@@ -122,6 +149,7 @@ CasscfResult solve_casscf(const integrals::AoIntegralInput& ao,
       const double scale=largest>mcscf::ciah_max_component*ray->reference_component
           ? mcscf::ciah_max_component/largest : 1/ray->reference_component;
       displacement=scale*ray->step;
+      last_step=displacement;
       return true;
     };
     std::unique_ptr<FixedCiPoint> accepted;
@@ -137,12 +165,15 @@ CasscfResult solve_casscf(const integrals::AoIntegralInput& ao,
         }
       }
       if (micro.keyframes.available()) {
-        displacement=micro.keyframes.take().displacement;
+        auto checkpoint=micro.keyframes.take();
+        displacement=std::move(checkpoint.displacement);
+        last_step=std::move(checkpoint.last_step);
         continue;
       }
       if ((micro.energy_model_stopped || model.gradient().dot(displacement)>=0) &&
           restart_origin()) continue;
       displacement*=0.5;
+      last_step*=0.5;
       if (displacement.norm()<=std::numeric_limits<double>::epsilon()) {
         if (restart_origin()) continue;
         result.termination_reason="ciah_macro_energy_rejected";
@@ -157,9 +188,14 @@ CasscfResult solve_casscf(const integrals::AoIntegralInput& ao,
         std::chrono::duration<double>(Clock::now()-start).count()});
     if (options.observe_iteration) options.observe_iteration(result.iterations.back());
     mcscf::diagnostics::ciah_trace("casscf_macro",
-        "iteration=%d,energy=%.17g,de=%.17g,gradient=%.17g,hvp=%d,ci_actions=%d",
+        "iteration=%d,energy=%.17g,de=%.17g,gradient=%.17g,hvp=%d,ci_actions=%d,coarse=%d,micro=%d,stop=%s",
         iteration,accepted->energy(),change,accepted_norm,
-        result.hvp_actions-hvp_before,result.ci_actions-ci_before);
+        result.hvp_actions-hvp_before,result.ci_actions-ci_before,coarse.size(),
+        micro.micro_steps,micro.stop_reason);
+    // As in PySCF's dr0 and VB's last-step predictor, recycle only a direction.
+    // MO labels are unchanged (no canonicalization); the next model projects
+    // its CI tail at the relaxed point and computes all curvature anew.
+    direction_guess=std::move(last_step);
     point=std::move(accepted);
     if (std::abs(change)<options.energy_tolerance && accepted_norm<options.gradient_tolerance) {
       result.converged=true;

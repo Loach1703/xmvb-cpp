@@ -23,6 +23,8 @@ CoarsePreconditioner::CoarsePreconditioner(
   basis_.resize(dimension,std::min(dimension,capacity));
   images_.resize(dimension,basis_.cols());
   metrics_.resize(dimension,basis_.cols());
+  hessian_projection_ = Eigen::MatrixXd::Zero(basis_.cols(),basis_.cols());
+  metric_projection_ = Eigen::MatrixXd::Zero(basis_.cols(),basis_.cols());
   sample_factor_ = Eigen::MatrixXd::Zero(basis_.cols(),basis_.cols());
 }
 
@@ -78,6 +80,53 @@ void CoarsePreconditioner::observe(const Eigen::VectorXd& direction,
   basis_.col(size_) = v/norm;
   images_.col(size_) = h/norm;
   metrics_.col(size_) = g/norm;
+  const int candidate=size_;
+  if (candidate) {
+    hessian_projection_.col(candidate).head(candidate) =
+        basis_.leftCols(candidate).transpose()*images_.col(candidate);
+    hessian_projection_.row(candidate).head(candidate) =
+        (images_.leftCols(candidate).transpose()*basis_.col(candidate)).transpose();
+    metric_projection_.col(candidate).head(candidate) =
+        basis_.leftCols(candidate).transpose()*metrics_.col(candidate);
+    metric_projection_.row(candidate).head(candidate) =
+        (metrics_.leftCols(candidate).transpose()*basis_.col(candidate)).transpose();
+  }
+  hessian_projection_(candidate,candidate)=basis_.col(candidate).dot(images_.col(candidate));
+  metric_projection_(candidate,candidate)=basis_.col(candidate).dot(metrics_.col(candidate));
+  const auto certified=[&](const auto& projected, const auto& action,
+      double action_accuracy, const char* operator_name) {
+    const Eigen::MatrixXd raw=projected.topLeftCorner(candidate+1,candidate+1);
+    const double skew=(raw-raw.transpose()).norm();
+    double bound=256*std::numeric_limits<double>::epsilon()*(candidate+1)*
+        std::max(1.0,raw.norm());
+    if (action_accuracy>0)
+      bound+=action_accuracy*basis_.leftCols(candidate+1).norm()*
+          action.leftCols(candidate+1).norm();
+    double projection_roundoff=0;
+    if (skew>bound) {
+      projection_roundoff=linalg::projection_skew_roundoff(
+          basis_.leftCols(candidate+1),action.leftCols(candidate+1),raw);
+      bound+=projection_roundoff;
+    }
+    if (!std::isfinite(skew) || !std::isfinite(bound) || skew>bound) {
+      diagnostics::ciah_trace("coarse_sample_image_rejected",
+          "size=%d,operator=%s,skew=%.17g,bound=%.17g,projection_roundoff=%.17g,image_norm=%.17g",
+          candidate,operator_name,skew,bound,projection_roundoff,
+          action.leftCols(candidate+1).norm());
+      return false;
+    }
+    return true;
+  };
+  if (!certified(hessian_projection_,images_,action_accuracy_,"hessian") ||
+      !certified(metric_projection_,metrics_,0.0,"metric")) return;
+  for (int i=0; i<candidate; ++i) {
+    const double hessian=0.5*(hessian_projection_(i,candidate)+
+        hessian_projection_(candidate,i));
+    const double metric=0.5*(metric_projection_(i,candidate)+
+        metric_projection_(candidate,i));
+    hessian_projection_(i,candidate)=hessian_projection_(candidate,i)=hessian;
+    metric_projection_(i,candidate)=metric_projection_(candidate,i)=metric;
+  }
   sample_factor_.topLeftCorner(size_+1,size_+1) = factor;
   ++size_;
 }
@@ -90,17 +139,8 @@ Eigen::VectorXd CoarsePreconditioner::apply(const Eigen::VectorXd& residual,
   if (!size_) return inverse(residual);
   const auto v = basis_.leftCols(size_);
   const Eigen::MatrixXd lv = images_.leftCols(size_)-eigenvalue*metrics_.leftCols(size_);
-  const Eigen::MatrixXd raw = v.transpose()*lv;
-  const double skew_bound = 256*std::numeric_limits<double>::epsilon()*size_*
-      std::max(1.0,raw.norm())+action_accuracy_*v.norm()*images_.leftCols(size_).norm();
-  if ((raw-raw.transpose()).norm() > skew_bound) {
-    diagnostics::ciah_trace("coarse_symmetry_failure",
-        "size=%d,skew=%.17g,bound=%.17g,projection_roundoff=%.17g,image_norm=%.17g",
-        size_,(raw-raw.transpose()).norm(),skew_bound,
-        linalg::projection_skew_roundoff(v,lv,raw),lv.norm());
-    throw std::runtime_error("coarse sampled shifted operator is not symmetric");
-  }
-  const Eigen::MatrixXd e = 0.5*(raw+raw.transpose());
+  const Eigen::MatrixXd e = hessian_projection_.topLeftCorner(size_,size_)-
+      eigenvalue*metric_projection_.topLeftCorner(size_,size_);
   Eigen::FullPivLU<Eigen::MatrixXd> factor(e);
   if (!factor.isInvertible())
     throw std::runtime_error("singular exact coarse shifted operator");
