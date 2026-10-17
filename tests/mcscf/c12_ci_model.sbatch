@@ -42,5 +42,5 @@ lscpu > cpu.txt
 sha256sum test_selected_metric_point input.xmi input.orb cc-pvdz.gbs > hashes.sha256
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores bash -se <<'RUN'
 grep Cpus_allowed_list /proc/self/status > affinity.txt
-/usr/bin/time -v -o resource.time ./test_selected_metric_point input.xmi --ci-model > models.out 2> models.err
+/usr/bin/time -v -o resource.time ./test_selected_metric_point input.xmi --ci-diagonal > models.out 2> models.err
 RUN

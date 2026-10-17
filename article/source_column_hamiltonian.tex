@@ -2049,6 +2049,187 @@ factored. Storage is $O(N_{\rm str}N_{\rm state})$ in addition to the
 existing occupation factors; no product carrier, complete-space inverse,
 or dense structure Hessian is constructed.
 
+\subsection{Cross-occupation coupling from constrained CI corrections}
+\label{sec:ci-constrained-model}
+
+\paragraph{Scope of this analysis.}
+This subsection records inverse-model experiments, not a retained production
+speedup. Root constraints and one additional shifted Ritz image did not
+reduce the final warm CI action count. The full-search-space variant below
+increased the same-point cold solve from 81 to 203 actions. Their production
+implementations were removed; the retained spin-energy model remains that
+of Section~\ref{sec:spin-tangent-model}. These negative results distinguish
+valid algebra from an effective approximation to the physical inverse.
+
+Let $C$ contain the current $M$-orthonormal Ritz roots, $A=MC$ their
+already available overlap images, and $r=(H-EM)c$ one Ritz residual.
+Galerkin stationarity gives $C\Tr r=0$, but generally does not imply
+$C\Tr M Rr=0$ for an approximate inverse $R$. The correction of the
+positive model $P=R^{-1}$ on the CI tangent is the minimizer of
+\begin{equation}
+ \min_{A\Tr t=0}\; \tfrac12 t\Tr Pt+r\Tr t.
+ \label{eq:ci-model-correction}
+\end{equation}
+Eliminating the root multipliers gives $t=-R_Cr$, where
+\begin{equation}
+ R_C=R-RA(A\Tr RA)^{-1}A\Tr R.
+ \label{eq:ci-constrained-inverse}
+\end{equation}
+This is Eq.~\eqref{eq:constrained-spin-model} applied to the current CI
+Ritz roots, rather than only to the accepted-point AH model. It requires
+no selected-space closure. In particular, the independent coefficients
+remain precisely those of the original selected VB structures.
+
+If $R$ is block diagonal by occupation, the off-diagonal block of $R_C$
+between different occupations $\omega$ and $\nu$ is
+\begin{equation}
+ (R_C)_{\omega\nu}
+ =-R_\omega A_\omega (A\Tr RA)^{-1}A_\nu\Tr R_\nu,
+ \qquad \omega\ne\nu.
+ \label{eq:ci-occupation-bridge}
+\end{equation}
+Thus the existing global root constraints supply an exact rank-at-most-
+$N_{\rm root}$ cross-occupation correction to this inverse model. This
+does not reconstruct every physical off-diagonal Hamiltonian coupling:
+the physical Davidson action still supplies those couplings without any
+approximation. Positivity of $P$ implies positive definiteness of its
+restriction to $\ker A\Tr$, while $R_C A=0$ removes the normalization and
+root-mixing gauge directions.
+
+The ordinary expansion first computes $-Rr$ and later applies the
+$M$-orthogonal projector $Q=I-CC\Tr M$. In general
+$Q R\ne R_C$: their difference need not lie in the current search space.
+For the special exact metric model $R=M^{-1}$, however,
+$R_Cr=M^{-1}r$ because $C\Tr r=0$. Adding this restriction to an exact
+metric-only inverse would therefore do no useful work. The experiments
+restricted the spin-energy model, not the resident exact-metric model.
+
+Nor does an arbitrary coarse correction automatically help. Let $V$ be
+the current Davidson basis, $L=H-EM$ and $F=V\Tr LV$, on any nonsingular
+coarse sector. The balanced coarse inverse gives, for $V\Tr r=0$,
+\begin{equation}
+ \left[(I-VF^{-1}V\Tr L)R(I-LVF^{-1}V\Tr)
+       +VF^{-1}V\Tr\right]r
+ =Rr-VF^{-1}V\Tr LRr.
+\end{equation}
+The added term lies entirely in $\operatorname{span}V$ and is removed by
+the subsequent Davidson orthogonalization. This rules out reusing the
+same search space in this particular coarse formula as a source of new
+expansion information. It is not a statement about recycling independent
+directions or about coarse corrections in a different linear solve.
+
+For root constraints alone, the cached $MC$ supplies $A$ and the only new
+factor is $A\Tr RA$, of size $N_{\rm root}$. If occupation blocks have sizes
+$g_\omega$, the inverse work is
+$O((N_{\rm root}+1)\sum_\omega g_\omega^2
+  +N_{\rm str}N_{\rm root}^2+N_{\rm root}^3)$, with
+$O(N_{\rm str}(N_{\rm root}+1)+N_{\rm root}^2)$ temporary storage.
+No new $H/M$ action, orbital transform, full carrier, global structure
+matrix, or per-thread large array is required by this formula. The
+experimental CI and AH entries shared one small constrained-inverse kernel;
+their physical operators and stopping criteria were unchanged.
+
+Root constraints alone need not improve the energy model. The full
+Davidson expansion instead belongs to $\ker(V\Tr M)$, where $V$ is the
+current $M$-orthonormal search basis, not only the requested roots $C$.
+Applying an ambient inverse and then orthogonalizing is not the minimizer
+of the same positive model on this complement. That minimizer uses
+Eq.~\eqref{eq:ci-constrained-inverse} with $A=MV$. All columns of $A$
+are already retained by Davidson. The update therefore incorporates
+the known physical metric couplings across occupations without another
+$M$ action or a new orbital transform. Its rank is the actual Davidson
+dimension $m$; no separate coarse-space threshold or spectral budget is
+introduced. Unlike the balanced inverse above, its correction generally
+contains $R M V$, which does not lie in $\operatorname{span}V$ and is not
+removed by ordinary Davidson orthogonalization.
+
+No persistent $N_{\rm str}$-by-$m$ inverse image is necessary. First form
+the small Gram $F=A\Tr RA$ by bounded column panels of $RA$, releasing
+each panel after its contraction. Then compute
+\begin{equation}
+ u=Rr,\qquad b=F^{-1}A\Tr u,\qquad z=R(r-Ab).
+ \label{eq:ci-streamed-restricted-inverse}
+\end{equation}
+This is exactly $z=R_Cr$, with neither an approximate constraint solve
+nor a residual-dependent switch. Apart from the borrowed $A$, storage
+is a bounded inverse panel, $O(N_{\rm str})$ vectors, and the
+$m$-by-$m$ Gram. The retained spin factors apply to $m+2$ RHS columns
+in total; forming the Gram costs $O(N_{\rm str}m^2)$ arithmetic and its
+factorization costs $O(m^3)$. The panel width follows the existing shared
+workspace allowance and simultaneous scaled/output/local arrays, rather
+than an admission test on the physical CI path. No large array is
+replicated across threads.
+
+The physical CI problem still uses the original selected structure
+space, exact $H/M$ actions and unchanged accuracy targets. This model
+does not assume closure, construct an inverse from a selected block of
+a FULL inverse, or change the structure-space Davidson dimension.
+
+\paragraph{Frozen-column locality diagnostic.}
+The unsuccessful inverse updates motivate measuring the omitted physical
+couplings rather than adding further projector constraints. Let
+$\ell_I=(H-EM)e_I$ be one sampled structure column and $R$ the retained
+occupation-block inverse model. For an occupation projector $\Pi_\omega$,
+different blocks are orthogonal in the $R$ norm. Thus
+\begin{equation}
+ f_I(\mathcal B)=
+ \frac{\sum_{\omega\in\mathcal B}
+       (\Pi_\omega\ell_I)\Tr R(\Pi_\omega\ell_I)}
+      {\ell_I\Tr R\ell_I}
+\end{equation}
+is the squared inverse-norm fraction of a specified collection of complete
+occupation blocks. It is not a physical wave-function norm, a global
+operator-error bound, or an eigensolver stopping criterion.
+
+For orbital occupations $n_p^I\in\{0,1,2\}$, define the occupation
+transfer distance
+\begin{equation}
+ d(I,J)=\tfrac12\sum_p|n_p^I-n_p^J|.
+\end{equation}
+This distance labels VB structure occupations; it is not a determinant
+excitation distance and does not introduce determinant-level computation.
+Frozen $H/M$ probe columns, their inverse images, and occupation labels
+allow all distance statistics to be computed offline without rerunning
+an electronic calculation. The exact actions are never truncated by this
+diagnostic. Although two-electron Slater--Condon links suggest testing a
+distance-two model for a preconditioner, nonorthogonal orbital maps can
+produce nonzero higher-distance entries and do not justify truncating the
+physical selected action.
+
+\paragraph{A carrier inverse model for arbitrary selected columns.}
+A different, unimplemented candidate reuses the algebra of the successful
+FULL energy preconditioner without asserting that the selected space is
+closed. Let $W$ contain the original selected spin-expansion columns,
+$G=W\Tr W$, and $T$ the invertible orbital exterior map. If $D$ is the
+orthogonal-carrier Hamiltonian diagonal, let $\Delta$ be the positive
+diagonal model $|D-EI|$ with the existing numerical denominator floor.
+Define
+\begin{equation}
+ J=T^{-\mathsf T}WG^{-1},\qquad
+ R_{\rm car}=J\Tr\Delta^{-1}J
+ =G^{-1}W\Tr T^{-1}\Delta^{-1}T^{-\mathsf T}WG^{-1}.
+ \label{eq:selected-carrier-model}
+\end{equation}
+For any nonzero selected covector $r$, independence of $W$ and
+invertibility of $T$ give
+$r\Tr R_{\rm car}r=\|\Delta^{-1/2}Jr\|^2>0$.
+This establishes an SPD preconditioner for any independent selection,
+not an exact selected metric or Hessian inverse. In particular, it must
+not replace the physical metric in a norm or a response certificate.
+No independent coefficient is introduced outside the original selected
+structure space.
+
+The orbital inverse maps in Eq.~\eqref{eq:selected-carrier-model} mix
+occupations, while $\Delta^{-1}$ supplies a carrier energy scale. Thus
+this candidate contains more than a constraint-induced correction of
+an occupation-local Gram. Its cost and spectral usefulness remain to
+be measured. A production implementation must contract its two factorized
+images against tiles of the diagonal weight, generating and consuming
+each tile without retaining a complete transformed product array. A
+complete carrier allocation or a completeness admission test would not
+establish the required general low-memory algorithm. This formula is a
+next candidate, not an implemented or benchmarked acceleration.
+
 \subsection{Residual image fusion and one-column projections}
 \label{sec:scalar-source}
 

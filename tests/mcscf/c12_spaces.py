@@ -15,7 +15,7 @@ import sys
 from summarize_scf_step import elapsed_seconds, field
 
 SEED = 20261017
-LABELS = ("ion01", "ion02", "full", "mixed3", "mixed20")
+LABELS = ("ion01", "ion02", "full", "mixed3", "mixed20", "mixed600")
 
 
 def pairings(sites):
@@ -30,14 +30,17 @@ def pairings(sites):
     return result
 
 
-def mixed_structures():
+def mixed_structures(count=20):
     """Select before calculation; retain the same nested mixed subsets."""
     rng = random.Random(SEED)
     sites = tuple(range(29, 41))
     selected = [tuple(zip(sites[::2], sites[1::2]))]
-    while len(selected) < 20:
+    while len(selected) < count:
         # The first three contain orders 0,1,2; the full set also contains 3.
-        order = len(selected) % 4
+        # Preserve the archived first twenty columns. Larger arbitrary sets
+        # sample occupations independently, avoiding exhaustion of the 132
+        # distinct covalent columns in a forced round-robin schedule.
+        order = len(selected) % 4 if len(selected) < 20 else rng.randrange(4)
         occupied_and_empty = rng.sample(sites, 2 * order)
         doubly = occupied_and_empty[:order]
         singles = tuple(p for p in sites if p not in occupied_and_empty)
@@ -63,13 +66,14 @@ def prepare(source, bundle):
     if changes != 1:
         raise ValueError("expected one ISCF control")
     explicit = re.sub(r"^str=.*\n", "", text, flags=re.I | re.M)
-    structures = mixed_structures()
+    structures = mixed_structures(600)
     manifest = dict(source_input_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
                     selection_seed=SEED, cases=[])
     for label, keyword, count in (("ion01", "ION(0:1)", sector_size(1)),
                                   ("ion02", "ION(0:2)", sector_size(2)),
                                   ("full", "FULL", sector_size(6)),
-                                  ("mixed3", None, 3), ("mixed20", None, 20)):
+                                  ("mixed3", None, 3), ("mixed20", None, 20),
+                                  ("mixed600", None, 600)):
         if keyword:
             deck, changes = re.subn(r"^str=.*$", f"str={keyword}", text, flags=re.I | re.M)
             if changes != 1:
@@ -77,7 +81,7 @@ def prepare(source, bundle):
         else:
             deck = explicit + "\n$STR\n" + "\n".join(structures[:count]) + "\n$END\n"
         run = bundle / "cases" / label
-        run.mkdir(parents=True)
+        run.mkdir(parents=True, exist_ok=True)
         (run / "input.xmi").write_text(deck)
         shutil.copyfile(bundle / "cc-pvdz.gbs", run / "cc-pvdz.gbs")
         manifest["cases"].append(dict(label=label, keyword=keyword, expected_structures=count,

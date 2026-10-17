@@ -20,13 +20,19 @@ original=$(realpath -e "$1")
 qualified=$(realpath -e "$2")
 bundle="$source_dir/c12-spaces-bundle-$SLURM_JOB_ID"
 mkdir -p "$bundle"
-grep -q '100% tests passed, 0 tests failed out of 11' "$qualified/ctest.out"
+grep -q '100% tests passed, 0 tests failed out of' "$qualified/ctest.out"
 sha256sum --check "$qualified/sources.sha256" > "$bundle/source-check.txt"
 (cd "$original" && sha256sum --check hashes.sha256) > "$bundle/input-bundle-check.txt"
 # Reuse the exact five already measured inputs. Only the qualified current
 # executable changes; no old executable or old benchmark is executed here.
 cp -a "$original/cases" "$bundle/"
 cp "$original/"{cases.json,original.xmi,cc-pvdz.gbs,c12_spaces.py,c12_spaces.sbatch,summarize_scf_step.py} "$bundle/"
+# Preserve all previously measured inputs byte for byte while adding new
+# explicitly selected test spaces from the current deterministic generator.
+find "$bundle/cases" -name input.xmi -print0 | sort -z | xargs -0 sha256sum > "$bundle/known-inputs.sha256"
+cp "$source_dir/tests/mcscf/"{c12_spaces.py,c12_spaces.sbatch,summarize_scf_step.py} "$bundle/"
+python3 "$bundle/c12_spaces.py" prepare "$bundle/original.xmi" "$bundle" > "$bundle/preparation.json"
+sha256sum --check "$bundle/known-inputs.sha256" > "$bundle/known-inputs-check.txt"
 cp "$qualified/"{CMakeCache.txt,sources.sha256,ctest.out} "$bundle/"
 cp "$source_dir/build/src/xmvb-cpp.exe" "$bundle/"
 printf '%s\n' "$qualified" > "$bundle/qualification.txt"

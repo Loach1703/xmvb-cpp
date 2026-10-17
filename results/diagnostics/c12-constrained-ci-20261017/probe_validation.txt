@@ -1,0 +1,2 @@
+probe_analysis.json PASS: dimensions, electron conservation, complete-band norm and independent scalar agreement; 6 columns
+probe_mixed600_analysis.json PASS: dimensions, electron conservation, complete-band norm and independent scalar agreement; 8 columns
