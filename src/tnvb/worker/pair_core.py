@@ -3918,9 +3918,6 @@ def build_su2_states(
 
         profile = reduced_bond_profile(state)
         norm2 = float(driver.expectation(state, identity_mpo, state))
-        log_summary(f"[TNVB-PAIR] structure={istr + 1} pairs={len(pairs)} "
-                    f"sweeps={total_pair_sweeps} retries={retried_pairs} initializer=occupation-csf-v2 "
-                    f"actual_bond={max(profile)} norm={norm2:.12e}")
         states.append(state)
         print(
             f"[TNVB-BLOCK2] physical_MPS progress={istr + 1}/{nstr} "

@@ -42,6 +42,7 @@ def main():
                 child_env.pop("XMVB_BLOCK2_FORBID_3PDM", None)
             result = subprocess.run([executable, str(path), *options], env=child_env,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            assert "[TNVB-PAIR]" not in result.stdout, result.stdout
             if result.returncode in (0, 2):
                 # The master exporter writes reusable GUS-body orbitals only
                 # after real optimization convergence, not for ENERGY/caps.
