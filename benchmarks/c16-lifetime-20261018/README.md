@@ -173,3 +173,13 @@ GEMM, gather and team waits are the main sampled paths; generator-adjoint
 replay is no longer a leading sampled function. CPU sample fractions are not
 wall-time fractions and cannot be compared as a matched percentage reduction
 against the earlier75s initial-CI-only capture.
+
+Intermediate native293141 has now accepted its first outer step:
+initial total energy -615.12694494749928 Eh; accepted energy
+-616.00691234563953 Eh;7 orbital HVPs,4 keyframes,13 candidate-CI actions
+(in addition to14 initial-CI actions). The projected gradient infinity norm
+falls from0.532854208 to0.0311454612; this is not convergence. Phase293142
+records449.900s inside the macro-step (excluding initial CI/gradient and final
+reporting). Both processes were still running after the accepted-step record,
+so whole-process time and final peak RSS remain pending. The final binary's
+native293167 has reached the same early keyframe energy within7e-13 Eh.
