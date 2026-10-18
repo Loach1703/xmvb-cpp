@@ -1,5 +1,64 @@
 # Native C12/C14 follow-up
 
+## Bounded column emission and exact integer admission
+
+This follow-up first eliminates targets that the existing exchange quotient
+would immediately reject. The certified covalent column generator accepts an
+exclusive caller-index bound. Ordered colex subtrees outside the bound are
+not visited; permuted callers retain their exact rank permutation and emit
+only bounded caller indices. Arbitrary selected families keep their own
+generator constraints. No coefficient cutoff or closure assumption is added.
+
+The first current-only trial293571 reduces path/admission0.898500->0.868825s,
+but C12 native12.29s is not faster than the saved12.16s. It is retained in
+`quotient.csv`, not advertised as an end-to-end improvement. The final follow-up
+also skips neighbor queries after the existing halo/column set saturates its
+single-spin universe, and evaluates integer byte costs in unsigned128-bit
+arithmetic rather than extended floating point. Neither operation changes
+admission, target order, tile capacity or physical contractions. The byte
+identity and saturation proof are in `article/sigma_tile_admission.md`; the
+exchange-bound proof is in `article/exterior_column_schedule.md`.
+
+Qualification293572 passes13/13 tests in5.09s. The original-seed oracle now
+tests every column bound at both depths for ordered/permuted callers and
+unequal spins, including genuinely selected seed families. Existing tiny-budget
+tests independently recompute complete byte payloads and check all exchange
+parities. The frozen binary SHA256 is
+`cfc05fc70ff58d98ce03066e8e3112202224b5fa6ad09128aeb191a2b3ddb390`.
+
+Native suite293573 runs the small241 case first, then C12, followed by a
+separate phase audit. All use32 cores on anode003 CPUs128-159 in
+CPU-256C768GB, matching saved baseline293555. Exact Libcint, original input
+hashes, CIAH/Davidson, BLAS1 and4GiB shared CI allowance are unchanged.
+No historical executable was rerun.
+
+| Case | Steps/HVP saved = new | Saved / new process s | Saved / new RSS GiB | Saved / new mean cores | New final energy / Eh |
+|---|---:|---:|---:|---:|---:|
+|241|3/20|1.26 /1.34|0.971 /0.953|23.58 /22.72|-230.720590533848|
+|C12 COV132|4/33|12.16 /12.07|3.451 /3.435|25.89 /26.18|-399.106646267316|
+
+C12 end-to-end improvement is only0.74%; the small241 run is6.35% slower,
+so these single-run measurements do **not** establish a uniform performance
+improvement or a substantial total speedup. Steps, CI actions and per-step
+HVP counts match; final energies differ by at most3e-12Eh. Mean cores are
+GNU-time(user+system)/wall, including OpenMP spin/wait activity, not useful
+arithmetic occupancy. No extra parallel region or per-worker array is added.
+
+The matched C12 phase audit has the same126 sweeps,38378340 targets and
+596113236-byte peak modeled sigma payload as the saved audit. Path/admission
+is0.786185s,12.50% below the saved0.898500s. Total preparation is
+1.166234s rather than1.269126s (8.11% lower); compute1.198176s and
+write2.436294s remain close to1.211904s and2.444277s. Cache scheduling was
+already about2ms and is not parallelized. The remaining output contraction
+is substantially larger than path generation; no large overall benefit can
+be inferred from optimizing only the latter.
+
+`paths-controls.csv` joins the already saved primary-partition241/C12
+controls; `paths.csv` and its comparison hold final native measurements.
+`paths-phases.csv` includes the saved, first trial and final phase scopes.
+Raw source manifests, qualification logs, affinity, native resources and
+diagnostics remain in `results/diagnostics/c12-c14-channels-20261018/`.
+
 ## Preparation breakdown and exact incremental admission
 
 New diagnostic qualification293542 and C12 audit293543 first split preparation

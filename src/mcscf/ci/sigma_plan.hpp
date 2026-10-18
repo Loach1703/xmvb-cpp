@@ -48,8 +48,10 @@ private:
   std::optional<ProductSupport::Cursor> cursor_;
   std::optional<Node> pending_;
   std::size_t next_beta_=0,next_release_=0;
-  // Exact byte coefficients of targets, packed entries and halo columns/groups.
-  long double row_bytes_=0,entry_bytes_=0,column_bytes_=0,group_bytes_=0,payload_=0;
+  // Byte admission is integer arithmetic. A rejected candidate may exceed
+  // size_t; 128 bits cover the products of the int-bounded tile dimensions.
+  using Bytes=__uint128_t;
+  Bytes row_bytes_=0,entry_bytes_=0,column_bytes_=0,group_bytes_=0,payload_=0;
   int next_alpha_=0;
 };
 

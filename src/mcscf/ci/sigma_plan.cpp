@@ -19,7 +19,7 @@ SigmaTilePlan::SigmaTilePlan(const SpinConnections& alpha,const SpinConnections&
   if (budget.packed_slabs<0 || budget.packed_slabs>budget.slabs ||
       (budget.packed_slabs && (!support || !support->has_channel_envelopes())))
     throw std::invalid_argument("packed sigma channels require a certified support");
-  const auto width=static_cast<long double>(budget.width);
+  const auto width=static_cast<Bytes>(budget.width);
   column_bytes_=sizeof(double)*width;
   group_bytes_=sizeof(int)*width;
   entry_bytes_=sizeof(double)*width*budget.packed_slabs;
@@ -65,10 +65,12 @@ bool SigmaTilePlan::pull(Node& node) {
   while (next_beta_<beta_targets_.size()) {
     const int b=beta_targets_[next_beta_];
     if (support_ && support_->has_channel_envelopes()) {
-      if (column_rows_.empty()) support_->append_column_rows(b,column_rows_,1);
+      if (column_rows_.empty()) {
+        const int upper=parity_ ? b+(parity_>0):alpha_.n_strings();
+        support_->append_column_rows(b,column_rows_,1,upper);
+      }
       while (next_alpha_<static_cast<int>(column_rows_.size())) {
         const int a=column_rows_[next_alpha_++];
-        if (parity_ && (a>b || (a==b && parity_<0))) continue;
         if (budget_.packed_slabs) {
           // One prefix certificate supplies both membership and its envelope.
           const auto [first,last]=support_->channel_envelope(a,b);
@@ -110,11 +112,15 @@ bool SigmaTilePlan::next() {
     const auto include=[](int id,const std::vector<int>& index,std::vector<int>& added) {
       if (index[id]<0) added.push_back(id);
     };
-    if (!alpha_seen_[node.alpha]) {
+    // Once a halo is the complete single-spin sector, every further neighbor
+    // is already present. This is set saturation, not selected-space closure.
+    const bool expand_alpha=halo.size()<static_cast<std::size_t>(alpha_.n_strings()) &&
+        !alpha_seen_[node.alpha];
+    if (expand_alpha) {
       include(node.alpha,halo_index,new_alpha_);
       for (const auto& edge:alpha_.singles(node.alpha)) include(edge.source,halo_index,new_alpha_);
     }
-    if (new_group) {
+    if (new_group && columns.size()<static_cast<std::size_t>(beta_.n_strings())) {
       include(node.beta,column_index,new_beta_);
       for (const auto& edge:beta_.singles(node.beta)) include(edge.source,column_index,new_beta_);
     }
@@ -132,7 +138,7 @@ bool SigmaTilePlan::next() {
       pending_=node;
       break;
     }
-    if (!alpha_seen_[node.alpha]) { alpha_seen_[node.alpha]=1; seen_alpha_.push_back(node.alpha); }
+    if (expand_alpha) { alpha_seen_[node.alpha]=1; seen_alpha_.push_back(node.alpha); }
     for (const int a:new_alpha_) { halo_index[a]=0; halo.push_back(a); }
     for (const int b:new_beta_) { column_index[b]=0; columns.push_back(b); }
     if (new_group) groups.push_back({node.beta,static_cast<int>(active.size()),static_cast<int>(active.size())});

@@ -1,5 +1,44 @@
 # Exact-demand exterior columns for tiled structure actions
 
+## Exchange quotient before column emission
+
+Let $\mathcal D_b^{(d)}$ be the exact set of caller-alpha indices emitted
+at beta column $b$ and depth $d$. In an exchange sector with parity $s=\pm1$,
+the sigma planner already uses only one representative of each exchange orbit:
+
+$$
+\mathcal Q_b^{(d)}=
+\begin{cases}
+\mathcal D_b^{(d)}\cap[0,b+1),&s=+1,\\
+\mathcal D_b^{(d)}\cap[0,b),&s=-1.
+\end{cases}
+$$
+
+The antisymmetric diagonal is absent. Unequal-spin or otherwise unrestricted
+actions retain $\mathcal D_b^{(d)}$ itself. This change intersects the already
+required support with the already required quotient **during generation**;
+it neither changes exchange weights nor drops either half of the physical
+output. No closure property of the selected VB structures is needed.
+
+For a caller ordered by colex rank, a prefix subtree has an interval
+$[r,r+\binom{k}{e})$. Its intersection with the exclusive bound $u_b$ is
+empty when $r\ge u_b$, so recursion stops before visiting that subtree. A
+complete subtree emits only $[r,\min(r+\binom{k}{e},u_b))$. For a permuted
+caller the colex interval cannot be truncated at a caller index: the existing
+rank-to-caller permutation is applied first, and only indices below $u_b$
+are inserted into the one-column bitset. Thus the permutation case is exact
+without pretending that caller indices are colex ranks. Its recursion may
+still visit rejected ranks, while its row list and bitset are bounded by the
+requested caller range. No product-sized map or numerical cache is added.
+
+The certified complete-covalent DAG uses this bounded emission in production.
+General selected families retain their own maximal-generator cursor and
+exchange test; they do not inherit the covalent certificate. The column API
+also supports the exact bound for those families. An independent original-seed
+oracle checks all bounds, both depths, ordered/permuted callers and unequal
+spin sectors. Tiny-budget sigma tests additionally check quotient targets,
+channel groups, release lifetimes and exact payloads.
+
 ## Reuse the one-generator column DAG
 
 For the complete singly occupied seed family, let $b_k$ count occupied beta

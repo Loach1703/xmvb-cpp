@@ -62,6 +62,38 @@ The legacy full payload evaluator and redundant cumulative channel sum are
 removed. A test-only oracle recomputes all live component sizes independently
 and checks equality, including packed tiles, multiple RHS and tiny budgets.
 
+### Integer admission and saturated neighborhoods
+
+All terms above are integer byte counts. The implementation evaluates the
+coefficients and incremental candidate in unsigned 128-bit integer arithmetic,
+not extended floating point. A rejected candidate can exceed the process
+`size_t` budget; narrowing occurs only for the admitted payload, which is at
+most that budget. With 32-bit signed width, slab, pair and per-spin dimensions,
+the largest coefficient contribution is bounded by a constant times the
+product of four 31-bit dimensions, hence is strictly below $2^{128}$. In the
+incremental expression the stored payload is already bounded by `size_t`,
+and new row/column/group counts are bounded by the existing int-indexed spin
+and target spaces. This preserves exact comparison at the budget boundary
+without rounded byte counts or overflowing a 64-bit rejected candidate.
+
+Let $\mathcal H\subseteq\mathcal U_\alpha$ be the current alpha halo and
+$\mathcal B\subseteq\mathcal U_\beta$ its source columns. The exact neighbor
+sets of a new target can only add elements of these same single-spin universes.
+Consequently,
+
+$$
+\mathcal H=\mathcal U_\alpha\Rightarrow\delta h=0,
+\qquad
+\mathcal B=\mathcal U_\beta\Rightarrow\delta b=0.
+$$
+
+Checking the set cardinalities is sufficient: the existing unique-index maps
+already guarantee the subset relation. After saturation, querying every
+neighbor again cannot change the union and is skipped. New target beta groups
+still contribute $\delta g$ and are budgeted normally. This identity applies
+to arbitrary selected families, regardless of whether their many-electron
+space is complete. It adds no state, cache or per-worker numerical storage.
+
 ## Shared prefix certificate
 
 For the certified complete-covalent seed family only, let $A_j$ and $B_j$ be

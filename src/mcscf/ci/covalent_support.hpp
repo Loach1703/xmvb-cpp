@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <bit>
 #include <cstddef>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -32,8 +33,9 @@ public:
    * bounded traversal stack and the caller's current tile row list. Persistent
    * storage is O(U_beta * n_orbitals * (n_alpha_electrons+1)), never U_alpha*U_beta.
    */
-  void append_column_rows(int beta,std::vector<int>& rows,int depth=0) const {
-    columns_.append(beta,rows,depth);
+  void append_column_rows(int beta,std::vector<int>& rows,int depth=0,
+      std::size_t upper=std::numeric_limits<std::size_t>::max()) const {
+    columns_.append(beta,rows,depth,upper);
   }
 
   bool contains(int alpha, int beta, int depth = 0) const noexcept {

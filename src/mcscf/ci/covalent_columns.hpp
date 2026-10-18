@@ -4,6 +4,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -58,27 +59,37 @@ public:
     }
   }
 
-  /** @brief Append sorted original-alpha indices using only current-column scratch.
+  /** @brief Append sorted original-alpha indices below an exclusive caller bound.
    * Persistent storage is O(U_beta*n_act*(n_alpha_electrons+1)+U_alpha).
    * Generating columns requires a complete alpha carrier; prefix membership
    * queries on a sampled carrier remain independent of this operation.
    */
-  void append(int beta,std::vector<int>& rows,int depth=0) const {
+  void append(int beta,std::vector<int>& rows,int depth=0,
+      std::size_t upper=std::numeric_limits<std::size_t>::max()) const {
     if (depth!=0 && depth!=1)
       throw std::invalid_argument("covalent column depth must be zero or one");
     if (alpha_order_.empty())
       throw std::logic_error("covalent column generation requires complete alpha strings");
+    upper=std::min(upper,alpha_order_.size());
+    if (!upper) return;
     const auto* nodes=branches_.data()+(2*static_cast<std::size_t>(beta)+depth)*choose_.size();
     // A one-column bitset restores a permuted caller order without sorting.
-    std::vector<std::uint64_t> indices(ordered_ ? 0:(alpha_order_.size()+63)/64,0);
+    std::vector<std::uint64_t> indices(ordered_ ? 0:(upper+63)/64,0);
     const auto visit=[&](auto&& self,int k,int e,std::size_t rank)->void {
+      // A colex subtree is a contiguous rank interval. Only an identity caller
+      // permutation lets us prune it using the caller's exclusive index bound.
+      if (ordered_ && rank>=upper) return;
       const auto edges=nodes[k*stride_+e];
       if (edges&Complete) {
         const auto count=choose_[k*stride_+e];
-        if (ordered_) for (std::size_t i=0;i<count;++i) rows.push_back(rank+i);
+        if (ordered_) {
+          const auto end=std::min(rank+count,upper);
+          for (auto i=rank;i<end;++i) rows.push_back(i);
+        }
         else for (std::size_t i=0;i<count;++i) {
           const auto index=alpha_order_[rank+i];
-          indices[index/64]|=std::uint64_t{1}<<(index%64);
+          if (static_cast<std::size_t>(index)<upper)
+            indices[index/64]|=std::uint64_t{1}<<(index%64);
         }
         return;
       }

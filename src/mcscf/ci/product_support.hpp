@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <numeric>
 #include <stdexcept>
@@ -135,17 +136,19 @@ public:
    * Complete covalent support uses its shared prefix DAG. General selections
    * use their maximal-generator paths; neither stores a product-space table.
    */
-  void append_column_rows(int beta,std::vector<int>& rows,int depth=0) const {
+  void append_column_rows(int beta,std::vector<int>& rows,int depth=0,
+      std::size_t upper=std::numeric_limits<std::size_t>::max()) const {
     if (beta<0 || static_cast<std::size_t>(beta)>=beta_.size())
       throw std::invalid_argument("product support column is outside the spin space");
     if (covalent_) {
-      covalent_->append_column_rows(beta,rows,depth);
+      covalent_->append_column_rows(beta,rows,depth,upper);
       return;
     }
     const auto begin=rows.size();
     auto cursor=column(beta,depth);
     int a,b; bool label;
-    while (cursor.next(a,b,label)) rows.push_back(a);
+    while (cursor.next(a,b,label))
+      if (static_cast<std::size_t>(a)<upper) rows.push_back(a);
     std::sort(rows.begin()+begin,rows.end());
   }
 
