@@ -15,6 +15,7 @@
 #include "vbscf/derivatives/hessian/responses/orbital/preparation.hpp"
 #include "integrals/response/types.hpp"
 #include "integrals/response/ri.hpp"
+#include "integrals/response/ri_ao.hpp"
 #include "integrals/ao/exact.hpp"
 #include "integrals/ao/ri_operator.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
@@ -81,6 +82,9 @@ private:
 
   PrecomputedDirection prepare_direction(
       Eigen::VectorXd packed_direction) const;
+
+  integrals::RiAoResponse ri_ao_response(const PrecomputedDirection& direction,
+      const Eigen::Ref<const Eigen::MatrixXd>& weighted_active) const;
 
   ActiveSpaceIntegralDirectionView build_active_integral_direction(
       const OrbitalPreparationDirectionalResult& orbital_direction,
@@ -160,13 +164,8 @@ private:
   Eigen::MatrixXd accepted_hho_gradient_symmetric_;
   mutable Eigen::MatrixXd ao_h1e_symmetrized_gradient_workspace_;
   mutable xmvb::integrals::AoH1eBatchWorkspace ao_h1e_batch_workspace_;
-  mutable xmvb::integrals::AoEffectiveOneElectronRiFusedWorkspace ri_ao_h1e_fused_workspace_;
-  mutable Eigen::MatrixXd ri_ao_h1e_forward_workspace_;
-  mutable Eigen::MatrixXd ri_ao_h1e_adjoint_workspace_;
-  mutable xmvb::integrals::AoEffectiveOneElectronRiStrategy ri_ao_h1e_strategy_ =
-      xmvb::integrals::AoEffectiveOneElectronRiStrategy::Uncalibrated;
+  mutable integrals::RiAoResponseWorkspace ri_ao_response_workspace_;
   Eigen::MatrixXd zero_core_hamiltonian_;
-  mutable std::vector<double> ao_h1e_inactive_density_gradient_workspace_;
   xmvb::integrals::ExactPackedActiveTwoElectronAdjointCache accepted_exact_two_electron_cache_;
   std::optional<xmvb::integrals::RiActiveTwoElectronResponseCache>
       accepted_ri_two_electron_cache_;

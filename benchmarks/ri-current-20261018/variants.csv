@@ -1,0 +1,5 @@
+variant,native_job,qualification_job,phase_job,status,native_csv,phase_csv
+original-ri,293579,293572,293581,saved-baseline-results-not-rerun,results.csv,c12-phases.csv
+orbital-factor-ao-response,293598,293597,,intermediate-trial,factor-response-trial.csv,
+two-stage-and-shared-one-index,293603,293603,293603,retained-source,factor-native.csv,two-stage-phases.csv
+blocked-factor-adjoint,293606,293606,293606,rejected-and-removed,block-native.csv,block-phases.csv

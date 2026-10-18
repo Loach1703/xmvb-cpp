@@ -2,6 +2,7 @@
 
 #include <Eigen/Core>
 
+#include <memory>
 #include <vector>
 
 namespace xmvb::integrals {
@@ -51,6 +52,12 @@ struct ActiveSpaceTwoElectronResult {
    * The matrix uses the project-standard column-major Eigen storage.
    */
   Eigen::MatrixXd ri_active_pair_factors;
+
+  /** @brief Budgeted accepted L_A C, shared by gradient and HVP consumers.
+   * Rows (active orbital, auxiliary), columns AO. An absent resident image
+   * uses the same exact auxiliary-tile transform, not a different operator.
+   */
+  std::shared_ptr<const Eigen::MatrixXd> ri_one_index_factors;
 
   /**
    * @brief Dense active-orbital coefficient table on AO rows.

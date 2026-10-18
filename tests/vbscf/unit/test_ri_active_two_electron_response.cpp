@@ -8,6 +8,7 @@
 #include "core/pair_index.hpp"
 #include "integrals/response/ri.hpp"
 #include "integrals/active/pair_map.hpp"
+#include "integrals/active/ri.hpp"
 
 namespace {
 
@@ -130,6 +131,14 @@ void check_direct_factor_direction() {
   }
 
   const auto accepted_result = make_result(coefficients, factorization);
+  const auto transformed=xmvb::integrals::transform_ri_active_integrals(factorization,coefficients);
+  require(is_close(transformed.ri_active_pair_factors,accepted_result.ri_active_pair_factors,2e-13),
+      "two-stage RI forward transform differs from the independent pair-map oracle");
+  const auto shared_cache=xmvb::integrals::build_ri_active_two_electron_response_cache(
+      factorization,transformed,n_active);
+  require(transformed.ri_one_index_factors &&
+      shared_cache.accepted_one_index_factors==transformed.ri_one_index_factors,
+      "RI response rebuilt or copied the forward one-index transform");
   const auto cache =
       xmvb::integrals::build_ri_active_two_electron_response_cache(
           factorization, accepted_result, n_active);
@@ -368,7 +377,7 @@ int main() {
   // Force streaming and a non-divisible tile boundary. This is the same
   // factor-native operator, not a separate numerical/reference path.
   auto tiled_cache = cache;
-  tiled_cache.accepted_one_index_factors.resize(0, 0);
+  tiled_cache.accepted_one_index_factors.reset();
   tiled_cache.auxiliary_tile_size = 3;
   require(is_close(
       xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(

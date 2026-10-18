@@ -1,8 +1,12 @@
 #include "integrals/active/ri.hpp"
 
+#include <algorithm>
+#include <memory>
 #include <stdexcept>
+#include <utility>
 #include "core/pair_index.hpp"
-#include "integrals/active/pair_map.hpp"
+#include "integrals/ao/ri_transform.hpp"
+#include "parallel/openmp.hpp"
 
 namespace xmvb::integrals {
 namespace {
@@ -60,21 +64,39 @@ ActiveSpaceTwoElectronResult transform_ri_active_integrals(
     throw std::invalid_argument("AO RI factor matrix shape mismatch");
   }
 
-  PackedOrbitalPairMapMatrix ao_pair_to_active_pair_coefficients;
-  build_packed_orbital_pair_map(
-      dense_active_coefficients,
-      &ao_pair_to_active_pair_coefficients);
-  const Eigen::MatrixXd active_pair_factors =
-      ao_ri_result.metric_whitened_ao_pair_factors *
-      ao_pair_to_active_pair_coefficients;
-
   ActiveSpaceTwoElectronResult result;
   result.representation =
       ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
   result.n_auxiliary_functions = ao_ri_result.n_auxiliary_functions;
-  result.ri_active_pair_factors = active_pair_factors;
+  const int n_aux=ao_ri_result.n_auxiliary_functions;
+  const int pairs=n_active_orbitals*(n_active_orbitals+1)/2;
+  result.ri_active_pair_factors.resize(n_aux,pairs);
+  const int workers=std::min(effective_openmp_thread_count(),n_basis_functions);
+  const std::size_t per_aux=static_cast<std::size_t>(n_basis_functions)*
+      (n_active_orbitals+workers)+n_active_orbitals*n_active_orbitals;
+  const int tile=std::min<std::size_t>(n_aux,std::max<std::size_t>(1,
+      ri_response_workspace_bytes/sizeof(double)/per_aux));
+  std::shared_ptr<Eigen::MatrixXd> resident;
+  if (static_cast<std::size_t>(n_aux)*n_active_orbitals*n_basis_functions<=
+      ri_response_workspace_bytes/sizeof(double))
+    resident=std::make_shared<Eigen::MatrixXd>(
+        static_cast<Eigen::Index>(n_aux)*n_active_orbitals,n_basis_functions);
+  for (int first=0;first<n_aux;first+=tile) {
+    const int count=std::min(tile,n_aux-first);
+    const Eigen::MatrixXd one_index=transform_ri_one_index(
+        ao_ri_result.metric_whitened_ao_pair_factors,dense_active_coefficients,first,count);
+    const Eigen::MatrixXd active=one_index*dense_active_coefficients;
+    for (int a=0;a<n_active_orbitals;++a) {
+      if (resident)
+        resident->middleRows(a*n_aux+first,count)=one_index.middleRows(a*count,count);
+      for (int b=0;b<=a;++b)
+        result.ri_active_pair_factors.col(a*(a+1)/2+b).segment(first,count)=
+            active.col(b).segment(a*count,count);
+    }
+  }
+  result.ri_one_index_factors=std::move(resident);
   result.packed_active_two_electron_integrals =
-      build_memory_dominated_pair_kernel(active_pair_factors);
+      build_memory_dominated_pair_kernel(result.ri_active_pair_factors);
   result.dense_active_coefficients = dense_active_coefficients;
 
   return result;

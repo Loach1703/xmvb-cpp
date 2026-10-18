@@ -37,6 +37,7 @@ set(XMVB_INTEGRAL_SOURCES
   integrals/ao/exact.cpp
   integrals/ao/exact_rows.cpp
   integrals/ao/ri_operator.cpp
+  integrals/ao/ri_transform.cpp
   integrals/active/one_electron.cpp
   integrals/active/exact.cpp
   integrals/active/ri.cpp
@@ -46,6 +47,7 @@ set(XMVB_INTEGRAL_SOURCES
   integrals/response/adjoint.cpp
   integrals/response/directional.cpp
   integrals/response/ri.cpp
+  integrals/response/ri_ao.cpp
   integrals/response/exchange.cpp
   integrals/response/pair_transforms.cpp
   integrals/response/ao_pair_operator.cpp
@@ -434,6 +436,11 @@ if (BUILD_TESTING)
   add_executable(test_product_frontier ${CMAKE_SOURCE_DIR}/tests/mcscf/test_product_frontier.cpp)
   target_link_libraries(test_product_frontier PRIVATE xmvb_mcscf)
   add_test(NAME product_frontier COMMAND test_product_frontier)
+
+  add_executable(test_ri_ao_response ${CMAKE_SOURCE_DIR}/tests/mcscf/test_ri_ao_response.cpp)
+  target_link_libraries(test_ri_ao_response PRIVATE xmvb_integrals)
+  add_test(NAME ri_ao_response COMMAND test_ri_ao_response)
+  set_tests_properties(ri_ao_response PROPERTIES ENVIRONMENT "OPENBLAS_NUM_THREADS=1")
 
   add_executable(
     test_input_auxiliary_basis

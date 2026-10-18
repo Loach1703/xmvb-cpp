@@ -33,8 +33,35 @@ ExactHvpOperator::State::prepare_direction(
           result.dense_orbital_tangent_context,
           n_inactive,
           orbital_input.n_active_orbitals,
-          *accepted_orbital_preparation_cache_);
+          *accepted_orbital_preparation_cache_,accepted_ri_factorization_==nullptr);
   return result;
+}
+
+integrals::RiAoResponse ExactHvpOperator::State::ri_ao_response(
+    const PrecomputedDirection& direction,
+    const Eigen::Ref<const Eigen::MatrixXd>& weighted_active) const {
+  const auto& geometry=*accepted_orbital_preparation_cache_;
+  const auto& input=current_input_->orbital_preparation_input;
+  const int n=input.n_basis_functions;
+  const int ni=(input.n_total_electrons-input.n_active_electrons)/2;
+  // Without an inactive sector, neither its density derivative nor its
+  // cotangent is consumed by the physical orbital pullback.
+  if (!ni) return {Eigen::MatrixXd::Zero(n,n),
+      Eigen::MatrixXd::Zero(n,input.n_active_orbitals)};
+  const auto dci=direction.dense_orbital_tangent_context.delta_normalized_orbitals.leftCols(ni);
+  const auto sci=geometry.basis_overlap_times_normalized.leftCols(ni);
+  std::vector<int> moving;
+  for (int i=0;i<ni;++i) if (!dci.col(i).isZero(0)) moving.push_back(i);
+  Eigen::MatrixXd delta(n,moving.size()),duals(n,moving.size());
+  for (int i=0;i<static_cast<int>(moving.size());++i) {
+    delta.col(i)=dci.col(moving[i]);
+    duals.col(i)=geometry.inactive_auxiliary.col(moving[i]);
+  }
+  // A column absent from delta C_i contributes exactly zero to delta P_i.
+  // This is structural zero pruning, with no numerical rank threshold.
+  const Eigen::MatrixXd horizontal=delta-geometry.inactive_auxiliary*(sci.transpose()*delta);
+  return integrals::apply_ri_ao_response(*accepted_ri_two_electron_cache_,
+      duals,horizontal,weighted_active,ri_ao_response_workspace_);
 }
 
 ActiveSpaceIntegralDirectionView

@@ -1,11 +1,14 @@
 #pragma once
 
+#include <cstddef>
+#include <memory>
 #include <vector>
 
 #include <Eigen/Core>
 
 #include "integrals/active/two_electron_result.hpp"
 #include "integrals/ao/ri.hpp"
+#include "integrals/ao/ri_transform.hpp"
 
 namespace xmvb::integrals {
 
@@ -29,7 +32,7 @@ struct RiActiveTwoElectronResponseCache {
   /** @brief Bounded one-index factors, row `a*n_aux+A`, column AO `mu`.
    * Empty means the identical transform is generated in auxiliary tiles.
    */
-  Eigen::MatrixXd accepted_one_index_factors;
+  std::shared_ptr<const Eigen::MatrixXd> accepted_one_index_factors;
   /** @brief Resource-derived auxiliary tile width, unrelated to accuracy. */
   int auxiliary_tile_size = 0;
 };

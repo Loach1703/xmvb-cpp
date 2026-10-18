@@ -198,8 +198,11 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
   const Eigen::Index ao_matrix_size =
       static_cast<Eigen::Index>(n_basis_functions) * n_basis_functions;
   const Eigen::Index n_directions = reduced_directions.cols();
-  Eigen::MatrixXd inactive_density_columns(ao_matrix_size, n_directions);
-  Eigen::MatrixXd symmetrized_pullback_columns(ao_matrix_size, n_directions);
+  Eigen::MatrixXd inactive_density_columns,symmetrized_pullback_columns;
+  if (!accepted_ri_factorization_) {
+    inactive_density_columns.resize(ao_matrix_size,n_directions);
+    symmetrized_pullback_columns.resize(ao_matrix_size,n_directions);
+  }
   Eigen::MatrixXd weighted_active_columns(
       n_basis_functions * n_active_orbitals, n_directions);
   std::vector<PrecomputedDirection> precomputed_directions;
@@ -213,21 +216,20 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
         precomputed.orbital_preparation_directional_result;
     dense_active_directions.push_back(
         directional_result.delta_active_auxiliary_orbitals);
-    Eigen::MatrixXd pullback_source = directional_result.delta_inactive_density;
     const Eigen::MatrixXd weighted_active =
         directional_result.delta_active_auxiliary_orbitals *
         accepted_hho_gradient_symmetric_;
     weighted_active_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(
         weighted_active.data(), weighted_active.size());
-    pullback_source.noalias() += weighted_active *
-        accepted_active_auxiliary_orbitals_.transpose();
-    inactive_density_columns.col(column) = Eigen::Map<const Eigen::VectorXd>(
-        directional_result.delta_inactive_density.data(), ao_matrix_size);
-    const Eigen::MatrixXd symmetrized_pullback =
-        pullback_source + pullback_source.transpose();
-    symmetrized_pullback_columns.col(column) =
-        Eigen::Map<const Eigen::VectorXd>(
-            symmetrized_pullback.data(), ao_matrix_size);
+    if (!accepted_ri_factorization_) {
+      Eigen::MatrixXd pullback_source=directional_result.delta_inactive_density;
+      pullback_source.noalias()+=weighted_active*accepted_active_auxiliary_orbitals_.transpose();
+      inactive_density_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(
+          directional_result.delta_inactive_density.data(),ao_matrix_size);
+      const Eigen::MatrixXd symmetric=pullback_source+pullback_source.transpose();
+      symmetrized_pullback_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(
+          symmetric.data(),ao_matrix_size);
+    }
     precomputed_directions.push_back(std::move(precomputed));
   }
 
@@ -238,26 +240,12 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
     combined_ao_columns.resize(ao_matrix_size, n_directions);
     active_projection_columns.resize(n_basis_functions * n_active_orbitals, n_directions);
     for (Eigen::Index column = 0; column < n_directions; ++column) {
-      const Eigen::Map<const Eigen::MatrixXd> source(
-          inactive_density_columns.col(column).data(),
-          n_basis_functions, n_basis_functions);
-      const Eigen::Map<const Eigen::MatrixXd> adjoint(
-          symmetrized_pullback_columns.col(column).data(),
-          n_basis_functions, n_basis_functions);
-      xmvb::integrals::apply_ao_effective_one_electron_ri_operator_adaptive(
-          source, adjoint, *accepted_ri_factorization_,
-          &ri_ao_h1e_fused_workspace_, &ri_ao_h1e_strategy_,
-          &ri_ao_h1e_forward_workspace_, &ri_ao_h1e_adjoint_workspace_);
-      std::vector<double> encoded_adjoint;
-      detail::encode_symmetric_ao_gradient(
-          ri_ao_h1e_adjoint_workspace_, &encoded_adjoint);
-      combined_ao_columns.col(column) =
-          Eigen::Map<const Eigen::VectorXd>(
-              encoded_adjoint.data(), ao_matrix_size) +
-          Eigen::Map<const Eigen::VectorXd>(ri_ao_h1e_forward_workspace_.data(), ao_matrix_size);
-      Eigen::Map<Eigen::MatrixXd> projection(
-          active_projection_columns.col(column).data(), n_basis_functions, n_active_orbitals);
-      projection.noalias() = ri_ao_h1e_forward_workspace_ * accepted_active_auxiliary_orbitals_;
+      const Eigen::Map<const Eigen::MatrixXd> weights(weighted_active_columns.col(column).data(),
+          n_basis_functions,n_active_orbitals);
+      const auto ri=ri_ao_response(precomputed_directions[column],weights);
+      combined_ao_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(ri.combined.data(),ao_matrix_size);
+      active_projection_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(
+          ri.projection.data(),n_basis_functions*n_active_orbitals);
     }
   } else {
     detail::apply_exact_ao_response(

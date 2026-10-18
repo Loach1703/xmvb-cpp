@@ -141,23 +141,6 @@ void check_raw_and_fused_operator() {
   require_close(transpose, reference_ri_action(second_adjoint, ri), 2.0e-13,
                 "reused fused RI workspace retained adjoint data");
 
-  xmvb::integrals::AoEffectiveOneElectronRiStrategy strategy =
-      xmvb::integrals::AoEffectiveOneElectronRiStrategy::Uncalibrated;
-  xmvb::integrals::apply_ao_effective_one_electron_ri_operator_adaptive(
-      source,
-      adjoint,
-      ri,
-      &workspace,
-      &strategy,
-      &forward,
-      &transpose);
-  require(
-      strategy != xmvb::integrals::AoEffectiveOneElectronRiStrategy::Uncalibrated,
-      "adaptive RI operator did not retain a calibrated strategy");
-  require_close(forward, reference_source, 3.0e-13,
-                "adaptive RI forward action mismatch");
-  require_close(transpose, reference_adjoint, 3.0e-13,
-                "adaptive RI transpose action mismatch");
 }
 
 void check_ri_builder_and_directional_action() {

@@ -65,10 +65,10 @@ void validate_cache(
     throw std::invalid_argument(
         std::string(operation) + " has inconsistent active-pair factors");
   }
-  if (cache.accepted_one_index_factors.size() != 0 &&
-      (cache.accepted_one_index_factors.rows() !=
+  if (cache.accepted_one_index_factors &&
+      (cache.accepted_one_index_factors->rows() !=
            static_cast<Eigen::Index>(n_auxiliary) * n_active ||
-       cache.accepted_one_index_factors.cols() != n_bf)) {
+       cache.accepted_one_index_factors->cols() != n_bf)) {
     throw std::invalid_argument(
         std::string(operation) + " has inconsistent one-index factors");
   }
@@ -105,7 +105,7 @@ Eigen::MatrixXd build_active_pair_adjoint(
 }
 
 /** @brief Shared factor/workspace budget; independent of numerical accuracy. */
-constexpr std::size_t response_workspace_bytes = 64ULL * 1024 * 1024;
+constexpr std::size_t response_workspace_bytes = ri_response_workspace_bytes;
 
 /** @brief Auxiliary tile width accounting for shared transforms and AO slices. */
 int planned_auxiliary_tile_width(const RiActiveTwoElectronResponseCache& cache) {
@@ -121,57 +121,20 @@ int planned_auxiliary_tile_width(const RiActiveTwoElectronResponseCache& cache) 
           1, response_workspace_bytes / sizeof(double) / elements_per_aux)));
 }
 
-/** @brief Forms L_A C without materializing full symmetric AO factors.
- *
- * Rows are grouped by active orbital, with auxiliary indices contiguous.
- * Workers own only one tiled AO slice; the output is shared.
- */
-Eigen::MatrixXd transform_one_index(
-    const RiActiveTwoElectronResponseCache& cache,
-    const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
-    int first_aux, int count) {
-  const int n_bf = cache.n_basis_functions;
-  const int n_active = cache.n_active_orbitals;
-  Eigen::MatrixXd transformed(
-      static_cast<Eigen::Index>(count) * n_active, n_bf);
-  const int workers = std::min(
-      xmvb::effective_openmp_thread_count(), n_bf);
-#pragma omp parallel num_threads(workers)
-  {
-    Eigen::MatrixXd ao_slice(count, n_bf);
-#pragma omp for schedule(static)
-    for (int mu = 0; mu < n_bf; ++mu) {
-      for (int nu = 0; nu < n_bf; ++nu) {
-        const int larger = std::max(mu, nu);
-        const int smaller = std::min(mu, nu);
-        const Eigen::Index pair =
-            static_cast<Eigen::Index>(larger) * (larger + 1) / 2 + smaller;
-        ao_slice.col(nu) =
-            cache.metric_whitened_ao_pair_factors->col(pair).segment(
-                first_aux, count);
-      }
-      Eigen::Map<Eigen::MatrixXd> output(
-          transformed.col(mu).data(), count, n_active);
-      output.noalias() = ao_slice * coefficients;
-    }
-  }
-  return transformed;
-}
-
 /** @brief Visits shared accepted factors, or generates the same tiled factors. */
 template <class Consumer>
 void visit_accepted_factors(
     const RiActiveTwoElectronResponseCache& cache, Consumer consume) {
-  if (cache.accepted_one_index_factors.size() != 0) {
+  if (cache.accepted_one_index_factors) {
     // No copy and no direction-dependent accepted transform.
-    consume(cache.accepted_one_index_factors, 0, cache.n_auxiliary_functions);
+    consume(*cache.accepted_one_index_factors, 0, cache.n_auxiliary_functions);
     return;
   }
   const int width = cache.auxiliary_tile_size;
   for (int first = 0; first < cache.n_auxiliary_functions; first += width) {
     const int count = std::min(width, cache.n_auxiliary_functions - first);
-    const Eigen::MatrixXd factors = transform_one_index(
-        cache, *cache.accepted_active_coefficients, first, count);
+    const Eigen::MatrixXd factors = transform_ri_one_index(
+        *cache.metric_whitened_ao_pair_factors, *cache.accepted_active_coefficients, first, count);
     consume(factors, first, count);
   }
 }
@@ -226,8 +189,8 @@ Eigen::MatrixXd contract_factor_adjoint(
     for (int offset = 0; offset < count; offset += width) {
       const int tile_count = std::min(width, count - offset);
       if (direction != nullptr) {
-        directional_factors = transform_one_index(
-            cache, *direction, first_aux + offset, tile_count);
+        directional_factors = transform_ri_one_index(
+            *cache.metric_whitened_ao_pair_factors, *direction, first_aux + offset, tile_count);
       }
       const std::size_t worker_elements =
           3ULL * n_bf * n_active + 2ULL * n_active * n_active;
@@ -345,22 +308,24 @@ RiActiveTwoElectronResponseCache build_ri_active_two_electron_response_cache(
       static_cast<std::size_t>(cache.n_auxiliary_functions) * n_bf *
       n_active_orbitals;
   cache.auxiliary_tile_size = planned_auxiliary_tile_width(cache);
-  if (factor_elements <= response_workspace_bytes / sizeof(double)) {
-    cache.accepted_one_index_factors.resize(
+  cache.accepted_one_index_factors=accepted_active_space_result.ri_one_index_factors;
+  if (!cache.accepted_one_index_factors && factor_elements <= response_workspace_bytes / sizeof(double)) {
+    auto resident=std::make_shared<Eigen::MatrixXd>(
         static_cast<Eigen::Index>(cache.n_auxiliary_functions) *
             n_active_orbitals,
         n_bf);
     const int width = cache.auxiliary_tile_size;
     for (int first = 0; first < cache.n_auxiliary_functions; first += width) {
       const int count = std::min(width, cache.n_auxiliary_functions - first);
-      const Eigen::MatrixXd factors = transform_one_index(
-          cache, *cache.accepted_active_coefficients, first, count);
+      const Eigen::MatrixXd factors = transform_ri_one_index(
+          *cache.metric_whitened_ao_pair_factors, *cache.accepted_active_coefficients, first, count);
       for (int a = 0; a < n_active_orbitals; ++a) {
-        cache.accepted_one_index_factors.middleRows(
+        resident->middleRows(
             static_cast<Eigen::Index>(a) * cache.n_auxiliary_functions + first,
             count) = factors.middleRows(a * count, count);
       }
     }
+    cache.accepted_one_index_factors=std::move(resident);
   }
   validate_cache(cache, "RI active-2e response cache");
   return cache;
