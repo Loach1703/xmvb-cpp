@@ -1798,13 +1798,17 @@ void check_prefix_words() {
       for (int b = 0; b < 3; ++b)
         for (int depth = 0; depth <= 1; ++depth) {
           int count = 0;
+          int first=-1,last=-1;
           bool expected = true;
           for (int k = 0; k < n; ++k) {
             count += ((alpha[a] >> k) & 1) + ((beta[b] >> k) & 1);
             expected = expected && count + depth >= k + 1;
+            if (count<k+1) { if (first<0) first=k; last=k; }
           }
           require(support.contains(a, b, depth) == expected,
                   "packed prefix comparison differs from scalar occupation counts");
+          require(support.channel_envelope(a,b)==std::pair{first,last},
+                  "packed channel envelope differs from scalar deficient prefixes");
         }
   }
 }

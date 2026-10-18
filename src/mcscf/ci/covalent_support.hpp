@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <bit>
+#include <utility>
 #include <vector>
 
 namespace xmvb::mcscf {
@@ -34,6 +36,25 @@ public:
       if ((((sum | high) - lengths_[k]) & high) != high) return false;
     }
     return true;
+  }
+
+  /** @brief First/last deficient prefix; {-1,-1} means depth-zero support.
+   * A frontier node can be reached only by a raising replacement crossing
+   * every deficient prefix. Byte-lane arithmetic shares contains()'s proof.
+   */
+  std::pair<int,int> deficient_prefixes(int alpha,int beta) const noexcept {
+    constexpr std::uint64_t high=0x8080808080808080ULL;
+    const auto* a=alpha_.data()+static_cast<std::size_t>(alpha)*chunks_;
+    const auto* b=beta_.data()+static_cast<std::size_t>(beta)*chunks_;
+    int first=-1,last=-1;
+    for (int k=0;k<chunks_;++k) {
+      const auto bad=~(((a[k]+b[k])|high)-lengths_[k])&high;
+      if (bad) {
+        if (first<0) first=8*k+std::countr_zero(bad)/8;
+        last=8*k+(63-std::countl_zero(bad))/8;
+      }
+    }
+    return {first,last};
   }
 
   std::size_t dynamic_bytes() const noexcept {

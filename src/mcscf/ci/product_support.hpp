@@ -123,6 +123,16 @@ public:
 
   bool full() const noexcept { return full_; }
 
+  /** @brief Certified frontier channel envelope, or unrestricted {-1,-1}.
+   * The covalent prefix certificate applies to the complete singly occupied
+   * seed family, not to arbitrary selected structures. Other families retain
+   * all channels; no unsupported closure assumption is made.
+   */
+  std::pair<int,int> channel_envelope(int alpha,int beta) const noexcept {
+    return covalent_ ? covalent_->deficient_prefixes(alpha,beta):std::pair{-1,-1};
+  }
+  bool has_channel_envelopes() const noexcept { return covalent_.has_value(); }
+
   /** @brief Small-query membership test; traversal should use cursor/column. */
   bool contains(int alpha, int beta, int depth = 0) const noexcept {
     if (alpha < 0 || beta < 0 || static_cast<std::size_t>(alpha) >= alpha_.size() ||

@@ -409,3 +409,67 @@ For states larger than the allowed live frontier, exact partial-image
 consumption is still required. This change does not claim that an arbitrarily
 small budget can avoid all recomputation, or that a sigma tile budget is a
 bound on whole-process RSS.
+
+## Restricting channels without dropping exterior images
+
+For a generated product node $t$, define the channel vector
+$a_t=(E y)_t$, where $E$ collects the packed spin-free one-body generators.
+The two-body channel operation and its integral adjoint are
+
+$$
+c_t=K a_t,\qquad G=\sum_t w_t a_t b_t^T.
+$$
+
+Here $b_t=(E z)_t$ is the channel vector of the other argument and $w_t$ is
+the exchange-orbit weight. If a Boolean selector $J_t$ contains every
+structurally reachable input channel, then
+
+$$
+a_t=J_t\widetilde a_t,\qquad
+c_t=(KJ_t)\widetilde a_t,\qquad
+G=\sum_t w_tJ_t\widetilde a_t\widetilde b_t^TJ_t^T.
+$$
+
+The second identity retains **all output channels**, including those leading
+outside the selected input support. It does not assume closure and does not
+set the exterior residual to zero. An output selector needs its own generator
+connectivity proof; it cannot simply be copied from the input selector.
+
+For a complete covalent seed family, let
+
+$$
+d_k(t)=N_\alpha(t;0{:}k)+N_\beta(t;0{:}k)-(k+1).
+$$
+
+Depth-zero support has every $d_k\geq0$. At a depth-one frontier node outside
+that support, the minimum is $-1$. Let $f$ and $l$ be the first and last
+negative prefixes. Every single replacement returning to depth-zero support
+must raise an electron from $q$ to $p$ with
+
+$$
+0\leq p\leq f\leq l<q<n,\qquad k_t=(f+1)(n-1-l).
+$$
+
+This rectangle is a safe channel envelope; occupations can remove additional
+channels. Supported nodes retain all $P=n(n+1)/2$ channels. Grouping nodes
+with the same $(f,l)$ allows an ordinary dense GEMM with $KJ_t$, changing its
+channel arithmetic from $O(m_tP^2)$ to $O(m_tPk_t)$. This is an exact
+support-dependent work reduction, not a smaller asymptotic power in $n$ for
+every family. The potentially smaller $O(m_tk_t^2)$ adjoint is a subsequent
+step, not part of the initial implementation.
+
+The current envelope certificate is specific to a complete covalent seed
+family. Arbitrarily selected and ionic seed families keep their original
+exact channel operation until their own channel envelopes are constructed.
+The grouped multiplication interface itself is independent of the family.
+Kernel panels are shared, charged against the existing action budget and
+never replicated per worker. Packing reuses disjoint pieces of the consumed
+input halo after a team barrier; source and output channel slabs are unchanged.
+
+An exhaustive C8 diagnostic and a deterministic C16 stride-257 census compare
+the envelope with explicitly enumerated supported one-generator neighbors.
+For C16,197498 sampled nodes out of50756849 exchange-quotient targets have
+mean exact input-channel count39.2394, versus136 unrestricted channels.
+The conservative envelope mean is60.7388. Its predicted channel multiplication
+work is44.66% of unrestricted work. This is a FLOP estimate, not a measured
+sigma or SCF speedup; packing, support traversal and exterior transforms remain.

@@ -13,6 +13,7 @@
 #include "core/timing.hpp"
 #include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma_plan.hpp"
+#include "mcscf/ci/channel_product.hpp"
 
 namespace xmvb::mcscf {
 namespace {
@@ -161,6 +162,22 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
 
   const auto& beta_graph = beta_connections();
   const int pairs = hamiltonian_pair_kernel_.rows();
+  const std::size_t n=n_orbitals_;
+  const std::size_t envelopes=n*(n-1)*(n+1)*(n+2)/24;
+  const auto directions=std::count_if(requests.begin(),requests.end(),
+      [](const auto& request) { return request.direction!=nullptr; });
+  const std::size_t kernel_bytes=sizeof(double)*pairs*envelopes*(1+directions);
+  // Packing is optional arithmetic scheduling, not a change of CI space.
+  // Charge shared immutable kernel panels to this action's existing budget.
+  const bool restricted_channels=support && support->has_channel_envelopes() &&
+      kernel_bytes<=workspace_bytes/8;
+  if (restricted_channels) workspace_bytes-=kernel_bytes;
+  const detail::ChannelProduct channel_product(hamiltonian_pair_kernel_,n_orbitals_,restricted_channels);
+  std::vector<detail::ChannelProduct> directional_products;
+  directional_products.reserve(requests.size());
+  for (const auto& request:requests)
+    directional_products.emplace_back(request.direction ? request.direction->hamiltonian_pair_kernel_:
+        hamiltonian_pair_kernel_,n_orbitals_,restricted_channels && request.direction);
   std::vector<Eigen::MatrixXd> kernel_adjoints(requests.size());
   if (collect_integrals) for (auto& gradient:kernel_adjoints)
     gradient=Eigen::MatrixXd::Zero(pairs,pairs);
@@ -192,6 +209,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   auto& active_support=plan.active_support;
   auto& released_columns=plan.released;
   std::vector<int> diagonal_rows,same_group,offsets,positions,target_index;
+  std::vector<int> channel_groups;
   std::vector<Eigen::Index> beta_offsets;
   std::vector<Incoming> incoming;
   ChannelWorkspace workspace(workspace_bytes);
@@ -211,6 +229,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   int gram_partitions=0,gram_extent=0;
   std::size_t batches = 0, source_columns = 0, source_elements = 0, peak_payload = 0;
   std::size_t targets = 0, unsupported_targets = 0, identity_halo_targets=0,beta_map_bytes=0;
+  std::size_t source_channels=0;
   Clock::time_point compute_start, prepare_start, gram_start;
 #pragma omp parallel if(workers > 1) num_threads(workers)
   {
@@ -234,6 +253,15 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             }
             if (!active.empty()) {
               count = active.size();
+              if (restricted_channels) {
+                channel_groups.assign(count,0);
+                for (int i=0;i<count;++i) if (!active_support[i]) {
+                  const auto [first,last]=support->channel_envelope(active[i],groups[group_index[i]].beta);
+                  channel_groups[i]=first<0 ? 0:1+first*n_orbitals_+last;
+                }
+                for (const int group:channel_groups) source_channels+=group ?
+                    ((group-1)/n_orbitals_+1)*(n_orbitals_-1-(group-1)%n_orbitals_):pairs;
+              }
               n_halo = halo.size();
               n_columns = columns.size();
               panel_size = static_cast<std::size_t>(n_halo) * n_columns * width;
@@ -259,6 +287,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               source_columns += n_columns;
               source_elements += panel_size;
               peak_payload = std::max(peak_payload, required * sizeof(double) +
+                  (restricted_channels ? kernel_bytes:0) +
                   sizeof(int) * n_halo * groups.size());
 
               same_group.assign(n_columns, -1);
@@ -455,7 +484,23 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             { gram_time+=seconds(gram_start,tick()); gram_tiles+=parts*blocks*blocks; }
           }
         }
-        if (temporal_in_place && last>first) {
+        // All scatter/Gram readers must finish before their shared halo can
+        // become packing scratch. Each worker then owns one disjoint slice.
+        if (restricted_channels) {
+#pragma omp barrier
+          const auto capacity=scratch_size/team;
+          double* scratch=workspace.get()+thread*capacity;
+          if (add_columns) channel_product.apply(scattered,transformed,first,last,
+              channel_groups,scratch,capacity);
+          if (direction && (add_columns || add_forcing)) {
+            auto output=temporal_in_place ? state_channels:scattered;
+            directional_products[request_id].apply(state_channels,output,first,last,
+                channel_groups,scratch,capacity);
+            if (add_columns && last>first)
+              transformed.middleRows(first,last-first)+=output.middleRows(first,last-first);
+          }
+        }
+        if (!restricted_channels && temporal_in_place && last>first) {
           const int owners=std::min(team,count*width);
           const int owner=count*width<team ? first:thread;
           const Eigen::Index rows=scratch_size/(static_cast<std::size_t>(owners)*pairs);
@@ -470,10 +515,10 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                 state_channels.middleRows(first,last-first);
           }
         }
-        if (!temporal_in_place && add_columns && last > first)
+        if (!restricted_channels && !temporal_in_place && add_columns && last > first)
           transformed.middleRows(first, last - first).noalias() =
               scattered.middleRows(first, last - first) * hamiltonian_pair_kernel_.transpose();
-        if (!temporal_in_place && direction && (add_columns || add_forcing) && last > first) {
+        if (!restricted_channels && !temporal_in_place && direction && (add_columns || add_forcing) && last > first) {
           // Base K*A has consumed A. Reuse its slab for deltaK*B, then add to C.
           scattered.middleRows(first, last - first).noalias() =
               state_channels.middleRows(first, last - first) *
@@ -595,14 +640,16 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
         "skipped_diagonal_scatters=%zu,gram=%.9f,gram_tiles=%zu,"
         "identity_halo_targets=%zu,beta_map_bytes=%zu,gram_partitions=%d,"
         "gram_extent=%d,gram_scratch_bytes=%zu,workspace_reused=%d,"
-        "workspace_allocations=%zu,workspace_bytes=%zu\n",
+        "workspace_allocations=%zu,workspace_bytes=%zu,"
+        "restricted_channels=%d,source_channels=%zu,channel_kernel_bytes=%zu\n",
         batches, source_columns, source_elements, peak_payload,
         prepare_time, read_time, compute_time, write_time, targets, exchange_parity,
         unsupported_targets * static_cast<std::size_t>(width) *
             (requests.size() + static_cast<std::size_t>(collect_integrals && static_cast<bool>(state))),
         gram_time,gram_tiles,identity_halo_targets,beta_map_bytes,
         gram_partitions,gram_extent,gram_scratch_bytes,
-        static_cast<int>(workspace.reused()),workspace.allocations(),workspace.bytes());
+        static_cast<int>(workspace.reused()),workspace.allocations(),workspace.bytes(),
+        static_cast<int>(restricted_channels),source_channels,restricted_channels ? kernel_bytes:0);
   std::vector<DirectCiIntegralAdjoint> results(requests.size());
   if (collect_integrals) for (std::size_t r=0;r<requests.size();++r)
     results[r]=pullback_channel_kernel(kernel_adjoints[r]);
