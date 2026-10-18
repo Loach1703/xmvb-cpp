@@ -105,6 +105,7 @@ bool SigmaTilePlan::next() {
   for (const int a:seen_alpha_) alpha_seen_[a]=0;
   groups.clear(); active.clear(); group_index.clear(); halo.clear(); columns.clear();
   active_support.clear(); seen_alpha_.clear(); released.clear(); channel_groups.clear(); payload_=0;
+  diagonal_rows.clear(); unsupported_targets=0;
   Node node;
   while (pull(node)) {
     new_alpha_.clear(); new_beta_.clear();
@@ -142,6 +143,8 @@ bool SigmaTilePlan::next() {
     for (const int a:new_alpha_) { halo_index[a]=0; halo.push_back(a); }
     for (const int b:new_beta_) { column_index[b]=0; columns.push_back(b); }
     if (new_group) groups.push_back({node.beta,static_cast<int>(active.size()),static_cast<int>(active.size())});
+    if (parity_ && node.alpha==node.beta) diagonal_rows.push_back(active.size());
+    unsupported_targets+=!node.supported;
     active.push_back(node.alpha);
     active_support.push_back(node.supported);
     payload_=bytes;

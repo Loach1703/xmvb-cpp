@@ -33,6 +33,9 @@ public:
   std::vector<int> active,group_index,halo,columns,halo_index,column_index,released;
   std::vector<unsigned char> active_support;
   std::vector<int> channel_groups;
+  /** Exchange-fixed rows and support counts, fused into node admission. */
+  std::vector<int> diagonal_rows;
+  std::size_t unsupported_targets=0;
 
 private:
   struct Node { int alpha,beta; bool supported; int group,channels; };

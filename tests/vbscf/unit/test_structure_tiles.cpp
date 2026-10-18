@@ -2008,6 +2008,19 @@ void check_sigma_payload(const xmvb::mcscf::detail::SigmaTilePlan& plan,
       "incremental sigma admission differs from complete byte accounting");
 }
 
+/** @brief Admission metadata equals an independent completed-tile traversal. */
+void check_sigma_metadata(const xmvb::mcscf::detail::SigmaTilePlan& plan,int parity) {
+  std::vector<int> diagonal;
+  std::size_t unsupported=0;
+  for (const auto& group:plan.groups)
+    for (int i=group.begin;i<group.end;++i) {
+      unsupported+=!plan.active_support[i];
+      if (parity && plan.active[i]==group.beta) diagonal.push_back(i);
+    }
+  require(plan.diagonal_rows==diagonal && plan.unsupported_targets==unsupported,
+      "admission metadata differs from independent full tile traversal");
+}
+
 void check_sigma_tile_plan() {
   using namespace xmvb::mcscf;
   SpinConnections graph;
@@ -2029,6 +2042,7 @@ void check_sigma_tile_plan() {
         std::array<bool,4> retired{};
         while (plan.next()) {
           check_sigma_payload(plan,{2,10,2,bytes},4);
+          check_sigma_metadata(plan,parity);
           require(plan.payload_bytes()<=bytes,"sigma plan exceeds numeric payload budget");
           for (const int column:plan.columns)
             require(!retired[column],"sigma plan reads a retired column");
@@ -2164,6 +2178,7 @@ void check_packed_sigma_tile_plan() {
       std::array<int,36> visits{};
       while (plan.next()) {
         check_sigma_payload(plan,{2,10,packed+1,bytes,packed},4);
+        check_sigma_metadata(plan,parity);
         require(plan.payload_bytes()<=bytes,"packed sigma plan exceeds shared budget");
         require(plan.channel_groups.size()==plan.active.size(),"missing packed channel groups");
         for (int i=0;i<static_cast<int>(plan.active.size());++i) {

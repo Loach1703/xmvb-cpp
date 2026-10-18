@@ -197,7 +197,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   auto& column_index=plan.column_index;
   auto& active_support=plan.active_support;
   auto& released_columns=plan.released;
-  std::vector<int> diagonal_rows,same_group,offsets,positions,image_index;
+  const auto& diagonal_rows=plan.diagonal_rows;
+  std::vector<int> same_group,offsets,positions,image_index;
   std::vector<detail::SigmaGatherRow> target_rows;
   const auto& channel_groups=plan.channel_groups;
   detail::ChannelLayout channel_layout;
@@ -238,13 +239,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             profiling::ScopedPhase phase(profiling::Phase::CiTilePaths);
             finished=!plan.next();
           }
-          diagonal_rows.clear();
           if (!failure) {
-            for (int i=0;i<static_cast<int>(active.size());++i) {
-              unsupported_targets+=!active_support[i];
-              if (exchange_parity && active[i]==groups[group_index[i]].beta)
-                diagonal_rows.push_back(i);
-            }
+            unsupported_targets+=plan.unsupported_targets;
             if (!active.empty()) {
               count = active.size();
               {
@@ -289,7 +285,11 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               image_index.assign(static_cast<std::size_t>(n_halo)*groups.size()*width,-1);
               target_rows.resize(count);
               offsets.assign(n_columns + 1, 0);
-              for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
+              // Each beta group owns a disjoint target interval and image-map
+              // slice. Borrow the existing team; no per-worker arrays or
+              // nested parallel region are needed. Tasks finish before sigma.
+              const int index_workers=coarse_openmp_thread_count(team,count);
+              cooperative_openmp_for(groups.size(),index_workers,[&](std::ptrdiff_t g) {
                 same_group[column_index[groups[g].beta]] = g;
                 for (int i = groups[g].begin; i < groups[g].end; ++i) {
                   const int image=channel_layout.image(i);
@@ -309,7 +309,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                 const auto end=target_rows.begin()+groups[g].end;
                 const auto before=[](const auto& a,const auto& b) { return a.alpha<b.alpha; };
                 if (!std::is_sorted(begin,end,before)) std::sort(begin,end,before);
-              }
+              });
               indices_phase.stop();
               profiling::ScopedPhase links_phase(profiling::Phase::CiTileLinks);
               for (const auto& group:groups)
