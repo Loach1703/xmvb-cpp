@@ -1989,6 +1989,24 @@ void check_generic_product_support() {
           "63-orbital path generation failed");
 }
 
+/** @brief Independent full-size oracle for incremental byte admission. */
+void check_sigma_payload(const xmvb::mcscf::detail::SigmaTilePlan& plan,
+    xmvb::mcscf::detail::SigmaTileBudget budget,int n) {
+  using xmvb::mcscf::detail::SigmaGatherRow;
+  const std::size_t rows=plan.active.size(),width=budget.width;
+  std::size_t entries=0;
+  for (const int group:plan.channel_groups)
+    entries+=group ? ((group-1)/n+1)*(n-1-(group-1)%n):budget.pairs;
+  const std::size_t input=sizeof(double)*width*plan.halo.size()*plan.columns.size();
+  const std::size_t images=sizeof(double)*width*rows*budget.pairs*(budget.slabs-budget.packed_slabs);
+  const std::size_t packed=sizeof(double)*width*entries*budget.packed_slabs;
+  const std::size_t indices=sizeof(int)*width*plan.halo.size()*plan.groups.size();
+  const std::size_t layout=budget.packed_slabs ?
+      rows*(sizeof(int)+width*(sizeof(int)+sizeof(std::size_t))):0;
+  require(plan.payload_bytes()==input+images+packed+indices+layout+rows*sizeof(SigmaGatherRow),
+      "incremental sigma admission differs from complete byte accounting");
+}
+
 void check_sigma_tile_plan() {
   using namespace xmvb::mcscf;
   SpinConnections graph;
@@ -2009,6 +2027,7 @@ void check_sigma_tile_plan() {
         std::array<int,16> visits{};
         std::array<bool,4> retired{};
         while (plan.next()) {
+          check_sigma_payload(plan,{2,10,2,bytes},4);
           require(plan.payload_bytes()<=bytes,"sigma plan exceeds numeric payload budget");
           for (const int column:plan.columns)
             require(!retired[column],"sigma plan reads a retired column");
@@ -2092,6 +2111,7 @@ void check_packed_sigma_tile_plan() {
       detail::SigmaTilePlan plan(graph,graph,&support,parity,{2,10,packed+1,bytes,packed},true);
       std::array<int,36> visits{};
       while (plan.next()) {
+        check_sigma_payload(plan,{2,10,packed+1,bytes,packed},4);
         require(plan.payload_bytes()<=bytes,"packed sigma plan exceeds shared budget");
         require(plan.channel_groups.size()==plan.active.size(),"missing packed channel groups");
         for (int i=0;i<static_cast<int>(plan.active.size());++i) {

@@ -20,26 +20,28 @@ set -u
 frozen=$(realpath -e "$1")
 label=$2
 mode=$3
-[[ $label == c12-cov || $label == c12-ion02 || $label == c12-full ]] || exit 64
+[[ $label == c12-cov || $label == c12-ion02 || $label == c12-full || $label == 241 ]] || exit 64
 [[ $mode == phase || $mode == profile ]] || exit 64
 artifact="$SLURM_SUBMIT_DIR/audit-$SLURM_JOB_ID"
 mkdir -p "$artifact/bin"
 cp "$frozen/bin/xmvb-cpp.exe" "$artifact/bin/"
 cp "$frozen/source.sha256" "$frozen/CMakeCache.txt" "$artifact/"
-cp "$SLURM_SUBMIT_DIR/cases/$label/input.xmi" "$artifact/"
+input="$SLURM_SUBMIT_DIR/cases/$label/input.xmi"
+if [[ $label == 241 ]]; then input="$SLURM_SUBMIT_DIR/../../testdata/vbscf/241_vb.xmi"; fi
+cp "$input" "$artifact/input.xmi"
 cp "$SLURM_SUBMIT_DIR/cc-pvdz.gbs" "$artifact/"
 cd "$artifact"
 hostname > node.txt
 lscpu > cpu.txt
 module list > modules.txt 2>&1
 export LD_LIBRARY_PATH=/home/guqqgroup/taoxia/xmvb-runs/porphine-current-20261017-c491230b/bundle/lib:${LD_LIBRARY_PATH:-}
-export LC_ALL=C OMP_NUM_THREADS=32 OMP_PLACES=cores OMP_PROC_BIND=close
+export LC_ALL=C OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK" OMP_PLACES=cores OMP_PROC_BIND=close
 export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
 export XMVB_PHASE_TIMING=1 XMVB_CIAH_TRACE=scalar
 export CI_AUDIT_ARTIFACT="$artifact" CI_AUDIT_MODE="$mode"
 env | sort > environment.txt
 sha256sum bin/xmvb-cpp.exe input.xmi cc-pvdz.gbs > hashes.txt
-srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores bash -se <<'RUN'
+srun --exact --ntasks=1 --cpus-per-task="$SLURM_CPUS_PER_TASK" --cpu-bind=cores bash -se <<'RUN'
 cd "$CI_AUDIT_ARTIFACT"
 grep Cpus_allowed_list /proc/self/status > affinity.txt
 command=(./bin/xmvb-cpp.exe input.xmi --optimizer-backend ciah

@@ -1,5 +1,106 @@
 # Native C12/C14 follow-up
 
+## Preparation breakdown and exact incremental admission
+
+New diagnostic qualification293542 and C12 audit293543 first split preparation
+into explicit scopes without changing solver policy or physical work. The
+large scope is path generation **and admission**, not cache scheduling:
+
+| C12 diagnostic scope | Instrumented before / optimized matched wall s |
+|---|---:|
+| Path emission, halo discovery and admission |1.105868 /0.898500|
+| Channel layout |0.160261 /0.155962|
+| Numerical workspace acquisition |0.000102 /0.000102|
+| Target/image indices |0.158067 /0.154660|
+| Beta adjacency |0.015035 /0.015314|
+| Input-cache scheduling |0.001765 /0.001771|
+| Numerical column generation |0.263879 /0.260023|
+| Cooperative column copying |0.009167 /0.009045|
+| Input-cache insertion |0.008478 /0.008811|
+
+The path scope includes budget arithmetic and final halo indexing; it is not
+column emission alone. Numerical generation/copying callbacks may execute
+parallel tasks under the single cache coordinator. Their wall times must not
+be called purely serial cache overhead. The independently scoped cache stages
+are not all additive to the outer preparation timer, which excludes reads.
+Saved sampling293400 remains only a qualitative call-path lead because of
+its timer warning; these exact stage scopes provide the timing attribution.
+
+The implementation removes two evidenced redundancies. Tile byte coefficients
+are action constants, so admission updates only the exact new row/channel and
+halo/column/group contributions instead of rebuilding the whole rectangular
+payload expression for every target. Frontier membership and channel envelope
+share one prefix certificate in the already-certified complete-covalent path;
+pending nodes retain that certificate across tile boundaries. Arbitrary
+selected families retain their own labels and also use the general incremental
+byte identity. `article/sigma_tile_admission.md` gives the full derivation.
+The obsolete full-payload evaluator and redundant cumulative channel sum are
+deleted. Added state is O(1), with no new numerical cache, per-worker carrier,
+larger tile, precision change, solver-policy change or new parallel region.
+
+Optimized qualification293544 passes13/13 tests in5.33s. A new independent
+oracle recomputes every payload component from actual dimensions and channel
+groups, covering unrestricted/selected support, exchange parity, packed slabs,
+multiple RHS and tiny budgets. Existing sigma, gradients/HVP, adjoints,
+transport and output checks also pass. The qualified frozen binary SHA256 is
+`1c935d8a1bfdd9d6e8fb39318c670b8163d06991f369d053f8f8779dbf8f89d2`.
+
+Primary native suite293555 and phase audit293555 use anode003 CPUs128-159,
+the SAME node/core mask and CPU-256C768GB partition as the saved excellent
+controls293520_0 /293523_3. The single32-core allocation is retained between
+cases to avoid losing the contiguous cores to another allocation. Each case
+starts a separate process and is measured independently by GNU time; this is
+not a sum of phase timings. Exact Libcint/cc-pVDZ, CIAH/Davidson, BLAS1,
+original inputs and4GiB shared CI allowance remain unchanged.
+
+| Case | Steps/HVP before = new | Final new energy / Eh | Saved / new process s | RSS before / new GiB | Average cores before / new |
+|---|---:|---:|---:|---:|---:|
+| C12 COV132 |4/33|-399.106646267319|12.38 /12.16|3.427 /3.451|25.48 /25.89|
+| C14 COV429 |4/46|-535.672671742978|173.82 /168.88|8.153 /8.139|25.23 /25.79|
+
+Observed end-to-end reductions are1.78% /2.84%. All initial energies match,
+final energy differences are at most6e-12Eh, CI counts79/113 and per-step
+HVP counts6:16:8:3 /5:10:28:3 match. Mean cores are GNU-time(user+system)/wall,
+not a measurement of useful arithmetic: OpenMP spin/wait CPU also contributes.
+The enhanced `summarize.py` now retains thread count, mean cores and occupied
+fraction, with input-hash, energy and convergence guards still enabled.
+
+Matched C12 phase audits293543 /293555 both use anode003 CPUs128-159 and
+complete126 sweeps over38378340 targets. Path/admission falls18.75%; total
+preparation falls1.484064->1.269126s (14.48%). Compute1.209196->1.211904s and
+write2.463435->2.444277s remain approximately level. Thus the demonstrated
+change is reduced preparation, not a new sigma kernel or parallel strategy.
+`admission-phases.csv` retains every detailed scope and placement.
+
+Resource-placement evidence is preserved, not mixed into that comparison.
+The original pending array293545 was canceled when anode003 filled. While
+waiting for contiguous cores, the SAME optimized binary ran on
+CPU-256C256GB: C12 job293549_0 on anode101 took17.70s and C14 job293550_3 on
+anode102 took258.16s. Both use EPYC9755 and a single NUMA domain but have
+different partition/hardware configurations and are not same-configuration
+code-regression controls. Audit293551 has the same126 sweeps/targets and
+0.909002s path time, but3.127096s compute rather than the matched partition's
+1.211904s. This confirms why its longer total cannot be assigned simply to
+path scheduling. `admission-other-partition.csv` and its comparison retain
+those outcomes explicitly. No old executable is rerun anywhere in this round.
+
+The same new binary also runs the smaller existing241 input. On anode101
+in CPU-256C256GB,8 cores take2.29s (mean6.48 cores,0.769GiB RSS), whereas
+32 cores take2.45s (mean15.40,0.959GiB), with identical3-step/20-HVP work and
+energies agreeing within1e-12Eh. This single pair does not demonstrate a
+32-core benefit for this small workload. The32-core primary-partition run
+on anode003 takes1.26s (mean23.58,0.971GiB), again3/20; it is not mixed into
+the anode101 scaling pair. A primary-partition8-core check293565_5 on
+anode003 CPUs128-135 takes2.02s (mean7.00,0.846GiB), also3/20, versus the
+same node's32-core1.26s. Thus the primary-partition pair DOES benefit from
+32 cores (1.60x versus8), whereas the other partition's pair does not.
+Neither pair is evidence of universal negative scaling or ideal linear
+scaling. `admission-small.csv` records all four hashes and placements.
+The run/audit scripts accept the Slurm-requested core count rather than
+hardcoding32; the native driver can also run explicit cases within a retained
+allocation. The next parallel question is useful task granularity and
+remaining path emission, not parallelizing a roughly2ms cache lookup stage.
+
 ## Alpha-adjoint image-map composition
 
 The alpha gather now reads physical grouped image rows directly. The existing

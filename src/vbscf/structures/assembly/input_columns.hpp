@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <span>
 
+#include "core/timing.hpp"
 #include "vbscf/structures/assembly/column_tiles.hpp"
 
 namespace xmvb::vb::detail {
@@ -31,16 +32,19 @@ public:
 
   void prepare(const std::vector<int>& betas) {
     std::vector<int> missing;
+    profiling::ScopedPhase phase(profiling::Phase::CiCacheSchedule);
     for (const int beta:betas)
       if (support_[beta] && !cache_.contains(beta)) missing.push_back(beta);
+    phase.stop();
     produce(missing,{});
   }
 
   void read(const std::vector<int>& betas,const std::vector<int>& rows,
       Eigen::Ref<Eigen::MatrixXd> values) {
-    for (int i=0;i<static_cast<int>(rows.size());++i) positions_[rows[i]]=i;
     std::vector<int> missing,ready;
     std::vector<const ColumnTile*> hits;
+    profiling::ScopedPhase schedule(profiling::Phase::CiCacheSchedule);
+    for (int i=0;i<static_cast<int>(rows.size());++i) positions_[rows[i]]=i;
     for (int i=0;i<static_cast<int>(betas.size());++i) {
       const int beta=betas[i];
       columns_[beta]=i;
@@ -50,7 +54,9 @@ public:
         hits.push_back(&cache_.get(beta));
       } else missing.push_back(beta);
     }
+    schedule.stop();
     const auto copy=[&](std::span<const int> keys,const auto& tile_at) {
+      profiling::ScopedPhase phase(profiling::Phase::CiCacheCopy);
       const int workers=cooperative_openmp_thread_count();
       cooperative_openmp_for(keys.size()*width_,workers,[&](std::ptrdiff_t packed) {
         const int j=packed/width_,v=packed%width_;
@@ -72,8 +78,11 @@ public:
     produce(missing,[&](std::span<const int> keys,const std::vector<ColumnTile>& tiles) {
       copy(keys,[&](int i)->const ColumnTile& { return tiles[i]; });
     });
-    for (const int row:rows) positions_[row]=-1;
-    for (const int beta:betas) columns_[beta]=-1;
+    {
+      profiling::ScopedPhase phase(profiling::Phase::CiCacheSchedule);
+      for (const int row:rows) positions_[row]=-1;
+      for (const int beta:betas) columns_[beta]=-1;
+    }
   }
 
   const ColumnPanels& cache() const noexcept { return cache_; }
@@ -85,8 +94,11 @@ private:
   void produce(std::span<const int> missing,const Consume& consume) {
     for (std::size_t begin=0;begin<missing.size();begin+=extent_) {
       const auto keys=missing.subspan(begin,std::min<std::size_t>(extent_,missing.size()-begin));
+      profiling::ScopedPhase generate(profiling::Phase::CiCacheGenerate);
       auto tiles=build_(keys);
+      generate.stop();
       if (consume) consume(keys,tiles);
+      profiling::ScopedPhase phase(profiling::Phase::CiCacheInsert);
       for (std::size_t j=0;j<keys.size();++j) cache_.insert(keys[j],std::move(tiles[j]));
     }
   }

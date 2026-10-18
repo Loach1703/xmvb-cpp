@@ -236,7 +236,10 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
       {
         try {
           prepare_start=tick();
-          finished=!plan.next();
+          {
+            profiling::ScopedPhase phase(profiling::Phase::CiTilePaths);
+            finished=!plan.next();
+          }
           diagonal_rows.clear();
           if (!failure) {
             for (int i=0;i<static_cast<int>(active.size());++i) {
@@ -246,7 +249,10 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             }
             if (!active.empty()) {
               count = active.size();
-              channel_layout.reset(channel_product,channel_groups,count,width);
+              {
+                profiling::ScopedPhase phase(profiling::Phase::CiTileLayout);
+                channel_layout.reset(channel_product,channel_groups,count,width);
+              }
               packed_size=channel_layout.entries();
               source_channels+=packed_size/width;
               n_halo = halo.size();
@@ -257,7 +263,10 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               source_capacity=has_forcing ? channel_size:packed_size;
               const std::size_t required=scratch_size+source_capacity+
                   (separate_output ? packed_size:0)+channel_size;
-              workspace.reserve(required);
+              {
+                profiling::ScopedPhase phase(profiling::Phase::CiTileStorage);
+                workspace.reserve(required);
+              }
               Eigen::Map<Eigen::MatrixXd> input(workspace.get(), n_halo,
                   static_cast<Eigen::Index>(n_columns) * width);
               // Each distinct source column is read once per batch. Callbacks
@@ -277,6 +286,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               peak_payload=std::max(peak_payload,plan.payload_bytes()+
                   (restricted_channels ? kernel_bytes:0));
 
+              profiling::ScopedPhase indices_phase(profiling::Phase::CiTileIndices);
               same_group.assign(n_columns, -1);
               image_index.assign(static_cast<std::size_t>(n_halo)*groups.size()*width,-1);
               target_rows.resize(count);
@@ -301,9 +311,12 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                 const auto end=target_rows.begin()+groups[g].end;
                 const auto before=[](const auto& a,const auto& b) { return a.alpha<b.alpha; };
                 if (!std::is_sorted(begin,end,before)) std::sort(begin,end,before);
-                for (const auto& edge:beta_graph.singles(groups[g].beta))
-                  ++offsets[column_index[edge.source] + 1];
               }
+              indices_phase.stop();
+              profiling::ScopedPhase links_phase(profiling::Phase::CiTileLinks);
+              for (const auto& group:groups)
+                for (const auto& edge:beta_graph.singles(group.beta))
+                  ++offsets[column_index[edge.source]+1];
               for (int i = 1; i <= n_columns; ++i) offsets[i] += offsets[i - 1];
               positions = offsets;
               incoming.resize(offsets.back());
@@ -322,6 +335,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                       static_cast<std::size_t>(n_halo)*column_index[links[link].source]*width);
                 }
               }
+              links_phase.stop();
               profiling::record_matrix_shape(profiling::Phase::CiSigma, count * width, team);
               prepare_time -= batch_read_time;
             }

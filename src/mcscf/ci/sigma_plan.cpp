@@ -19,6 +19,14 @@ SigmaTilePlan::SigmaTilePlan(const SpinConnections& alpha,const SpinConnections&
   if (budget.packed_slabs<0 || budget.packed_slabs>budget.slabs ||
       (budget.packed_slabs && (!support || !support->has_channel_envelopes())))
     throw std::invalid_argument("packed sigma channels require a certified support");
+  const auto width=static_cast<long double>(budget.width);
+  column_bytes_=sizeof(double)*width;
+  group_bytes_=sizeof(int)*width;
+  entry_bytes_=sizeof(double)*width*budget.packed_slabs;
+  row_bytes_=sizeof(SigmaGatherRow)+sizeof(double)*width*
+      (budget.slabs-budget.packed_slabs)*budget.pairs;
+  if (budget.packed_slabs)
+    row_bytes_+=sizeof(int)+width*(sizeof(int)+sizeof(std::size_t));
   if (support_ && support_->has_channel_envelopes()) {
     // Every beta column belongs to the complete singly occupied family.
     beta_targets_=support_->columns();
@@ -48,20 +56,8 @@ SigmaTilePlan::SigmaTilePlan(const SpinConnections& alpha,const SpinConnections&
   }
 }
 
-long double SigmaTilePlan::payload(std::size_t rows,std::size_t h,std::size_t b,std::size_t g,
-    std::size_t entries) const {
-  const long double input=static_cast<long double>(budget_.width)*h*b;
-  const long double channels=static_cast<long double>(budget_.width)*
-      ((budget_.slabs-budget_.packed_slabs)*static_cast<long double>(rows)*budget_.pairs+
-       budget_.packed_slabs*static_cast<long double>(entries));
-  const long double maps=budget_.packed_slabs ?
-      static_cast<long double>(rows)*(sizeof(int)+budget_.width*(sizeof(int)+sizeof(std::size_t))):0;
-  return sizeof(double)*(input+channels)+sizeof(int)*static_cast<long double>(budget_.width)*h*g+
-      sizeof(SigmaGatherRow)*static_cast<long double>(rows)+maps;
-}
-
 std::size_t SigmaTilePlan::payload_bytes() const {
-  return static_cast<std::size_t>(payload(active.size(),halo.size(),columns.size(),groups.size(),channels_));
+  return static_cast<std::size_t>(payload_);
 }
 
 bool SigmaTilePlan::pull(Node& node) {
@@ -73,7 +69,12 @@ bool SigmaTilePlan::pull(Node& node) {
       while (next_alpha_<static_cast<int>(column_rows_.size())) {
         const int a=column_rows_[next_alpha_++];
         if (parity_ && (a>b || (a==b && parity_<0))) continue;
-        node={a,b,support_->contains(a,b)};
+        if (budget_.packed_slabs) {
+          // One prefix certificate supplies both membership and its envelope.
+          const auto [first,last]=support_->channel_envelope(a,b);
+          node={a,b,first<0,first<0 ? 0:1+first*support_->n_orbitals()+last,
+              first<0 ? budget_.pairs:(first+1)*(support_->n_orbitals()-1-last)};
+        } else node={a,b,support_->contains(a,b),0,budget_.pairs};
         return true;
       }
     } else if (support_) {
@@ -81,13 +82,13 @@ bool SigmaTilePlan::pull(Node& node) {
       int a,ignored; bool label;
       while (cursor_->next(a,ignored,label)) {
         if (parity_ && (a>b || (a==b && parity_<0))) continue;
-        node={a,b,label};
+        node={a,b,label,0,budget_.pairs};
         return true;
       }
     } else {
       const int limit=parity_ ? b+(parity_>0):alpha_.n_strings();
       if (next_alpha_<limit) {
-        node={next_alpha_++,b,true};
+        node={next_alpha_++,b,true,0,budget_.pairs};
         return true;
       }
     }
@@ -101,7 +102,7 @@ bool SigmaTilePlan::next() {
   for (const int b:columns) column_index[b]=-1;
   for (const int a:seen_alpha_) alpha_seen_[a]=0;
   groups.clear(); active.clear(); group_index.clear(); halo.clear(); columns.clear();
-  active_support.clear(); seen_alpha_.clear(); released.clear(); channel_groups.clear(); channels_=0;
+  active_support.clear(); seen_alpha_.clear(); released.clear(); channel_groups.clear(); payload_=0;
   Node node;
   while (pull(node)) {
     new_alpha_.clear(); new_beta_.clear();
@@ -117,16 +118,15 @@ bool SigmaTilePlan::next() {
       include(node.beta,column_index,new_beta_);
       for (const auto& edge:beta_.singles(node.beta)) include(edge.source,column_index,new_beta_);
     }
-    int channel_group=0,channel_count=budget_.pairs;
-    if (budget_.packed_slabs && !node.supported) {
-      const auto [first,last]=support_->channel_envelope(node.alpha,node.beta);
-      if (first>=0) {
-        channel_group=1+first*support_->n_orbitals()+last;
-        channel_count=(first+1)*(support_->n_orbitals()-1-last);
-      }
-    }
-    const auto bytes=payload(active.size()+1,halo.size()+new_alpha_.size(),
-        columns.size()+new_beta_.size(),groups.size()+new_group,channels_+channel_count);
+    // B = row_bytes*T + entry_bytes*entries + h*(column_bytes*b+group_bytes*g).
+    // Only halo/column/group growth changes the rectangular term. Most nodes
+    // add just their row and channel entries; never remeasure the entire tile.
+    auto bytes=payload_+row_bytes_+entry_bytes_*node.channels;
+    if (!new_alpha_.empty())
+      bytes+=new_alpha_.size()*(column_bytes_*(columns.size()+new_beta_.size())+
+          group_bytes_*(groups.size()+new_group));
+    if (!new_beta_.empty() || new_group)
+      bytes+=halo.size()*(column_bytes_*new_beta_.size()+group_bytes_*new_group);
     if (bytes>budget_.bytes || active.size()>=static_cast<std::size_t>(std::numeric_limits<int>::max()/budget_.width)) {
       if (active.empty()) throw std::length_error("one direct-CI target exceeds the tile workspace");
       pending_=node;
@@ -138,8 +138,8 @@ bool SigmaTilePlan::next() {
     if (new_group) groups.push_back({node.beta,static_cast<int>(active.size()),static_cast<int>(active.size())});
     active.push_back(node.alpha);
     active_support.push_back(node.supported);
-    channels_+=channel_count;
-    if (budget_.packed_slabs) channel_groups.push_back(channel_group);
+    payload_=bytes;
+    if (budget_.packed_slabs) channel_groups.push_back(node.group);
     group_index.push_back(groups.size()-1);
     groups.back().end=active.size();
   }

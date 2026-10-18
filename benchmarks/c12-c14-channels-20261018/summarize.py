@@ -54,6 +54,9 @@ def main():
         resource = fields(path / "resource.time")
         hashes = {name: sha for sha, name in
                   (line.split() for line in (path / "hashes.txt").read_text().splitlines())}
+        threads = next(int(line.split("=", 1)[1]) for line in
+                       (path / "environment.txt").read_text().splitlines()
+                       if line.startswith("OMP_NUM_THREADS="))
         if hashes["input.xmi"] != old["input_sha256"]:
             raise RuntimeError(f"{case}: input differs from the baseline")
         with (path / "ciah.tsv").open() as stream:
@@ -72,8 +75,9 @@ def main():
             elif columns[3] == "ciah_keyframe_cost":
                 keyframe_seconds += float(values["seconds"])
         task = {"c12-cov": 0, "c12-ion02": 1, "c12-full": 2,
-                "c14-cov": 3, "c12-cov-64": 4}[case]
-        row = dict(case=case, job=f"{job}_{task}",
+                "c14-cov": 3, "c12-cov-64": 4, "241": 5}[case]
+        job_record = path / "slurm-job.txt"
+        row = dict(case=case, job=job_record.read_text().strip() if job_record.exists() else f"{job}_{task}",
                    node=(path / "node.txt").read_text().strip(),
                    steps=len(trace), hvp=sum(int(t["orbital_hvp_actions"]) for t in trace),
                    per_step_hvp=":".join(t["orbital_hvp_actions"] for t in trace),
@@ -88,6 +92,9 @@ def main():
                    ci_actions=ci_actions, ci_s=ci_seconds, hvp_s=hvp_seconds,
                    keyframe_s=keyframe_seconds, input_sha256=hashes["input.xmi"],
                    binary_sha256=hashes["bin/xmvb-cpp.exe"])
+        row["threads"] = threads
+        row["effective_cores"] = (row["user_s"] + row["system_s"]) / row["process_s"]
+        row["cpu_fraction"] = row["effective_cores"] / threads
         if abs(row["initial_Eh"] - float(old["initial_Eh"])) > 1e-10 or \
                 abs(row["final_Eh"] - float(old["final_Eh"])) > 5e-10:
             raise RuntimeError(f"{case}: energy regression")
@@ -98,6 +105,9 @@ def main():
                for key in ("node", "steps", "hvp", "process_s", "application_s", "rss_GiB", "final_Eh")},
             speedup=float(old["process_s"]) / row["process_s"],
             delta_Eh=row["final_Eh"] - float(old["final_Eh"])))
+        comparisons[-1]["before_effective_cores"] = (
+            float(old["user_s"]) + float(old["system_s"])) / float(old["process_s"])
+        comparisons[-1]["after_effective_cores"] = row["effective_cores"]
     for path, rows in ((args.output, current),
                        (args.output.with_name(args.output.stem + "-comparison.csv"), comparisons)):
         with path.open("w", newline="") as stream:

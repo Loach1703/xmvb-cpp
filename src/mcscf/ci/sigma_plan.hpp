@@ -35,10 +35,8 @@ public:
   std::vector<int> channel_groups;
 
 private:
-  struct Node { int alpha,beta; bool supported; };
+  struct Node { int alpha,beta; bool supported; int group,channels; };
   bool pull(Node& node);
-  long double payload(std::size_t rows,std::size_t h,std::size_t b,std::size_t g,
-      std::size_t channels) const;
   const SpinConnections& alpha_;
   const SpinConnections& beta_;
   const ProductSupport* support_;
@@ -50,7 +48,8 @@ private:
   std::optional<ProductSupport::Cursor> cursor_;
   std::optional<Node> pending_;
   std::size_t next_beta_=0,next_release_=0;
-  std::size_t channels_=0;
+  // Exact byte coefficients of targets, packed entries and halo columns/groups.
+  long double row_bytes_=0,entry_bytes_=0,column_bytes_=0,group_bytes_=0,payload_=0;
   int next_alpha_=0;
 };
 
