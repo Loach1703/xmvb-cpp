@@ -33,7 +33,7 @@ enum class Phase {
   CiOverlapAdjointDirection, CiTransportRetract, CiTransportGradient,
   CiOverlapTransportGradient,
   CiProductPattern, CiProductGenerate, CiProductPack, CiSupportedValidation,
-  CiExteriorGeneratorPullback, CiExteriorMomentPullback, Count
+  CiExteriorGeneratorPullback, CiExteriorMomentPullback, StructureNormalization, Count
 };
 
 /** @brief Opt-in wall/process-CPU totals. Nested scopes are not additive.
@@ -75,7 +75,7 @@ class PhaseTotals {
         "ci_overlap_adjoint_direction", "ci_transport_retract", "ci_transport_gradient",
         "ci_overlap_transport_gradient",
         "ci_product_pattern", "ci_product_generate", "ci_product_pack", "ci_supported_validation",
-        "ci_exterior_generator_pullback", "ci_exterior_moment_pullback"};
+        "ci_exterior_generator_pullback", "ci_exterior_moment_pullback", "structure_normalization"};
     static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Phase::Count));
     return names[static_cast<std::size_t>(phase)];
   }

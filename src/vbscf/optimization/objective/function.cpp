@@ -81,6 +81,7 @@ void VbScfObjective::ensure_exact_structure_overlap_diagonal() {
   if (scf_result.structure_overlap_diagonal_exact) {
     return;
   }
+  profiling::ScopedPhase phase(profiling::Phase::StructureNormalization, true);
   const std::shared_ptr<AcceptedPointContext>& accepted =
       gradient_result_.second_order_context;
   if (accepted == nullptr) {

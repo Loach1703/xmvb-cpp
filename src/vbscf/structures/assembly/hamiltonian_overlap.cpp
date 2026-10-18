@@ -1314,12 +1314,12 @@ double exact_spin_overlap(
   const auto& right_occupations = unique_determinants[right];
   double overlap = 1.0;
   if (!left_occupations.empty()) {
-    overlap = overlap_resolver.resolve_matrix(
+    overlap = overlap_resolver.determinant(
         build_overlap_submatrix(
             left_occupations,
             right_occupations,
             active_overlap,
-            n_orbitals)).overlap_determinant;
+            n_orbitals));
   }
   cache->emplace(key, overlap);
   return overlap;

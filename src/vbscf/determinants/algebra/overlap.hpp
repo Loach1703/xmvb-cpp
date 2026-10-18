@@ -55,6 +55,12 @@ public:
   DeterminantOverlapResult resolve_matrix(
       const Eigen::MatrixXd& overlap_submatrix) const;
 
+  /** @brief Computes only the overlap determinant, without an inverse.
+   * Uses the same LU/SVD rank decisions as resolve_matrix(). Intended for
+   * norm and overlap consumers that do not need density/cofactor data.
+   */
+  double determinant(const Eigen::MatrixXd& overlap_submatrix) const;
+
   /**
    * @brief Returns the singular-value threshold used by the resolver.
    */

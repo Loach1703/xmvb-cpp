@@ -121,3 +121,90 @@ All these nodes are EPYC9755, but the allocations are not exclusive repeats.
 The two frozen measurements remain separate in `current.csv` and `replay.csv`;
 `replay-comparison.csv` pairs their original input hashes. Raw logs and traces
 are in the corresponding `run-293281/` directory alongside `run-293257/`.
+
+## End-to-end audit: unnecessary inverses in final structure normalization
+
+The scalar CI/HVP/keyframe records are not a complete runtime partition.
+FULL's process time is104.58s, while the recorded CI solves, HVP expansions
+and fixed-structure keyframes account for17.35s,9.31s and7.34s, respectively.
+The norm of every individual structure is still required for the normalized
+structure-coefficient report; Coulson--Chirgwin weights additionally use the
+retained M*C images. Neither requires a spin-overlap inverse at reporting time.
+
+Audit293293 enables existing phase scopes on the then-current executable
+from qualification293280. Its process time is80.44s on anode014; four CIAH
+macros total34.25s. This is attribution, not a matched speedup measurement.
+Sampling293294 on anode019 resolves the call chain
+`build_exact_structure_overlap_diagonal -> exact_spin_overlap -> resolve_matrix
+-> FullPivLU inverse -> dtrsm -> BLAS workspace mutex`.
+GNU gprofng2.42 reports a changed collection timer; its numeric sample shares
+are not reliable wall fractions. The resolved unnecessary inverse call is
+also directly established by the source, independently of that warning.
+
+For each pair of expansion terms, a structure norm consumes only the product
+of the alpha and beta overlap determinants, multiplied by their two expansion
+coefficients. The inverse matrix, cofactor data and signed-log determinant
+state are unused. The determinant-only entry point therefore shares the
+existing factorization and LU/SVD rank decisions but omits inverse solves and
+unconsumed matrix copies/state. This is not a regular-pair approximation and
+does not change the singular-value threshold. Empty, signed, rank-deficient
+and relative-LU/absolute-SVD rank cases are checked in `cofactor_differential`;
+`orthogonal_direct_ci` checks structure norms against an independently formed
+small dense overlap matrix for arbitrary expansion coefficients.
+
+The physical gradient/HVP, all CIAH policies and outer tolerances are
+unchanged. The existing structure-local overlap maps remain local and are
+cleared between structures: this change adds no global pair cache, no complete
+structure matrix, and no worker copies of the integrals. It does not remove
+the remaining pair-of-expansion-terms work; cross-structure reuse is a separate
+possible improvement. `structure_normalization` is an opt-in phase around the
+actual final calculation, not an additional calculation or certificate.
+
+`normalize.sbatch` builds/tests only the changed exact implementation and
+freezes its source manifest and binary. `audit.sbatch` records native phase
+timing or gprofng sampling on a frozen executable. Native performance
+comparisons use the existing293281 records, without rerunning historical
+executables. Unrelated local RI edits are excluded from the remote mirror.
+
+### Completed qualification and native comparison
+
+Qualification293303 passes10/10 tests in6.67s, including singular/cofactor,
+arbitrary-structure overlap, CI transport, CIAH, and the F2 text report.
+Binary SHA256:
+`5a7d1d68b7e7bab5706f5f35d12b4d3666f3e8d6a227f13d98af7b5665c7a681`.
+Native array293313_[0-3] converges every original input with32 physical cores,
+the same4GiB shared CI workspace, scalar tracing and unchanged thresholds.
+
+| Case | Steps/HVP before = after | Energy after (Eh) | Process s before/after | GNU RSS GiB before/after |
+|---|---:|---:|---:|---:|
+| C12 COV |4/33|-399.106646267317|15.12/13.30|3.345/3.454|
+| C12 ION(0:2) |4/44|-399.397232509243|77.29/67.45|3.869/3.859|
+| C12 FULL |4/40|-399.417495587056|104.58/47.09|4.503/4.541|
+| C14 COV |4/46|-535.672671742974|222.50/212.15|7.986/7.980|
+
+Maximum final-energy difference from293281 is2.0e-12Eh at printed precision.
+Each per-macro HVP sequence is also preserved. RSS is not systematically
+reduced: this change removes computation, not a dominant resident matrix.
+FULL's complete process speedup is2.22x; its application timer changes from
+102.094402s to45.003713s. These are single measurements on different nodes
+of the same EPYC9755 cluster; small timing changes are not isolated kernel
+speedups. Historical Hanhai22/64MiB records remain separate.
+
+New native phase audit293314 measures `structure_normalization` once at
+0.267026176s. Its four CIAH macros total34.008920629s, compared with
+34.250658471s in audit293293; removing reporting-time inverses did not
+accelerate the physical macro actions. Physical-metric solves total only
+0.054133184s in this audit (0.046387482s before): repeated physical-norm
+reporting is not the missing large cost here and was not given a new cache.
+
+The remaining main costs are different: ION still needs273 accumulated CI
+actions versus FULL's103, and C14 remains dominated by CI/HVP work. The
+structure-local pair contractions remain exact and are not claimed to have
+a lower asymptotic exponent in this round.
+
+`normalization.csv` and `normalization-comparison.csv` are generated by
+`summarize.py` from saved report tails, CIAH traces, hashes and GNU-time
+records. It checks input hashes, successful convergence and energy agreement
+before joining with `replay.csv`. Raw large output files remain on Hanhai25;
+compact logs, report tails and frozen build metadata are mirrored in
+`results/diagnostics/c12-c14-channels-20261018/run-293313/`.
