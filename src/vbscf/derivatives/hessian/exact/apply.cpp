@@ -511,10 +511,9 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       outer_response_context()
           .selected_state_eigen_response_operator.structure_action
           ->supports_integral_direction();
-  // A fixed-curvature jet already needs delta B: reuse that image for CI.
-  // The three-active contraction removes delta B only in response-only calls.
+  // CI needs delta G, not delta B. A resident three-active image removes its
+  // auxiliary contraction even when the fixed RI jet separately needs delta B.
   const bool ri_orbital_pair_direction = direct_active_gradient &&
-      !components.direct_core_response &&
       accepted_ri_two_electron_cache_ &&
       integrals::ri_uses_orbital_pairs(*accepted_ri_two_electron_cache_);
   const bool packed_outer_two_electron_required =

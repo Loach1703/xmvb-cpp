@@ -300,9 +300,9 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
       outer_response_context()
           .selected_state_eigen_response_operator.structure_action
           ->supports_integral_direction();
-  // Share the factor direction with the fixed-curvature jet when it exists.
+  // The fixed RI jet keeps delta B; CI can form delta G from the smaller
+  // resident three-active image without transforming auxiliary factors again.
   const bool ri_orbital_pair_direction = direct_active_gradient &&
-      !components.direct_core_response &&
       accepted_ri_two_electron_cache_ &&
       integrals::ri_uses_orbital_pairs(*accepted_ri_two_electron_cache_);
   const bool packed_outer_two_electron_required =

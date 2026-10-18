@@ -7,6 +7,7 @@
 #include <Eigen/Core>
 
 #include "integrals/active/ri_transform.hpp"
+#include "integrals/response/orbital_pair.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
 
 namespace {
@@ -97,6 +98,42 @@ void check(int n) {
       exact,values(ds),dh,pack(dv),n);
   close(direction.pair_kernel,reference.pair_kernel);
   close(direction.one_electron,reference.one_electron);
+
+  // In the fused physical path only the active 2e frame is pretransformed.
+  // CI may consume its three-active image while the fixed jet still uses dB.
+  auto fused=accepted;
+  fused.two_electron_pretransformed=true;
+  const Matrix orthogonal=c*q, physical_direction=dc*q;
+  Matrix physical_db(n_aux,pairs);
+  xmvb::integrals::OrbitalPairMatrix products(n_bf*n,pairs);
+  products.setZero();
+  std::vector<int> first,second;
+  for (int a=0;a<n;++a) for (int k=0;k<=a;++k) {
+    first.push_back(a); second.push_back(k);
+  }
+  for (int p=0;p<n_aux;++p) {
+    const Matrix image=l[p]*orthogonal;
+    const Matrix mixed=image.transpose()*physical_direction;
+    for (int a=0;a<n;++a) for (int k=0;k<=a;++k)
+      physical_db(p,a*(a+1)/2+k)=mixed(a,k)+mixed(k,a);
+    for (int mu=0;mu<n_bf;++mu) for (int a=0;a<n;++a)
+      products.row(mu*n+a).noalias()+=image(mu,a)*independent.row(p);
+  }
+  const auto packed_direction=xmvb::integrals::packed_orbital_pair_direction(
+      products,physical_direction,first,second,n);
+  const Matrix physical_kernel=independent.transpose()*physical_db+
+      physical_db.transpose()*independent;
+  const auto packed_values=pack(physical_kernel);
+  close(packed_direction,Eigen::Map<const Eigen::VectorXd>(packed_values.data(),packed_values.size()));
+  const auto factor_image=xmvb::vb::orthogonalize_active_integral_direction(
+      fused,values(ds),dh,{},n,&physical_db);
+  const auto image_values=std::vector<double>(packed_direction.data(),
+      packed_direction.data()+packed_direction.size());
+  const auto pair_image=xmvb::vb::orthogonalize_active_integral_direction(
+      fused,values(ds),dh,image_values,n);
+  close(pair_image.pair_kernel,factor_image.pair_kernel);
+  close(pair_image.pair_kernel,direction.pair_kernel);
+  close(pair_image.one_electron,direction.one_electron);
   constexpr double step=1e-5;
   const auto plus=prepare(c+step*dc,true), minus=prepare(c-step*dc,true);
   close(direction.pair_kernel,(plus.pair_kernel-minus.pair_kernel)/(2*step),2e-8);

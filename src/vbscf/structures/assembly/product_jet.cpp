@@ -691,21 +691,30 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       result.images.tiles.output_resident_bytes=std::max(result.images.tiles.output_resident_bytes,output.peak_bytes);
     };
     if (cached && collect_images && delta_upper) {
-      // Reuse accepted Y/residual panels for all left-direction/backward consumers.
-      // No per-HVP replay of the accepted sigma is needed when it is resident.
+      // delta T = G T implies delta T^T Z = T^T G^T Z. Consume the
+      // accepted Y/residual directly, rather than differentiating both exterior
+      // transforms again. Only their ordinary selected-space projection remains;
+      // no closure of the selected VB space is assumed.
+      const Eigen::MatrixXd dual_generator=generator.transpose();
       const auto& images=state.product_images->states[state_id];
       for (const int panel:reachable) {
         if (!images[panel].pattern) continue;
-        Eigen::MatrixXd values=images[panel].unpack(n_unique_alpha_);
+        const int first=panel*extent;
         const int count=images[panel].pattern->columns();
-        // [Y,(H-E)Y] -> [Y,HY] only in this disposable work panel.
-        // Its two left-direction images share a projection; no later Y
-        // reread or independent residual/HY temporary is necessary.
+        Eigen::MatrixXd values(n_unique_alpha_,2*count);
+        sigma.apply_one_body_generator_columns(first,y_column,dual_generator,
+            values.leftCols(count),spin_exchange_parity_!=0);
+        sigma.apply_one_body_generator_columns(first,residual_column,dual_generator,
+            values.rightCols(count),spin_exchange_parity_!=0);
+        // T preserves the certified spin-exchange parity, so its projection
+        // of the beta generator equals that of the alpha generator. This
+        // identity is used only for a projection, not for a retained carrier.
+        if (spin_exchange_parity_) values*=2.0;
         values.rightCols(count).noalias()+=energy*values.leftCols(count);
         if (capture) project(panel,values.rightCols(count),
-            {diagnostic->connection->representation_forcing.col(state_id).data()},true);
+            {diagnostic->connection->representation_forcing.col(state_id).data()});
         project(panel,std::move(values),{result.images.overlap.col(state_id).data(),
-            result.images.hamiltonian.col(state_id).data()},true);
+            result.images.hamiltonian.col(state_id).data()});
       }
     }
     sweep();

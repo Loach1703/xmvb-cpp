@@ -1,0 +1,44 @@
+key,value
+decision,Retain exact left-transport generator projection and independent RI CI integral-direction scheduling
+source_base,165a2f75; production C++ at the base matches 1fb2c921
+scope,Complete orthogonal-integral gradient and scalar/block HVP consumer chain; no optimizer or tolerance changes
+cluster,Hanhai25 CPU-256C768GB
+threads,32 physical OpenMP cores; BLAS one thread; no nested OpenMP
+workspace,4096 MiB single-process CI workspace unchanged
+native_ri_job,293934
+native_ri_node,anode003
+native_ri_affinity,160-191; identical to saved native RI baseline 293883
+native_exact_job,293935
+native_exact_node,anode060
+native_exact_affinity,224-255; identical to saved native exact baseline 293884
+qualification_job,293932
+qualification,28 of 28 tests; 660 source/test files verified; full gradient/HVP finite differences for F2 FeCl2 and 241 in both exact and RI
+full_hvp_max_relative_error,5.86533742139e-9
+support_coverage,Existing independent selected-structure jet tests include arbitrary three-structure nonclosed spaces; unequal spins; both exchange parities; multiple roots; tiny workspace evictions; independently populated accepted product images
+new_ri_test,Independent dense AO-factor reference for physical delta-B and three-active delta-G; same moving-frame integral direction
+numerical_invariants,Unchanged selected structure space; nonorthogonal coordinates; physical response; convergence criteria; no amplitude screening
+memory,No new accepted cache; one shared bounded generator panel; no complete carrier or AO-factor replica per worker
+left_transport_identity,delta-T-transpose Z equals T-transpose E(G-transpose) Z; G equals delta-R times inverse-R
+exchange_identity,Only certified parity states use twice the alpha generator for final selected projection; unequal or uncertified spin spaces use both spin generators
+unretained_images,The existing differentiated exterior sweep remains necessary when accepted images cannot reside; it is the bounded schedule for the same exact operation
+ci_direction_identity,CI delta-G may use the existing three-active image while fixed RI curvature independently consumes delta-B
+ci_direction_only,Native 293925 versus 293883: C12 10.61 to 10.61 s; C14 153.58 to 153.98 s; no claimed acceleration from this isolated change
+ri_c12_result,4 steps and 33 HVP; 10.61 to 10.38 s; RSS 1.39076 to 1.40994 GiB; final energy unchanged to printed precision
+ri_c14_result,4 steps and 46 HVP; 153.58 to 145.74 s; RSS 4.17939 to 4.11992 GiB; final energy difference 1.02e-12 Eh
+exact_c12_result,4 steps and 33 HVP; 11.86 to 11.48 s; RSS 3.32680 to 3.48626 GiB; final energy unchanged to printed precision
+exact_c14_result,4 steps and 46 HVP; 160.71 to 151.38 s; RSS 8.14032 to 8.10881 GiB; final energy difference -1.02e-12 Eh
+fecl2_caveat,13 to 14 steps and 249 to 243 HVP; 5.58 to 5.59 s; final energy difference -1.94e-8 Eh under unchanged criteria; not a uniform speedup
+historical_best_c12_ri,9.97 s in benchmarks/orthogonal-jet-20261018/ri.csv remains faster than this candidate; no claim to beat every historical record
+ri_over_exact,C12 exact-to-RI time ratio 1.106; C14 1.039; significant RI end-to-end acceleration is not achieved
+ri_exact_energy,Preexisting RI fit offsets are approximately 0.370 and 0.555 mEh for C12 and C14; do not confuse fitting error with fusion consistency
+c14_native_hvp,RI summed HVP time 68.71367 to 60.87707 s; exact 66.36203 to 57.69427 s; RI CI solve time remains approximately 56.8 s
+phase_c12_job,293936 on anode014; same node and mask as saved phase 293926
+phase_c14_job,293937 on anode064; reference phase 293927 on anode060; attribution only and not a native performance comparison
+phase_c14_interpretation,Directional exterior time 11.293 to 1.830 s; added generator time 1.904 to 5.209 s; nested phase timers must not be summed
+baseline_rerun,None; comparisons use saved CSVs and logs only
+cancelled_preflight,293931 cancelled before qualification because the indexed source snapshot had not finished materializing; not counted as a numerical test
+source_manifest,source.sha256 generated from a distinct immutable manifest after snapshot completion; all 660 hashes verified by qualification
+native_binary,91c3ca7caa1f5dcd2425e73e154f4c6682d89f4beef33f3803f1047d1ea78a3f
+raw_artifacts,results/diagnostics/ri-left-generator-20261019
+local_theory,docs/orthogonal_integral_jet_fusion.md; ignored and not committed per user request
+unrelated_work,Existing .gitignore and src/integrals/ao/ri_operator.cpp and tests/vbscf/unit/test_ri_ao_h1e_hvp.cpp changes excluded and left untouched
