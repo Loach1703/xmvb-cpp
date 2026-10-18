@@ -32,14 +32,15 @@ lscpu > "$artifact/cpu.txt"
 module list > "$artifact/modules.txt" 2>&1
 cd "$artifact"
 sha256sum bin/xmvb-cpp.exe C16_vb.xmi cc-pvdz.gbs > hashes.txt
-export XMVB_CIAH_TRACE=scalar XMVB_PHASE_TIMING=1
+export XMVB_CIAH_TRACE=scalar
+if [[ ${C16_PHASE_TIMING:-1} == 1 ]]; then export XMVB_PHASE_TIMING=1; else unset XMVB_PHASE_TIMING; fi
 env | sort > environment.txt
 export C16_ARTIFACT="$artifact"
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores bash -se <<'RUN'
 cd "$C16_ARTIFACT"
 grep Cpus_allowed_list /proc/self/status > affinity.txt
 set +e
-timeout -k 10s 1800s /usr/bin/time -v -o resource.time \
+/usr/bin/time -v -o resource.time timeout -k 10s 1800s \
   stdbuf -oL -eL ./bin/xmvb-cpp.exe C16_vb.xmi \
   --optimizer-backend ciah --ci-workspace-mib 4096 \
   --max-iterations 1 --ciah-trace ciah.tsv > output.out 2> run.err

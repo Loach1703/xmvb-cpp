@@ -30,7 +30,7 @@ module list > "$artifact/modules.txt" 2>&1
 cmake --build "$source_dir/build-final" --target xmvb test_orthogonal_direct_ci \
   test_structure_tiles test_ci_transport test_selected_ci_transport test_coupled_structure test_davidson -j16 \
   > "$artifact/build.log" 2>&1
-ctest --test-dir "$source_dir/build-final" --output-on-failure \
+ctest --test-dir "$source_dir/build-final" --output-on-failure --timeout 120 \
   -R '^(orthogonal_direct_ci|structure_tiles|ci_transport|selected_ci_transport|coupled_structure|davidson)$' \
   > "$artifact/ctest.out" 2>&1
 cmake --build "$source_dir/build-final" --target xmvb -j16 >> "$artifact/build.log" 2>&1

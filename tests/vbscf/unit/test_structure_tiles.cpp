@@ -1621,6 +1621,36 @@ void check_sigma_columns(const Fixture& fixture, int width) {
   check_adjoint(sequence_adjoints[2],cross);
   require((tiled-2*ordinary).norm()<4e-11*std::max(1.0,ordinary.norm()),
           "temporal halo refill overwrote a live image or accepted channels");
+  if (fixture.n<=5) {
+    // Retire only after ALL response writers have finished a generated tile.
+    // The small workspace forces multiple tiles independently of residency.
+    tiled.setZero();
+    std::fill(released.begin(),released.end(),false);
+    const auto guarded_read=[&](const auto& betas,const auto& rows,
+        Eigen::Ref<Eigen::MatrixXd> values) {
+      for (const int b:betas) require(!released[b],"response read after final release");
+      read(betas,rows,values);
+    };
+    const auto guarded_write=[&](const auto& betas,const auto& rows,const auto& accumulate) {
+      for (const int b:betas) require(!released[b],"temporal writer after final release");
+      add(betas,rows,accumulate);
+    };
+    const xmvb::mcscf::DirectCiTileRequest repeated[]={
+        {guarded_read,guarded_write},{guarded_read,guarded_write}};
+    const auto derivatives=sigma.apply_tiled_responses(width,repeated,guarded_read,nullptr,0,
+        [&](std::span<const int> columns) {
+          for (const int b:columns) {
+            require(!released[b],"response column released twice");
+            released[b]=true;
+          }
+        },16*1024);
+    require(std::all_of(released.begin(),released.end(),[](bool value){return value;}),
+        "response did not retire all columns");
+    require((tiled-2*ordinary).norm()<4e-11*std::max(1.0,ordinary.norm()),
+        "retiring temporal outputs changed sigma");
+    for (const auto& derivative:derivatives)
+      check_adjoint(derivative,sigma.integral_adjoint(carrier,carrier));
+  }
   Eigen::MatrixXd orbital(fixture.n,fixture.n);
   for (int q=0;q<fixture.n;++q)
     for (int p=0;p<fixture.n;++p) orbital(p,q)=std::sin(0.29*(p+2)*(q+1));
@@ -3334,6 +3364,15 @@ int main(int argc, char** argv) {
       check_factor_structure_response(0,true);
       for (int parity:{0,1,-1}) check_product_response(parity,false);
       check_product_response(0,true);
+      {
+        // The complete derivative chain, not only bare sigma: force multiple
+        // generated tiles while the narrow-panel cases also force evictions.
+        const auto previous=xmvb::mcscf::ci_workspace_bytes();
+        xmvb::mcscf::set_ci_workspace_bytes(32*1024);
+        for (int parity:{0,1,-1}) check_product_response(parity,false);
+        check_product_response(0,true);
+        xmvb::mcscf::set_ci_workspace_bytes(previous);
+      }
       check_broad_product_projection(false);
       check_broad_product_projection(true);
       check_broad_product_projection(true,true);

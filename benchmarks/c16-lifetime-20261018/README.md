@@ -105,3 +105,71 @@ is outside its scope.
 
 Submitted as Hanhai25 job293003 on anode003 (AMD EPYC9755). The earlier
 first-CI timing was on anode017; retain that node distinction when comparing.
+
+## Product-jet completed-output scheduling
+
+The first one-step capture293003 completes initial CI in184.03s, then spends
+57.96s in the output callback of its very first gradient sigma tile. This is
+not a measured full-gradient time. Code inspection identifies a residency
+mismatch: H/S uses the configured4 GiB allowance, whereas product-jet
+input/output panels and response sigma still use separate old64 MiB limits.
+Output eviction invokes generator cotangents on partial images and rereads
+neighboring transformed inputs. The control is not rerun.
+
+The new derivative path reserves accepted data across roots, partitions the
+remaining configured workspace, and retires completed output panels after
+all temporal response/forcing writers. Input lifetimes are deliberately not
+shortened: the generator adjoint still needs their neighbors. Fully resident
+images are accumulated before exchange projection and reverse consumption.
+Accepted two-lane payload counts shared structural indices once and must fit
+the subsequent coupled-direction input allowance. The mathematical argument
+is in `article/exterior_column_schedule.md`.
+
+Build293117 caught a size-type deduction error before any workload ran.
+Build293119 passes6/6 tests in7.38s and freezes binary
+`d2fe908fa2e678b5582e1c970498a005abf14b0b93df876296132de028c83e8e`.
+New tests check temporal-output retirement and compare images/integral
+adjoints with independent complete-carrier oracles. Build293164 adds an
+end-to-end32 KiB workspace regression on nonclosed selected spaces, both
+exchange parities, unequal spins and multiple roots; numerical production
+sources are unchanged from293119. The32 KiB test exposed an OpenMP retirement
+race: a worker could test the mutable released-column list while another
+started the next tile, entering different conditional barriers. The hung
+qualification293164 was cancelled. Serial and phase-instrumented diagnostic
+runs passed, showing why the ordinary large-workspace tests had missed it.
+Retirement now executes inside the final writer's existing single/barrier;
+there is no extra conditional barrier. Final qualification293166 passes6/6
+including the32 KiB regression in10.96s. Final binary SHA256:
+`7316f3a8b5414e907df7d597d9522a77b2eb183c137357676aad58ac0d66a1b8`.
+
+New32-core one-step jobs293141 (native, anode014) and293142 (phase timing,
+anode039) use the same frozen binary and original input. Job293143 takes a
+420s gprofng capture of that new binary; samples are for attribution, not
+native timing. No thresholds, CIAH policy, physical spaces or old executable
+runs are changed.293141/293142/293143 use the pre-barrier-fix variant and are
+retained as intermediate measurements. Final native job293167 uses the
+qualified barrier fix. These jobs are in progress; do not infer one-step
+completion or full SCF convergence from their submission or batch status.
+
+In293142 the accepted-state sigma sweep completes with175 batches:
+prepare4.0091s, read4.3625s, compute6.9511s, write2.0599s. The17.3827s sum
+excludes the final panel-consumption work and is not a complete gradient
+time. The completed accepted product jet reports66 input panels,66 output
+consumptions, zero input/output evictions and695317744 retained bytes. It
+has reached the CIAH macro model; the old293003 capture was still inside its
+initial gradient. These different endpoints do not define a full-step
+speedup factor.
+
+Subsequent orbital-direction jets in293142 also report66 generated inputs,
+66 output consumptions, zero evictions and the same retained accepted payload.
+Native293141 reaches actual gradient keyframes (about20s) and orbital HVPs
+(about30s each). These are intermediate-variant per-operation observations,
+not complete outer-step timings or convergence results.
+
+The420s gprofng capture293143 has resolved symbols, no collector errors or
+timer warnings, and the expected `experiment was not closed` note after its
+bounded timeout. It covers initial CI plus early CIAH work. Scatter, channel
+GEMM, gather and team waits are the main sampled paths; generator-adjoint
+replay is no longer a leading sampled function. CPU sample fractions are not
+wall-time fractions and cannot be compared as a matched percentage reduction
+against the earlier75s initial-CI-only capture.

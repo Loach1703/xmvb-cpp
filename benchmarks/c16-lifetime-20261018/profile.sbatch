@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --threads-per-core=1
 #SBATCH --mem=96G
-#SBATCH --time=00:05:00
+#SBATCH --time=00:10:00
 #SBATCH --output=profile-%j.out
 #SBATCH --error=profile-%j.err
 set -eo pipefail
@@ -33,7 +33,7 @@ sha256sum "$native/bin/xmvb-cpp.exe" C16_vb.xmi cc-pvdz.gbs > hashes.txt
 gprofng --version > version.txt 2>&1
 set +e
 srun --exact --ntasks=1 --cpus-per-task=32 --cpu-bind=cores \
-  timeout -k 10s 75s gprofng collect app -p on -o capture.er \
+  timeout -k 10s "${C16_PROFILE_SECONDS:-75}s" gprofng collect app -p on -o capture.er \
   stdbuf -oL -eL "$native/bin/xmvb-cpp.exe" C16_vb.xmi --optimizer-backend ciah \
   > output.out 2> run.err
 printf '%s\n' "$?" > run.exit

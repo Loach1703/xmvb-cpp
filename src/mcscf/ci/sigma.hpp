@@ -226,7 +226,9 @@ public:
       int block_width, const DirectCiTileReader& response,
       const DirectCiTileWriter& add_columns,
       const DirectCiTileReader& state = {},
-      const ProductSupport* support = nullptr, int exchange_parity = 0) const;
+      const ProductSupport* support = nullptr, int exchange_parity = 0,
+      const DirectCiColumnRelease& release = {},
+      std::size_t workspace_bytes = 64ULL*1024*1024) const;
 
   /** @brief Fuse H*response + deltaH*state with the integral adjoint.
    * The required state reader supplies unweighted coefficients. Both readers
@@ -236,7 +238,7 @@ public:
    * adjoint is that of <response,H*state>, excluding the direction kernel.
    * Direction must share this action's immutable spin-string links and
    * orbital ordering (as with the shared-links constructor). Only three
-   * shared channel slabs and one input halo are live within the 64 MiB tile
+   * shared channel slabs and one input halo are live within the supplied tile
    * workspace; neither reader nor writer may retain a batch view.
    */
   DirectCiIntegralAdjoint apply_tiled_direction(
@@ -244,18 +246,22 @@ public:
       const DirectCiTileReader& state, const DirectCiSigmaAction& direction,
       const DirectCiTileWriter& add_columns,
       const DirectCiTileWriter& add_forcing = {},
-      const ProductSupport* support = nullptr, int exchange_parity = 0) const;
+      const ProductSupport* support = nullptr, int exchange_parity = 0,
+      const DirectCiColumnRelease& release = {},
+      std::size_t workspace_bytes = 64ULL*1024*1024) const;
 
   /** @brief Independent responses sharing one accepted scatter per tile.
    * Each returned integral adjoint is <request.response,H*state>, without
    * combining directions. All inputs share width, exact support and parity.
    * Requests reuse the same halo and at most three channel slabs under the
-   * existing 64 MiB bound. Carrier storage does not grow with the request
+   * supplied workspace bound. Carrier storage does not grow with the request
    * count; the small orbital-space integral cotangents remain separate.
    */
   std::vector<DirectCiIntegralAdjoint> apply_tiled_responses(int block_width,
       std::span<const DirectCiTileRequest> requests,const DirectCiTileReader& state,
-      const ProductSupport* support=nullptr,int exchange_parity=0) const;
+      const ProductSupport* support=nullptr,int exchange_parity=0,
+      const DirectCiColumnRelease& release = {},
+      std::size_t workspace_bytes = 64ULL*1024*1024) const;
 
   /** @brief Hamiltonian diagonal on the unique alpha/beta product carrier.
    * Uses occupation lists and the retained two-electron kernel, not sigma

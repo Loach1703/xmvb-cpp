@@ -6,8 +6,8 @@
 
 namespace xmvb::mcscf {
 
-/** @brief Process-wide H/S tile payload budget, configured before numerical work.
- * Input/output residency, sigma and transformation scratch share this budget;
+/** @brief Shared CI-action/derivative payload budget, configured before work.
+ * Accepted panels, input/output residency, sigma and transformation scratch share it;
  * it is not an RSS limit. Integrals, immutable links and Davidson vectors are
  * separate. Increasing the budget never changes the selected physical space.
  */

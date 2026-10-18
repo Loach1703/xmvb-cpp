@@ -339,12 +339,73 @@ are immutable accepted-point data with their existing separate bounded
 residency; AO integrals, Davidson vectors and library/allocator storage are
 also outside this tile-payload budget. It is therefore not a process RSS
 limit. The resource option changes neither precision nor the variational
-space. Other derivative consumers keep their existing explicit bounds until
-their combined working sets are profiled; they do not silently acquire a
-4 GiB allowance each.
+space. The product-jet derivative consumers use the same configured allowance
+with the partition below, not an independent allowance for each consumer.
 
 Column retirement still uses exact last generator use. Its sorted order is
 built once and advanced monotonically, avoiding a scan of all beta strings
 at every tile boundary. The numerical workspace retains one shared idle
 allocation, never one allocation per OpenMP worker; a smaller-budget caller
 discards an oversized idle allocation before beginning its action.
+
+## Completed images before reverse contraction
+
+Write a normalized selected state as $y=TWc$. Its orbital variation obeys
+
+$$
+\mathrm d E=y^T(\mathrm dH)y+2[(H-E)y]^T(\mathrm dT)Wc.
+$$
+
+CI stationarity gives $W^TT^T(H-E)y=0$, not $(H-E)y=0$ in an arbitrary
+selected space. The second term therefore remains in both gradient and HVP.
+The scheduling change below uses linearity, not a small-residual approximation.
+
+For an output column panel $b$, let $z_{bt}$ be the image contribution from
+generated sigma tile $t$, and let $\mathcal G(z,y)$ be the generator cotangent
+with its right argument held fixed. Then
+
+$$
+z_b=\sum_t z_{bt},\qquad
+\sum_t\mathcal G(z_{bt},y)=\mathcal G(z_b,y).
+$$
+
+The same identity applies to exterior-adjoint projection and to each term of
+its directional derivative. Repeated consumption of partial output panels
+is mathematically correct, but needlessly repeats neighbor reads, exterior
+generation and projection. Prefer a completed image and consume it once.
+
+Sigma retirement now extends to adjoint, directional and temporal-response
+sweeps: a column retires only after every response and forcing writer in its
+last tile has finished. A panel retires after all its columns. Once a sweep
+has capacity evictions, completed output panels are immediately consumed and
+released, reducing pressure on unfinished panels. Fully resident sweeps keep
+their completed panels until exchange projection and accepted-state retention.
+An input panel must NOT be retired using this shorter lifetime: generator
+adjoints still read neighboring inputs while consuming completed outputs.
+Retirement runs inside the final writer's existing OpenMP single region.
+Testing a mutable retirement list outside it can race the next tile planner
+and send workers to different conditional barriers; no additional barrier
+is needed when retirement shares the final writer's synchronization.
+
+With total configured budget $B$, at most $B/4$ is reserved for accepted
+panels across all roots. Divide the remainder into four equal parts for
+input panels, output panels, sigma, and reverse-transform workspace. In the
+last part, projection accumulation and directional exterior rows each have
+one quarter; bounded transient panels have the other half. Small explicit
+panel caps can reduce residency but never alter support or derivatives.
+The panel extent respects the transient bound as well as spin-space sizes.
+
+Accepted $y$ and restricted $(H-E)y$ share one structural index pattern.
+For $N$ supported coordinates, their payload is approximately $20N$ bytes,
+not twice the one-lane $12N$ bytes. Retention must also fit the input-panel
+allowance for a subsequent two-lane coupled direction; otherwise borrowing
+all directional panels across a parallel reader would invalidate LRU views.
+For the C16 support $N=34763300$, the payload excluding offsets is663.06 MiB.
+No complete channel array is retained. Immutable exterior row caches,
+integrals, spin links, metadata and allocator residency remain outside this
+numeric tile accounting and must be included in measured process RSS.
+
+For states larger than the allowed live frontier, exact partial-image
+consumption is still required. This change does not claim that an arbitrarily
+small budget can avoid all recomputation, or that a sigma tile budget is a
+bound on whole-process RSS.

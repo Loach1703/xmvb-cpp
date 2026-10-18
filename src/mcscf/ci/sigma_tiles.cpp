@@ -106,10 +106,11 @@ void DirectCiSigmaAction::apply_tiled(
 
 DirectCiIntegralAdjoint DirectCiSigmaAction::apply_tiled_with_adjoint(
     int width, const DirectCiTileReader& response, const DirectCiTileWriter& add_columns,
-    const DirectCiTileReader& state, const ProductSupport* support, int exchange_parity) const {
+    const DirectCiTileReader& state, const ProductSupport* support, int exchange_parity,
+    const DirectCiColumnRelease& release,std::size_t workspace_bytes) const {
   profiling::ScopedPhase phase(profiling::Phase::CiResponse);
   const DirectCiTileRequest request{response,add_columns};
-  auto results=contract_tiled(width,{&request,1},state,true,support,exchange_parity);
+  auto results=contract_tiled(width,{&request,1},state,true,support,exchange_parity,release,workspace_bytes);
   return std::move(results.front());
 }
 
@@ -117,19 +118,20 @@ DirectCiIntegralAdjoint DirectCiSigmaAction::apply_tiled_direction(
     int width, const DirectCiTileReader& response, const DirectCiTileReader& state,
     const DirectCiSigmaAction& direction, const DirectCiTileWriter& add_columns,
     const DirectCiTileWriter& add_forcing, const ProductSupport* support,
-    int exchange_parity) const {
+    int exchange_parity,const DirectCiColumnRelease& release,std::size_t workspace_bytes) const {
   profiling::ScopedPhase phase(profiling::Phase::CiResponse);
   const DirectCiTileRequest request{response,add_columns,&direction,add_forcing};
-  auto results=contract_tiled(width,{&request,1},state,true,support,exchange_parity);
+  auto results=contract_tiled(width,{&request,1},state,true,support,exchange_parity,release,workspace_bytes);
   return std::move(results.front());
 }
 
 std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::apply_tiled_responses(
     int width,std::span<const DirectCiTileRequest> requests,const DirectCiTileReader& state,
-    const ProductSupport* support,int exchange_parity) const {
+    const ProductSupport* support,int exchange_parity,
+    const DirectCiColumnRelease& release,std::size_t workspace_bytes) const {
   profiling::ScopedPhase phase(profiling::Phase::CiResponse);
   if (!state) throw std::invalid_argument("temporal responses require a common state");
-  return contract_tiled(width,requests,state,true,support,exchange_parity);
+  return contract_tiled(width,requests,state,true,support,exchange_parity,release,workspace_bytes);
 }
 
 std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
@@ -568,6 +570,12 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             if (add_columns) write_image(add_columns, transformed.data());
             if (add_forcing) write_image(add_forcing,
                 temporal_in_place ? state_channels.data():scattered.data());
+            // Retire inside the final writer's existing single/barrier.
+            // Testing the shared retirement vector outside this region races
+            // the next plan.next(): one worker could enter a conditional
+            // barrier after another has already advanced to the next tile.
+            if (request_id+1==requests.size() && release && !released_columns.empty())
+              release(released_columns);
             write_time += seconds(write_start, tick());
             if (timing && (batches==1 || batches%256==0))
               std::fprintf(stderr,"XMVB_TILE_PROGRESS,batches=%zu,targets=%zu,prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f\n",
@@ -576,17 +584,6 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
         }
         if (failure) break;
       } // temporal responses share the generated graph and accepted channels
-      if (failure) break;
-      if (release && !released_columns.empty()) {
-#pragma omp single
-        {
-          try {
-            const auto begin=tick();
-            release(released_columns);
-            write_time+=seconds(begin,tick());
-          } catch (...) { failure=std::current_exception(); }
-        }
-      }
       if (failure) break;
     }
   }

@@ -56,15 +56,26 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
   if (joint) *ci_sweep={
       {Eigen::MatrixXd::Zero(n_structures_,states),Eigen::MatrixXd::Zero(n_structures_,states)},
       Eigen::MatrixXd::Zero(n,n),Eigen::MatrixXd::Zero(d,d),Eigen::MatrixXd::Zero(n,n)};
-  // Residency only controls batching. It never selects a different wave function.
-  const std::size_t cache_bytes=state.product_images ? state.product_images->budget:
-      detail::kStructureTileWorkspaceBytes/4;
+  // Reserve accepted panels across all roots, then divide the remaining
+  // allowance among input, output, sigma and reverse-transform scratch.
+  // Small explicit panel caps are useful for bounded-residency regressions.
+  // They never change physical support or the response being differentiated.
+  const auto total_bytes=mcscf::ci_workspace_bytes();
+  const auto retained_bytes=state.product_images ?
+      std::min(state.product_images->budget,total_bytes/4):0;
+  const auto work_bytes=(total_bytes-retained_bytes)/4;
+  const auto cache_bytes=state.product_images ?
+      std::min(state.product_images->budget,work_bytes):work_bytes;
+  const auto projection_bytes=std::min(cache_bytes,work_bytes/4);
+  const auto factor_bytes=projection_bytes;
+  const auto temporary_bytes=work_bytes/2;
   const int extent=std::max<std::size_t>(1,std::min<std::size_t>(n_unique_beta_,
       std::min<std::size_t>(8*cooperative_openmp_thread_count(),
           // Three output components plus compact row indices must fit even
           // for highly unequal spin spaces; the bound is shared by accepted
           // and directional calls so diagnostic capture does not change it.
-          cache_bytes/(sizeof(double)*((joint ? 6:4)*n_unique_alpha_+2*n_unique_beta_)))));
+          std::min<std::size_t>(cache_bytes/(sizeof(double)*((joint ? 6:4)*n_unique_alpha_+2*n_unique_beta_)),
+              temporary_bytes/(sizeof(double)*(12ULL*n_unique_alpha_+8ULL*n_unique_beta_))))));
   if (!tangent && state.product_images) {
     state.product_images->extent=extent;
     state.product_images->states.resize(states);
@@ -119,7 +130,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       alpha.orbital_transform().transpose().triangularView<Eigen::Lower>()
           .solve(delta_upper->transpose()).transpose()):Eigen::MatrixXd{};
   // Differentiated beta rows are shared by generation and left projection.
-  detail::ColumnPanels beta_directions(cache_bytes,[&](int panel) {
+  detail::ColumnPanels beta_directions(factor_bytes,[&](int panel) {
     const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);
     Eigen::MatrixXd rows=Eigen::MatrixXd::Zero(count,n_unique_beta_),dr=rows;
     rows.middleCols(first,count).setIdentity();
@@ -383,14 +394,14 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     // Associativity removes the per-panel beta-row reconstruction on broad
     // support. Primal and left-direction images share the existing budget.
     const bool resident_projection=(collect_images || capture) &&
-        ordered_beta && products<=cache_bytes/
+        ordered_beta && products<=projection_bytes/
             (sizeof(double)*projection_count*(delta_upper ? 2:1));
     std::vector<Eigen::MatrixXd> projected(projection_count),left_projected(projection_count);
     const auto group_extent=std::max<std::size_t>(1,std::min<std::size_t>(
         static_cast<std::size_t>(n_unique_alpha_)*extent,
-        cache_bytes/(sizeof(double)*projection_count)));
+        projection_bytes/(sizeof(double)*projection_count)));
     std::vector<double*> projection_targets;
-    detail::ColumnPanels projections(cache_bytes,[&](int block) {
+    detail::ColumnPanels projections(projection_bytes,[&](int block) {
       const auto begin=static_cast<std::size_t>(block)*group_extent;
       const auto count=std::min(group_extent,spin_products_.size()-begin);
       auto pattern=std::make_shared<detail::ColumnPattern>();
@@ -601,6 +612,22 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         };
       };
       const auto add=writer(0,w,0);
+      // Complete each output panel at its last sigma contributor. Unlike
+      // input lifetimes, this must include every temporal response/forcing.
+      // Keep a fully resident sweep intact for exchange projection and reuse;
+      // once capacity eviction occurs, retire completed panels immediately.
+      // The generator reads neighboring INPUT panels, so do not retire those
+      // using the shorter sigma-only lifetime.
+      std::vector<int> remaining(panels),completed;
+      for (int p=0;p<panels;++p) remaining[p]=std::min(extent,n_unique_beta_-p*extent);
+      const mcscf::DirectCiColumnRelease release=[&](std::span<const int> columns) {
+        for (const int b:columns)
+          if (--remaining[b/extent]==0) completed.push_back(b/extent);
+        if (output.evictions) {
+          for (const int p:completed) output.release(p);
+          completed.clear();
+        }
+      };
       {
         // Accepted bra and ket are identical. Keep the empty-reader identity
         // so the channel kernel reuses its scatter; apply the weight outside.
@@ -611,14 +638,14 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
             {ci_read,writer(w-1,1,q_slot)},
             {read,add,delta_sigma,forcing ? writer(w-1,1,forcing_slot):mcscf::DirectCiTileWriter{}}
           };
-          auto gradients=sigma.apply_tiled_responses(w,requests,right,support,spin_exchange_parity_);
+          auto gradients=sigma.apply_tiled_responses(w,requests,right,support,spin_exchange_parity_,release,work_bytes);
           ci_sweep->one_electron.noalias()+=2*weight*gradients[0].one_electron;
           ci_sweep->pair_kernel.noalias()+=2*weight*gradients[0].pair_kernel;
           gradient=std::move(gradients[1]);
         } else gradient=delta_sigma ? sigma.apply_tiled_direction(w,read,right,*delta_sigma,add,
-            forcing ? writer(w-1,1,forcing_slot):mcscf::DirectCiTileWriter{},support,spin_exchange_parity_):
+            forcing ? writer(w-1,1,forcing_slot):mcscf::DirectCiTileWriter{},support,spin_exchange_parity_,release,work_bytes):
             sigma.apply_tiled_with_adjoint(w,read,add,
-                tangent ? right:mcscf::DirectCiTileReader{},support,spin_exchange_parity_);
+                tangent ? right:mcscf::DirectCiTileReader{},support,spin_exchange_parity_,release,work_bytes);
         // Keep state weights outside the shared scatter and both kernel actions.
         result.one_electron.noalias()+=(tangent ? 2*weight:weight)*gradient.one_electron;
         result.pair_kernel.noalias()+=(tangent ? 2*weight:weight)*gradient.pair_kernel;
@@ -646,8 +673,19 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
         detail::project_exchange(tiles,extent,spin_exchange_parity_);
         exchange_reduced=true;
       }
+      std::size_t accepted_bytes=0;
+      if (!tangent && state.product_images && output.evictions==0)
+        for (const int panel:reachable) {
+          const auto& tile=output.get(panel);
+          accepted_bytes+=tile.pattern->bytes()+2*sizeof(double)*tile.values.rows();
+        }
+      // Count shared row metadata once, not twice. A cached two-lane tangent
+      // must fit the same input allowance; otherwise its borrowed views would
+      // be invalidated by an LRU insertion during the parallel reader.
+      const auto retain_limit=std::min(retained_bytes,cache_bytes);
       if (!tangent && state.product_images && output.evictions==0 &&
-          2*output.peak_bytes<=cache_bytes-state.product_images->bytes) {
+          state.product_images->bytes<=retain_limit &&
+          accepted_bytes<=retain_limit-state.product_images->bytes) {
         retain=true;
         state.product_images->states[state_id].resize(panels);
       }
@@ -754,6 +792,14 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
   }
   if (!tangent && states==1 && state.product_images)
     state.product_images->density=state.product_images->density.selfadjointView<Eigen::Upper>();
+  if (profiling::phase_totals().enabled)
+    std::fprintf(stderr,"XMVB_PRODUCT_JET,tangent=%d,joint=%d,states=%d,extent=%d,"
+        "input_panels=%zu,output_consumes=%zu,input_evictions=%zu,output_evictions=%zu,"
+        "accepted_bytes=%zu,column_budget=%zu,sigma_budget=%zu\n",
+        tangent,joint,states,extent,result.images.tiles.input_panels,
+        result.images.tiles.hamiltonian_projections,result.images.tiles.input_evictions,
+        result.images.tiles.output_evictions,state.product_images ? state.product_images->bytes:0,
+        cache_bytes,work_bytes);
   return result;
 }
 
