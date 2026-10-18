@@ -174,7 +174,7 @@ build_selected_structure_direction(
           direction.overlap,
           direction.one_electron,
           direction.packed_two_electron,
-          &direct_ci_direction,ci_response);
+          &direct_ci_direction,ci_response,directional_ri_active_pair_factors);
   require_finite(
       direct_direction.hamiltonian,
       "orthogonal direct-CI directional Hamiltonian images");

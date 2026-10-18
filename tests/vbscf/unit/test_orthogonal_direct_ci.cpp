@@ -629,19 +629,6 @@ void check_sigma_action() {
       std::abs(predicted_integral_direction - applied_integral_direction) <
           3.0e-10 * std::max(1.0, std::abs(applied_integral_direction)),
       "direct-CI integral adjoint fails the bilinear directional identity");
-  const auto pack_pair_kernel = [n_orbitals](
-      const Eigen::MatrixXd& kernel,
-      xmvb::integrals::ActiveSpaceTwoElectronResult* result) {
-    result->packed_active_two_electron_integrals.resize(
-        xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
-    for (int column = 0; column < kernel.cols(); ++column) {
-      for (int row = 0; row <= column; ++row) {
-        result->packed_active_two_electron_integrals[
-            xmvb::core::PairIndex::packed_pair_of_pairs_index(
-                row, column)] = kernel(row, column);
-      }
-    }
-  };
   constexpr double adjoint_step = 1.0e-6;
   auto plus_sigma_integrals = orthogonal;
   auto minus_sigma_integrals = orthogonal;
@@ -653,12 +640,6 @@ void check_sigma_action() {
       adjoint_step * orthogonal_direction.pair_kernel;
   minus_sigma_integrals.pair_kernel -=
       adjoint_step * orthogonal_direction.pair_kernel;
-  pack_pair_kernel(
-      plus_sigma_integrals.pair_kernel,
-      &plus_sigma_integrals.two_electron);
-  pack_pair_kernel(
-      minus_sigma_integrals.pair_kernel,
-      &minus_sigma_integrals.two_electron);
   const double plus_bilinear =
       (left_coefficients.cwiseProduct(
            xmvb::mcscf::DirectCiSigmaAction(
@@ -1848,7 +1829,6 @@ void check_distinct_spin_sigma_action() {
   integrals.orbital_transform=Eigen::MatrixXd::Identity(n_orbitals,n_orbitals);
   integrals.one_electron=one_electron;
   integrals.pair_kernel=pair_kernel;
-  integrals.two_electron=two_electron;
   const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
 
   Eigen::MatrixXd coefficients(

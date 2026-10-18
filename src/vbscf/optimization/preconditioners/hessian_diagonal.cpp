@@ -18,6 +18,7 @@
 #include "integrals/response/types.hpp"
 #include "integrals/response/ao_pair_operator.hpp"
 #include "integrals/active/pair_map.hpp"
+#include "integrals/active/ri_transform.hpp"
 #include "integrals/ao/ri.hpp"
 
 namespace xmvb::vb {
@@ -198,8 +199,6 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
       prepared.ao_effective_one_electron_result.ao_coulomb_exchange_matrix * mo;
 
   const auto& active_two_electron = prepared.active_space_two_electron_result;
-  const Eigen::MatrixXd active_pair_transform =
-      build_pair_transform(inverse_active_transform);
   xmvb::integrals::ExactCtxPairMatrix active_pair_products;
   if (active_two_electron.representation ==
       xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
@@ -209,13 +208,15 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
           "RI analytic Hessian diagonal requires accepted active-pair factors");
     }
     const Eigen::MatrixXd orthogonal_active_factors =
-        active_two_electron.ri_active_pair_factors * active_pair_transform;
+        xmvb::integrals::transform_ri_pair_factors(
+            active_two_electron.ri_active_pair_factors, inverse_active_transform);
     active_pair_products.noalias() =
         input.ri_factorization->metric_whitened_ao_pair_factors.transpose() *
         orthogonal_active_factors;
   } else if (active_two_electron.dense_ao_pair_products.size() != 0) {
     active_pair_products.noalias() =
-        active_two_electron.dense_ao_pair_products * active_pair_transform;
+        active_two_electron.dense_ao_pair_products *
+        build_pair_transform(inverse_active_transform);
   } else {
     // The memory-bounded exact forward path deliberately does not retain
     // G*Q_active. Rebuild only that absent accepted tensor from the AO graph.

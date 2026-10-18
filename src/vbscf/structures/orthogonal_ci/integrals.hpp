@@ -18,7 +18,8 @@ namespace xmvb::vb {
 struct OrthogonalActiveIntegrals : mcscf::ActiveIntegrals {
   /** Upper factor in `S_active = R^T R`. */
   Eigen::MatrixXd orbital_transform;
-  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
+  /** Accepted orthogonal RI factors, shared by all integral directions. */
+  Eigen::MatrixXd ri_pair_factors;
 };
 
 /** @brief Active-integral adjoint in the original nonorthogonal orbital basis. */
@@ -42,13 +43,16 @@ OrthogonalActiveIntegrals orthogonalize_active_integrals(
  *
  * The returned `orbital_transform` is `delta R`; the other members are the
  * first derivatives of the orthonormal one- and two-electron integrals.
+ * RI callers supply raw factor directions and leave the packed tensor empty;
+ * accepted orthogonal factors are reused without a raw four-index direction.
  */
 OrthogonalActiveIntegrals orthogonalize_active_integral_direction(
     const OrthogonalActiveIntegrals& accepted,
     const std::vector<double>& overlap_direction,
     const Eigen::Ref<const Eigen::MatrixXd>& one_electron_direction,
     const std::vector<double>& packed_two_electron_direction,
-    int n_active_orbitals);
+    int n_active_orbitals,
+    const Eigen::MatrixXd* ri_factor_direction = nullptr);
 
 /**
  * @brief Backpropagates an orthogonal-CI integral and orbital-generator adjoint.

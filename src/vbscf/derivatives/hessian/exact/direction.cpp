@@ -72,31 +72,8 @@ ExactHvpOperator::State::build_active_integral_direction(
     const OrbitalPreparationDirectionalResult& orbital_direction,
     const Eigen::Ref<const Eigen::MatrixXd>& delta_h1e_times_active,
     const Eigen::VectorXd* precomputed_delta_packed_two_electron,
-    Eigen::VectorXd* ri_delta_packed_two_electron,
     ActiveSpaceIntegralDirectionWorkspace* workspace,
     bool packed_two_electron_required) const {
-  const Eigen::VectorXd* delta_packed_two_electron =
-      precomputed_delta_packed_two_electron;
-  if (packed_two_electron_required &&
-      delta_packed_two_electron == nullptr &&
-      accepted_ri_two_electron_cache_.has_value()) {
-    if (ri_delta_packed_two_electron == nullptr) {
-      throw std::invalid_argument(
-          "RI active-integral direction requires an output workspace");
-    }
-    const Eigen::MatrixXd delta_factors =
-        xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
-            *accepted_ri_two_electron_cache_,
-            orbital_direction.delta_active_auxiliary_orbitals);
-    const std::vector<double> packed =
-        xmvb::integrals::compute_ri_packed_active_two_electron_integral_directional_derivative(
-            *accepted_ri_two_electron_cache_,
-            delta_factors);
-    *ri_delta_packed_two_electron = Eigen::Map<const Eigen::VectorXd>(
-        packed.data(), static_cast<Eigen::Index>(packed.size()));
-    delta_packed_two_electron = ri_delta_packed_two_electron;
-  }
-
   const auto& accepted_two_electron = accepted_point_context_
       ->prepared_active_space.active_space_two_electron_result;
   const ActiveSpaceIntegralDirectionContext integral_context{
@@ -115,7 +92,7 @@ ExactHvpOperator::State::build_active_integral_direction(
           orbital_direction.delta_active_auxiliary_orbitals,
           orbital_direction.delta_active_auxiliary_orbitals,
           delta_h1e_times_active,
-          delta_packed_two_electron,
+          precomputed_delta_packed_two_electron,
           packed_two_electron_required},
       workspace);
 }

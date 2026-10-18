@@ -419,9 +419,7 @@ struct StructureAction::OrthogonalDirectCiData {
                integrals.orbital_transform.size() +
                integrals.one_electron.size() +
                integrals.pair_kernel.size() +
-               integrals.two_electron.ri_active_pair_factors.size()) *
-            sizeof(double) +
-        integrals.two_electron.packed_active_two_electron_integrals.capacity() *
+               integrals.ri_pair_factors.size()) *
             sizeof(double) +
         alpha_transform.dynamic_bytes() +
         (distinct_beta_transform
@@ -1299,7 +1297,8 @@ StructureActionResult StructureAction::apply_integral_direction(
     const std::vector<double>& one_electron_direction,
     const std::vector<double>& packed_two_electron_direction,
     StructureIntegralDirection* direct_ci_direction,
-    StructureResponseRequest* ci_response) const {
+    StructureResponseRequest* ci_response,
+    const Eigen::MatrixXd* ri_factor_direction) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiIntegralDirection);
   if (!direct_ci_) {
     throw std::logic_error(
@@ -1322,7 +1321,8 @@ StructureActionResult StructureAction::apply_integral_direction(
           overlap_direction,
           delta_one_electron,
           packed_two_electron_direction,
-          n_active_orbitals));
+          n_active_orbitals,
+          ri_factor_direction));
   const auto& integral_direction=*prepared_direction;
   if (direct_ci_direction) direct_ci_direction->integrals=prepared_direction;
   const xmvb::mcscf::DirectCiSigmaAction sigma_direction(
@@ -1488,7 +1488,8 @@ StructureAction::active_integral_adjoint_direction(
     const std::vector<double>& one_electron_direction,
     const std::vector<double>& packed_two_electron_direction,
     const StructureIntegralDirection* direct_ci_direction,
-    bool include_integral_response) const {
+    bool include_integral_response,
+    const Eigen::MatrixXd* ri_factor_direction) const {
   if (!direct_ci_) {
     throw std::logic_error(
         "active-integral adjoint direction requires orthogonal direct CI");
@@ -1531,7 +1532,8 @@ StructureAction::active_integral_adjoint_direction(
         overlap_direction,
         delta_one_electron,
         packed_two_electron_direction,
-        n_orbitals);
+        n_orbitals,
+        ri_factor_direction);
   } else if (!include_integral_response) {
     computed_direction.orbital_transform = Eigen::MatrixXd::Zero(
         n_orbitals, n_orbitals);

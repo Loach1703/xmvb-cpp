@@ -90,7 +90,6 @@ private:
       const OrbitalPreparationDirectionalResult& orbital_direction,
       const Eigen::Ref<const Eigen::MatrixXd>& delta_h1e_times_active,
       const Eigen::VectorXd* precomputed_delta_packed_two_electron,
-      Eigen::VectorXd* ri_delta_packed_two_electron,
       ActiveSpaceIntegralDirectionWorkspace* workspace,
       bool packed_two_electron_required = true) const;
 

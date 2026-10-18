@@ -41,9 +41,11 @@ set(XMVB_INTEGRAL_SOURCES
   integrals/active/one_electron.cpp
   integrals/active/exact.cpp
   integrals/active/ri.cpp
+  integrals/active/ri_transform.cpp
   integrals/active/matrix_adjoint.cpp
   integrals/active/two_electron.cpp
   integrals/active/pair_map.cpp
+  integrals/active/transform.cpp
   integrals/response/adjoint.cpp
   integrals/response/directional.cpp
   integrals/response/ri.cpp

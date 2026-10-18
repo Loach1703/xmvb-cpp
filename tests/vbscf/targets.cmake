@@ -8,6 +8,9 @@ set(_xmvb_vbscf_unit_targets
   test_spinor_strings
   test_spinor_projection
   test_active_two_electron_sparse
+  test_integral_transform
+  test_ri_integral_transform
+  test_orthogonal_ri_transform
   test_accepted_pair_tile
   test_hessian_diagonal
   test_keyframe
@@ -64,6 +67,9 @@ if (BUILD_TESTING)
   set_tests_properties(spinor_strings spinor_projection PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME active_two_electron_sparse COMMAND test_active_two_electron_sparse)
+  add_test(NAME integral_transform COMMAND test_integral_transform)
+  add_test(NAME ri_integral_transform COMMAND test_ri_integral_transform)
+  add_test(NAME orthogonal_ri_transform COMMAND test_orthogonal_ri_transform)
   add_test(NAME accepted_pair_tile COMMAND test_accepted_pair_tile)
   add_test(NAME hessian_diagonal COMMAND test_hessian_diagonal)
   add_test(NAME keyframe COMMAND test_keyframe)

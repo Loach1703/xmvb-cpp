@@ -220,7 +220,8 @@ public:
       const std::vector<double>& one_electron_direction,
       const std::vector<double>& packed_two_electron_direction,
       StructureIntegralDirection* direct_ci_direction,
-      StructureResponseRequest* ci_response=nullptr) const;
+      StructureResponseRequest* ci_response=nullptr,
+      const Eigen::MatrixXd* ri_factor_direction=nullptr) const;
 
   /** @brief Whether exact orthogonal direct-CI directional actions are available. */
   bool supports_integral_direction() const noexcept;
@@ -260,7 +261,8 @@ public:
       const std::vector<double>& one_electron_direction,
       const std::vector<double>& packed_two_electron_direction,
       const StructureIntegralDirection* direct_ci_direction,
-      bool include_integral_response) const;
+      bool include_integral_response,
+      const Eigen::MatrixXd* ri_factor_direction=nullptr) const;
 
   /**
    * @brief Applies the selected-subspace coupling adjoint to active integrals.
