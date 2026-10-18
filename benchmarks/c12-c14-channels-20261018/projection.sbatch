@@ -29,9 +29,9 @@ cmake -S "$source_dir" -B "$source_dir/build-final" > "$artifact/configure.log" 
 cmake --build "$source_dir/build-final" --target xmvb test_product_frontier \
   test_selected_ci_transport test_ci_transport test_coupled_structure \
   test_orthogonal_direct_ci test_representation_overlap test_selected_metric \
-  test_ciah test_keyframe test_output_normalization -j16 > "$artifact/build.log" 2>&1
+  test_ciah test_keyframe test_output_normalization test_structure_tiles -j16 > "$artifact/build.log" 2>&1
 ctest --test-dir "$source_dir/build-final" --output-on-failure --timeout 120 \
-  -R '^(product_frontier|selected_ci_transport|ci_transport|coupled_structure|orthogonal_direct_ci|representation_overlap|selected_metric|ciah|keyframe|output_normalization|text_report_f2|state_average_f2)$' \
+  -R '^(product_frontier|selected_ci_transport|ci_transport|coupled_structure|orthogonal_direct_ci|structure_tiles|representation_overlap|selected_metric|ciah|keyframe|output_normalization|text_report_f2|state_average_f2)$' \
   > "$artifact/ctest.out" 2>&1
 cp "$source_dir/build-final/src/xmvb-cpp.exe" "$artifact/bin/"
 cp "$SLURM_SUBMIT_DIR/source.sha256" "$source_dir/build-final/CMakeCache.txt" "$artifact/"

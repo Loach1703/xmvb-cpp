@@ -227,12 +227,15 @@ public:
 
   /** @brief Precomputes direction-independent selected-state adjoint data.
    * Optional H/M images are consumed from the same sigma sweep, not replayed.
+   * A supplied overlap_image is the exact M*C for these input columns and
+   * avoids projecting the same overlap again; it is not a CI residual estimate.
    */
   StructureAdjointState prepare_active_adjoint(
       const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
       const std::vector<double>& state_weights,
       const std::vector<double>& state_energies,
-      StructureActionResult* images = nullptr) const;
+      StructureActionResult* images = nullptr,
+      const Eigen::MatrixXd* overlap_image = nullptr) const;
 
   /** @brief Pulls a prepared direct-CI adjoint back to active integrals. */
   StructureActiveIntegralAdjoint active_integral_adjoint(
@@ -442,7 +445,8 @@ private:
       const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma,bool collect_images,
       StructureIntegralDirection* diagnostic=nullptr,
-      StructureResponseSweep* ci_sweep=nullptr) const;
+      StructureResponseSweep* ci_sweep=nullptr,
+      const Eigen::MatrixXd* overlap_image=nullptr) const;
 
   /** @brief Shared generated product graph for structure H/M actions. */
   StructureResponseSweep contract_product_tiles(

@@ -1375,7 +1375,8 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
     const std::vector<double>& state_weights,
     const std::vector<double>& state_energies,
-    StructureActionResult* images) const {
+    StructureActionResult* images,
+    const Eigen::MatrixXd* overlap_image) const {
   if (!direct_ci_) {
     throw std::logic_error(
         "active-integral adjoint requires orthogonal direct CI");
@@ -1406,13 +1407,15 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
       n_orbitals, n_orbitals);
   if (images) {
     images->hamiltonian = Eigen::MatrixXd::Zero(n_structures_, n_states);
-    images->overlap = Eigen::MatrixXd::Zero(n_structures_, n_states);
+    images->overlap = overlap_image ? *overlap_image:
+        Eigen::MatrixXd::Zero(n_structures_, n_states);
   }
 
   if (!result.source_factors) {
     result.product_images=std::make_shared<detail::ProductImages>();
     auto sweep=product_jet(result,nullptr,nullptr,nullptr,direct_ci_->alpha_transform,
-        direct_ci_->beta_transform(),direct_ci_->sigma,images != nullptr);
+        direct_ci_->beta_transform(),direct_ci_->sigma,images != nullptr,
+        nullptr,nullptr,overlap_image);
     result.one_electron_gradient=sweep.one_electron;
     result.pair_kernel_gradient=sweep.pair_kernel;
     result.generator_gradient=sweep.generator;
@@ -1440,7 +1443,7 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
           direct_ci_->beta_transform(),direct_ci_->sigma,nullptr,true,state_energies[state]);
       result.generator_gradient.noalias() += 2*state_weight*image.generator;
       images->hamiltonian.col(state) = image.images.hamiltonian.col(0);
-      images->overlap.col(state) = image.images.overlap.col(0);
+      if (!overlap_image) images->overlap.col(state) = image.images.overlap.col(0);
     } else {
       result.generator_gradient.noalias() += 2*state_weight*mcscf::factor_residual_generator_adjoint(
           direct_ci_->sigma,physical,y,state_energies[state]);

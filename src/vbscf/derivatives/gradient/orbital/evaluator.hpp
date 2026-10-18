@@ -127,7 +127,8 @@ public:
       const std::vector<int>& selected_state_indices,
       const std::vector<double>& state_average_weights,
       double nuclear_repulsion_energy,
-      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+      const SelectedMetric* metric = nullptr) const;
 
   /**
    * @brief Evaluates the orbital gradient pullback from a precomputed active-space result.

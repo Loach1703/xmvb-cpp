@@ -1118,7 +1118,8 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
     const std::vector<int>& selected_state_indices,
     const std::vector<double>& state_average_weights,
     double nuclear_repulsion_energy,
-    const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const {
+    const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+    const SelectedMetric* metric) const {
   const auto total_start_time = std::chrono::steady_clock::now();
   validate_state_selection(
       selected_state_indices,
@@ -1160,7 +1161,7 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       std::chrono::steady_clock::now() - structure_start_time).count();
 
   const auto action_start_time = std::chrono::steady_clock::now();
-  auto states = evaluate_fixed_states(*context.structure_action,structure_coefficients,normalized_weights);
+  auto states = evaluate_fixed_states(*context.structure_action,structure_coefficients,normalized_weights,metric);
   context.selected_state_eigenvectors = std::move(states.coefficients);
   context.selected_state_energies = std::move(states.energies);
   double electronic_energy = 0.0;

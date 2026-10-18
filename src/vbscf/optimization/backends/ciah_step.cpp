@@ -298,7 +298,8 @@ bool build_ciah_macro_step(
     mcscf::CiahKeyframe keyframe;
     if (ns) {
       const auto& point = transport_at(displacement);
-      const auto exact = objective->evaluate_coupled_keyframe(parameters, point.coefficients);
+      const auto exact = objective->evaluate_coupled_keyframe(
+          parameters, point.coefficients, point.selected_metric.get());
       auto model = transport->evaluate_model(point, exact);
       keyframe.gradient = std::move(model.gradient);
       keyframe.energy = model.energy;

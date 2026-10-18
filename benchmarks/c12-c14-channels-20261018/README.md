@@ -1,5 +1,75 @@
 # Native C12/C14 follow-up
 
+## Trial-chart keyframe overlap reuse
+
+The transport point now retains shared immutable ownership of its own exact
+selected Gram, when that Gram already exists. The fixed-state keyframe consumes
+it instead of replaying an overlap action. The normalized overlap image is
+`(M*C)*white`; the sigma/integral-adjoint sweep receives this known image and
+omits the second structure-overlap projection and the primal reread used only
+for that projection. Hamiltonian images, integral cotangents, generator moments,
+physical structure response and all solver policies/thresholds are unchanged.
+Selections without a resident Gram still compute the required overlap, then
+reuse its normalized image. No Gram is added solely for this optimization.
+
+The whole tile regression was added to qualification. Initial293355 passed
+12/13 tests but exposed a boundary bug from the preceding column-plan change:
+sampled spin-string membership queries were incorrectly required to provide
+a complete alpha carrier. Prefix membership is now kept separate from the
+complete-carrier column generator in `mcscf/ci/covalent_columns.hpp`. A sampled
+membership view does not create a full universe or a product table. The
+original high-orbital-count prefix tests are retained, not weakened.
+
+Final qualification293374 passes13/13 tests in5.87s, including structure tiles,
+fixed-state energies/gradients/integral adjoints with and without a supplied
+Gram, known-overlap consumption, unequal spins, arbitrary selected structures,
+multistate transport and immutable trial-Gram lifetime. Frozen binary SHA256:
+`58b4c9b76d787aa5db031b16d4a12c3a2f301430441fe877a7b0dcbf399a740c`.
+The failed qualification and successful replacement are both retained.
+
+Native293375_0 (C12) and293376_3 (C14) run concurrently on Hanhai25 with the
+same exact inputs,32 physical cores,4GiB shared CI workspace, CIAH/Davidson,
+BLAS1 and original outer criteria. No archived executable is rerun.
+
+| Case | Steps/HVP old = new | Final energy new (Eh) | Best saved / preceding / new process s | RSS preceding / new GiB |
+|---|---:|---:|---:|---:|
+| C12 COV132 |4/33|-399.106646267318|13.30 /17.39 /13.80|3.403 /3.429|
+| C14 COV429 |4/46|-535.672671742974|212.15 /202.49 /201.80|7.947 /7.857|
+
+Initial energies and per-macro HVP sequences match. Final differences from the
+saved excellent controls are at most1.1e-12Eh. GNU time measures the complete
+application process; application-report timers are also retained in the CSV.
+C14's new time is4.9% below the excellent control but only0.34% below the
+preceding version: this round is not a demonstrated significant C14 speedup.
+C12 still does not beat13.30s.
+
+There is concrete placement evidence relevant to C12's preceding slower run:
+excellent293313_0 used CPUs96-127 (one NUMA domain); preceding293347_0 used
+96-105,116-127,224-233 (two NUMA domains). New293375_0 uses160-191 (one NUMA
+domain) on anode003 rather than anode031. Therefore its17.39->13.80s change
+cannot be assigned solely to these source changes. This allocation evidence
+does not by itself quantify a NUMA penalty. C14 remains on anode064, but its
+core mask changes as well. All these nodes report EPYC9755 processors.
+No binding policy, thread count or physics parameter was changed to obtain
+the new results; the actual affinity files are retained.
+
+Current-only audit293377, launched after the C12 native run, verifies that
+pure-overlap product actions fall9->0 while Hamiltonian actions remain79.
+Compared with saved audit293348, fixed-state keyframes now use the transported
+trial Gram and no longer replay the overlap at a changed chart. Normalized
+overlap reuse also removes the product-jet primal-overlap projection. C14's
+remaining native major scopes are81.44s CI,80.05s physical HVP and13.92s
+fixed-state keyframes: further large end-to-end gains must target the actual
+CI/HVP contraction, not claim another large win from the now-removed metric
+replays.
+
+`keyframe.csv` and `keyframe-comparison.csv` compare against the excellent
+normalization293313 controls. `summarize.py --case-job c14-cov=293376` records
+the separate array allocations accurately. Source/build/test manifests,
+native resource logs, actual affinity and phase evidence are retained under
+the qualification/run/audit job directories in
+`results/diagnostics/c12-c14-channels-20261018/` and the remote benchmark mirror.
+
 ## Selected metric and symbolic column reuse (current follow-up)
 
 This round changes neither the Hamiltonian/HVP nor CIAH policies, physical

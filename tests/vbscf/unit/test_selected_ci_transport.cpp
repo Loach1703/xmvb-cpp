@@ -366,6 +366,14 @@ void check_selected_transport(bool stationary) {
               trial_factor != accepted->selected_metric &&
               (trial_factor->overlap - accepted->selected_metric->overlap).norm() > 1e-5,
           "changed trial chart reused the accepted metric factor");
+  require(point.selected_metric && point.selected_metric!=accepted->selected_metric &&
+      relative_error(point.selected_metric->overlap,trial_factor->overlap)<2e-12,
+      "transport did not retain the exact trial-chart Gram for its keyframe");
+  const auto retained_metric=point.selected_metric;
+  const auto next_point=transport.retract(0.7*p,0.5*q);
+  require(next_point.selected_metric && next_point.selected_metric!=retained_metric &&
+      relative_error(retained_metric->overlap,trial_factor->overlap)<2e-12,
+      "a later retraction invalidated an earlier trial's shared Gram");
   const Eigen::Vector3d reference_c = independent_coefficient(p, q);
   require(relative_error(point.coefficients.col(0), reference_c) < 2e-9,
           "finite selected transport differs from explicit least squares");

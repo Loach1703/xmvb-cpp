@@ -143,7 +143,8 @@ VbScfObjective::evaluate_trial_energy_with_initial_eigenvectors(
 VbScfCoupledKeyframeEvaluation
 VbScfObjective::evaluate_coupled_keyframe(
     const Eigen::VectorXd& parameter_vector,
-    const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const {
+    const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+    const SelectedMetric* metric) const {
   const auto start = std::chrono::steady_clock::now();
   OrbitalPreparationInput trial_orbitals = input_.orbital_preparation_input;
   layout_.unpack(parameter_vector, &trial_orbitals);
@@ -154,7 +155,7 @@ VbScfObjective::evaluate_coupled_keyframe(
           state_indices_,
           state_weights_,
           nuclear_repulsion_,
-          structure_coefficients);
+          structure_coefficients, metric);
   VbScfCoupledKeyframeEvaluation result;
   result.orbital_gradient = layout_.gather_from_full(
       fixed.gradient.sparse_orbital_energy_gradient);

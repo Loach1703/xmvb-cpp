@@ -27,7 +27,10 @@ def main():
     parser.add_argument("baseline", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--cases", nargs="+", help="Select cases without rerunning other inputs")
+    parser.add_argument("--case-job", action="append", default=[], metavar="CASE=JOB",
+                        help="Use a separately allocated native job for one case")
     args = parser.parse_args()
+    case_jobs = dict(value.split("=", 1) for value in args.case_job)
     with args.baseline.open() as stream:
         baseline = list(csv.DictReader(stream))
     if args.cases:
@@ -37,7 +40,8 @@ def main():
     current, comparisons = [], []
     for old in baseline:
         case = old["case"]
-        path = args.root / f"run-{args.job}" / case
+        job = case_jobs.get(case, args.job)
+        path = args.root / f"run-{job}" / case
         if (path / "run.exit").read_text().strip() != "0":
             raise RuntimeError(f"{case}: application failed")
         report_path = path / "report-tail.txt"
@@ -69,7 +73,7 @@ def main():
                 keyframe_seconds += float(values["seconds"])
         task = {"c12-cov": 0, "c12-ion02": 1, "c12-full": 2,
                 "c14-cov": 3, "c12-cov-64": 4}[case]
-        row = dict(case=case, job=f"{args.job}_{task}",
+        row = dict(case=case, job=f"{job}_{task}",
                    node=(path / "node.txt").read_text().strip(),
                    steps=len(trace), hvp=sum(int(t["orbital_hvp_actions"]) for t in trace),
                    per_step_hvp=":".join(t["orbital_hvp_actions"] for t in trace),

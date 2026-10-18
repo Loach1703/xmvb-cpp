@@ -40,6 +40,26 @@ Gram nor assumes a complete CAS. Large selections without a resident Gram
 still use the exact streamed action. A trial orbital chart has its own metric;
 an accepted-point Gram cannot be reused at a different chart.
 
+The finite CI transport already prepares the exact selected Gram $M_t$ at its
+trial chart $t$. Retain shared immutable ownership of that Gram in the trial
+point and pass it to the fixed-state keyframe. For its prescribed columns $C$,
+let $G=C^TM_tC$ and let $L$ be the small state-space normalization transform,
+so that $L^TGL=I$. The normalized structure overlap image is exactly
+
+$$
+M_t(C L)=(M_t C)L.
+$$
+
+Thus a keyframe can use the trial Gram for its initial normalization and pass
+the already-known normalized overlap image to the joint sigma/adjoint sweep.
+The sweep still computes all Hamiltonian images, integral cotangents and
+generator moments; it need not reread the primal carrier solely to project its
+overlap again. The same identity applies when $M_t C$ came from a streamed
+overlap action rather than a resident Gram. No CI residual is substituted for
+an overlap, and no derivative of the metric is discarded. The immutable trial
+Gram remains valid if the transport workspace subsequently moves to another
+trial point.
+
 For the complete singly occupied seed family, let $b_k$ count beta electrons
 on the first $k$ sites. The exact depth-zero upper-triangular support condition
 is $a_k+b_k\ge k$. Define $d_b(k,e)$ as the number of allowed alpha occupations

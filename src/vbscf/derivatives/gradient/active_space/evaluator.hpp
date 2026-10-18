@@ -16,6 +16,7 @@
 namespace xmvb::vb {
 
 struct AcceptedPointContext;
+struct SelectedMetric;
 
 /**
  * @brief Move-only forward evaluation awaiting the active-space adjoint.
@@ -128,13 +129,14 @@ public:
       const VbScfInput& input,
       ActiveSpaceForwardEvaluation forward_evaluation) const;
 
-  /** @brief Evaluates energy and gradient at prescribed structure columns. */
+  /** @brief Fixed-column energy/gradient; optional Gram belongs to input's orbitals. */
   ActiveSpaceFixedStructureGradient evaluate_fixed_structure(
       const VbScfInput& input,
       const std::vector<int>& selected_state_indices,
       const std::vector<double>& state_average_weights,
       double nuclear_repulsion_energy,
-      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+      const SelectedMetric* metric = nullptr) const;
 
   /**
    * @brief Evaluates a state-averaged gradient reusing a prebuilt active-space context.

@@ -41,7 +41,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     const mcscf::DirectCiSigmaAction* delta_sigma,const ExteriorOrbitalTransform& alpha,
     const ExteriorOrbitalTransform& beta,const mcscf::DirectCiSigmaAction& sigma,
     bool collect_images,StructureIntegralDirection* diagnostic,
-    StructureResponseSweep* ci_sweep) const {
+    StructureResponseSweep* ci_sweep,const Eigen::MatrixXd* overlap_image) const {
   const bool joint=ci_sweep!=nullptr;
   if (joint && (!response || !delta_upper || !delta_sigma || !collect_images))
     throw std::invalid_argument("joint product jet requires orbital and CI directions");
@@ -53,6 +53,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       {Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,states),
        Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,states)},
       Eigen::MatrixXd::Zero(n,n),Eigen::MatrixXd::Zero(d,d),Eigen::MatrixXd::Zero(n,n)};
+  if (collect_images && overlap_image) result.images.overlap=*overlap_image;
   if (joint) *ci_sweep={
       {Eigen::MatrixXd::Zero(n_structures_,states),Eigen::MatrixXd::Zero(n_structures_,states)},
       Eigen::MatrixXd::Zero(n,n),Eigen::MatrixXd::Zero(d,d),Eigen::MatrixXd::Zero(n,n)};
@@ -710,7 +711,10 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     sweep();
     double norm=0,parallel=0,square=0;
     std::vector<int> all_rows(n_unique_alpha_); std::iota(all_rows.begin(),all_rows.end(),0);
-    if (tangent || collect_images || capture) for (const int panel:reachable) {
+    // Accepted fixed-state normalization already supplies M*C. The sigma
+    // sweep has consumed Y for all densities/generator terms above; only the
+    // redundant structure-overlap projection remains, so omit that reread.
+    if (tangent || (collect_images && !overlap_image) || capture) for (const int panel:reachable) {
       const int first=panel*extent,count=std::min(extent,n_unique_beta_-first);
       std::vector<int> betas(count); std::iota(betas.begin(),betas.end(),first);
       Eigen::MatrixXd values,directions;

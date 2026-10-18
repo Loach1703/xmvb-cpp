@@ -17,6 +17,7 @@
 namespace xmvb::vb {
 
 struct AcceptedPointContext;
+struct SelectedMetric;
 
 /**
  * @brief Result of evaluating an orbital point without accepting it.
@@ -127,10 +128,12 @@ class VbScfObjective {
    *
    * This mirrors the CIAH keyframe operation: both the orbital displacement
    * and the current approximate structure displacement are retained.
+   * metric, when supplied, is the exact selected Gram at these trial orbitals.
    */
   VbScfCoupledKeyframeEvaluation evaluate_coupled_keyframe(
       const Eigen::VectorXd& parameter_vector,
-      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+      const SelectedMetric* metric = nullptr) const;
 
   /** @brief Relax CI from the supplied guess without orbital gradient backpropagation. */
   TrialEvaluation evaluate_trial_energy_with_structure_guess(

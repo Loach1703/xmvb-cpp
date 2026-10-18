@@ -32,6 +32,7 @@
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
+#include "vbscf/structures/overlap/metric.hpp"
 #include "mcscf/ci/product_paths.hpp"
 
 namespace {
@@ -307,6 +308,19 @@ void check_fixed_states(const xmvb::vb::StructureAction& action) {
   const std::vector<double> weights(count,1.0/count);
   const auto actual=xmvb::vb::evaluate_fixed_states(action,c,weights);
   const auto images=action.apply(c);
+  const xmvb::vb::SelectedMetric shared_metric(action.apply_overlap(
+      Eigen::MatrixXd::Identity(action.n_structures(),action.n_structures())));
+  const auto reused=xmvb::vb::evaluate_fixed_states(action,c,weights,&shared_metric);
+  const auto& reused_adjoint=reused.integral_adjoint.value();
+  require((reused.coefficient_gradient-actual.coefficient_gradient).norm()<3e-11 &&
+      (reused.residuals-actual.residuals).norm()<3e-11 &&
+      (reused_adjoint.overlap-actual.integral_adjoint->overlap).norm()<3e-11 &&
+      (reused_adjoint.one_electron-actual.integral_adjoint->one_electron).norm()<3e-11 &&
+      (reused_adjoint.pair_kernel-actual.integral_adjoint->pair_kernel).norm()<3e-11,
+      "trial-chart Gram reuse changed fixed-state gradients or integral adjoints");
+  for (int s=0;s<count;++s)
+    require(std::abs(reused.energies[s]-actual.energies[s])<3e-11,
+        "trial-chart Gram reuse changed a fixed-state energy");
   const Eigen::MatrixXd gram=c.transpose()*images.overlap;
   const Eigen::LLT<Eigen::MatrixXd> metric(gram);
   const Eigen::MatrixXd white=metric.matrixU().solve(Eigen::MatrixXd::Identity(count,count));
@@ -333,6 +347,14 @@ void check_fixed_states(const xmvb::vb::StructureAction& action) {
   // Exercise the optional image consumer independently of Rayleigh normalization.
   xmvb::vb::StructureActionResult fused_images;
   const auto fused=action.prepare_active_adjoint(c,weights,energies,&fused_images);
+  xmvb::vb::StructureActionResult known_images;
+  const auto known=action.prepare_active_adjoint(c,weights,energies,
+      &known_images,&images.overlap);
+  check_images(known_images,fused_images);
+  require((known.one_electron_gradient-fused.one_electron_gradient).norm()<3e-11 &&
+      (known.pair_kernel_gradient-fused.pair_kernel_gradient).norm()<3e-11 &&
+      (known.generator_gradient-fused.generator_gradient).norm()<3e-11,
+      "known-overlap consumption removed a physical adjoint term");
   check_images(fused_images,images);
   const auto separate=action.prepare_active_adjoint(c,weights,energies);
   require((fused.generator_gradient-separate.generator_gradient).norm()<3e-11 &&
