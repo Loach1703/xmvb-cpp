@@ -3,7 +3,8 @@ if (NOT DEFINED XMVB_EXECUTABLE OR NOT DEFINED XMVB_INPUT)
 endif()
 
 execute_process(
-  COMMAND "${XMVB_EXECUTABLE}" "${XMVB_INPUT}"
+  COMMAND "${CMAKE_COMMAND}" -E env XMVB_PHASE_TIMING=1
+    "${XMVB_EXECUTABLE}" "${XMVB_INPUT}"
   RESULT_VARIABLE xmvb_status
   OUTPUT_VARIABLE xmvb_report
   ERROR_VARIABLE xmvb_errors)
@@ -11,6 +12,15 @@ execute_process(
 if (NOT xmvb_status EQUAL 0)
   message(FATAL_ERROR
     "F2 state-average run failed with status ${xmvb_status}:\n${xmvb_errors}\n${xmvb_report}")
+endif()
+
+# A report can reuse norms already available from the physical calculation,
+# or evaluate them once. It must never repeat this work for individual roots.
+string(REGEX MATCHALL "XMVB_PHASE_EVENT,structure_normalization,begin"
+  norm_events "${xmvb_errors}")
+list(LENGTH norm_events norm_count)
+if (norm_count GREATER 1)
+  message(FATAL_ERROR "state-average report recomputed common structure norms")
 endif()
 
 foreach(pattern IN ITEMS

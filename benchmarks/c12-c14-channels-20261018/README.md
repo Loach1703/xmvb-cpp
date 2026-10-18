@@ -208,3 +208,56 @@ records. It checks input hashes, successful convergence and energy agreement
 before joining with `replay.csv`. Raw large output files remain on Hanhai25;
 compact logs, report tails and frozen build metadata are mirrored in
 `results/diagnostics/c12-c14-channels-20261018/run-293313/`.
+
+## Output-only structure normalization
+
+The optimizer no longer completes exact structure norms for reporting. The
+objective's reporting-only method and its call are deleted, without an alias.
+The result retains only the small accepted active-orbital overlap needed by
+optional analysis, not an HVP context or copied physical pair cache. It is
+important to use this accepted overlap: exported OEO orbitals can be in a
+different representative from the stored structure coefficients.
+
+`output/text/normalization.*` owns the output preparation. It reuses an
+already exact result diagonal (or a matrix already present) before doing any
+new contraction. Otherwise it prepares topology once and calls the existing
+overlap-only kernel. Normalized coefficients, Renormalized weights and the
+reported mean overlap share one norm vector across all states. Energy,
+optimization and orbital writers do not request it. Coulson--Chirgwin weights
+still use the retained raw C and M*C and do not require structure norms.
+No full H/M matrix or eigensolve is added; Davidson remains the API/input/CLI
+default and is checked explicitly. Existing dense data are merely reused if
+an explicit reference calculation has already produced them.
+
+The SCF timer now excludes optional report normalization, while the command
+end-to-end timer is sampled after final structure analysis, including its
+output. Consequently application timers across this change have different
+boundaries; GNU process time remains the comparison metric.
+
+Qualification293329 passes11/11 tests in1.92s. Tests cover arbitrary selected
+open-shell expansions, unequal alpha/beta electron counts, accepted-frame
+overlap without AO/integral input, exact-diagonal/matrix reuse, coefficient
+and weight invariance, Davidson defaults, and a two-state F2 report with at
+most one norm contraction. An initial build293326 reached the application
+but failed to find the new test target in Make's stale top-level rules; the
+script now explicitly reconfigures before building. Binary SHA256:
+`dfb30ac85e7896c6044921709b4f785e32c51bc43b9b3a3aebc985872313b082`.
+
+Native293330_0/2 preserve4/33 and4/40 steps/HVPs for C12 COV/FULL. Every
+printed normalized coefficient, Coulson--Chirgwin weight and Renormalized
+weight agrees exactly at the printed8 decimals with saved293313 output:
+132 entries per table for COV and226512 per table for FULL. No baseline
+executable is rerun. `output-layer.csv` records the complete native results.
+FULL takes46.23s process time,4.597GiB RSS,energy-399.417495587054Eh;
+COV takes17.85s,3.372GiB,energy-399.106646267316Eh. This refactor is not a
+claimed physical-kernel speedup. The COV native measurement is slower than
+293313: its79 CI actions take5.59s rather than3.85s, and33 HVPs take4.92s
+rather than3.74s. Nodes differ; the unchanged counts alone do not explain
+that timing difference or establish its cause.
+
+Current-only phase audits293331(FULL) and293333(COV) each record exactly one
+output norm contraction,0.355720514s and0.007424226s, respectively. The FULL
+audit's macro work totals33.81s; COV's totals12.29s. These scopes separate
+output work from the physical solve and show that the COV timing increase
+is not seconds of new structure normalization. No new threshold, regular
+certificate, physical action or per-state normalization is introduced.

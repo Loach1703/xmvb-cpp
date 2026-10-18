@@ -63,7 +63,8 @@ struct VbScfResult {
   double total_energy = 0.0;
 
   /**
-   * @brief Mean of the diagonal structure overlap elements.
+   * @brief Mean of the available structure-overlap diagonal estimate.
+   * Exact only when structure_overlap_diagonal_exact is true.
    */
   double average_structure_overlap = 0.0;
 
@@ -99,10 +100,11 @@ struct VbScfResult {
   std::vector<double> eigenvector_matrix;
 
   /**
-   * @brief Exact diagonal of the structure overlap matrix.
+   * @brief Available structure-overlap diagonal, possibly a Jacobi estimate.
    *
-   * Davidson uses this linear-storage metric data to report coefficients in
-   * individually normalized structure coordinates without forming full S.
+   * The exactness flag distinguishes physical norms from preconditioner data.
+   * Output computes missing exact norms only when normalized coefficients are
+   * requested; optimization does not complete this array for reporting.
    */
   std::vector<double> structure_overlap_diagonal;
 

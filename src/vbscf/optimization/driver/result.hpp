@@ -340,6 +340,12 @@ struct VbScfOptimizerResult {
    */
   VbScfResult scf_result;
 
+  /** @brief Accepted active-orbital overlap in the structure-coefficient frame.
+   * Small geometry-only input for optional output analysis. Exported orbitals
+   * can use a different representative; no integral/HVP context is retained.
+   */
+  std::vector<double> active_orbital_overlap_matrix;
+
   /**
    * @brief Final spin-summed AO one-particle density matrix.
    *

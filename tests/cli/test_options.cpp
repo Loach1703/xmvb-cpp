@@ -39,6 +39,9 @@ int main() {
       "optimizer API must default to P-LBFGS");
   const auto defaults = parse({"xmvb-cpp.exe", "unused.xmi"});
   require(defaults.has_value(), "default CLI options must parse");
+  require(api_defaults.structure_eigensolver == xmvb::vb::StructureEigensolver::Davidson &&
+          defaults->optimizer.structure_eigensolver == xmvb::vb::StructureEigensolver::Davidson,
+      "API and CLI must default to matrix-free Davidson");
   require(
       defaults->optimizer.backend ==
           xmvb::vb::VbScfOptimizerBackend::Plbfgs,

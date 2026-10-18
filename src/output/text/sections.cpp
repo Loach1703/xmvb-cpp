@@ -1,6 +1,7 @@
 #include "output/text/sections.hpp"
 
 #include "output/text/structure.hpp"
+#include "output/text/normalization.hpp"
 
 #include <Eigen/Eigenvalues>
 
@@ -254,7 +255,7 @@ struct NormalizedStructureState {
 
 NormalizedStructureState normalize_structure_state(
     const vb::VbScfResult& result,
-    int state) {
+    int state, const Eigen::VectorXd& structure_norms) {
   const int n_str = result.n_structures;
   const Eigen::MatrixXd raw_overlap =
       structure_matrix(result.structure_matrices.overlap_matrix, n_str);
@@ -266,24 +267,9 @@ NormalizedStructureState normalize_structure_state(
   const bool has_full_matrices =
       raw_overlap.rows() == n_str && raw_hamiltonian.rows() == n_str;
   if (raw_coefficients.size() != n_str ||
-      (!has_full_matrices &&
-       (result.structure_overlap_diagonal.size() !=
-            static_cast<std::size_t>(n_str) ||
-        !result.structure_overlap_diagonal_exact))) {
+      structure_norms.size() != n_str) {
     throw std::invalid_argument(
         "final structure state requires exact norms and consistent dimensions");
-  }
-
-  Eigen::VectorXd structure_norms(n_str);
-  for (int structure = 0; structure < n_str; ++structure) {
-    const double squared_norm = has_full_matrices
-        ? raw_overlap(structure, structure)
-        : result.structure_overlap_diagonal[structure];
-    if (!std::isfinite(squared_norm) || squared_norm <= 0.0) {
-      throw std::domain_error(
-          "a final VB structure has a non-positive or non-finite norm");
-    }
-    structure_norms[structure] = std::sqrt(squared_norm);
   }
 
   NormalizedStructureState normalized;
@@ -1106,7 +1092,7 @@ void print_input_sections(
   output << "---------------End of Guess--------------\n";
 }
 
-void print_final_state_sections(
+double print_final_state_sections(
     std::ostream& output,
     const vb::VbScfInputLoadResult& load_result,
     const vb::VbScfOptimizerResult& result) {
@@ -1137,8 +1123,11 @@ void print_final_state_sections(
            << result.final_total_energy << '\n';
   }
 
+  // Only normalized structure analysis requests these norms. All states and
+  // the summary reuse this one result; orbital/trace writers never request it.
+  const auto norms = structure_norms(result);
   const NormalizedStructureState first_state =
-      normalize_structure_state(scf, selected_states.front());
+      normalize_structure_state(scf, selected_states.front(), norms.values);
 
   const bool has_full_structure_matrices = first_state.overlap.size() != 0;
   if (has_full_structure_matrices) {
@@ -1154,7 +1143,7 @@ void print_final_state_sections(
        ++state_offset) {
     const NormalizedStructureState normalized = state_offset == 0
         ? first_state
-        : normalize_structure_state(scf, selected_states[state_offset]);
+        : normalize_structure_state(scf, selected_states[state_offset], norms.values);
     if (normalized.coefficients.size() == 0) {
       continue;
     }
@@ -1218,6 +1207,7 @@ void print_final_state_sections(
       natural_orbitals.overlap_square_root,
       orbitals.spin_multiplicity);
   print_dipole_and_virial_analysis(output, load_result, result);
+  return norms.mean_overlap;
 }
 
 }  // namespace xmvb::output

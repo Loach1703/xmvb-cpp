@@ -290,11 +290,6 @@ void print_summary(
       result.final_total_energy -
       load_result.nuclear_repulsion_energy -
       result.final_one_electron_reference_energy;
-  const auto command_finish_time = std::chrono::system_clock::now();
-  const double total_job_wall_time_seconds =
-      std::chrono::duration<double>(
-          std::chrono::steady_clock::now() - command_start_steady_time)
-          .count();
   const double optimizer_wall_time_seconds = result.total_wall_time_seconds;
   const int effective_thread_count = allocated_cpu_thread_count();
 
@@ -305,7 +300,12 @@ void print_summary(
             << "                  Total Energy:   "
             << std::fixed << std::setprecision(10) << result.final_total_energy
             << '\n';
-  print_final_state_sections(std::cout, load_result, result);
+  const double average_structure_overlap =
+      print_final_state_sections(std::cout, load_result, result);
+  const auto command_finish_time = std::chrono::system_clock::now();
+  const double total_job_wall_time_seconds =
+      std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - command_start_steady_time).count();
 
   std::cout << "\n\n                 ===============================================\n"
             << "                       XMVB-CPP RUN DIAGNOSTICS\n"
@@ -389,7 +389,7 @@ void print_summary(
       format_fixed_double(final_valence_structure_eigenvalue, 12));
   print_log_field(
       "Average structure overlap",
-      format_fixed_double(result.scf_result.average_structure_overlap, 12));
+      format_fixed_double(average_structure_overlap, 12));
   print_log_field(
       "Final gradient |g|_inf",
       format_scientific_double(result.final_gradient_inf_norm, 8));

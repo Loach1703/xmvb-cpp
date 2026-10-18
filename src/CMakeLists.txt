@@ -122,6 +122,7 @@ set(XMVB_OUTPUT_SOURCES
   output/text/report.cpp
   output/text/sections.cpp
   output/text/structure.cpp
+  output/text/normalization.cpp
   output/trace/accepted_iteration.cpp
   output/trace/ciah.cpp
   output/trace/tnhvp.cpp
@@ -414,6 +415,10 @@ if (BUILD_TESTING)
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${EIGEN3_INCLUDE_DIR})
   add_test(NAME output_structure COMMAND test_output_structure)
+
+  add_executable(test_output_normalization ${CMAKE_SOURCE_DIR}/tests/output/test_normalization.cpp)
+  target_link_libraries(test_output_normalization PRIVATE xmvb_output)
+  add_test(NAME output_normalization COMMAND test_output_normalization)
 
   add_executable(
     test_cli_options
