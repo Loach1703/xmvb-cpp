@@ -36,8 +36,8 @@ tests/linalg/      Linear-algebra tests with no electronic-model dependency
 tests/parallel/    Shared-buffer and nested-team execution tests
 ```
 
-The component dependency rules and numerical naming conventions are recorded
-in [Code Organization and Naming](docs/code_organization.md).
+Shared numerical modules do not depend on VB-specific model types. AO basis
+counts use `n_bf`; active orbital counts use `n_active`.
 
 ## Dependencies
 

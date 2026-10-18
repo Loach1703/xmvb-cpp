@@ -105,5 +105,9 @@ pdflatex3.fls
 uv.lock
 pyproject.toml
 scripts/
-article/
-docs/
+# Local manuscripts, derivations and benchmark reports; keep these off GitHub.
+/article/
+/docs/
+/doc/
+/benchmarks/**/*.md
+!/benchmarks/README.md

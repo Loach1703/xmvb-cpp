@@ -42,5 +42,4 @@ are local to one accepted point. Across macros only the last accepted search
 direction is recycled, with the CI sign aligned and its tangent reprojected;
 old Hessian images are never carried to a different orbital point.
 
-Derivation: `article/orthogonal_casscf.md`. Same-initial-frame Slurm/PySCF
-checks: `benchmarks/casscf-20261017/`.
+Same-initial-frame Slurm/PySCF checks: `benchmarks/casscf-20261017/`.
