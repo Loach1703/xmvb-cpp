@@ -91,3 +91,17 @@ legal shared budgets; direct LRU and small-budget sigma tests still force
 eviction and tile boundaries independently.292996 qualifies the corrected
 source-order accounting; all6 tests pass in6.39s. The frozen binary SHA256 is
 `57204727c0add6b806109a7d519af5b3e38d1958abb92c26afc9e61bcced386e`.
+
+## One outer-step measurement
+
+`step.sbatch` reuses this qualified frozen binary and the original input,
+with 32 cores, 4096 MiB and `--max-iterations 1`. It records scalar CIAH events,
+accepted-step diagnostics, phase timings and GNU-time RSS. Its 30-minute
+external cap bounds the diagnostic; a timeout is not a completed step. The
+first-CI-only driver is not used, so initial gradients, HVPs, candidate CI
+solves and the first accepted orbital update are included. Phase timing is
+enabled, so this is an instrumented one-step measurement. Full SCF convergence
+is outside its scope.
+
+Submitted as Hanhai25 job293003 on anode003 (AMD EPYC9755). The earlier
+first-CI timing was on anode017; retain that node distinction when comparing.
