@@ -16,6 +16,7 @@
 #endif
 
 #include "parallel/openmp.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::integrals {
 
@@ -707,6 +708,7 @@ std::vector<double> apply_ao_effective_one_electron_ri_operator(
     const RiAoFactorization& ri_factorization,
     int n_basis_functions,
     const AoEffectiveOneElectronRiOperatorOptions& options) {
+  profiling::ScopedPhase phase(profiling::Phase::RiAoH1e);
   validate_ri_factorization(ri_factorization, n_basis_functions);
 
   const std::size_t matrix_size =
@@ -737,6 +739,7 @@ std::vector<double> apply_ao_effective_one_electron_ri_operator(
     const AoEffectiveOneElectronRiLowRankFactors& low_rank_factors,
     const RiAoFactorization& ri_factorization,
     int n_basis_functions) {
+  profiling::ScopedPhase phase(profiling::Phase::RiAoH1e);
   validate_ri_factorization(ri_factorization, n_basis_functions);
 
   const auto spectral_factorization =

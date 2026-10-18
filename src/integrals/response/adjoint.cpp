@@ -8,6 +8,7 @@
 
 #include "integrals/response/internal.hpp"
 #include "integrals/response/ao_pair_operator.hpp"
+#include "integrals/response/orbital_pair.hpp"
 
 namespace xmvb::integrals {
 namespace {
@@ -22,26 +23,6 @@ using detail::build_active_pair_list;
 using detail::build_ao_pair_component_tables;
 using detail::build_mixed_ao_pair_to_active_pair_coefficients_from_cache;
 using detail::multiply_pair_coefficients_by_gradient_matrix;
-
-/** @brief Density adjoint of the accepted one-orbital integral contraction. */
-Eigen::MatrixXd backpropagate_orbital_pair_products(
-    const ExactPackedActiveTwoElectronAdjointCache& cache,
-    const ExactCtxPairMatrix& pair_gradient) {
-  const Eigen::Index n = cache.n_active_orbitals;
-  const Eigen::Index pairs = cache.active_pair_first_indices.size();
-  Eigen::MatrixXd weights = Eigen::MatrixXd::Zero(n * pairs, n);
-  for (Eigen::Index p = 0; p < pairs; ++p) {
-    const int a = cache.active_pair_first_indices[p];
-    const int b = cache.active_pair_second_indices[p];
-    for (Eigen::Index q = 0; q < pairs; ++q) {
-      weights(b * pairs + q, a) += pair_gradient(q, p);
-      weights(a * pairs + q, b) += pair_gradient(q, p);
-    }
-  }
-  const Eigen::Map<const ExactCtxPairMatrix> image(
-      cache.orbital_pair_products.data(), cache.n_basis_functions, n * pairs);
-  return image * weights;
-}
 
 /** @brief Builds shared three-active/one-AO integrals without thread replicas. */
 void build_orbital_pair_products(ExactPackedActiveTwoElectronAdjointCache* cache) {
@@ -129,7 +110,10 @@ Eigen::MatrixXd backpropagate_exact_packed_active_two_electron_gradient(
           packed_active_two_electron_gradient,
           active_pairs);
   if (accepted_cache.orbital_pair_products.size() != 0) {
-    return backpropagate_orbital_pair_products(accepted_cache, active_pair_gradient_matrix);
+    return pullback_orbital_pairs(
+        accepted_cache.orbital_pair_products, active_pair_gradient_matrix,
+        accepted_cache.active_pair_first_indices,
+        accepted_cache.active_pair_second_indices, n_ao);
   }
   Eigen::MatrixXd dense_active_gradient = Eigen::MatrixXd::Zero(
       n_bf,

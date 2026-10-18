@@ -9,6 +9,7 @@
 #include "integrals/active/two_electron_result.hpp"
 #include "integrals/ao/ri.hpp"
 #include "integrals/ao/ri_transform.hpp"
+#include "integrals/response/orbital_pair.hpp"
 
 namespace xmvb::integrals {
 
@@ -17,8 +18,8 @@ namespace xmvb::integrals {
  *
  * The cache borrows molecule-static whitened AO-pair factors, accepted
  * AO-by-active coefficients, and accepted active-pair factors `B = L T(C)`.
- * It owns only a bounded one-index transform, never AO-pair adjoints or an
- * orbital Hessian. Borrowed data must outlive every use of this cache.
+ * It retains bounded one-index and three-active-index integral images, never
+ * AO-pair adjoints or an orbital Hessian. Borrowed data must outlive the cache.
  */
 struct RiActiveTwoElectronResponseCache {
   int n_basis_functions = 0;
@@ -33,6 +34,11 @@ struct RiActiveTwoElectronResponseCache {
    * Empty means the identical transform is generated in auxiliary tiles.
    */
   std::shared_ptr<const Eigen::MatrixXd> accepted_one_index_factors;
+  /** @brief Shared (AO active|active pair) image for repeated pullbacks.
+   * Independent of the density adjoint and of the chosen VB structures.
+   * Admission accounts for this image and resident one-index factors together.
+   */
+  OrbitalPairMatrix orbital_pair_products;
   /** @brief Resource-derived auxiliary tile width, unrelated to accuracy. */
   int auxiliary_tile_size = 0;
 };
@@ -49,6 +55,11 @@ RiActiveTwoElectronResponseCache build_ri_active_two_electron_response_cache(
     const RiAoFactorization& ao_ri_factorization,
     const ActiveSpaceTwoElectronResult& accepted_active_space_result,
     int n_active_orbitals);
+
+/** @brief Prepare the density-independent image once for repeated responses.
+ * Ordinary one-off gradient evaluation does not request this extra transform.
+ */
+void prepare_ri_orbital_pair_products(RiActiveTwoElectronResponseCache& cache);
 
 /**
  * @brief Forms the active-pair factor direction `delta B = L delta T(C)[D]`.

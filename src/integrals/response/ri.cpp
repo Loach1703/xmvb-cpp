@@ -14,6 +14,7 @@
 
 #include "parallel/openmp.hpp"
 #include "core/pair_index.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::integrals {
 namespace {
@@ -310,25 +311,46 @@ RiActiveTwoElectronResponseCache build_ri_active_two_electron_response_cache(
   cache.auxiliary_tile_size = planned_auxiliary_tile_width(cache);
   cache.accepted_one_index_factors=accepted_active_space_result.ri_one_index_factors;
   if (!cache.accepted_one_index_factors && factor_elements <= response_workspace_bytes / sizeof(double)) {
-    auto resident=std::make_shared<Eigen::MatrixXd>(
-        static_cast<Eigen::Index>(cache.n_auxiliary_functions) *
-            n_active_orbitals,
-        n_bf);
-    const int width = cache.auxiliary_tile_size;
-    for (int first = 0; first < cache.n_auxiliary_functions; first += width) {
-      const int count = std::min(width, cache.n_auxiliary_functions - first);
-      const Eigen::MatrixXd factors = transform_ri_one_index(
-          *cache.metric_whitened_ao_pair_factors, *cache.accepted_active_coefficients, first, count);
-      for (int a = 0; a < n_active_orbitals; ++a) {
-        resident->middleRows(
-            static_cast<Eigen::Index>(a) * cache.n_auxiliary_functions + first,
-            count) = factors.middleRows(a * count, count);
-      }
-    }
-    cache.accepted_one_index_factors=std::move(resident);
+    cache.accepted_one_index_factors = std::make_shared<Eigen::MatrixXd>(
+        transform_ri_one_index_tiled(*cache.metric_whitened_ao_pair_factors,
+                                     *cache.accepted_active_coefficients));
   }
   validate_cache(cache, "RI active-2e response cache");
   return cache;
+}
+
+void prepare_ri_orbital_pair_products(RiActiveTwoElectronResponseCache& cache) {
+  profiling::ScopedPhase phase(profiling::Phase::RiOrbitalPairBuild);
+  validate_cache(cache, "RI orbital-pair transform");
+  if (cache.orbital_pair_products.size() != 0) return;
+  const Eigen::Index rows = static_cast<Eigen::Index>(cache.n_basis_functions) *
+      cache.n_active_orbitals;
+  const Eigen::Index pairs = cache.active_pair_first_indices.size();
+  const std::size_t resident = cache.accepted_one_index_factors
+      ? static_cast<std::size_t>(cache.accepted_one_index_factors->size()) : 0;
+  const std::size_t elements = static_cast<std::size_t>(rows) * pairs;
+  const std::size_t allowance = response_workspace_bytes / sizeof(double);
+  if (resident > allowance || elements > allowance - resident) return;
+  cache.orbital_pair_products.setZero(rows, pairs);
+  const int workers = std::min<Eigen::Index>(
+      xmvb::effective_openmp_thread_count(), rows);
+  visit_accepted_factors(cache, [&](const Eigen::MatrixXd& factors,
+                                  int first, int count) {
+    // Column-major [(a,A),mu] is already row-major [(mu,a),A]. No repacking.
+    const Eigen::Map<const OrbitalPairMatrix> image(factors.data(), rows, count);
+    const auto pair_factors = cache.accepted_active_pair_factors->middleRows(first, count);
+#pragma omp parallel num_threads(workers)
+    {
+      int worker = 0;
+#ifdef _OPENMP
+      worker = omp_get_thread_num();
+#endif
+      const Eigen::Index begin = rows * worker / workers;
+      const Eigen::Index end = rows * (worker + 1) / workers;
+      cache.orbital_pair_products.middleRows(begin, end - begin).noalias() +=
+          image.middleRows(begin, end - begin) * pair_factors;
+    }
+  });
 }
 
 Eigen::MatrixXd compute_ri_active_pair_factor_directional_derivative(
@@ -474,6 +496,14 @@ Eigen::MatrixXd backpropagate_ri_packed_active_two_electron_gradient(
       build_active_pair_adjoint(
           packed_active_two_electron_gradient,
           accepted_cache);
+  if (accepted_cache.orbital_pair_products.size() != 0) {
+    const OrbitalPairMatrix pair_adjoint = active_pair_adjoint;
+    return pullback_orbital_pairs(
+        accepted_cache.orbital_pair_products, pair_adjoint,
+        accepted_cache.active_pair_first_indices,
+        accepted_cache.active_pair_second_indices,
+        accepted_cache.n_active_orbitals);
+  }
   const Eigen::MatrixXd factor_adjoint =
       *accepted_cache.accepted_active_pair_factors * active_pair_adjoint;
   return contract_factor_adjoint(

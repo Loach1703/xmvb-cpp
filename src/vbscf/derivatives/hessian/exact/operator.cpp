@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <Eigen/Core>
+#include "core/timing.hpp"
 
 #include "vbscf/structures/assembly/coefficient_blocks.hpp"
 #include "integrals/response/adjoint.hpp"
@@ -165,6 +166,8 @@ ExactHvpOperator::State::State(
               *accepted_ri_factorization_,
               accepted_two_electron_result,
               n_active_orbitals));
+      xmvb::integrals::prepare_ri_orbital_pair_products(
+          *accepted_ri_two_electron_cache_);
     } else {
       accepted_exact_two_electron_cache_ =
           xmvb::integrals::build_exact_packed_active_two_electron_adjoint_cache(
@@ -191,6 +194,19 @@ ExactHvpOperator::State::State(
                 current_input_->orbital_preparation_input,
                 accepted_point_context_->total_active_auxiliary_gradient,
                 accepted_point_context_->total_inactive_density_gradient));
+    if (accepted_ri_two_electron_cache_ && n_inactive_doubly_occupied_orbitals > 0) {
+      xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::RiInactiveBuild);
+      const auto& cache = *accepted_ri_two_electron_cache_;
+      const std::size_t resident = cache.orbital_pair_products.size() +
+          (cache.accepted_one_index_factors ? cache.accepted_one_index_factors->size() : 0);
+      const std::size_t needed = static_cast<std::size_t>(n_basis_functions) *
+          n_inactive_doubly_occupied_orbitals * cache.n_auxiliary_functions;
+      const std::size_t allowance = integrals::ri_response_workspace_bytes / sizeof(double);
+      if (resident <= allowance && needed <= allowance - resident)
+        accepted_ri_inactive_one_index_factors_ = integrals::transform_ri_one_index_tiled(
+            *cache.metric_whitened_ao_pair_factors,
+            accepted_orbital_preparation_cache_->inactive_auxiliary);
+    }
   }
 }
 

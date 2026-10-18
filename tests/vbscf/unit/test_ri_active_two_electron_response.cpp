@@ -306,6 +306,17 @@ int main() {
       xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
           packed_adjoint,
           cache);
+  auto prepared = cache;
+  xmvb::integrals::prepare_ri_orbital_pair_products(prepared);
+  require(prepared.orbital_pair_products.size() != 0,
+          "small RI orbital-pair image was not prepared");
+  const double* products = prepared.orbital_pair_products.data();
+  xmvb::integrals::prepare_ri_orbital_pair_products(prepared);
+  require(products == prepared.orbital_pair_products.data(),
+          "accepted RI orbital-pair image was needlessly rebuilt");
+  require(is_close(xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
+      packed_adjoint, prepared), pullback, 1e-13),
+      "shared RI orbital-pair pullback differs from explicit factor contraction");
   const double directional_duality =
       packed_dot(packed_adjoint, packed_integral_direction);
   require(
@@ -330,6 +341,9 @@ int main() {
             (coordinate_pullback.array() * direction.array()).sum()) <=
             1.0e-10,
         "RI packed coordinate pullback has a symmetry-factor error");
+    require(is_close(xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
+        coordinate_adjoint, prepared), coordinate_pullback, 1e-13),
+        "shared orbital-pair pullback changed a packed coordinate multiplicity");
   }
 
   const auto plus_cache =
@@ -379,6 +393,11 @@ int main() {
   auto tiled_cache = cache;
   tiled_cache.accepted_one_index_factors.reset();
   tiled_cache.auxiliary_tile_size = 3;
+  auto prepared_tiled = tiled_cache;
+  xmvb::integrals::prepare_ri_orbital_pair_products(prepared_tiled);
+  require(is_close(xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
+      packed_adjoint, prepared_tiled), pullback, 1e-13),
+      "RI orbital-pair image changed when built from auxiliary tiles");
   require(is_close(
       xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
           tiled_cache, direction), factor_direction, 1.0e-13),

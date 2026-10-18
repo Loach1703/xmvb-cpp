@@ -17,4 +17,11 @@ Eigen::MatrixXd transform_ri_one_index(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
     int first_aux,int count);
 
+/** @brief Assemble a resident image with bounded transform scratch.
+ * The caller admits the returned image to its accepted-point storage budget.
+ */
+Eigen::MatrixXd transform_ri_one_index_tiled(
+    const Eigen::Ref<const Eigen::MatrixXd>& packed_factors,
+    const Eigen::Ref<const Eigen::MatrixXd>& coefficients);
+
 } // namespace xmvb::integrals

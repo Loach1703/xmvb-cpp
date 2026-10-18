@@ -467,10 +467,8 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
   } else if (ri_factorization != nullptr) {
     total_inactive_density_gradient =
         ao_effective_one_electron_backpropagator.backpropagate(
-            active_space_matrix_backpropagation_result
-                .ao_effective_one_electron_gradient,
-            *ri_factorization,
-            input.orbital_preparation_input.n_basis_functions).inactive_density_gradient;
+            symmetric_active_one_electron_gradient,
+            *ri_two_electron_cache).inactive_density_gradient;
   } else {
     total_inactive_density_gradient =
         ao_effective_one_electron_backpropagator.backpropagate(

@@ -48,6 +48,8 @@ set(XMVB_INTEGRAL_SOURCES
   integrals/response/directional.cpp
   integrals/response/ri.cpp
   integrals/response/ri_ao.cpp
+  integrals/response/orbital_pair.cpp
+  integrals/response/density_diagonal.cpp
   integrals/response/exchange.cpp
   integrals/response/pair_transforms.cpp
   integrals/response/ao_pair_operator.cpp

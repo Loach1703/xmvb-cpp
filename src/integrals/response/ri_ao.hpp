@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <span>
 #include <Eigen/Core>
 
 #include "integrals/response/ri.hpp"
@@ -25,6 +26,21 @@ struct RiAoResponseWorkspace {
   std::vector<Worker> workers;
 };
 
+/** @brief Borrowed accepted inactive transform, with exact column selection. */
+struct RiInactiveFactorView {
+  const Eigen::MatrixXd* factors = nullptr;
+  std::span<const int> orbitals;
+};
+
+/** @brief G(C W C^T) from accepted L_A C and active-pair factors.
+ * W must be symmetric. No AO eigendecomposition or repeated L_A C transform
+ * is needed when the accepted factors are resident; otherwise the same
+ * operator consumes bounded auxiliary tiles.
+ */
+Eigen::MatrixXd apply_ri_active_density_response(
+    const RiActiveTwoElectronResponseCache& active,
+    const Eigen::Ref<const Eigen::MatrixXd>& weights);
+
 /** @brief Exact factor-native RI AO response for D=X A^T+A X^T.
  * @param active Borrowed accepted active coefficients and one-index factors.
  * @param inactive_duals A=C_i (C_i^T S C_i)^-1; may have zero columns.
@@ -39,6 +55,7 @@ RiAoResponse apply_ri_ao_response(
     const Eigen::Ref<const Eigen::MatrixXd>& horizontal_direction,
     const Eigen::Ref<const Eigen::MatrixXd>& weighted_active,
     RiAoResponseWorkspace& workspace,
-    std::size_t workspace_bytes=ri_response_workspace_bytes);
+    std::size_t workspace_bytes=ri_response_workspace_bytes,
+    RiInactiveFactorView inactive = {});
 
 } // namespace xmvb::integrals

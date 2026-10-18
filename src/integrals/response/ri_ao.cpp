@@ -6,19 +6,128 @@
 #include <utility>
 #include <cblas.h>
 #include "parallel/openmp.hpp"
+#include "core/timing.hpp"
 
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
 namespace xmvb::integrals {
+namespace {
+
+/** @brief Add scale*(U^T V+V^T U), with one writer per lower AO rectangle. */
+void add_symmetric_product(const Eigen::MatrixXd& u, const Eigen::MatrixXd& v,
+                           double scale, Eigen::MatrixXd& output) {
+  profiling::ScopedPhase phase(profiling::Phase::RiAoExchange);
+  const int n = output.rows(), leading = u.rows();
+  const int workers = std::min(effective_openmp_thread_count(), n);
+  const int panels = std::min(n, static_cast<int>(std::ceil(
+      (std::sqrt(1.0 + 8.0 * workers) - 1) / 2)));
+  std::vector<std::pair<int, int>> blocks;
+  for (int row = 0; row < panels; ++row)
+    for (int col = 0; col <= row; ++col) blocks.emplace_back(row, col);
+#pragma omp parallel for schedule(dynamic,1) num_threads(workers)
+  for (std::size_t block = 0; block < blocks.size(); ++block) {
+    const auto [row, col] = blocks[block];
+    const int rb = row * n / panels, re = (row + 1) * n / panels;
+    const int cb = col * n / panels, ce = (col + 1) * n / panels;
+    double* target = output.data() + static_cast<std::size_t>(cb) * n + rb;
+    const double* ur = u.data() + static_cast<std::size_t>(rb) * leading;
+    const double* vr = v.data() + static_cast<std::size_t>(rb) * leading;
+    const double* uc = u.data() + static_cast<std::size_t>(cb) * leading;
+    const double* vc = v.data() + static_cast<std::size_t>(cb) * leading;
+    if (row == col) {
+      cblas_dsyr2k(CblasColMajor, CblasLower, CblasTrans, re-rb, leading,
+                  scale, ur, leading, vr, leading, 1, target, n);
+    } else {
+      cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, re-rb, ce-cb, leading,
+                  scale, ur, leading, vc, leading, 1, target, n);
+      cblas_dgemm(CblasColMajor, CblasTrans, CblasNoTrans, re-rb, ce-cb, leading,
+                  scale, vr, leading, uc, leading, 1, target, n);
+    }
+  }
+}
+
+/** @brief Add 2 L^T rho and mirror the completed lower triangle. */
+void add_coulomb(const Eigen::MatrixXd& factors, const Eigen::VectorXd& charge,
+                 Eigen::MatrixXd& output) {
+  profiling::ScopedPhase phase(profiling::Phase::RiAoCoulomb);
+  const int n = output.rows(), pairs = factors.cols();
+  const int workers = std::min(effective_openmp_thread_count(), pairs);
+  Eigen::VectorXd packed(pairs);
+#pragma omp parallel num_threads(workers)
+  {
+    int worker = 0;
+#ifdef _OPENMP
+    worker = omp_get_thread_num();
+#endif
+    const int begin = worker * pairs / workers, end = (worker + 1) * pairs / workers;
+    packed.segment(begin, end-begin).noalias() =
+        2 * factors.middleCols(begin, end-begin).transpose() * charge;
+#pragma omp barrier
+#pragma omp for schedule(static)
+    for (int mu = 0; mu < n; ++mu) for (int nu = 0; nu <= mu; ++nu) {
+      output(mu,nu) += packed[static_cast<std::size_t>(mu)*(mu+1)/2+nu];
+      output(nu,mu) = output(mu,nu);
+    }
+  }
+}
+
+}  // namespace
+
+Eigen::MatrixXd apply_ri_active_density_response(
+    const RiActiveTwoElectronResponseCache& active,
+    const Eigen::Ref<const Eigen::MatrixXd>& weights) {
+  const int n = active.n_basis_functions, na = active.n_active_orbitals;
+  const int n_aux = active.n_auxiliary_functions;
+  if (weights.rows() != na || weights.cols() != na ||
+      !active.accepted_active_pair_factors || !active.metric_whitened_ao_pair_factors)
+    throw std::invalid_argument("invalid RI active-density response dimensions");
+  Eigen::VectorXd packed_weights(active.active_pair_first_indices.size());
+  for (Eigen::Index p = 0; p < packed_weights.size(); ++p) {
+    const int a = active.active_pair_first_indices[p], b = active.active_pair_second_indices[p];
+    packed_weights[p] = (a == b ? 1.0 : 2.0) * weights(a,b);
+  }
+  const Eigen::VectorXd charge = *active.accepted_active_pair_factors * packed_weights;
+  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n,n);
+  const int workers = std::min(effective_openmp_thread_count(), n);
+  for (int first = 0; first < n_aux; first += active.auxiliary_tile_size) {
+    const int count = std::min(active.auxiliary_tile_size, n_aux-first);
+    Eigen::MatrixXd owned;
+    const Eigen::MatrixXd* factors = nullptr;
+    if (active.accepted_one_index_factors && count == n_aux) {
+      factors = active.accepted_one_index_factors.get();
+    } else if (active.accepted_one_index_factors) {
+      owned.resize(count*na,n);
+      for (int a = 0; a < na; ++a)
+        owned.middleRows(a*count,count) =
+            active.accepted_one_index_factors->middleRows(a*n_aux+first,count);
+      factors = &owned;
+    } else {
+      owned = transform_ri_one_index(*active.metric_whitened_ao_pair_factors,
+                                     *active.accepted_active_coefficients,first,count);
+      factors = &owned;
+    }
+    Eigen::MatrixXd weighted(count*na,n);
+#pragma omp parallel for schedule(static) num_threads(workers)
+    for (int mu = 0; mu < n; ++mu) {
+      const Eigen::Map<const Eigen::MatrixXd> source(factors->col(mu).data(),count,na);
+      Eigen::Map<Eigen::MatrixXd> target(weighted.col(mu).data(),count,na);
+      target.noalias() = source * weights;
+    }
+    add_symmetric_product(weighted,*factors,-0.5,result);
+  }
+  add_coulomb(*active.metric_whitened_ao_pair_factors,charge,result);
+  return result;
+}
 
 RiAoResponse apply_ri_ao_response(
     const RiActiveTwoElectronResponseCache& active,
     const Eigen::Ref<const Eigen::MatrixXd>& inactive_duals,
     const Eigen::Ref<const Eigen::MatrixXd>& horizontal_direction,
     const Eigen::Ref<const Eigen::MatrixXd>& weighted_active,
-    RiAoResponseWorkspace& workspace,std::size_t workspace_bytes) {
+    RiAoResponseWorkspace& workspace,std::size_t workspace_bytes,
+    RiInactiveFactorView inactive) {
   const int n=active.n_basis_functions, na=active.n_active_orbitals;
   const int ni=inactive_duals.cols(), rank=ni+na, n_aux=active.n_auxiliary_functions;
   if (n<=0 || na<=0 || n_aux<=0 || inactive_duals.rows()!=n ||
@@ -26,6 +135,10 @@ RiAoResponse apply_ri_ao_response(
       weighted_active.rows()!=n || weighted_active.cols()!=na ||
       !active.accepted_active_coefficients || !active.metric_whitened_ao_pair_factors)
     throw std::invalid_argument("invalid factor-native RI AO response dimensions");
+  if (inactive.factors && (inactive.factors->cols() != n ||
+      inactive.factors->rows() % n_aux != 0 || inactive.orbitals.size() !=
+          static_cast<std::size_t>(ni)))
+    throw std::invalid_argument("invalid accepted inactive RI factor view");
   // Previous slabs are not inputs to this action. Release them before a
   // different rank/tile plan allocates its first returned transform.
   workspace.direction.resize(0,0);
@@ -57,27 +170,37 @@ RiAoResponse apply_ri_ao_response(
   }
   workspace.coulomb.resize(n_aux);
   RiAoResponse result{Eigen::MatrixXd::Zero(n,n),Eigen::MatrixXd::Zero(n,na)};
-  const int panels=std::min(n,static_cast<int>(std::ceil(
-      (std::sqrt(1.0+8.0*workers)-1)/2)));
-  std::vector<std::pair<int,int>> blocks;
-  for (int row=0;row<panels;++row)
-    for (int col=0;col<=row;++col) blocks.emplace_back(row,col);
 
   for (int first=0;first<n_aux;first+=tile) {
     const int count=std::min(tile,n_aux-first),leading=count*rank;
+    profiling::ScopedPhase direction_phase(profiling::Phase::RiAoDirection);
     workspace.direction=transform_ri_one_index(*active.metric_whitened_ao_pair_factors,u,first,count);
-    if (active.accepted_one_index_factors) {
+    direction_phase.stop();
+    profiling::ScopedPhase accepted_phase(profiling::Phase::RiAoAccepted);
+    if (active.accepted_one_index_factors || inactive.factors) {
       workspace.accepted.resize(leading,n);
-      if (ni)
+      if (ni && inactive.factors) {
+        for (int a = 0; a < ni; ++a)
+          workspace.accepted.middleRows(a * count, count) =
+              inactive.factors->middleRows(
+                  static_cast<Eigen::Index>(inactive.orbitals[a]) * n_aux + first, count);
+      } else if (ni) {
         workspace.accepted.topRows(ni*count)=
             transform_ri_one_index(*active.metric_whitened_ao_pair_factors,inactive_duals,first,count);
+      }
       // Borrow the already-computed active transform, never recompute L C_a.
-      for (int a=0;a<na;++a)
-        workspace.accepted.middleRows((ni+a)*count,count)=
-            active.accepted_one_index_factors->middleRows(a*n_aux+first,count);
+      if (active.accepted_one_index_factors) {
+        for (int a=0;a<na;++a)
+          workspace.accepted.middleRows((ni+a)*count,count)=
+              active.accepted_one_index_factors->middleRows(a*n_aux+first,count);
+      } else {
+        workspace.accepted.bottomRows(na * count) = transform_ri_one_index(
+            *active.metric_whitened_ao_pair_factors, c, first, count);
+      }
     } else {
       workspace.accepted=transform_ri_one_index(*active.metric_whitened_ao_pair_factors,v,first,count);
     }
+    accepted_phase.stop();
 #pragma omp parallel num_threads(workers)
     {
       int thread=0;
@@ -114,34 +237,9 @@ RiAoResponse apply_ri_ao_response(
       }
       }
     }
-    // Every lower AO rectangle has one writer; no AO-square worker reductions.
-#pragma omp parallel for schedule(dynamic,1) num_threads(workers)
-    for (std::size_t block=0;block<blocks.size();++block) {
-      const auto [row,col]=blocks[block];
-      const int rb=row*n/panels,re=(row+1)*n/panels;
-      const int cb=col*n/panels,ce=(col+1)*n/panels;
-      double* output=result.combined.data()+static_cast<std::size_t>(cb)*n+rb;
-      const double* ur=workspace.direction.data()+static_cast<std::size_t>(rb)*leading;
-      const double* vr=workspace.accepted.data()+static_cast<std::size_t>(rb)*leading;
-      const double* uc=workspace.direction.data()+static_cast<std::size_t>(cb)*leading;
-      const double* vc=workspace.accepted.data()+static_cast<std::size_t>(cb)*leading;
-      if (row==col) {
-        cblas_dsyr2k(CblasColMajor,CblasLower,CblasTrans,re-rb,leading,
-            -1,ur,leading,vr,leading,1,output,n);
-      } else {
-        cblas_dgemm(CblasColMajor,CblasTrans,CblasNoTrans,re-rb,ce-cb,leading,
-            -1,ur,leading,vc,leading,1,output,n);
-        cblas_dgemm(CblasColMajor,CblasTrans,CblasNoTrans,re-rb,ce-cb,leading,
-            -1,vr,leading,uc,leading,1,output,n);
-      }
-    }
+    add_symmetric_product(workspace.direction,workspace.accepted,-1,result.combined);
   }
-  const Eigen::VectorXd coulomb=2*active.metric_whitened_ao_pair_factors->transpose()*
-      workspace.coulomb;
-  for (int mu=0;mu<n;++mu) for (int nu=0;nu<=mu;++nu) {
-    result.combined(mu,nu)+=coulomb[static_cast<std::size_t>(mu)*(mu+1)/2+nu];
-    result.combined(nu,mu)=result.combined(mu,nu);
-  }
+  add_coulomb(*active.metric_whitened_ao_pair_factors,workspace.coulomb,result.combined);
   if (ni) {
     for (const auto& worker:workspace.workers) result.projection-=0.25*worker.projection;
     result.projection.noalias()+=0.5*result.combined*c;

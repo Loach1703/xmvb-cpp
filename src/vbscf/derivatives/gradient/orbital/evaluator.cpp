@@ -43,9 +43,6 @@ std::vector<double> build_reference_energy_inactive_density_gradient(
     const OrbitalPreparationResult& orbital_result,
     const AoEffectiveOneElectronResult& ao_effective_one_electron_result,
     const AoEffectiveOneElectronBackpropagator& ao_effective_one_electron_backpropagator) {
-  const int n_inactive_doubly_occupied_orbitals =
-      (input.orbital_preparation_input.n_total_electrons -
-       input.orbital_preparation_input.n_active_electrons) / 2;
   std::vector<double> inactive_density_gradient(
       orbital_result.inactive_density_matrix.size(),
       0.0);
@@ -66,21 +63,20 @@ std::vector<double> build_reference_energy_inactive_density_gradient(
         ao_core_hamiltonian_data[index];
   }
 
+  if (use_standard_ri_ao_effective_one_electron_path(input)) {
+    // G is linear: the reference contribution G(2 P_i) is already 2 G(P_i).
+    const int n_bf = input.ao_integral_input.n_basis_functions;
+    Eigen::MatrixXd encoded = Eigen::MatrixXd::Zero(n_bf,n_bf);
+    encoded.triangularView<Eigen::Lower>() =
+        2 * ao_effective_one_electron_result.ao_coulomb_exchange_matrix;
+    encoded.diagonal() *= 0.5;
+    for (std::size_t i = 0; i < inactive_density_gradient.size(); ++i)
+      inactive_density_gradient[i] += encoded.data()[i];
+    return inactive_density_gradient;
+  }
   const auto ao_effective_one_electron_backpropagation_result =
-      use_standard_ri_ao_effective_one_electron_path(input)
-          ? ao_effective_one_electron_backpropagator.backpropagate(
-                std::vector<double>(
-                    input.orbital_preparation_input.n_active_orbitals *
-                        input.orbital_preparation_input.n_active_orbitals,
-                    0.0),
-                orbital_result,
-                ensure_vbscf_input_ri_cache(input),
-                input.ao_integral_input.n_basis_functions,
-                n_inactive_doubly_occupied_orbitals,
-                input.orbital_preparation_input.n_active_orbitals)
-          : ao_effective_one_electron_backpropagator.backpropagate(
-                orbital_result.inactive_density_matrix,
-                input.ao_integral_input);
+      ao_effective_one_electron_backpropagator.backpropagate(
+          orbital_result.inactive_density_matrix, input.ao_integral_input);
   for (std::size_t index = 0; index < inactive_density_gradient.size(); ++index) {
     inactive_density_gradient[index] +=
         ao_effective_one_electron_backpropagation_result.inactive_density_gradient[index];
@@ -355,11 +351,11 @@ OrbitalGradientResult OrbitalGradientEvaluator::evaluate_from_active_space_gradi
       use_standard_ri_ao_effective_one_electron_path(input)
           ? ao_effective_one_electron_backpropagator_.backpropagate(
                 active_space_gradient_result.active_one_electron_gradient,
-                orbital_result,
-                ensure_vbscf_input_ri_cache(input),
-                input.ao_integral_input.n_basis_functions,
-                n_inactive_doubly_occupied_orbitals,
-                input.orbital_preparation_input.n_active_orbitals)
+                integrals::build_ri_active_two_electron_response_cache(
+                    ensure_vbscf_input_ri_cache(input),
+                    active_space_gradient_result.active_space_two_electron_result,
+                    input.orbital_preparation_input.n_active_orbitals),
+                &ao_effective_one_electron_result)
           : [&]() {
               std::vector<double> total_ao_effective_one_electron_gradient =
                   active_space_matrix_backpropagation_result.ao_effective_one_electron_gradient;
@@ -535,11 +531,10 @@ OrbitalGradientEvaluator::evaluate_sparse_orbital_gradient_with_fixed_active_spa
       use_standard_ri_ao_effective_one_electron_path(input)
           ? ao_effective_one_electron_backpropagator_.backpropagate(
                 accepted_point_context.active_one_electron_gradient,
-                orbital_result,
-                ensure_vbscf_input_ri_cache(input),
-                input.ao_integral_input.n_basis_functions,
-                n_inactive_doubly_occupied_orbitals,
-                input.orbital_preparation_input.n_active_orbitals)
+                integrals::build_ri_active_two_electron_response_cache(
+                    ensure_vbscf_input_ri_cache(input),active_space_two_electron_result,
+                    input.orbital_preparation_input.n_active_orbitals),
+                &ao_effective_one_electron_result)
           : [&]() {
               std::vector<double> total_ao_effective_one_electron_gradient =
                   active_space_matrix_backpropagation_result.ao_effective_one_electron_gradient;

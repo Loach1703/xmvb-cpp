@@ -61,7 +61,10 @@ integrals::RiAoResponse ExactHvpOperator::State::ri_ao_response(
   // This is structural zero pruning, with no numerical rank threshold.
   const Eigen::MatrixXd horizontal=delta-geometry.inactive_auxiliary*(sci.transpose()*delta);
   return integrals::apply_ri_ao_response(*accepted_ri_two_electron_cache_,
-      duals,horizontal,weighted_active,ri_ao_response_workspace_);
+      duals,horizontal,weighted_active,ri_ao_response_workspace_,
+      integrals::ri_response_workspace_bytes,
+      {accepted_ri_inactive_one_index_factors_.size() != 0
+          ? &accepted_ri_inactive_one_index_factors_ : nullptr, moving});
 }
 
 ActiveSpaceIntegralDirectionView

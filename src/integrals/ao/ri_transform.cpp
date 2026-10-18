@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include "parallel/openmp.hpp"
+#include "core/timing.hpp"
 
 namespace xmvb::integrals {
 
@@ -10,6 +11,7 @@ Eigen::MatrixXd transform_ri_one_index(
     const Eigen::Ref<const Eigen::MatrixXd>& packed_factors,
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
     int first_aux,int count) {
+  profiling::ScopedPhase phase(profiling::Phase::RiOneIndex);
   const int n=coefficients.rows(),orbitals=coefficients.cols();
   if (n<=0 || first_aux<0 || count<=0 || first_aux+count>packed_factors.rows() ||
       packed_factors.cols()!=static_cast<Eigen::Index>(n)*(n+1)/2)
@@ -31,6 +33,27 @@ Eigen::MatrixXd transform_ri_one_index(
     }
   }
   return transformed;
+}
+
+Eigen::MatrixXd transform_ri_one_index_tiled(
+    const Eigen::Ref<const Eigen::MatrixXd>& packed_factors,
+    const Eigen::Ref<const Eigen::MatrixXd>& coefficients) {
+  const int n_bf = coefficients.rows(), orbitals = coefficients.cols();
+  const int n_aux = packed_factors.rows();
+  const int workers = std::min(effective_openmp_thread_count(), n_bf);
+  const std::size_t per_aux = static_cast<std::size_t>(n_bf) * (orbitals + workers);
+  const int width = std::min<std::size_t>(n_aux, std::max<std::size_t>(
+      1, ri_response_workspace_bytes / sizeof(double) / per_aux));
+  Eigen::MatrixXd result(static_cast<Eigen::Index>(n_aux) * orbitals, n_bf);
+  for (int first = 0; first < n_aux; first += width) {
+    const int count = std::min(width, n_aux - first);
+    const Eigen::MatrixXd tile = transform_ri_one_index(
+        packed_factors, coefficients, first, count);
+    for (int a = 0; a < orbitals; ++a)
+      result.middleRows(static_cast<Eigen::Index>(a) * n_aux + first, count) =
+          tile.middleRows(a * count, count);
+  }
+  return result;
 }
 
 } // namespace xmvb::integrals

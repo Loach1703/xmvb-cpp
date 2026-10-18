@@ -23,11 +23,15 @@ def main():
     parser.add_argument("artifact", type=Path)
     parser.add_argument("references", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--mode", choices=("ri", "exact"), default="ri")
+    parser.add_argument("--cases", nargs="+",
+                        choices=("241", "c12-cov", "c14-cov", "FeCl2", "MnF2"),
+                        default=("241", "c12-cov", "c14-cov", "FeCl2", "MnF2"))
     args = parser.parse_args()
     with args.references.open() as stream:
         references = {r["case"]: r for r in csv.DictReader(stream)}
     rows = []
-    for case in ("241", "c12-cov", "c14-cov", "FeCl2", "MnF2"):
+    for case in args.cases:
         path = args.artifact / case
         report = {k.strip(): v.strip() for k, v in fields(path / "report-tail.txt").items()}
         resource = fields(path / "resource.time")
@@ -56,10 +60,11 @@ def main():
         source = (path / "input.xmi").read_text().splitlines()
         basis = next(line.split("=", 1)[1].strip() for line in source
                      if line.strip().lower().startswith("basis="))
-        row = dict(case=case, mode="ri", job=(path / "slurm-job.txt").read_text().strip(),
+        row = dict(case=case, mode=args.mode, job=(path / "slurm-job.txt").read_text().strip(),
                    node=(path / "node.txt").read_text().strip(),
                    affinity=(path / "affinity.txt").read_text().split(":", 1)[1].strip(),
-                   basis=basis, auxbasis=basis.lower()+"-jkfit", converged=converged,
+                   basis=basis, auxbasis=basis.lower()+"-jkfit" if args.mode == "ri" else "",
+                   converged=converged,
                    steps=len(trace), hvp=sum(int(t["orbital_hvp_actions"]) for t in trace),
                    per_step_hvp=":".join(t["orbital_hvp_actions"] for t in trace),
                    initial_Eh=report.get("Initial total energy", ""),
@@ -76,7 +81,7 @@ def main():
             raise RuntimeError(f"{case}: input differs from saved exact reference")
         for key in ("job", "node", "source", "process_s", "rss_GiB", "steps", "hvp", "final_Eh"):
             row[f"exact_{key}"] = reference[key]
-        row["reference_over_ri_time"] = float(reference["process_s"])/process_s if converged else ""
+        row[f"reference_over_{args.mode}_time"] = float(reference["process_s"])/process_s if converged else ""
         row["delta_E_mEh"] = 1000*(float(row["final_Eh"])-float(reference["final_Eh"])) if converged else ""
         rows.append(row)
         print(f"{case}: converged={converged}, {row['steps']}/{row['hvp']}, "

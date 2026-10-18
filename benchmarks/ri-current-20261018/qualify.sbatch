@@ -31,7 +31,7 @@ cmake --build "$source_dir/build-final" --target xmvb test_ri_ao_response \
   check_exact_ctx_hvp test_product_frontier test_structure_tiles \
   test_selected_ci_transport test_ci_transport test_coupled_structure \
   test_orthogonal_direct_ci test_representation_overlap test_selected_metric \
-  test_ciah test_keyframe test_output_normalization -j16 > "$artifact/build.log" 2>&1
+  test_ciah test_keyframe test_output_normalization -j"$SLURM_CPUS_PER_TASK" > "$artifact/build.log" 2>&1
 ctest --test-dir "$source_dir/build-final" --output-on-failure --timeout 120 \
   -R '^(ri_ao_response|ri_ao_h1e_hvp|ri_active_two_electron_response|ri_pair_contractions|ri_tnhvp_f2|product_frontier|selected_ci_transport|ci_transport|coupled_structure|orthogonal_direct_ci|structure_tiles|representation_overlap|selected_metric|ciah|keyframe|output_normalization|text_report_f2|state_average_f2)$' \
   > "$artifact/ctest.out" 2>&1
