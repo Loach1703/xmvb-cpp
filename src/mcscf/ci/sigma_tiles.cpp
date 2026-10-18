@@ -199,7 +199,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   auto& column_index=plan.column_index;
   auto& active_support=plan.active_support;
   auto& released_columns=plan.released;
-  std::vector<int> diagonal_rows,same_group,offsets,positions,target_index,target_rows;
+  std::vector<int> diagonal_rows,same_group,offsets,positions,target_index;
+  std::vector<detail::SigmaGatherRow> target_rows;
   const auto& channel_groups=plan.channel_groups;
   detail::ChannelLayout channel_layout;
   std::vector<Eigen::Index> beta_offsets;
@@ -282,13 +283,18 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               offsets.assign(n_columns + 1, 0);
               for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
                 same_group[column_index[groups[g].beta]] = g;
-                for (int i = groups[g].begin; i < groups[g].end; ++i)
+                for (int i = groups[g].begin; i < groups[g].end; ++i) {
                   target_index[static_cast<std::size_t>(g)*n_halo+halo_index[active[i]]]=i;
-                // Sort once through the existing row map. Every beta edge
-                // then traverses only its valid targets, rather than the halo.
-                int target=groups[g].begin;
-                const int* index=target_index.data()+static_cast<std::size_t>(g)*n_halo;
-                for (int h=0;h<n_halo;++h) if (index[h]>=0) target_rows[target++]=h;
+                  const int image=channel_layout.image(i);
+                  target_rows[i]={active[i],image,width>1 ? channel_layout.image(count+i)-image:0};
+                }
+                // The column generator already supplies the targets. Compose
+                // their image addresses once instead of scanning the whole
+                // halo, then decoding them again along every incoming edge.
+                const auto begin=target_rows.begin()+groups[g].begin;
+                const auto end=target_rows.begin()+groups[g].end;
+                const auto before=[](const auto& a,const auto& b) { return a.alpha<b.alpha; };
+                if (!std::is_sorted(begin,end,before)) std::sort(begin,end,before);
                 for (const auto& edge:beta_graph.singles(groups[g].beta))
                   ++offsets[column_index[edge.source] + 1];
               }
@@ -505,12 +511,11 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               // the entire alpha range. Do not rediscover them for every pixel.
               for (int edge = offsets[source]; edge < offsets[source + 1]; ++edge) {
                 const auto& link = incoming[edge];
-                const int* index = target_index.data() + static_cast<std::size_t>(link.group) * n_halo;
                 const double* values = channel_values + link.pair;
                 const auto& group=groups[link.group];
-                detail::gather_beta_rows(values,pairs,v*count,link.sign,
+                detail::gather_beta_rows(values,pairs,v,link.sign,
                     {target_rows.data()+group.begin,static_cast<std::size_t>(group.end-group.begin)},
-                    index,halo,channel_layout,first,last,destination,rows,n_rows);
+                    halo[first],halo[last-1]+1,destination,rows,n_rows);
               }
             };
               writer(columns, halo, accumulate);

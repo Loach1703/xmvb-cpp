@@ -3,36 +3,40 @@
 #include <algorithm>
 #include <span>
 
-#include "mcscf/ci/channel_product.hpp"
-
 namespace xmvb::mcscf::detail {
 
+/** @brief One tile-local target with its composed grouped-image address.
+ * An RHS advances by stride image rows. All temporal responses share this
+ * symbolic address; no channel values or excitation-edge arrays are cached.
+ */
+struct SigmaGatherRow { int alpha,image,stride; };
+
 /** @brief Contract one beta edge over existing target rows only.
- * Targets are sorted halo addresses. Their index entries contain original
- * tile rows; the shared layout maps each RHS to its grouped image.
+ * Targets are sorted alpha addresses with the layout permutation composed once.
  * Sparse destination rows are intersected exactly, without a product mask.
  * The caller owns a disjoint destination interval, so no atomics are needed.
  */
-inline void gather_beta_rows(const double* values,int pairs,int rhs_offset,double sign,
-    std::span<const int> targets,const int* index,std::span<const int> halo,
-    const ChannelLayout& layout,int first,int last,double* destination,const int* rows,int n_rows) {
-  auto target=std::lower_bound(targets.begin(),targets.end(),first);
-  const auto end=std::lower_bound(target,targets.end(),last);
+inline void gather_beta_rows(const double* values,int pairs,int rhs,double sign,
+    std::span<const SigmaGatherRow> targets,int first,int last,
+    double* destination,const int* rows,int n_rows) {
+  const auto before=[](const SigmaGatherRow& row,int alpha) { return row.alpha<alpha; };
+  auto target=std::lower_bound(targets.begin(),targets.end(),first,before);
+  const auto end=std::lower_bound(target,targets.end(),last,before);
   if (target==end) return;
   if (!rows) {
     for (;target!=end;++target)
-      destination[halo[*target]]+=sign*values[
-          static_cast<std::size_t>(layout.image(index[*target]+rhs_offset))*pairs];
+      destination[target->alpha]+=sign*values[
+          static_cast<std::size_t>(target->image+rhs*target->stride)*pairs];
     return;
   }
-  int output=std::lower_bound(rows,rows+n_rows,halo[*target])-rows;
+  int output=std::lower_bound(rows,rows+n_rows,target->alpha)-rows;
   for (;target!=end;++target) {
-    const int alpha=halo[*target];
+    const int alpha=target->alpha;
     while (output<n_rows && rows[output]<alpha) ++output;
     if (output==n_rows) break;
     if (rows[output]==alpha)
       destination[output]+=sign*values[
-          static_cast<std::size_t>(layout.image(index[*target]+rhs_offset))*pairs];
+          static_cast<std::size_t>(target->image+rhs*target->stride)*pairs];
   }
 }
 
