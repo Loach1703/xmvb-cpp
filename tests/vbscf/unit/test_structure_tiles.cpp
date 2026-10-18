@@ -1981,7 +1981,7 @@ void check_sigma_tile_plan() {
     for (int parity:{0,1,-1})
       for (const std::size_t bytes:{800U,8192U}) {
         detail::SigmaTilePlan plan(graph,graph,selected,parity,
-            {2,10,2,2,false,bytes},true);
+            {2,10,2,bytes},true);
         std::array<int,16> visits{};
         std::array<bool,4> retired{};
         while (plan.next()) {
@@ -2008,6 +2008,41 @@ void check_sigma_tile_plan() {
         require(std::all_of(retired.begin(),retired.end(),[](bool value) { return value; }),
             "sigma plan omitted a final column release");
       }
+}
+
+/** @brief Ragged-channel capacity never drops nodes at a budget boundary. */
+void check_packed_sigma_tile_plan() {
+  using namespace xmvb::mcscf;
+  const std::vector<std::uint64_t> masks{3,5,6,9,10,12};
+  SpinConnections graph;
+  graph.strings=6; graph.degree=4;
+  graph.occupations.resize(2,6);
+  for (int a=0;a<6;++a) {
+    int entry=0;
+    for (int p=0;p<4;++p) if ((masks[a]>>p)&1) graph.occupations(entry++,a)=p;
+    for (int b=0;b<6;++b) if (__builtin_popcountll(masks[a]^masks[b])==2)
+      graph.links.push_back({b,0,0,0,1.0});
+  }
+  const ProductSupport support(4,masks,masks);
+  for (int parity:{0,1,-1}) for (int packed:{1,2})
+    for (const std::size_t bytes:{2048U,8192U}) {
+      detail::SigmaTilePlan plan(graph,graph,&support,parity,{2,10,packed+1,bytes,packed},true);
+      std::array<int,36> visits{};
+      while (plan.next()) {
+        require(plan.payload_bytes()<=bytes,"packed sigma plan exceeds shared budget");
+        require(plan.channel_groups.size()==plan.active.size(),"missing packed channel groups");
+        for (int i=0;i<static_cast<int>(plan.active.size());++i) {
+          const int a=plan.active[i],b=plan.groups[plan.group_index[i]].beta;
+          ++visits[6*a+b];
+          const auto [first,last]=support.channel_envelope(a,b);
+          require(plan.channel_groups[i]==(first<0 ? 0:1+4*first+last),
+              "packed sigma planner changed the exact channel envelope");
+        }
+      }
+      for (int a=0;a<6;++a) for (int b=0;b<6;++b)
+        require(visits[6*a+b]==static_cast<int>(support.contains(a,b,1) &&
+            (!parity || a<b || (a==b && parity>0))),"packed sigma plan lost or duplicated a target");
+    }
 }
 
 void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
@@ -3399,10 +3434,14 @@ int main(int argc, char** argv) {
       check_sigma_columns(make_fixture(4, 4, 1), 2);
       check_sigma_columns(make_fixture(10, 5, 4), 2);
       check_sigma_tile_plan();
+      check_packed_sigma_tile_plan();
       check_prefix_words();
       check_supported_sigma(4, 2, 2, 2);
       check_supported_sigma(5, 3, 2, 3);
       check_supported_sigma(6, 3, 3, 1);
+      // Enough halo scratch for the grouped per-worker Gram, including
+      // both exchange parities, multiple RHS and independent HVP adjoints.
+      check_supported_sigma(8, 4, 4, 2);
       check_generic_product_support();
       check_supported_sigma(5, 2, 1, 2, {3 * 5 + 2, 6 * 5 + 0});
       check_covalent_subset(1, false);

@@ -132,6 +132,7 @@ public:
     return covalent_ ? covalent_->deficient_prefixes(alpha,beta):std::pair{-1,-1};
   }
   bool has_channel_envelopes() const noexcept { return covalent_.has_value(); }
+  int n_orbitals() const noexcept { return n_; }
 
   /** @brief Small-query membership test; traversal should use cursor/column. */
   bool contains(int alpha, int beta, int depth = 0) const noexcept {

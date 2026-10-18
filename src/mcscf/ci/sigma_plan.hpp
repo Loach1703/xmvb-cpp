@@ -11,9 +11,9 @@ namespace xmvb::mcscf::detail {
 
 /** @brief Numeric halo, channel and target-index budget; immutable spin links are shared. */
 struct SigmaTileBudget {
-  int width,pairs,slabs,workers;
-  bool temporal;
+  int width,pairs,slabs;
   std::size_t bytes;
+  int packed_slabs=0;
 };
 
 struct SigmaTargetGroup { int beta,begin,end,column=0; };
@@ -32,11 +32,13 @@ public:
   std::vector<SigmaTargetGroup> groups;
   std::vector<int> active,group_index,halo,columns,halo_index,column_index,released;
   std::vector<unsigned char> active_support;
+  std::vector<int> channel_groups;
 
 private:
   struct Node { int alpha,beta; bool supported; };
   bool pull(Node& node);
-  long double payload(std::size_t rows,std::size_t h,std::size_t b,std::size_t g) const;
+  long double payload(std::size_t rows,std::size_t h,std::size_t b,std::size_t g,
+      std::size_t channels) const;
   const SpinConnections& alpha_;
   const SpinConnections& beta_;
   const ProductSupport* support_;
@@ -47,6 +49,7 @@ private:
   std::optional<ProductSupport::Cursor> cursor_;
   std::optional<Node> pending_;
   std::size_t next_beta_=0,next_release_=0;
+  std::size_t channels_=0;
   int next_alpha_=0;
 };
 

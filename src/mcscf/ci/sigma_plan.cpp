@@ -12,8 +12,11 @@ SigmaTilePlan::SigmaTilePlan(const SpinConnections& alpha,const SpinConnections&
     : halo_index(alpha.n_strings(),-1),column_index(beta.n_strings(),-1),
       alpha_(alpha),beta_(beta),support_(support),parity_(parity),budget_(budget),
       alpha_seen_(alpha.n_strings(),0) {
-  if (budget.width<=0 || budget.pairs<=0 || budget.slabs<=0 || budget.workers<=0 || !budget.bytes)
+  if (budget.width<=0 || budget.pairs<=0 || budget.slabs<=0 || !budget.bytes)
     throw std::invalid_argument("invalid sigma tile budget");
+  if (budget.packed_slabs<0 || budget.packed_slabs>budget.slabs ||
+      (budget.packed_slabs && (!support || !support->has_channel_envelopes())))
+    throw std::invalid_argument("packed sigma channels require a certified support");
   if (support_) {
     auto cursor=support_->cursor(1);
     int b;
@@ -40,16 +43,19 @@ SigmaTilePlan::SigmaTilePlan(const SpinConnections& alpha,const SpinConnections&
   }
 }
 
-long double SigmaTilePlan::payload(std::size_t rows,std::size_t h,std::size_t b,std::size_t g) const {
+long double SigmaTilePlan::payload(std::size_t rows,std::size_t h,std::size_t b,std::size_t g,
+    std::size_t entries) const {
   const long double input=static_cast<long double>(budget_.width)*h*b;
-  const long double channels=static_cast<long double>(budget_.width)*rows*budget_.pairs*budget_.slabs;
-  const long double scratch=budget_.temporal ? std::max(input,
-      static_cast<long double>(std::min<std::size_t>(budget_.workers,rows*budget_.width))*budget_.pairs):input;
-  return sizeof(double)*(scratch+channels)+sizeof(int)*static_cast<long double>(h)*g;
+  const long double channels=static_cast<long double>(budget_.width)*
+      ((budget_.slabs-budget_.packed_slabs)*static_cast<long double>(rows)*budget_.pairs+
+       budget_.packed_slabs*static_cast<long double>(entries));
+  const long double maps=budget_.packed_slabs ?
+      static_cast<long double>(rows)*(sizeof(int)+budget_.width*(sizeof(int)+sizeof(std::size_t))):0;
+  return sizeof(double)*(input+channels)+sizeof(int)*static_cast<long double>(h)*g+maps;
 }
 
 std::size_t SigmaTilePlan::payload_bytes() const {
-  return static_cast<std::size_t>(payload(active.size(),halo.size(),columns.size(),groups.size()));
+  return static_cast<std::size_t>(payload(active.size(),halo.size(),columns.size(),groups.size(),channels_));
 }
 
 bool SigmaTilePlan::pull(Node& node) {
@@ -81,7 +87,7 @@ bool SigmaTilePlan::next() {
   for (const int b:columns) column_index[b]=-1;
   for (const int a:seen_alpha_) alpha_seen_[a]=0;
   groups.clear(); active.clear(); group_index.clear(); halo.clear(); columns.clear();
-  active_support.clear(); seen_alpha_.clear(); released.clear();
+  active_support.clear(); seen_alpha_.clear(); released.clear(); channel_groups.clear(); channels_=0;
   Node node;
   while (pull(node)) {
     new_alpha_.clear(); new_beta_.clear();
@@ -97,8 +103,16 @@ bool SigmaTilePlan::next() {
       include(node.beta,column_index,new_beta_);
       for (const auto& edge:beta_.singles(node.beta)) include(edge.source,column_index,new_beta_);
     }
+    int channel_group=0,channel_count=budget_.pairs;
+    if (budget_.packed_slabs && !node.supported) {
+      const auto [first,last]=support_->channel_envelope(node.alpha,node.beta);
+      if (first>=0) {
+        channel_group=1+first*support_->n_orbitals()+last;
+        channel_count=(first+1)*(support_->n_orbitals()-1-last);
+      }
+    }
     const auto bytes=payload(active.size()+1,halo.size()+new_alpha_.size(),
-        columns.size()+new_beta_.size(),groups.size()+new_group);
+        columns.size()+new_beta_.size(),groups.size()+new_group,channels_+channel_count);
     if (bytes>budget_.bytes || active.size()>=static_cast<std::size_t>(std::numeric_limits<int>::max()/budget_.width)) {
       if (active.empty()) throw std::length_error("one direct-CI target exceeds the tile workspace");
       pending_=node;
@@ -110,6 +124,8 @@ bool SigmaTilePlan::next() {
     if (new_group) groups.push_back({node.beta,static_cast<int>(active.size()),static_cast<int>(active.size())});
     active.push_back(node.alpha);
     active_support.push_back(node.supported);
+    channels_+=channel_count;
+    if (budget_.packed_slabs) channel_groups.push_back(channel_group);
     group_index.push_back(groups.size()-1);
     groups.back().end=active.size();
   }

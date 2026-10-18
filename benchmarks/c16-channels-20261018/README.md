@@ -45,6 +45,32 @@ Frozen executable SHA256:
 `899515c153f5c4bead18fb8b3fd6841c463ba77dc75c551c39cace015a88f2cc`.
 Native one-step293191 runs on anode014,32 cores,4GiB workspace, original input,
 unchanged thresholds. Existing control293167 ran on anode003; both are EPYC9755.
-Full-step wall time and RSS are pending. Early scalar CI events agree, but
-they do not establish end-to-end speedup. The experiment is kept on a work
-branch pending this measurement; the previous qualified master is unchanged.
+The completed result is recorded below. The experiment remains on a work
+branch; the previous qualified master is unchanged.
+
+## Completed grouped-GEMM control
+
+Native293191 completes its intentional one-step limit in807.78s with
+11108704KiB GNU-time peak RSS. Initial/candidate CI take183.508/160.901s;
+14/13 actions and7 orbital HVPs are unchanged. Accepted molecular energy is
+-616.0069123456398Eh (computed from the logged initial energy and decrease).
+There is **no end-to-end speedup** over803.33s control293167. The smaller
+GEMM count did not justify declaring the implementation optimized.
+
+## Direct ragged layout
+
+The next implementation removes dense source-channel generation followed by
+packing, writes scatter values directly into grouped matrices, forms smaller
+channel Grams, and adds directional forcing directly into sigma when no
+separate forcing output is requested. It retains full output channels and
+charges the actual variable-width storage to the same4GiB action workspace.
+The mathematical derivation is in `article/exterior_column_schedule.md`.
+
+Qualification293200 passes6/6 in6.60s. Qualification293203 passes6/6 in6.82s,
+additionally checking ragged planner boundaries and a C8 multi-RHS derivative
+fixture large enough to exercise the per-worker grouped Gram. Frozen binary:
+`26652e9d1abe9cd1adace1fefe19336dcefca17af41272513facf086be066e58`.
+Native one-step293205 runs on anode014; bounded420-second profiling job293206
+runs on anode031. Both use32cores. No historical version is rerun;
+timings/RSS remain pending. Profiling is for attribution, not native speed
+claims. The one-step test does not establish SCF convergence.

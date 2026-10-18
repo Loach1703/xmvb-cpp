@@ -473,3 +473,59 @@ mean exact input-channel count39.2394, versus136 unrestricted channels.
 The conservative envelope mean is60.7388. Its predicted channel multiplication
 work is44.66% of unrestricted work. This is a FLOP estimate, not a measured
 sigma or SCF speedup; packing, support traversal and exterior transforms remain.
+
+## Ragged channel storage and fused directional images
+
+The first grouped-GEMM implementation still built dense channel rows and
+packed/unpacked them around each multiplication. Its C16 one-step runtime
+did not improve. The next implementation places the rows of each selector
+group directly in contiguous, variable-width matrices:
+
+$$
+A_g,B_g\in\mathbb R^{m_g\times k_g},\qquad
+C_g=A_g(KJ_g)^T\in\mathbb R^{m_g\times P}.
+$$
+
+The scatter addresses $A_g$ directly, skipping only generator edges whose
+channels are certified absent by $J_g$. There is no dense intermediate input,
+no numerical row permutation and no post-GEMM unpacking. Integer row maps
+connect the original product enumeration to the grouped output. All output
+channels remain present, so the existing complete-image adjoint is retained.
+
+The reverse contraction now also uses the smaller matrices:
+
+$$
+G=\sum_g J_g\left(A_g^TW_gB_g\right)J_g^T,
+$$
+
+where $W_g$ contains exchange-orbit multiplicities (one on the diagonal,
+two otherwise). A shared accepted-state channel matrix remains unweighted;
+weights act only on the Gram and the completed sigma image. This permits
+its reuse across temporal responses and directional Hamiltonians. When the
+bra and ket coincide, the Gram borrows the same channel storage twice rather
+than copying or scattering it again.
+
+For a directional image, perform the second product as an accumulation:
+
+$$
+\delta C_g=A_g(KJ_g)^T+B_g(\delta KJ_g)^T.
+$$
+
+Unless a consumer explicitly requests the independent forcing image,
+the second term needs no full-size temporary. An explicit forcing request
+reuses the consumed source storage only after every worker has completed
+the base product. Grouped BLAS and original-row scatter have different row
+owners; their synchronization is explicit, not inferred from equal row counts.
+
+With $R$ target/RHS rows and $L=\sum_gm_gk_g$, the simultaneous channel
+payload is $L+RP$ doubles for H/S or a single adjoint, $2L+RP$ for a shared-state
+direction/response sequence, and $L+2RP$ when a separate forcing image is
+requested. The planner computes this payload while generating nodes, also
+charging the row maps and existing target map. No per-thread numerical copy
+of these slabs is introduced. Small per-worker Grams borrow disjoint portions
+of the consumed halo; if the halo cannot hold them, workers own independent
+global Gram entries without allocating extra scratch.
+
+The unrestricted family is the same algorithm with $J_g=I$ and implicit
+identity row maps. The earlier full-channel packing implementation and its
+in-place expansion logic are removed, rather than kept as a second solver.

@@ -82,17 +82,6 @@ public:
   std::size_t bytes() const noexcept { return storage_.capacity*sizeof(double); }
 };
 
-/** @brief Row-independent product using disjoint, already consumed halo storage. */
-void multiply_in_place(Eigen::Ref<ChannelMatrix> values,
-    const Eigen::MatrixXd& kernel,Eigen::Ref<ChannelMatrix> scratch) {
-  for (Eigen::Index first=0;first<values.rows();first+=scratch.rows()) {
-    const auto count=std::min(scratch.rows(),values.rows()-first);
-    auto image=scratch.topRows(count);
-    image.noalias()=values.middleRows(first,count)*kernel.transpose();
-    values.middleRows(first,count)=image;
-  }
-}
-
 } // namespace
 
 void DirectCiSigmaAction::apply_tiled(
@@ -166,7 +155,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   const std::size_t envelopes=n*(n-1)*(n+1)*(n+2)/24;
   const auto directions=std::count_if(requests.begin(),requests.end(),
       [](const auto& request) { return request.direction!=nullptr; });
-  const std::size_t kernel_bytes=sizeof(double)*pairs*envelopes*(1+directions);
+  const std::size_t kernel_bytes=(sizeof(double)*pairs*envelopes+
+      sizeof(int)*(envelopes+pairs*n*(n-1)/2))*(1+directions);
   // Packing is optional arithmetic scheduling, not a change of CI space.
   // Charge shared immutable kernel panels to this action's existing budget.
   const bool restricted_channels=support && support->has_channel_envelopes() &&
@@ -181,14 +171,14 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   std::vector<Eigen::MatrixXd> kernel_adjoints(requests.size());
   if (collect_integrals) for (auto& gradient:kernel_adjoints)
     gradient=Eigen::MatrixXd::Zero(pairs,pairs);
-  // Only these channel slabs coexist: response/state and, for a direction,
-  // its output. Response and state refill the same input halo sequentially.
+  // Source and state are ragged; images retain all channels. Directional
+  // forcing normally adds directly into the image. Only an explicit forcing
+  // consumer needs to expand the consumed source slab into a second image.
   const bool separate_output=has_direction || requests.size()>1;
-  // Earlier CI outputs are consumed before the final orbital request. Only
-  // that last request may destroy B to produce its independent forcing image.
-  const bool temporal_in_place=requests.size()>1 && std::none_of(
-      requests.begin(),requests.end()-1,[](const auto& r) { return r.direction!=nullptr; });
-  const std::size_t slab_factor = temporal_in_place ? 2ULL:(separate_output ? 3ULL:2ULL);
+  const bool has_forcing=std::any_of(requests.begin(),requests.end(),
+      [](const auto& request) { return static_cast<bool>(request.forcing); });
+  const int slab_factor=separate_output ? 3:2;
+  const int packed_slabs=restricted_channels ? (separate_output && !has_forcing ? 2:1):0;
   const int row_limit = static_cast<int>(std::max<std::size_t>(1,
       std::min<std::size_t>(std::numeric_limits<int>::max() / width,
           workspace_bytes / (slab_factor * sizeof(double) * width * pairs))));
@@ -197,7 +187,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
 
   struct Incoming { int group, pair; double sign; };
   detail::SigmaTilePlan plan(*alpha_,beta_graph,support,exchange_parity,
-      {width,pairs,static_cast<int>(slab_factor),workers,temporal_in_place,workspace_bytes},
+      {width,pairs,slab_factor,workspace_bytes,packed_slabs},
       static_cast<bool>(release));
   auto& groups=plan.groups;
   auto& active=plan.active;
@@ -209,11 +199,12 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   auto& active_support=plan.active_support;
   auto& released_columns=plan.released;
   std::vector<int> diagonal_rows,same_group,offsets,positions,target_index;
-  std::vector<int> channel_groups;
+  const auto& channel_groups=plan.channel_groups;
+  detail::ChannelLayout channel_layout;
   std::vector<Eigen::Index> beta_offsets;
   std::vector<Incoming> incoming;
   ChannelWorkspace workspace(workspace_bytes);
-  std::size_t panel_size=0,channel_size=0,scratch_size=0;
+  std::size_t panel_size=0,channel_size=0,scratch_size=0,packed_size=0,source_capacity=0;
   int count=0,n_halo=0,n_columns=0;
   bool finished=false;
   std::exception_ptr failure;
@@ -253,22 +244,17 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             }
             if (!active.empty()) {
               count = active.size();
-              if (restricted_channels) {
-                channel_groups.assign(count,0);
-                for (int i=0;i<count;++i) if (!active_support[i]) {
-                  const auto [first,last]=support->channel_envelope(active[i],groups[group_index[i]].beta);
-                  channel_groups[i]=first<0 ? 0:1+first*n_orbitals_+last;
-                }
-                for (const int group:channel_groups) source_channels+=group ?
-                    ((group-1)/n_orbitals_+1)*(n_orbitals_-1-(group-1)%n_orbitals_):pairs;
-              }
+              channel_layout.reset(channel_product,channel_groups,count,width);
+              packed_size=channel_layout.entries();
+              source_channels+=packed_size/width;
               n_halo = halo.size();
               n_columns = columns.size();
               panel_size = static_cast<std::size_t>(n_halo) * n_columns * width;
               channel_size = static_cast<std::size_t>(count) * width * pairs;
-              scratch_size=temporal_in_place ? std::max(panel_size,
-                  static_cast<std::size_t>(std::min(team,count*width))*pairs):panel_size;
-              const std::size_t required = scratch_size + slab_factor * channel_size;
+              scratch_size=panel_size;
+              source_capacity=has_forcing ? channel_size:packed_size;
+              const std::size_t required=scratch_size+source_capacity+
+                  (separate_output ? packed_size:0)+channel_size;
               workspace.reserve(required);
               Eigen::Map<Eigen::MatrixXd> input(workspace.get(), n_halo,
                   static_cast<Eigen::Index>(n_columns) * width);
@@ -286,9 +272,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               if (n_halo==n_alpha_) identity_halo_targets+=count;
               source_columns += n_columns;
               source_elements += panel_size;
-              peak_payload = std::max(peak_payload, required * sizeof(double) +
-                  (restricted_channels ? kernel_bytes:0) +
-                  sizeof(int) * n_halo * groups.size());
+              peak_payload=std::max(peak_payload,plan.payload_bytes()+
+                  (restricted_channels ? kernel_bytes:0));
 
               same_group.assign(n_columns, -1);
               target_index.assign(static_cast<std::size_t>(n_halo) * groups.size(), -1);
@@ -330,20 +315,18 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
 
       Eigen::Map<const Eigen::MatrixXd> input(workspace.get(), n_halo,
           static_cast<Eigen::Index>(n_columns) * width);
-      // Keep each node's channel vector contiguous through scatter and GEMM.
-      Eigen::Map<ChannelMatrix> scattered(workspace.get() + scratch_size, count * width, pairs);
-      Eigen::Map<ChannelMatrix> state_channels(workspace.get() + scratch_size + channel_size,
-          count * width, pairs);
-      Eigen::Map<ChannelMatrix> transformed(workspace.get() + scratch_size +
-          (temporal_in_place ? 0:(separate_output ? 2:1)) * channel_size,
-          count * width, pairs);
+      double* scattered=workspace.get()+scratch_size;
+      double* state_channels=scattered+source_capacity;
+      double* transformed=state_channels+(separate_output ? packed_size:0);
 
       const int first = count * width * thread / team;
       const int last = count * width * (thread + 1) / team;
       const bool identity_halo=n_halo==n_alpha_;
-      const auto scatter = [&](int row, Eigen::Ref<ChannelMatrix> target) {
-        target.row(row).setZero();
+      const auto scatter = [&](int row,double* values) {
         const int local = row % count, v = row / count;
+        const int channel_group=channel_groups.empty() ? 0:channel_groups[local];
+        double* target=values+channel_layout.packed(row);
+        std::fill_n(target,channel_product.channels(channel_group),0.0);
         const int a=active[local],g=group_index[local],beta=groups[g].beta;
         const int h=identity_halo ? a:halo_index[a];
         const double* column=input.col(groups[g].column+v).data();
@@ -352,32 +335,22 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
         if (active_support[local]) {
           const double value = column[h];
           for (const int p : alpha_->occupied(a))
-            target(row, core::PairIndex::packed_pair_index(p, p)) += value;
+            target[core::PairIndex::packed_pair_index(p, p)] += value;
           for (const int p : beta_graph.occupied(beta))
-            target(row, core::PairIndex::packed_pair_index(p, p)) += value;
+            target[core::PairIndex::packed_pair_index(p, p)] += value;
         }
         const auto& alpha_links = alpha_->singles(a);
-        for (int link = 0; link < static_cast<int>(alpha_links.size()); ++link)
-          target(row, alpha_links[link].pair) += alpha_links[link].sign *
+        for (int link = 0; link < static_cast<int>(alpha_links.size()); ++link) {
+          const int channel=channel_product.local(channel_group,alpha_links[link].pair);
+          if (channel>=0) target[channel] += alpha_links[link].sign *
               column[identity_halo ? alpha_links[link].source:halo_index[alpha_links[link].source]];
+        }
         const auto& beta_links = beta_graph.singles(beta);
         const double* source=input.data()+h+static_cast<std::size_t>(n_halo)*v;
-        for (int link = 0; link < static_cast<int>(beta_links.size()); ++link)
-          target(row, beta_links[link].pair) += beta_links[link].sign *
+        for (int link = 0; link < static_cast<int>(beta_links.size()); ++link) {
+          const int channel=channel_product.local(channel_group,beta_links[link].pair);
+          if (channel>=0) target[channel] += beta_links[link].sign *
               source[beta_offsets[g*beta_graph.n_singles()+link]];
-      };
-      // Orbit weights are 2 except on a=b. Apply them to the small Gram,
-      // not to B: temporal responses and deltaK*B share its unweighted slab.
-      const auto subtract_diagonal=[&](auto&& gram,int begin,int end,int row,int col) {
-        for (int v=0;v<width;++v) {
-          const int lo=std::max(0,begin-v*count),hi=std::min(count,end-v*count);
-          if (lo>=hi) continue;
-          auto entry=std::lower_bound(diagonal_rows.begin(),diagonal_rows.end(),lo);
-          for (;entry!=diagonal_rows.end() && *entry<hi;++entry) {
-            const int r=v*count+*entry;
-            gram.noalias()-=scattered.row(r).segment(row,gram.rows()).transpose()*
-                state_channels.row(r).segment(col,gram.cols());
-          }
         }
       };
       for (std::size_t request_id=0;request_id<requests.size();++request_id) {
@@ -422,125 +395,74 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             }
             if (failure) break;
             for (int row = first; row < last; ++row) scatter(row,state_channels);
-          } else if (!state && last > first) {
-            state_channels.middleRows(first,last-first) = scattered.middleRows(first,last-first);
           }
-          // B remains unweighted and immutable for every temporal response.
+          // An identical bra borrows A directly: no second scatter or copy.
+          // A distinct B remains immutable across all temporal responses.
 #pragma omp barrier
-          // G=sum_t A_t^T B_t. The consumed input halo can hold the local Gram
-          // images without allocating or copying channel slabs. If it cannot
-          // hold full local images, own output blocks directly instead: tiny
-          // halos must not launch one barrier per scalar Gram entry.
           const int available=std::min(team,count*width);
           const auto full_area=static_cast<std::size_t>(pairs)*pairs;
-          const bool row_partition=available>1 && full_area<=scratch_size/available;
+          const bool row_partition=full_area<=scratch_size/(2*available);
           const int parts=row_partition ? available:1;
-          int axis=1;
-          if (!row_partition) while (axis*axis<team) axis*=2;
-          const int extent=(pairs+axis-1)/axis;
-          const int blocks=(pairs+extent-1)/extent;
-          const auto tile_area=static_cast<std::size_t>(extent)*extent;
           if (timing) {
 #pragma omp single
             {
               gram_start=tick();
               gram_partitions=std::max(gram_partitions,parts);
-              gram_extent=std::max(gram_extent,extent);
+              gram_extent=std::max(gram_extent,pairs);
               if (row_partition) gram_scratch_bytes=std::max(gram_scratch_bytes,
-                  parts*tile_area*sizeof(double));
+                  2*parts*full_area*sizeof(double));
             }
           }
-          if (row_partition) {
-            if (thread<parts) {
-              const int begin=count*width*thread/parts,end=count*width*(thread+1)/parts;
-              Eigen::Map<Eigen::MatrixXd> partial(
-                  workspace.get()+thread*tile_area,pairs,pairs);
-              partial.noalias()=(exchange_parity ? 2.0:1.0)*
-                  scattered.middleRows(begin,end-begin).transpose()*
-                  state_channels.middleRows(begin,end-begin);
-              if (exchange_parity) subtract_diagonal(partial,begin,end,0,0);
-            }
-#pragma omp barrier
-#pragma omp for schedule(static)
-            for (int entry=0;entry<pairs*pairs;++entry) {
-              double value=0;
-              for (int part=0;part<parts;++part)
-                value+=workspace[part*tile_area+entry];
-              kernel_adjoint.data()[entry]+=value;
-            }
-          } else {
-#pragma omp for schedule(static)
-            for (int block=0;block<blocks*blocks;++block) {
-              const int row=(block/blocks)*extent,col=(block%blocks)*extent;
-              const int rows=std::min(extent,pairs-row),cols=std::min(extent,pairs-col);
-              auto gram=kernel_adjoint.block(row,col,rows,cols);
-              gram.noalias()+=(exchange_parity ? 2.0:1.0)*
-                  scattered.middleCols(row,rows).transpose()*state_channels.middleCols(col,cols);
-              if (exchange_parity) subtract_diagonal(gram,0,count*width,row,col);
-            }
-          }
+          detail::contract_channel_gram(channel_product,channel_layout,scattered,
+              state ? state_channels:scattered,kernel_adjoint,diagonal_rows,count,width,
+              exchange_parity!=0,workspace.get(),scratch_size,thread,team);
           if (timing) {
 #pragma omp single
-            { gram_time+=seconds(gram_start,tick()); gram_tiles+=parts*blocks*blocks; }
+            { gram_time+=seconds(gram_start,tick()); gram_tiles+=parts*channel_product.groups(); }
           }
         }
-        // All scatter/Gram readers must finish before their shared halo can
-        // become packing scratch. Each worker then owns one disjoint slice.
-        if (restricted_channels) {
+        // Rows were scattered in original order; grouped BLAS partitions
+        // have different owners. Publish all source rows before multiplication.
 #pragma omp barrier
-          const auto capacity=scratch_size/team;
-          double* scratch=workspace.get()+thread*capacity;
-          if (add_columns) channel_product.apply(scattered,transformed,first,last,
-              channel_groups,scratch,capacity);
-          if (direction && (add_columns || add_forcing)) {
-            auto output=temporal_in_place ? state_channels:scattered;
-            directional_products[request_id].apply(state_channels,output,first,last,
-                channel_groups,scratch,capacity);
-            if (add_columns && last>first)
-              transformed.middleRows(first,last-first)+=output.middleRows(first,last-first);
+        if (add_columns) detail::multiply_channels(channel_product,channel_layout,
+            scattered,transformed,thread,team);
+        if (add_forcing) {
+          // Expanding packed A into a full forcing image may overlap rows
+          // owned by other workers. Every base multiplication must finish.
+#pragma omp barrier
+          detail::multiply_channels(directional_products[request_id],channel_layout,
+              state_channels,scattered,thread,team);
+          if (add_columns) {
+            // Both images use identical group row ownership.
+            for (int group=0;group<channel_product.groups();++group) {
+              const int size=channel_layout.size(group);
+              const int begin=channel_layout.begin(group)+size*thread/team;
+              const int end=channel_layout.begin(group)+size*(thread+1)/team;
+              Eigen::Map<ChannelMatrix>(transformed+static_cast<std::size_t>(begin)*pairs,end-begin,pairs)+=
+                  Eigen::Map<const ChannelMatrix>(scattered+static_cast<std::size_t>(begin)*pairs,end-begin,pairs);
+            }
           }
+        } else if (direction && add_columns) {
+          detail::multiply_channels(directional_products[request_id],channel_layout,
+              state_channels,transformed,thread,team,true);
         }
-        if (!restricted_channels && temporal_in_place && last>first) {
-          const int owners=std::min(team,count*width);
-          const int owner=count*width<team ? first:thread;
-          const Eigen::Index rows=scratch_size/(static_cast<std::size_t>(owners)*pairs);
-          Eigen::Map<ChannelMatrix> scratch(workspace.get()+
-              static_cast<std::size_t>(owner)*rows*pairs,rows,pairs);
-          if (add_columns) multiply_in_place(scattered.middleRows(first,last-first),
-              hamiltonian_pair_kernel_,scratch);
-          if (direction && (add_columns || add_forcing)) {
-            multiply_in_place(state_channels.middleRows(first,last-first),
-                direction->hamiltonian_pair_kernel_,scratch);
-            if (add_columns) transformed.middleRows(first,last-first)+=
-                state_channels.middleRows(first,last-first);
-          }
-        }
-        if (!restricted_channels && !temporal_in_place && add_columns && last > first)
-          transformed.middleRows(first, last - first).noalias() =
-              scattered.middleRows(first, last - first) * hamiltonian_pair_kernel_.transpose();
-        if (!restricted_channels && !temporal_in_place && direction && (add_columns || add_forcing) && last > first) {
-          // Base K*A has consumed A. Reuse its slab for deltaK*B, then add to C.
-          scattered.middleRows(first, last - first).noalias() =
-              state_channels.middleRows(first, last - first) *
-              direction->hamiltonian_pair_kernel_.transpose();
-          if (add_columns)
-            transformed.middleRows(first, last - first) +=
-                scattered.middleRows(first, last - first);
-        }
+        // Return from grouped owners to original-row owners for exchange weights.
+#pragma omp barrier
         // E commutes with spin exchange. In a fixed-parity bilinear form,
         // off-diagonal exchange orbits have two identical contributions.
         if (add_columns && exchange_parity)
           for (int row = first; row < last; ++row) {
             const int local = row % count;
             if (active[local] != groups[group_index[local]].beta)
-              transformed.row(row) *= 2.0;
+              Eigen::Map<Eigen::VectorXd>(transformed+
+                  static_cast<std::size_t>(channel_layout.image(row))*pairs,pairs)*=2.0;
           }
         if (add_forcing && exchange_parity)
           for (int row = first; row < last; ++row) {
             const int local = row % count;
             if (active[local] != groups[group_index[local]].beta) {
-              if (temporal_in_place) state_channels.row(row)*=2.0;
-              else scattered.row(row) *= 2.0;
+              Eigen::Map<Eigen::VectorXd>(scattered+
+                  static_cast<std::size_t>(channel_layout.image(row))*pairs,pairs)*=2.0;
             }
           }
 #pragma omp barrier
@@ -570,7 +492,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                   if (local<first || local>=last) continue;
                   double sum = 0;
                   if (index[local] >= 0) {
-                    const int row = v * count + index[local];
+                    const int row = channel_layout.image(v * count + index[local]);
                     for (const int p : alpha_->occupied(a))
                       sum += channel_values[static_cast<std::size_t>(row) * pairs +
                           core::PairIndex::packed_pair_index(p, p)];
@@ -584,7 +506,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                     const int target = h < 0 ? -1 : index[h];
                     if (target >= 0)
                       sum += links[link].sign *
-                          channel_values[static_cast<std::size_t>(v * count + target) * pairs +
+                          channel_values[static_cast<std::size_t>(channel_layout.image(v * count + target)) * pairs +
                               links[link].pair];
                   }
                   destination[rows ? i:a] += sum;
@@ -595,8 +517,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               for (int edge = offsets[source]; edge < offsets[source + 1]; ++edge) {
                 const auto& link = incoming[edge];
                 const int* index = target_index.data() + static_cast<std::size_t>(link.group) * n_halo;
-                const double* values = channel_values +
-                    static_cast<std::size_t>(v) * count * pairs + link.pair;
+                const double* values = channel_values + link.pair;
                 const double sign = link.sign;
                 for (int i=begin;i<end;++i) {
                   const int a=rows ? rows[i]:halo[i];
@@ -604,7 +525,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                   if (local<first || local>=last) continue;
                   const int target=index[local];
                   if (target>=0)
-                    destination[rows ? i:a]+=sign*values[static_cast<std::size_t>(target)*pairs];
+                    destination[rows ? i:a]+=sign*values[
+                        static_cast<std::size_t>(channel_layout.image(v*count+target))*pairs];
                 }
               }
             };
@@ -612,9 +534,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             };
             const auto write_start = tick();
             compute_time += seconds(compute_start, write_start);
-            if (add_columns) write_image(add_columns, transformed.data());
-            if (add_forcing) write_image(add_forcing,
-                temporal_in_place ? state_channels.data():scattered.data());
+            if (add_columns) write_image(add_columns,transformed);
+            if (add_forcing) write_image(add_forcing,scattered);
             // Retire inside the final writer's existing single/barrier.
             // Testing the shared retirement vector outside this region races
             // the next plan.next(): one worker could enter a conditional
