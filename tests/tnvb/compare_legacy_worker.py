@@ -32,15 +32,15 @@ def main():
     parser.add_argument("report")
     args = parser.parse_args()
     content = Path(args.request).read_bytes()
-    if content[:8] != b"CPTNREQ1":
+    if content[:8] != b"CPTNREQ2":
         raise ValueError("bad exported request")
-    version, n, k, nae, nel, d, s, mode = struct.unpack("<8i", content[8:40])
-    if version != 1 or mode != 1:
+    version, n, k, nae, nel, d, s, mode, solver, nguess = struct.unpack("<10i", content[8:48])
+    if version != 2 or mode != 1 or solver or nguess:
         raise ValueError("requires a gradient request")
     with tempfile.TemporaryDirectory(prefix="cpp-tnvb-interop-") as folder:
         folder = Path(folder)
         old_request = folder / "old.request"
-        old_request.write_bytes(b"XMB2RD1\0" + struct.pack("<11i", 7, n, k, nae, nel, d, s, 0, 0, 0, 0) + content[40:])
+        old_request.write_bytes(b"XMB2RD1\0" + struct.pack("<11i", 7, n, k, nae, nel, d, s, 0, 0, 0, 0) + content[64:])
         responses = [folder / "new.response", folder / "old.response"]
         env = os.environ.copy()
         env["XMVB_BLOCK2_RDM_CHECK_TOL"] = "1e-8"
@@ -53,10 +53,10 @@ def main():
                 env["XMVB_BLOCK2_WARM_CACHE"] = str(Path(scratch) / "warm")
                 subprocess.run([sys.executable, str(Path(worker).resolve()), str(Path(request).resolve()), str(response)], env=env, check=True)
         with responses[0].open("rb") as stream:
-            if stream.read(8) != b"CPTNRES1":
+            if stream.read(8) != b"CPTNRES2":
                 raise ValueError("bad new response")
             header = struct.unpack("<8i", stream.read(32))
-            if header != (1, 0, n, k, 1, n, 0, 0):
+            if header != (2, 0, n, k, 1, n, 0, 0):
                 raise ValueError("bad new response dimensions")
             hn, sn = array(stream, n*n), array(stream, n*n)
             en, cn = array(stream, n), array(stream, n*n).reshape((n,n), order="F")[:,0]

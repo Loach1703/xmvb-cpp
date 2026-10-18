@@ -20,7 +20,8 @@ class ElectronicEvaluator final : public vb::ElectronicStateBackend {
  private:
   WorkerProcess process_;
   vb::ActiveSpaceGradientResult evaluate(const vb::VbScfInput&,
-      const vb::ElectronicStateRequest&, bool gradient) const;
+      const vb::ElectronicStateRequest&, bool gradient,
+      std::shared_ptr<const StateDirectory>* retain = nullptr) const;
 };
 
 }  // namespace xmvb::tnvb

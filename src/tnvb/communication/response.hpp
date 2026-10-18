@@ -1,16 +1,22 @@
 #pragma once
 
 #include <vector>
+#include <memory>
 #include <Eigen/Core>
+#include "vbscf/core/contracts/result.hpp"
 
 namespace xmvb::tnvb {
 
+class StateDirectory;
+
 /** Owned column-major numerical response; no determinant cache or rank-6 data. */
 struct WorkerResponse {
+  std::shared_ptr<const StateDirectory> retained_state;
   Eigen::MatrixXd hamiltonian;
   Eigen::MatrixXd overlap;
   Eigen::VectorXd energies;
   Eigen::MatrixXd coefficients;
+  std::optional<vb::DavidsonDiagnostics> davidson_diagnostics;
   Eigen::MatrixXd density_one;
   std::vector<double> density_two_buffer;
   Eigen::MatrixXd contracted_three;

@@ -18,14 +18,16 @@ void require(bool value,const char* message) {
 
 int main(int argc,char** argv) {
   try {
-    if (argc!=2) throw std::invalid_argument("expected benzene fixture");
+    if (argc!=2 && argc!=3) throw std::invalid_argument("expected benzene fixture [davidson]");
+    const auto solver=argc==3 ? xmvb::vb::StructureEigensolver::Davidson :
+                              xmvb::vb::StructureEigensolver::Dense;
     auto loaded=xmvb::vb::load_vbscf_input_with_timings(argv[1]);
     xmvb::vb::SparseParameterLayout layout(loaded.input.orbital_preparation_input);
     const auto initial=layout.pack(loaded.input.orbital_preparation_input);
     xmvb::vb::OrbitalGradientEvaluator pullback;
     auto backend=std::make_shared<xmvb::tnvb::ElectronicEvaluator>();
     xmvb::vb::VbScfObjective objective(std::move(loaded.input),layout,{0},{1.0},
-        loaded.nuclear_repulsion_energy,xmvb::vb::StructureEigensolver::Dense,{},&pullback,backend);
+        loaded.nuclear_repulsion_energy,solver,{},&pullback,backend);
     Eigen::VectorXd gradient;
     const double accepted_energy=objective(initial,gradient);
     const auto accepted_orbitals=objective.input().orbital_preparation_input.orbital_value_table;
@@ -45,6 +47,7 @@ int main(int argc,char** argv) {
     std::swap(raw.at(first_active),raw.at(first_active+1));
     xmvb::vb::ElectronicStateRequest request;
     request.nuclear_repulsion_energy=loaded.nuclear_repulsion_energy;
+    request.eigensolver=solver;
     const auto reversed_result=backend->evaluate_energy_result(reversed,request).scf_result;
     const auto& original_result=objective.gradient_result().scf_result;
     const auto close=[](const auto& a,const auto& b) {
@@ -64,6 +67,23 @@ int main(int argc,char** argv) {
     verify_accepted();
     Eigen::VectorXd trial=initial;
     trial[0]+=1e-4;
+    // A retained state is tied to the exact evaluated orbital coordinates.
+    auto stale_forward=backend->evaluate_energy(objective.input(),request);
+    auto changed_input=objective.input();
+    changed_input.orbital_preparation_input.orbital_value_table[0]+=1e-4;
+    bool stale_rejected=false;
+    try { (void)backend->complete_gradient(changed_input,std::move(stale_forward)); }
+    catch (const std::invalid_argument&) { stale_rejected=true; }
+    require(stale_rejected,"TNVB handoff accepted different orbitals");
+    verify_accepted();
+    auto stale_integrals=backend->evaluate_energy(objective.input(),request);
+    auto changed_integrals=objective.input();
+    changed_integrals.ao_integral_input.ao_core_hamiltonian_matrix(0,0)+=1e-4;
+    bool integral_change_rejected=false;
+    try { (void)backend->complete_gradient(changed_integrals,std::move(stale_integrals)); }
+    catch (const std::invalid_argument&) { integral_change_rejected=true; }
+    require(integral_change_rejected,"TNVB handoff accepted changed AO integrals");
+    verify_accepted();
     // An ENERGY trial must be usable without a total MPS or any 3-PDM call.
     setenv("XMVB_BLOCK2_FORBID_3PDM","1",1);
     auto value=objective.evaluate_trial_energy(trial);
@@ -79,6 +99,14 @@ int main(int argc,char** argv) {
       worker_failed=std::string(error.what()).find("TNVB worker failed")!=std::string::npos;
     }
     require(worker_failed,"forced FULL worker failure was not propagated");
+    verify_accepted();
+    auto failed_forward=backend->evaluate_energy(objective.input(),request);
+    bool completion_failed=false;
+    try { (void)backend->complete_gradient(objective.input(),std::move(failed_forward)); }
+    catch (const std::runtime_error& error) {
+      completion_failed=std::string(error.what()).find("TNVB worker failed")!=std::string::npos;
+    }
+    require(completion_failed,"forced retained RDM failure was not propagated");
     verify_accepted();
     unsetenv("XMVB_BLOCK2_FORBID_3PDM");
     objective.complete_trial(&value);
@@ -97,7 +125,7 @@ int main(int argc,char** argv) {
     auto block_input=xmvb::vb::load_vbscf_input_with_timings(argv[1]);
     xmvb::vb::VbScfOptimizerOptions block_options;
     block_options.backend=xmvb::vb::VbScfOptimizerBackend::Plbfgs;
-    block_options.structure_eigensolver=xmvb::vb::StructureEigensolver::Dense;
+    block_options.structure_eigensolver=solver;
     block_options.max_iterations=1;
     block_options.verbose=false;
     block_options.retain_accepted_iteration_trace=true;

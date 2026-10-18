@@ -1,5 +1,6 @@
 #include "tnvb/electronic/evaluator.hpp"
 #include "tnvb/gradient/adapter.hpp"
+#include "tnvb/electronic/input_signature.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -17,6 +18,9 @@ class Forward final : public vb::ElectronicStateForwardEvaluation {
  public:
   vb::ElectronicStateRequest request;
   vb::ActiveSpaceGradientResult result;
+  std::shared_ptr<const StateDirectory> state;
+  std::vector<double> orbitals;
+  std::array<std::uint64_t,2> input_key;
   double total_energy() const override { return result.scf_result.total_energy; }
 };
 
@@ -51,14 +55,14 @@ void validate_response(const WorkerResponse& response) {
 
 vb::ActiveSpaceGradientResult ElectronicEvaluator::evaluate(
     const vb::VbScfInput& input, const vb::ElectronicStateRequest& request,
-    bool gradient) const {
+    bool gradient, std::shared_ptr<const StateDirectory>* retain) const {
   if (!input.tnvb.enabled || request.selected_states != std::vector<int>{0} ||
       request.state_weights.size()!=1 || !std::isfinite(request.state_weights[0]) ||
-      request.state_weights[0]<=0 || request.eigensolver!=vb::StructureEigensolver::Dense ||
+      request.state_weights[0]<=0 ||
       input.orbital_preparation_input.spin_multiplicity!=1 ||
       (input.orbital_preparation_input.orbital_type!=vb::kOrbitalTypeHao &&
        input.orbital_preparation_input.orbital_type!=vb::kOrbitalTypeOeo)) {
-    throw std::invalid_argument("TNVB supports HAO/OEO and one singlet root with dense H/S solving");
+    throw std::invalid_argument("TNVB supports HAO/OEO and one singlet root");
   }
   if (gradient && input.tnvb.total_bond < input.tnvb.structure_bond) {
     throw std::invalid_argument("TNVB orbital gradients require TNSUMBOND >= TNBOND");
@@ -74,10 +78,13 @@ vb::ActiveSpaceGradientResult ElectronicEvaluator::evaluate(
   const auto started=std::chrono::steady_clock::now();
   auto timed=vb::prepare_timed_active_space_context(input);
   auto& prepared=timed.prepared_active_space;
-  WorkerResponse response=process_.evaluate(input,prepared,gradient);
+  WorkerResponse response=process_.evaluate(input,prepared,request,gradient,
+                                            retain!=nullptr);
   validate_response(response);
+  if (retain) *retain=std::move(response.retained_state);
   vb::ActiveSpaceGradientResult result;
   auto& scf=result.scf_result;
+  scf.davidson_diagnostics=response.davidson_diagnostics;
   scf.tnvb_diagnostics=vb::TnVbDiagnostics{
       input.tnvb.structure_bond, input.tnvb.total_bond, gradient,
       response.fit_energy_error, response.rdm_identity_error,
@@ -120,19 +127,46 @@ vb::ActiveSpaceGradientResult ElectronicEvaluator::evaluate(
 std::unique_ptr<vb::ElectronicStateForwardEvaluation> ElectronicEvaluator::evaluate_energy(
     const vb::VbScfInput& input, const vb::ElectronicStateRequest& request) const {
   auto result=std::make_unique<Forward>();
-  result->request=request; result->result=evaluate(input,request,false);
+  result->request=request;
+  result->orbitals=input.orbital_preparation_input.orbital_value_table;
+  result->result=evaluate(input,request,false,&result->state);
+  result->input_key=input_signature(input);
   return result;
 }
 
 vb::ActiveSpaceGradientResult ElectronicEvaluator::complete_gradient(
     const vb::VbScfInput& input,
     std::unique_ptr<vb::ElectronicStateForwardEvaluation> forward) const {
-  const auto* state=dynamic_cast<Forward*>(forward.get());
+  auto* state=dynamic_cast<Forward*>(forward.get());
   if (state==nullptr) throw std::invalid_argument("TNVB backend received foreign forward state");
-  // Energy-screened requests intentionally built no total state. Complete
-  // trials call evaluate_energy_gradient directly, avoiding this
-  // second H/S build; this method is the generic lazy-completion capability.
-  return evaluate(input,state->request,true);
+  const auto started=std::chrono::steady_clock::now();
+  if (!state->state || state->orbitals!=input.orbital_preparation_input.orbital_value_table ||
+      state->input_key!=input_signature(input)) {
+    throw std::invalid_argument("TNVB handoff requires the same evaluated scientific input");
+  }
+  // Worker-side request/integral/settings validation precedes native RDM work.
+  // Consuming this Forward releases its private bank on both success/failure.
+  if (input.tnvb.total_bond<input.tnvb.structure_bond) {
+    throw std::invalid_argument("TNVB orbital gradients require TNSUMBOND >= TNBOND");
+  }
+  const auto response=process_.complete_gradient(input,state->request,state->state);
+  validate_response(response);
+  auto result=std::move(state->result);
+  if (std::abs(response.energies[0]-result.scf_result.electronic_energy)>1e-10) {
+    throw std::runtime_error("TNVB handoff changed its selected energy");
+  }
+  std::copy_n(response.coefficients.data(),response.coefficients.rows(),
+              result.scf_result.eigenvector_matrix.begin());
+  auto& diagnostics=*result.scf_result.tnvb_diagnostics;
+  diagnostics.gradient_evaluated=true;
+  diagnostics.fit_energy_error=response.fit_energy_error;
+  diagnostics.rdm_identity_error=response.rdm_identity_error;
+  diagnostics.rdm_wall_seconds=response.rdm_wall_seconds;
+  result.adjoint_wall_time_seconds=response.rdm_wall_seconds;
+  populate_active_space_adjoints(response,&result);
+  result.total_wall_time_seconds+=std::chrono::duration<double>(
+      std::chrono::steady_clock::now()-started).count();
+  return result;
 }
 
 vb::ActiveSpaceGradientResult ElectronicEvaluator::evaluate_energy_gradient(

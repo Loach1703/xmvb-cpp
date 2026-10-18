@@ -46,6 +46,8 @@ from pyblock2.driver.core import (
     SymmetryTypes,
 )
 
+import hs_shared
+
 
 # Diagnostic only: never reject an evaluation or promote a bond stage on this
 # basis. This retains the former default accuracy reference, without an input
@@ -3794,7 +3796,9 @@ def build_su2_states(
     """Build all physical VB structures by variational SU(2) pair products."""
     sweeps = int(os.environ.get("XMVB_BLOCK2_SU2_SWEEPS", "4"))
     tolerance = float(os.environ.get("XMVB_BLOCK2_SU2_TOL", "1e-10"))
-    cutoff = float(os.environ.get("XMVB_BLOCK2_SU2_CUTOFF", "1e-14"))
+    # Retain the D cap but do not discard zero/small singular subspaces by
+    # default: positive cutoffs can strand an otherwise exact pair fit.
+    cutoff = float(os.environ.get("XMVB_BLOCK2_SU2_CUTOFF", "0"))
     seed = int(os.environ.get("XMVB_BLOCK2_SU2_SEED", "20260813"))
     iprint = int(os.environ.get("XMVB_BLOCK2_SU2_IPRINT", "0"))
     pair_log = os.environ.get("XMVB_BLOCK2_SU2_PAIR_LOG", "0") == "1"
@@ -4232,14 +4236,9 @@ def persist_parallel_states(states, scratch: str):
 
 def copy_parallel_state_files(source: str, destination: str, tags):
     """Copy only final MPS files, excluding all pair-product intermediates."""
-    names = os.listdir(source)
+    names = hs_shared.selected_names(os.listdir(source), tags)
     copied = 0
     for name in names:
-        selected = any(
-            name == f"{tag}-mps_info.bin" or f".{tag}." in name for tag in tags
-        )
-        if not selected:
-            continue
         source_path = os.path.join(source, name)
         if os.path.isfile(source_path):
             shutil.copyfile(source_path, os.path.join(destination, name))
@@ -4249,6 +4248,25 @@ def copy_parallel_state_files(source: str, destination: str, tags):
         if not os.path.isfile(info_path):
             raise RuntimeError(f"parallel H/S cannot find persisted MPS tag {tag}")
     return copied
+
+
+def move_parallel_state_files(source: str, destination: str, tags):
+    """Transfer final private files after their last construction/HS reader.
+
+    Both directories belong to one request on the same filesystem. Never use
+    this for a shared bank, warm cache or a live native MPS owner.
+    """
+    names = hs_shared.selected_names(os.listdir(source), tags)
+    for tag in tags:
+        if not os.path.isfile(os.path.join(source, f"{tag}-mps_info.bin")):
+            raise RuntimeError(f"retained state cannot find MPS tag {tag}")
+    moved = 0
+    for name in names:
+        path = os.path.join(source, name)
+        if os.path.isfile(path):
+            os.replace(path, os.path.join(destination, name))
+            moved += 1
+    return moved
 
 
 def warm_cache_manifest(nstr, nao, nae, nel, tnbond, sum_bond, ntstr, rmat=None):
@@ -4271,7 +4289,7 @@ def warm_cache_manifest(nstr, nao, nae, nel, tnbond, sum_bond, ntstr, rmat=None)
             np.asarray(rmat != 0.0, dtype=np.uint8).tobytes()).hexdigest(),
         "pair_fit": {name: os.environ.get(name, default) for name, default in (
             ('XMVB_BLOCK2_SU2_SWEEPS', '4'), ('XMVB_BLOCK2_SU2_TOL', '1e-10'),
-            ('XMVB_BLOCK2_SU2_CUTOFF', '1e-14'), ('XMVB_BLOCK2_SU2_SEED', '20260813'))},
+            ('XMVB_BLOCK2_SU2_CUTOFF', '0'), ('XMVB_BLOCK2_SU2_SEED', '20260813'))},
         "nstr": int(nstr),
         "nao": int(nao),
         "nae": int(nae),
@@ -5298,12 +5316,16 @@ def compute_total_state_rdms(
     sum_mode,
     warm_read_directory=None,
     warm_write_directory=None,
+    selected_eigenpair=None,
+    consume_source=False,
 ):
     """Reload final structures, form one weighted state, and compute its RDMs."""
     started = time.perf_counter()
-    rdm_scratch = tempfile.mkdtemp(prefix="tnvb-block2-rdm-", dir=scratch_parent)
+    rdm_scratch = (source_scratch if consume_source else
+                   tempfile.mkdtemp(prefix="tnvb-block2-rdm-", dir=scratch_parent))
     try:
-        copied = copy_parallel_state_files(source_scratch, rdm_scratch, state_tags)
+        copied = (0 if consume_source else
+                  copy_parallel_state_files(source_scratch, rdm_scratch, state_tags))
         rdm_threads, allocation_source = rdm_thread_count(nao, sum_bond)
         rdm_stack_bytes = rdm_stack_memory_bytes(nao, sum_bond)
         configure_phase_environment(rdm_threads)
@@ -5320,7 +5342,18 @@ def compute_total_state_rdms(
         states = [driver.load_mps(tag) for tag in state_tags]
         identity_mpo = driver.get_identity_mpo()
         h_mpo = get_hamiltonian_mpo(driver, h_orth, g_orth, log=False)
-        eigenvalue, coefficient = solve_generalized_state(hmat, smat, root)
+        if selected_eigenpair is None:
+            eigenvalue, coefficient = solve_generalized_state(hmat, smat, root)
+        else:
+            eigenvalue, coefficient = selected_eigenpair
+            coefficient = np.asarray(coefficient, dtype=float)
+            sc = smat @ coefficient
+            residual = hmat @ coefficient - eigenvalue * sc
+            if (root != 0 or not np.isfinite(eigenvalue) or
+                    not np.all(np.isfinite(coefficient)) or
+                    abs(coefficient @ sc - 1.0) > 1e-9 or
+                    np.linalg.norm(residual / np.sqrt(np.diag(smat))) > 1e-9):
+                raise RuntimeError("invalid selected eigenpair supplied to TNVB RDM")
         print(
             f"[TNVB-BLOCK2-RDM] total_state start root={root + 1} "
             f"structures={len(states)} structure_bond={tnbond} "
@@ -5805,7 +5838,7 @@ def compute_total_state_rdms(
 
 def build_hs(
     request, root=None, sum_bond=None, d3g_mode=None, d3g_backend=None,
-    sum_mode=0,
+    sum_mode=0, ci_options=None, ci_result=None, retain_state=None,
 ):
     nstr, nao, nae, nel, tnbond, ntstr, sso, hho, packed_ggo = request
     started = time.perf_counter()
@@ -5815,6 +5848,8 @@ def build_hs(
     )
 
     symmetry = "SU2"
+    if retain_state is not None and root is not None:
+        raise ValueError("TNVB can retain forward states only for ENERGY")
     if root is not None and (sum_bond is None or sum_bond < tnbond):
         raise RuntimeError("TNVB RDM sum bond must be at least TNBOND")
     state_builder = "pair"
@@ -5990,6 +6025,46 @@ def build_hs(
             )
     mps_seconds = time.perf_counter() - mps_started
 
+    if ci_options is not None:
+        # This branch never constructs pairwise H/S environments or solves a
+        # dense structure CI problem. The native common operator owns a child
+        # frame and is closed before the RDM driver is initialized below.
+        import common_ci
+        if ci_result is None:
+            raise ValueError("Davidson requires an eigenpair result sink")
+        if state_tags is None:
+            state_tags = persist_parallel_states(states, scratch)
+        del states, identity_mpo, driver
+        hs_started = time.perf_counter()
+        hmat, smat, eigenvalue, coefficient, diagnostics = common_ci.contract(
+            scratch, scratch_parent, state_tags, nao, nae, tnbond,
+            min(16, allocated_cpus), h_orth, g_orth, ci_options,
+            private_source=True)
+        ci_result.update(energy=eigenvalue, coefficient=coefficient,
+                         diagnostics=diagnostics)
+        diagonal = np.diag(smat)
+        log_summary(
+            f"[TNVB-MPS] structures={nstr} Dmax={tnbond} build={mps_seconds:.3f}s "
+            f"norm=[{np.min(diagonal):.6e},{np.max(diagonal):.6e}] "
+            f"warm={'hit' if warm_read_directory is not None else 'miss'}")
+        log_summary(f"[TNVB-HS] backend=COMMON_DAVIDSON "
+                    f"wall={time.perf_counter()-hs_started:.3f}s matrices=exported")
+        rdm_result = None
+        if root is not None:
+            rdm_result = compute_total_state_rdms(
+                scratch, scratch_parent, state_tags, nao, nae, tnbond, sum_bond,
+                root, hmat, smat, rinv, h_orth, g_orth, d3g_mode, d3g_backend,
+                sum_mode, warm_read_directory=warm_read_directory,
+                warm_write_directory=warm_write_directory,
+                selected_eigenpair=(eigenvalue, coefficient))
+        if warm_root is not None:
+            commit_warm_cache(warm_root, warm_write_directory, warm_manifest_data)
+        if retain_state is not None:
+            from forward_state import export_context
+            export_context(retain_state, scratch, state_tags, rinv, h_orth, g_orth)
+        shutil.rmtree(scratch, ignore_errors=True)
+        return (hmat, smat) if rdm_result is None else (hmat, smat) + rdm_result
+
     hs_started = time.perf_counter()
     hmat = np.zeros((nstr, nstr), dtype=np.float64, order="F")
     smat = np.zeros((nstr, nstr), dtype=np.float64, order="F")
@@ -6004,7 +6079,10 @@ def build_hs(
             f"workers={hs_workers} block2_threads={hs_threads}",
             flush=True,
         )
-        results = contract_parallel_hs(
+        # ENERGY uses the verified immutable shared bank. FULL gradients keep
+        # their existing private H/S/RDM objects and warm-cache lifecycle.
+        contract_hs = hs_shared.contract if hs_shared.use_shared_hs(root, hs_workers) else contract_parallel_hs
+        results = contract_hs(
             states,
             scratch,
             scratch_parent,
@@ -6152,6 +6230,8 @@ def build_hs(
         )
     else:
         # Keep objects alive until all contractions finish, then remove scratch.
+        if retain_state is not None and state_tags is None:
+            state_tags = persist_parallel_states(states, scratch)
         del states, identity_mpo, driver
         if hs_workers == 1:
             del h_mpo
@@ -6159,6 +6239,9 @@ def build_hs(
         commit_warm_cache(
             warm_root, warm_write_directory, warm_manifest_data
         )
+    if retain_state is not None:
+        from forward_state import export_context
+        export_context(retain_state, scratch, state_tags, rinv, h_orth, g_orth)
     shutil.rmtree(scratch, ignore_errors=True)
     if rdm_result is None:
         return hmat, smat

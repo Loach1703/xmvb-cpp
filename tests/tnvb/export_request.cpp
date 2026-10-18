@@ -37,10 +37,13 @@ int main(int argc,char** argv) {
       out.write(reinterpret_cast<const char*>(values),count*sizeof(*values));
       if (!out) throw std::runtime_error("interop request write failed");
     };
-    out.write("CPTNREQ1",8);
-    const std::array<std::int32_t,8> header{1,raw.n_structures,k,raw.n_active_electrons,
-        raw.n_total_electrons,input.tnvb.structure_bond,input.tnvb.total_bond,1};
+    out.write("CPTNREQ2",8);
+    const std::array<std::int32_t,10> header{2,raw.n_structures,k,raw.n_active_electrons,
+        raw.n_total_electrons,input.tnvb.structure_bond,input.tnvb.total_bond,1,
+        loaded.structure_eigensolver==xmvb::vb::StructureEigensolver::Davidson ? 1 : 0,0};
     write(header.data(),header.size());
+    const std::array<double,2> accuracy{1e-7,1e-3};
+    write(accuracy.data(),accuracy.size());
     for (const auto index:raw.raw_structure_orbitals) {
       const std::int32_t value=index; write(&value,1);
     }

@@ -61,6 +61,7 @@ def main():
         for configuration, itmax, options in [
                 ("TNVB TNBOND=128", 0, ()),
                 ("TNVB TNBOND=128", 200, ("--max-iterations", "0")),
+                ("TNVB TNBOND=128 EIGENSOLVER=DAVIDSON", 0, ()),
                 ("TNVB TNBOND=128 EIGENSOLVER=DAVIDSON", 0, ("--eigensolver", "dense"))]:
             status, output = run(configuration, itmax, options, molden=True)
             assert status == 0 and "Termination reason                 : energy_only" in output, output
@@ -69,13 +70,14 @@ def main():
                           "ORBITALS IN PRIMITIVE BASIS FUNCTIONS", "Fixed-orbital ENERGY"]:
                 assert label in output, label
             assert "[TNVB-RDM]" not in output and "[TNVB-SUM]" not in output, output
+            expected_davidson = "EIGENSOLVER=DAVIDSON" in configuration and not options
+            assert ("[TNVB-DAVIDSON]" in output) == expected_davidson, output
             assert "VBSCF converged" not in output and "Final gradient |g|" not in output, output
             assert "COMPUTED NATURAL ORBITALS" not in output, output
             assert "XMVB ATOMIC POPULATION ANALYSIS" not in output, output
         for configuration, options, message in [
                 ("TNVB TNBOND=128", ("--max-iterations", "1"), "requires explicit TNSUMBOND"),
                 ("TNVB TNBOND=128 TNSUMBOND=64", ("--max-iterations", "1"), "requires explicit TNSUMBOND"),
-                ("TNVB TNBOND=128", ("--eigensolver", "davidson"), "dense H/S"),
                 ("TNVB TNBOND=128", ("--optimizer-backend", "ciah"), "ISCF=8"),
                 ("TNVB TNBOND=128", ("--optimizer-backend", "nonredundant_truncated_newton"), "ISCF=8"),
                 ("TNVB TNBOND=128", ("--max-iterations", "-1"), "ISCF=8")]:
@@ -121,6 +123,12 @@ def main():
         assert "$" not in orbital_text, orbital_text
         assert [int(value) for value in re.findall(r"(?m)^# ORBITAL (\d+) NAO", orbital_text)] == list(range(1, 25))
         final_energy = float(re.search(r"Final total energy\s*:\s*([-0-9.]+)", output).group(1))
+        status, davidson_output = run("TNVB TNBOND=128 TNSUMBOND=256 EIGENSOLVER=DAVIDSON", 100,
+                                     forbidden=False, molden=True, iscf=8)
+        assert status == 0 and "VBSCF converged" in davidson_output, davidson_output
+        assert "[TNVB-DAVIDSON]" in davidson_output, davidson_output
+        davidson_energy = float(re.search(r"Final total energy\s*:\s*([-0-9.]+)", davidson_output).group(1))
+        assert abs(davidson_energy-final_energy) <= 1e-6, (davidson_energy, final_energy)
         status, output = run("TNVB TNBOND=128 TNSUMBOND=256", 0,
                              iscf=8, guess_body=orbital_text)
         assert status == 0 and "energy_only" in output, output

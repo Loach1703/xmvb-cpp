@@ -82,10 +82,9 @@ int run(Options command_line) {
     const auto& orbitals=load_result.input.orbital_preparation_input;
     if (options.max_iterations < 0 || load_result.state_average_count != 1 ||
         options.backend != xmvb::vb::VbScfOptimizerBackend::Plbfgs ||
-        options.structure_eigensolver != xmvb::vb::StructureEigensolver::Dense ||
         (orbitals.orbital_type != xmvb::vb::kOrbitalTypeHao &&
          orbitals.orbital_type != xmvb::vb::kOrbitalTypeOeo)) {
-      throw std::invalid_argument("TNVB supports ISCF=8 (P-LBFGS), one singlet state, HAO/OEO and dense H/S");
+      throw std::invalid_argument("TNVB supports ISCF=8 (P-LBFGS), one singlet state and HAO/OEO");
     }
     if (options.max_iterations > 0 && load_result.input.tnvb.total_bond <
         load_result.input.tnvb.structure_bond) {
@@ -145,7 +144,9 @@ int run(Options command_line) {
 #ifdef XMVB_ENABLE_TNVB
     xmvb::vb::ElectronicStateRequest request;
     request.nuclear_repulsion_energy=load_result.nuclear_repulsion_energy;
-    request.eigensolver=xmvb::vb::StructureEigensolver::Dense;
+    request.eigensolver=options.structure_eigensolver;
+    request.accuracy.energy_tolerance=options.energy_tolerance;
+    request.accuracy.gradient_tolerance=options.gradient_tolerance;
     auto evaluation=tnvb_backend->evaluate_energy_result(load_result.input,request);
     result.energy_only=true;
     result.termination_reason="energy_only";

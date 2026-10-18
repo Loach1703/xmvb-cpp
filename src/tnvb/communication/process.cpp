@@ -57,7 +57,9 @@ std::filesystem::path worker_path() {
 
 void execute_worker(const std::filesystem::path& request,
                     const std::filesystem::path& response,
-                    const std::filesystem::path& cache) {
+                    const std::filesystem::path& cache,
+                    const std::string& handoff_option,
+                    const std::filesystem::path& handoff_directory) {
   std::map<std::string, std::string> environment;
   for (char** item = environ; *item != nullptr; ++item) {
     const std::string entry(*item);
@@ -90,7 +92,13 @@ void execute_worker(const std::filesystem::path& request,
   std::string python = XMVB_TNVB_PYTHON;
   std::string worker = worker_path().string();
   std::string in = request.string(), out = response.string();
-  std::array<char*, 5> argv{python.data(), worker.data(), in.data(), out.data(), nullptr};
+  std::string handoff = handoff_directory.string();
+  std::string option = handoff_option;
+  std::vector<char*> argv{python.data(), worker.data(), in.data(), out.data()};
+  if (!option.empty()) {
+    argv.push_back(option.data()); argv.push_back(handoff.data());
+  }
+  argv.push_back(nullptr);
   // Flush parent reports before the child writes to the inherited stdout.
   // Otherwise redirected logs can splice worker summaries into an orbital row.
   std::cout.flush();
@@ -120,18 +128,31 @@ WorkerProcess::WorkerProcess() {
     throw std::runtime_error("TNVB binary protocol requires a little-endian host");
   }
   const char* parent = std::getenv("XMVB_BLOCK2_SCRATCH_PARENT");
-  scratch_ = unique_directory(parent && *parent ? parent : std::filesystem::temp_directory_path());
+  if (!(parent && *parent)) parent = std::getenv("SLURM_TMPDIR");
+  scratch_ = std::shared_ptr<const StateDirectory>(new StateDirectory(
+      unique_directory(parent && *parent ? parent : std::filesystem::temp_directory_path())));
 }
 
-WorkerProcess::~WorkerProcess() {
+StateDirectory::~StateDirectory() {
   std::error_code ignored;
-  std::filesystem::remove_all(scratch_, ignored);
+  std::filesystem::remove_all(path_, ignored);
 }
+
+WorkerProcess::~WorkerProcess() = default;
 
 WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
-    const vb::PreparedActiveSpaceContext& prepared, bool gradient) const {
-  const auto directory = unique_directory(scratch_);
-  const auto request = directory / "request.bin", response = directory / "response.bin";
+    const vb::PreparedActiveSpaceContext& prepared,
+    const vb::ElectronicStateRequest& electronic_request, bool gradient,
+    bool retain_forward, std::shared_ptr<const StateDirectory> resume) const {
+  if ((retain_forward && gradient) || (resume && (!gradient || retain_forward)) ||
+      (resume && resume->parent_.get()!=scratch_.get())) {
+    throw std::invalid_argument("invalid or foreign TNVB handoff lease");
+  }
+  const auto lease = std::shared_ptr<const StateDirectory>(new StateDirectory(
+      unique_directory(scratch_->path()), scratch_));
+  const auto& directory = lease->path();
+  const auto request = resume ? resume->path()/"request.bin" : directory/"request.bin";
+  const auto response = directory/"response.bin";
   const auto& topology = input.raw_structure_data;
   const int n_str = topology.n_structures;
   const int n_ao = input.orbital_preparation_input.n_active_orbitals;
@@ -141,6 +162,7 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
       topology.raw_structure_orbitals.size() != std::size_t(n_str)*topology.n_total_electrons) {
     throw std::invalid_argument("TNVB raw structure dimensions are inconsistent");
   }
+  if (!resume) {
   std::vector<double> packed = prepared.active_space_two_electron_result.packed_active_two_electron_integrals;
   if (packed.empty() && prepared.active_space_two_electron_result.representation ==
       integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
@@ -158,11 +180,22 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
   if (packed.size() != n_eri) throw std::invalid_argument("TNVB active ERI size mismatch");
   {
     std::ofstream stream(request, std::ios::binary);
-    stream.write("CPTNREQ1", 8);
-    const std::array<std::int32_t, 8> header{1, n_str, n_ao, topology.n_active_electrons,
+    electronic_request.accuracy.validate();
+    const auto& initial = electronic_request.initial_eigenvectors;
+    const bool davidson = electronic_request.eigensolver == vb::StructureEigensolver::Davidson;
+    const bool has_guess = davidson && initial.size() != 0;
+    if (has_guess && (initial.rows() != n_str || initial.cols() < 1 || !initial.allFinite())) {
+      throw std::invalid_argument("invalid TNVB Davidson initial coefficients");
+    }
+    stream.write("CPTNREQ2", 8);
+    const std::array<std::int32_t, 10> header{2, n_str, n_ao, topology.n_active_electrons,
         topology.n_total_electrons, input.tnvb.structure_bond, input.tnvb.total_bond,
-        gradient ? 1 : 0};
+        gradient ? 1 : 0, davidson ? 1 : 0, has_guess ? 1 : 0};
     write_values(stream, header.data(), header.size());
+    const std::array<double, 2> accuracy{electronic_request.accuracy.energy_tolerance,
+                                        electronic_request.accuracy.gradient_tolerance};
+    write_values(stream, accuracy.data(), accuracy.size());
+    if (has_guess) write_values(stream, initial.col(0).data(), n_str);
     // RawStructureData is already structure-major, i.e. Fortran (NEL,NSTR).
     for (const int orbital : topology.raw_structure_orbitals) {
       const std::int32_t value = orbital;
@@ -177,20 +210,25 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
     write_values(stream, h.data(), h.size());
     write_values(stream, packed.data(), packed.size());
   }
-  execute_worker(request, response, scratch_ / "warm");
+  }
+  const std::string option = resume ? "--resume" : retain_forward ? "--retain" : "";
+  const auto handoff_directory = resume ? resume->path()/"forward" : directory/"forward";
+  execute_worker(request, response, scratch_->path()/"warm", option, handoff_directory);
   WorkerResponse result;
   std::ifstream stream(response, std::ios::binary);
   std::array<char, 8> magic{};
   read_values(stream, magic.data(), magic.size());
   std::array<std::int32_t, 8> header{};
   read_values(stream, header.data(), header.size());
-  if (std::memcmp(magic.data(), "CPTNRES1", 8) || header[0] != 1 || header[1] != 0 ||
+  const bool davidson = electronic_request.eigensolver == vb::StructureEigensolver::Davidson;
+  const int n_roots = davidson ? 1 : n_str;
+  if (std::memcmp(magic.data(), "CPTNRES2", 8) || header[0] != 2 || header[1] != 0 ||
       header[2] != n_str || header[3] != n_ao || header[4] != (gradient ? 1 : 0) ||
-      header[5] != n_str || header[6] || header[7]) {
+      header[5] != n_roots || header[6] != (davidson ? 1 : 0) || header[7]) {
     throw std::runtime_error("TNVB response header mismatch");
   }
   result.hamiltonian.resize(n_str, n_str); result.overlap.resize(n_str, n_str);
-  result.energies.resize(n_str); result.coefficients.resize(n_str, n_str);
+  result.energies.resize(n_roots); result.coefficients.resize(n_str, n_roots);
   read_values(stream, result.hamiltonian.data(), result.hamiltonian.size());
   read_values(stream, result.overlap.data(), result.overlap.size());
   read_values(stream, result.energies.data(), result.energies.size());
@@ -199,6 +237,19 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
   read_values(stream, checks.data(), checks.size());
   result.fit_energy_error=checks[0]; result.rdm_identity_error=checks[1];
   result.hs_wall_seconds=checks[2]; result.rdm_wall_seconds=checks[3];
+  if (davidson) {
+    std::array<std::int32_t,3> counts{};
+    std::array<double,2> residuals{};
+    read_values(stream, counts.data(), counts.size());
+    read_values(stream, residuals.data(), residuals.size());
+    if (counts[0]<1 || counts[1]<1 || counts[2]<1 || counts[2]>n_str ||
+        !std::isfinite(residuals[0]) || !std::isfinite(residuals[1]) ||
+        residuals[0]<0 || residuals[1]<0) {
+      throw std::runtime_error("invalid TNVB Davidson diagnostics");
+    }
+    result.davidson_diagnostics=vb::DavidsonDiagnostics{counts[0],counts[1],counts[2],
+                                                        residuals[0],residuals[1]};
+  }
   if (gradient) {
     result.density_one.resize(n_ao, n_ao); result.contracted_three.resize(n_ao, n_ao);
     result.density_two_buffer.resize(std::size_t(n_ao)*n_ao*n_ao*n_ao);
@@ -209,9 +260,23 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
   if (stream.peek() != std::char_traits<char>::eof()) {
     throw std::runtime_error("trailing TNVB response data");
   }
-  std::error_code ignored;
-  std::filesystem::remove_all(directory, ignored);
+  if (retain_forward) {
+    if (!std::filesystem::is_regular_file(directory/"forward/ready.json")) {
+      throw std::runtime_error("TNVB worker did not publish its forward state");
+    }
+    result.retained_state=lease;
+  }
   return result;
+}
+
+WorkerResponse WorkerProcess::complete_gradient(const vb::VbScfInput& input,
+    const vb::ElectronicStateRequest& request,
+    std::shared_ptr<const StateDirectory> state) const {
+  if (!state) throw std::invalid_argument("missing TNVB handoff lease");
+  // The retained original request contains the exact ENERGY integrals. The
+  // empty preparation is never read by the resume branch above.
+  const vb::PreparedActiveSpaceContext unused;
+  return evaluate(input,unused,request,true,false,std::move(state));
 }
 
 }  // namespace xmvb::tnvb

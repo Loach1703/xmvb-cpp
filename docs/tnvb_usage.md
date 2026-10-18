@@ -1,5 +1,131 @@
 # Independent TNVB: build, run and numerical acceptance
 
+## Same-point ENERGY to FULL-gradient handoff: 2026-10-18
+
+The lazy-gradient interface now retains the final structure MPS files from
+an ENERGY trial and consumes them when that same trial needs its gradient.
+This applies to both DENSE and Davidson. The second worker does not rebuild
+the structures, recompute H/S, or solve CI again. It uses the original
+selected eigenpair and orthogonal integral context for the FULL 1/2/3-RDM
+calculation. The C++ forward object also owns the original orbital/integral
+preparation result, so completing its gradient does not repeat preparation
+or serialize a second integral request. No input keyword is added.
+
+Each forward object owns a private directory lease. Only final state files
+are moved into its retained bank; pair intermediates are excluded. RDM work
+consumes that bank directly instead of copying it into another workspace.
+Davidson's private native-operator child can likewise use its caller-owned
+bank without another file-bank copy. These changes remove redundant phase
+transfers; native tensor loading, common-basis conversion and total-state
+construction still perform their required numerical work.
+
+The handoff is one-shot and checks the scientific input, original request,
+worker settings/code, retained file inventory and solved response before
+RDM evaluation. Changed orbitals, integrals, structures or numerical settings
+cannot count as a cache hit. Failed or discarded trials release their private
+directories without modifying the accepted electronic state. Ordinary VBSCF,
+orbital stopping conditions and the optimizer algorithm are unchanged.
+Standalone `ITMAX=0` ENERGY does not retain a bank or compute RDMs.
+Python workers still have separate native lifetimes; this is not a persistent
+worker service or a cross-orbital numerical-result cache.
+
+Scratch parent selection is `XMVB_BLOCK2_SCRATCH_PARENT`, then `SLURM_TMPDIR`,
+then the system temporary directory. A user-selected parent retains
+precedence. Node-local scratch can independently improve small-file access;
+measure old/new handoff timings with the same placement and resources.
+Validation inputs, normal CLI XMO outputs, numerical comparisons and retained
+failure diagnostics are under `cpptest/tnvb_energy_gradient_handoff_20261018`.
+The matched development build is `xmvb4.0/build/cpp-tnvb-master-20261017`;
+this change does not overwrite `install-tnvb`.
+
+All six same-orbital handoff checks passed: C6 exact and C14 exact/RI, with
+both solvers. C14's maximum energy, weight and orbital-gradient differences
+were `2.3e-13 Eh`, `9.7e-14` and `8.8e-12`, respectively. Ten focused CTests
+passed, including changed-input rejection and failed/discarded-trial isolation.
+Matched pc001/16-core/local-scratch C6 full optimizations converged in 9 steps
+with both versions. Across two repeats, DENSE mean wall time decreased from
+14.991 s to 10.274 s and Davidson from 13.211 s to 8.755 s. MPS builds fell
+from 19 to 10; RDM evaluations remained 10. These are small-system timings,
+not a predicted speedup for 3-RDM-dominated large systems. Full evidence and
+measurement conditions are in that validation directory's README.md.
+
+## Generalized Davidson integration: 2026-10-18
+
+`TNVB EIGENSOLVER=DAVIDSON` uses one fixed common SU(2) family and
+one reusable native effective Hamiltonian for the lowest singlet root.
+Writing the structure family as `B = L P`, each CI action is
+`Hv = P.T H_eff P v`, `Sv = P.T P v`. Only structure coefficients vary;
+the solver does not perform unrestricted DMRG or enlarge the VB space.
+The common family uses lossless block QR; no sigma-MPS fit is involved.
+
+The generalized solver uses S-orthogonal corrections, diagonal H/S
+preconditioning, low-Ritz-vector restart and a fresh final-action residual
+check. Its CI residual budget is at most `1e-10` Eh and never looser than
+the requested outer energy/gradient accuracy. Orbital stopping conditions
+and the P-LBFGS algorithm are unchanged. A rank-deficient normalized metric
+or a failed solve is an error, not a silent structure deletion or dense
+fallback. The same converged coefficients feed the FULL RDM/gradient path;
+there is no second dense CI solve in that path.
+
+Dense remains the default. Both modes support `ITMAX=0` ENERGY and ISCF=8
+orbital optimization. ENERGY constructs no total-state MPS or RDM. In
+Davidson mode, full H/S are exported **after** CI convergence for the normal
+XMO matrices, weights and analysis. Accordingly the solve is matrix-free,
+but current result export and postprocessing still have quadratic storage;
+this is not an end-to-end linear-memory implementation.
+
+Common-family ranks can exceed individual `TNBOND` substantially. The
+`XMVB_BLOCK2_COMMON_GB` resource control (default 2 GiB) bounds estimated
+Python family workspace and the center map, not total process RSS or the
+native environment. Native stack remains governed by `XMVB_BLOCK2_STACK_GB`;
+when unset, the common-operator phase has an 8-GiB default floor (an
+individual-structure 512-MiB budget proved insufficient for C14).
+Increasing these is not an accuracy setting. Exhausting the budget reports
+an error; select DENSE when common-basis growth is unfavorable. No universal
+speedup over pairwise contraction is assumed. The native environment is
+private to one child process and is released before RDM construction.
+
+Numerical integration evidence is recorded under
+`cpptest/tnvb_davidson_integration_20261018`; do not infer a completed test
+from the mere presence of an input file. The matched development build is
+`xmvb4.0/build/cpp-tnvb-davidson-20261018`; existing installations are not
+automatically overwritten.
+
+Initial numerical gates passed for frozen C10 4/64 mixed covalent/ionic
+states, normal benzene 175-structure ENERGY, benzene exact/RI same-orbital
+FULL gradients and matched normal-CLI benzene orbital optimizations (both
+solvers converged in 9 steps with unchanged stopping settings). In the
+175-structure single-node comparison, H/S+CI wall time was 84.809 s for
+shared-readonly DENSE versus 21.656 s for common-basis Davidson; total wall
+time was 137.663 s versus 83.435 s. MPS build times fluctuated and were not
+optimized. C14 exact ENERGY passed its confirmed acceptance profile; full
+exact/RI gradient-reference comparisons are tracked separately and are not
+yet claimed complete. See the validation directory's RESULTS.md for scope
+and the retained dispatch/stack failures.
+
+## Shared-readonly ENERGY integration: 2026-10-18
+
+Parallel fixed-orbital ENERGY now uses `hs_shared.py`: prepare a common
+one-site/right-center MPS file bank once, then read it from process-private
+Block2 drivers with MPS metadata writes disabled. Bank contents are checked
+before/after contraction. Mutable tensors, MPOs and environments are not
+shared between processes. Serial ENERGY and FULL gradients retain their
+existing H/S path. No input keyword or optimizer setting is added.
+
+The SU(2) pair-construction cutoff defaults to zero while `TNBOND` continues
+to cap the bond dimension. This avoids the small-subspace loss found in the
+C10 ionic validation. The warm-cache manifest records the new default, so
+old positive-cutoff caches do not silently count as compatible hits. An
+explicit existing `XMVB_BLOCK2_SU2_CUTOFF` override remains a numerical
+development control, not a new production input option.
+
+The verified C10 256/512 ENERGY prototype evidence is under
+`cpptest/tnvb_c10_ionic_hs_scaling_validation_20261017/development_20261018`.
+Production integration and C14 exact/RI same-orbital regressions are tracked
+separately under `cpptest/tnvb_energy_integration_c14_20261018`; that directory
+retains the pre-integration executable/worker. This is not a C14 full-space
+or full-optimization claim. Common-prefix reuse is not enabled in production.
+
 ## Master synchronization: 2026-10-17
 
 Master `03d469cc` is integrated with TNVB restricted to ISCF=8/P-LBFGS.
@@ -51,8 +177,9 @@ VB structures are still needed. Structures can be supplied explicitly through
 including `STR=COV`. Both sources feed the same TNVB MPS construction without
 determinant expansion. Final command-line `--max-iterations`
 overrides `ITMAX`. Omitted `ITMAX` retains the project default 2000; specify
-zero explicitly for ENERGY. TNVB defaults to dense H/S solving. An explicit
-unsupported eigensolver or optimizer request is a capability error.
+zero explicitly for ENERGY. TNVB defaults to dense H/S solving;
+`EIGENSOLVER=DAVIDSON` selects the common-basis iterative CI path described
+above. An unsupported optimizer request is a capability error.
 
 No old TNVB keywords, adaptive scheduling, contracted backend, TNHVP, CIAH,
 state averaging, open-shell treatment or nuclear derivatives are registered
@@ -111,7 +238,8 @@ TNVB executable and new acceptance tools have explicit matching runtime
 paths; this shell requirement is not another TNVB input or worker setting.
 
 Installation contains `bin/xmvb-cpp.exe`, `lib/libxmvb_tnvb.a`, its own
-`libexec/xmvb-cpp/tnvb/{evaluate.py,pair_core.py}`, and basis assets in
+`libexec/xmvb-cpp/tnvb/` (including `forward_state.py` and the common-basis
+CI modules), and basis assets in
 `share/xmvb-cpp/basis`. Configured external Python/Block2/runtime dependencies
 must remain accessible. This is not a self-contained binary distribution.
 Existing project/local basis files retain precedence over installed assets.

@@ -64,19 +64,19 @@ def main():
                         help="test commuting pair-product order without changing the CSF")
     args = parser.parse_args()
     content = Path(args.request).read_bytes()
-    if content[:8] != b"CPTNREQ1":
+    if content[:8] != b"CPTNREQ2":
         raise ValueError("bad C++ request")
-    version, n, k, nae, nel, d, s, mode = struct.unpack("<8i", content[8:40])
-    if version != 1 or not (0 < k <= 14) or nae % 2 or nel < nae:
+    version, n, k, nae, nel, d, s, mode, solver, nguess = struct.unpack("<10i", content[8:48])
+    if version != 2 or solver or nguess or not (0 < k <= 14) or nae % 2 or nel < nae:
         raise ValueError("oracle restricted to valid small singlet requests")
     if args.bond is not None:
         if not 1 <= args.bond <= 400:
             raise ValueError("diagnostic bond must lie in [1,400]")
         d = args.bond
     structures = np.frombuffer(content, dtype="<i4", count=n * nel,
-                               offset=40).reshape((nel, n), order="F")
+                               offset=64).reshape((nel, n), order="F")
     overlap = np.frombuffer(content, dtype="<f8", count=k * k,
-                           offset=40 + 4 * n * nel).reshape((k, k), order="F")
+                           offset=64 + 4 * n * nel).reshape((k, k), order="F")
     reference = exact_overlap(structures, overlap, nae, nel)
     if args.pair_order == "right-endpoint":
         structures = structures.copy()
@@ -85,20 +85,20 @@ def main():
             pairs = np.sort(structures[first_active:, istr].reshape((-1, 2)), axis=1)
             order = np.lexsort((pairs[:, 0], pairs[:, 1]))
             structures[first_active:, istr] = pairs[order].ravel()
-        content = (content[:40] + np.asarray(structures, dtype="<i4").ravel(order="F").tobytes()
-                   + content[40 + 4 * n * nel:])
+        content = (content[:64] + np.asarray(structures, dtype="<i4").ravel(order="F").tobytes()
+                   + content[64 + 4 * n * nel:])
     with tempfile.TemporaryDirectory(prefix="tnvb-overlap-oracle-") as directory:
         directory = Path(directory)
         request, response = directory / "request.bin", directory / "response.bin"
-        request.write_bytes(content[:8] + struct.pack("<8i", version, n, k,
-                            nae, nel, d, s, 0) + content[40:])
+        request.write_bytes(content[:8] + struct.pack("<10i", version, n, k,
+                            nae, nel, d, s, 0, 0, 0) + content[48:])
         env = os.environ.copy()
         env["XMVB_BLOCK2_SCRATCH_PARENT"] = str(directory)
         env["XMVB_BLOCK2_WARM_CACHE"] = str(directory / "warm")
         subprocess.run([sys.executable, str(Path(args.worker).resolve()),
                         str(request), str(response)], check=True, env=env, timeout=180)
         data = response.read_bytes()
-    if data[:8] != b"CPTNRES1" or struct.unpack("<8i", data[8:40]) != (1, 0, n, k, 0, n, 0, 0):
+    if data[:8] != b"CPTNRES2" or struct.unpack("<8i", data[8:40]) != (2, 0, n, k, 0, n, 0, 0):
         raise ValueError("invalid ENERGY response")
     tensor = np.frombuffer(data, dtype="<f8", count=n * n,
                            offset=40 + 8 * n * n).reshape((n, n), order="F")

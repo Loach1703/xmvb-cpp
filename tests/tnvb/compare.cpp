@@ -100,13 +100,16 @@ int main(int argc,char** argv) {
     determinant_input.structure_data=xmvb::vb::FullDeterminantStructureExpander{}.expand(loaded.raw_structure_data);
     xmvb::vb::ElectronicStateRequest request;
     request.nuclear_repulsion_energy=loaded.nuclear_repulsion_energy;
+    request.eigensolver=loaded.structure_eigensolver;
+    auto reference_request=request;
+    reference_request.eigensolver=xmvb::vb::StructureEigensolver::Dense;
     xmvb::tnvb::ElectronicEvaluator tensor_backend;
     xmvb::vb::VbScfResult determinant,tensor;
     double gradient_error=0;
     if (gradient) {
       auto tensor_active=tensor_backend.evaluate_energy_gradient(tensor_input,request);
       if (tensor_active.second_order_context) throw std::runtime_error("TNVB created a determinant second-order cache");
-      auto determinant_active=xmvb::vb::DeterminantElectronicStateBackend{}.evaluate_energy_gradient(determinant_input,request);
+      auto determinant_active=xmvb::vb::DeterminantElectronicStateBackend{}.evaluate_energy_gradient(determinant_input,reference_request);
       xmvb::vb::OrbitalGradientEvaluator pullback;
       const auto tensor_gradient=pullback.evaluate_without_reference_energy_gradient(tensor_input,std::move(tensor_active));
       const auto determinant_gradient=pullback.evaluate_without_reference_energy_gradient(determinant_input,std::move(determinant_active));
@@ -144,6 +147,12 @@ int main(int argc,char** argv) {
       << ",\n\"all_weight_error\":" << dw << ",\n\"gradient_error\":";
     if (gradient) report << gradient_error; else report << "null";
     report << ",\n\"tnvb_coefficients\":"; write_vector(report,t.c);
+    if (tensor.davidson_diagnostics) {
+      const auto& diagnostics=*tensor.davidson_diagnostics;
+      report << ",\n\"davidson_iterations\":" << diagnostics.iterations
+             << ",\n\"davidson_actions\":" << diagnostics.block_actions
+             << ",\n\"davidson_stationarity_residual\":" << diagnostics.maximum_stationarity_residual;
+    }
     if (tensor.tnvb_diagnostics) {
       report << ",\n\"fit_energy_error\":" << tensor.tnvb_diagnostics->fit_energy_error
              << ",\n\"rdm_identity_error\":" << tensor.tnvb_diagnostics->rdm_identity_error;
