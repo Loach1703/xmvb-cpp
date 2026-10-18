@@ -23,6 +23,7 @@
 #include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/assembly/input_columns.hpp"
 #include "vbscf/structures/assembly/states.hpp"
 #include "vbscf/structures/assembly/column_tiles.hpp"
 #include "vbscf/structures/assembly/sources.hpp"
@@ -1332,6 +1333,53 @@ void check_mixed_exchange_space() {
   const auto reference = reference_images(fixture, terms, alpha, beta, vectors);
   check_images(action.apply(vectors), reference);
   check_images(action.apply_streamed(vectors, 512), reference);
+}
+
+void check_input_columns() {
+  constexpr int n_alpha=7,width=2;
+  const std::vector<std::uint8_t> support{1,1,1,1,1,1,0,1,1,1};
+  std::vector<int> generated;
+  const auto value=[](int beta,int alpha,int v) { return 100.0*beta+10*v+alpha+1; };
+  xmvb::vb::detail::InputColumns input(n_alpha,width,3,48,support,
+      [&](std::span<const int> betas) {
+    require(betas.size()<=3,"input generation exceeded its bounded batch");
+    std::vector<xmvb::vb::detail::ColumnTile> result;
+    for (const int beta:betas) {
+      generated.push_back(beta);
+      auto p=std::make_shared<xmvb::vb::detail::ColumnPattern>();
+      p->offsets.resize(2); p->offsets<<0,2;
+      p->rows.resize(2); p->rows<<beta%n_alpha,(beta+2)%n_alpha;
+      std::sort(p->rows.data(),p->rows.data()+2);
+      Eigen::MatrixXd values(2,width);
+      for (int v=0;v<width;++v) for (int a=0;a<2;++a)
+        values(a,v)=value(beta,p->rows[a],v);
+      result.push_back({std::move(p),std::move(values)});
+    }
+    return result;
+  });
+  const std::vector<int> betas{0,3,6,9},rows{0,1,3,5,6};
+  Eigen::MatrixXd actual(rows.size(),betas.size()*width);
+  const auto read=[&] { input.read(betas,rows,actual); };
+  read();
+  require(generated==std::vector<int>({0,3,9}),"reader generated an unrequested or strictly zero beta column");
+  const auto check=[&] {
+    for (int b=0;b<static_cast<int>(betas.size());++b)
+      for (int v=0;v<width;++v) for (int a=0;a<static_cast<int>(rows.size());++a) {
+        const int beta=betas[b],alpha=rows[a];
+        const double expected=support[beta] && (alpha==beta%n_alpha || alpha==(beta+2)%n_alpha)
+            ? value(beta,alpha,v):0.0;
+        require(actual(a,b*width+v)==expected,"column eviction/gather changed a multi-RHS coefficient");
+      }
+  };
+  check();
+#pragma omp parallel num_threads(2)
+#pragma omp single
+  read();
+  check();
+  const auto before=generated.size();
+  input.prepare({3});
+  require(generated.size()==before && input.cache().evictions>0,
+      "column hit regenerated data or the tiny-budget test did not evict");
 }
 
 void check_exterior_team() {
@@ -3223,6 +3271,7 @@ int main(int argc, char** argv) {
       check_factor_state_average();
       check_complete_unequal_spin_case();
       check_mixed_exchange_space();
+      check_input_columns();
       check_exterior_team();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
       check_sigma_columns(make_fixture(4, 2, 2), 3);

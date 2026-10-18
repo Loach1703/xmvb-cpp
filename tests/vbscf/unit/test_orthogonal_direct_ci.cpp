@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <barrier>
 #include <cmath>
@@ -164,6 +165,36 @@ Eigen::MatrixXd explicit_exterior(
     }
   }
   return exterior;
+}
+
+void check_generated_exterior_rows() {
+  for (int n:{3,6,8}) for (int electrons=0;electrons<=n;++electrons) {
+    auto strings=complete_space(n,electrons);
+    std::reverse(strings.begin(),strings.end());
+    Eigen::MatrixXd upper=Eigen::MatrixXd::Zero(n,n);
+    for (int i=0;i<n;++i) {
+      upper(i,i)=0.7+0.13*(i+1);
+      for (int j=i+1;j<n;++j) upper(i,j)=0.2*std::cos(0.31*(i+1)*(j+2));
+    }
+    const xmvb::vb::ExteriorOrbitalTransform transform(strings,upper);
+    const Eigen::MatrixXd reference=explicit_exterior(strings,upper);
+    std::vector<int> selected{static_cast<int>(strings.size())-1,0,
+        static_cast<int>(strings.size()/2)};
+    const auto rows=transform.generate_rows(selected);
+    for (int i=0;i<static_cast<int>(selected.size());++i)
+      require((rows.row(i)-reference.row(selected[i])).cwiseAbs().maxCoeff()<2e-13,
+          "direct exterior rows differ from independent minors/permuted occupations");
+    Eigen::MatrixXd team;
+#pragma omp parallel num_threads(2)
+#pragma omp single
+    team=transform.generate_rows(selected);
+    require((team-rows).norm()<1e-14,"direct exterior rows changed inside the sigma team");
+    const auto cached=transform.row_block(0,strings.size());
+    require((*cached-reference).cwiseAbs().maxCoeff()<2e-13,
+        "cached exterior row recursion differs from independent minors");
+    const auto empty=transform.generate_rows({});
+    require(empty.rows()==0 && empty.cols()==reference.cols(),"empty exterior row selection changed shape");
+  }
 }
 
 void check_exterior_transform(int width) {
@@ -3173,6 +3204,7 @@ int main(int argc, char** argv) {
       benchmark_sigma();
       return 0;
     }
+    check_generated_exterior_rows();
     check_exterior_transform(7);
     check_exterior_transform(259);
     check_planner();

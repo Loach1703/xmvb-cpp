@@ -2,16 +2,19 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <iterator>
 #include <list>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <stdexcept>
 #include <unordered_map>
 
 #include "parallel/openmp.hpp"
 #include "core/timing.hpp"
+#include "vbscf/structures/orthogonal_ci/exterior_rows.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -112,6 +115,7 @@ ExteriorOrbitalTransform::ExteriorOrbitalTransform(
     masks_.push_back(mask);
   }
 
+  row_plan_=std::make_shared<ExteriorRowPlan>(n_orbitals_,n_electrons_,masks_);
   determinant_scales_.resize(static_cast<int>(masks_.size()));
   for (int determinant = 0;
        determinant < static_cast<int>(masks_.size());
@@ -177,6 +181,13 @@ ExteriorOrbitalTransform::ExteriorOrbitalTransform(
               operation.removed,
               operation.inserted)});
     }
+    const std::size_t words=(masks_.size()+63)/64;
+    shear.source_words.assign(words,0);
+    for (const auto& pair:shear.pairs)
+      shear.source_words[pair.source/64]|=std::uint64_t{1}<<(pair.source%64);
+    shear.word_offsets.resize(words+1,0);
+    for (std::size_t w=0;w<words;++w)
+      shear.word_offsets[w+1]=shear.word_offsets[w]+std::popcount(shear.source_words[w]);
     shears_.push_back(std::move(shear));
   }
 }
@@ -315,31 +326,55 @@ void ExteriorOrbitalTransform::apply_supported_left(
   const int n_shears = static_cast<int>(shears_.size());
   cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
     std::vector<std::uint8_t> allowed(dimension());
+    std::vector<std::uint64_t> words((dimension()+63)/64);
     const int first=beta_count*part/workers;
     const int last=beta_count*(part+1)/workers;
     for (int beta=first;beta<last;++beta) {
       std::fill(allowed.begin(), allowed.end(), 0);
-      for (int index=offsets[beta];index<offsets[beta+1];++index)
+      std::fill(words.begin(),words.end(),0);
+      for (int index=offsets[beta];index<offsets[beta+1];++index) {
         allowed[rows[index]]=1;
+        words[rows[index]/64]|=std::uint64_t{1}<<(rows[index]%64);
+      }
       for (Eigen::Index column=beta;column<coefficients->cols();column+=beta_count) {
         auto values = coefficients->col(column);
         for (int alpha = 0; alpha < dimension(); ++alpha) {
           if (!allowed[alpha]) values[alpha] = 0.0;
           else if (!adjoint) values[alpha] *= determinant_scales_[alpha];
         }
-        for (int index = 0; index < n_shears; ++index) {
-          const Shear& shear = shears_[adjoint ? n_shears - 1 - index : index];
-          if (shear.coefficient==0.0) continue;
-          for (const auto& pair : shear.pairs) {
-            if (!allowed[pair.source] || !allowed[pair.target]) continue;
-            const int target = adjoint ? pair.source : pair.target;
-            const int source = adjoint ? pair.target : pair.source;
-            values[target] += shear.coefficient * pair.sign * values[source];
+      }
+      // The graph belongs to beta's symbolic support, not to an RHS. Visit
+      // its intersection once and update the independent RHS lanes together.
+      const bool full=offsets[beta+1]-offsets[beta]==dimension();
+      for (int index = 0; index < n_shears; ++index) {
+        const Shear& shear = shears_[adjoint ? n_shears - 1 - index : index];
+        if (shear.coefficient==0.0) continue;
+        const auto update=[&](const DeterminantPair& pair) {
+          const int target = adjoint ? pair.source : pair.target;
+          const int source = adjoint ? pair.target : pair.source;
+          const double factor=shear.coefficient*pair.sign;
+          for (Eigen::Index column=beta;column<coefficients->cols();column+=beta_count)
+            (*coefficients)(target,column)+=factor*(*coefficients)(source,column);
+        };
+        if (full) {
+          for (const auto& pair:shear.pairs) update(pair);
+        } else for (std::size_t w=0;w<words.size();++w) {
+          const auto sources=shear.source_words[w];
+          auto live=sources & words[w];
+          while (live) {
+            const int bit=std::countr_zero(live);
+            const int edge=shear.word_offsets[w]+
+                std::popcount(sources & ((std::uint64_t{1}<<bit)-1));
+            const auto& pair=shear.pairs[edge];
+            if (allowed[pair.target]) update(pair);
+            live&=live-1;
           }
         }
-        if (adjoint)
-          for (int alpha = 0; alpha < dimension(); ++alpha)
-            if (allowed[alpha]) values[alpha] *= determinant_scales_[alpha];
+      }
+      if (adjoint) for (Eigen::Index column=beta;column<coefficients->cols();column+=beta_count) {
+        auto values=coefficients->col(column);
+        for (int alpha = 0; alpha < dimension(); ++alpha)
+          if (allowed[alpha]) values[alpha] *= determinant_scales_[alpha];
       }
     }
   });
@@ -382,10 +417,9 @@ std::shared_ptr<const Eigen::MatrixXd> ExteriorOrbitalTransform::row_block(
   }
 
   // Generate outside the mutex; other readers may use cached rows meanwhile.
-  auto rows = std::make_shared<Eigen::MatrixXd>(count, dimension());
-  rows->setZero();
-  rows->middleCols(begin, count).setIdentity();
-  apply_adjoint_right_block(*rows);
+  std::vector<int> selected(count);
+  std::iota(selected.begin(),selected.end(),begin);
+  auto rows = std::make_shared<Eigen::MatrixXd>(generate_rows(selected));
   const std::size_t width = static_cast<std::size_t>(dimension());
   if (static_cast<std::size_t>(count) >
       std::numeric_limits<std::size_t>::max() / width / sizeof(double)) {
@@ -419,6 +453,13 @@ std::shared_ptr<const Eigen::MatrixXd> ExteriorOrbitalTransform::row_block(
   }
   row_cache_->cached_bytes.store(resident + bytes, std::memory_order_relaxed);
   return rows;
+}
+
+Eigen::MatrixXd ExteriorOrbitalTransform::generate_rows(std::span<const int> rows) const {
+  for (const int row:rows)
+    if (row<0 || row>=dimension())
+      throw std::invalid_argument("exterior row index is out of range");
+  return row_plan_->apply(orbital_transform_,masks_,rows);
 }
 
 void ExteriorOrbitalTransform::validate_inverse() const {
@@ -830,9 +871,12 @@ std::size_t ExteriorOrbitalTransform::dynamic_bytes() const noexcept {
       shears_.capacity() * sizeof(Shear);
   for (const Shear& shear : shears_) {
     bytes += shear.pairs.capacity() * sizeof(DeterminantPair);
+    bytes += shear.source_words.capacity()*sizeof(std::uint64_t)+
+        shear.word_offsets.capacity()*sizeof(int);
   }
   if (row_cache_)
     bytes += row_cache_->cached_bytes.load(std::memory_order_relaxed);
+  bytes+=row_plan_->dynamic_bytes();
   return bytes;
 }
 

@@ -38,6 +38,7 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/evaluation/evaluator.cpp
   vbscf/structures/expansion/expander.cpp
   vbscf/structures/orthogonal_ci/exterior_transform.cpp
+  vbscf/structures/orthogonal_ci/exterior_rows.cpp
   vbscf/structures/orthogonal_ci/metric.cpp
   vbscf/structures/overlap/representation.cpp
   vbscf/structures/overlap/spin_metric.cpp

@@ -391,6 +391,9 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               // Each distinct source column is read once per batch. Callbacks
               // mutate the panel LRU and therefore remain outside worker loops.
               const auto read_start = tick();
+              if (timing && batches==0)
+                std::fprintf(stderr,"XMVB_TILE_PROGRESS,event=first_read,rows=%d,columns=%d,halo=%d\n",
+                    count,n_columns,n_halo);
               requests.front().response(columns, halo, input);
               const double batch_read_time = seconds(read_start, tick());
               read_time += batch_read_time;
@@ -712,6 +715,9 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             if (add_forcing) write_image(add_forcing,
                 temporal_in_place ? state_channels.data():scattered.data());
             write_time += seconds(write_start, tick());
+            if (timing && (batches==1 || batches%256==0))
+              std::fprintf(stderr,"XMVB_TILE_PROGRESS,batches=%zu,targets=%zu,prepare=%.9f,read=%.9f,compute=%.9f,write=%.9f\n",
+                  batches,targets,prepare_time,read_time,compute_time,write_time);
           } catch (...) { failure = std::current_exception(); }
         }
         if (failure) break;

@@ -169,13 +169,19 @@ public:
   ColumnPanels(std::size_t bytes,Build build,Consume consume={})
       : budget_(std::max<std::size_t>(1,bytes)),build_(std::move(build)),consume_(std::move(consume)) {}
 
+  bool contains(int index) const { return index_.contains(index); }
+
   ColumnTile& get(int index) {
     const auto found=index_.find(index);
     if (found!=index_.end()) {
       panels_.splice(panels_.begin(),panels_,found->second);
       return found->second->tile;
     }
-    ColumnTile tile=build_(index);
+    return insert(index,build_(index));
+  }
+
+  /** @brief Admit a newly generated tile; no existing owner may have this key. */
+  ColumnTile& insert(int index,ColumnTile tile) {
     const auto bytes=tile.bytes();
     while (!panels_.empty() && (bytes>budget_ || resident_>budget_-bytes)) {
       auto& last=panels_.back();
