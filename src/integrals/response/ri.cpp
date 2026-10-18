@@ -1,4 +1,5 @@
 #include "integrals/response/ri.hpp"
+#include "integrals/response/ri_internal.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -75,36 +76,6 @@ void validate_cache(
   }
 }
 
-Eigen::MatrixXd build_active_pair_adjoint(
-    const std::vector<double>& packed_gradient,
-    const RiActiveTwoElectronResponseCache& cache) {
-  const Eigen::Index n_active_pairs = static_cast<Eigen::Index>(
-      cache.active_pair_first_indices.size());
-  const std::size_t expected_size =
-      static_cast<std::size_t>(n_active_pairs) *
-      (static_cast<std::size_t>(n_active_pairs) + 1) / 2;
-  if (packed_gradient.size() != expected_size) {
-    throw std::invalid_argument(
-        "packed RI active-2e adjoint has the wrong size");
-  }
-
-  Eigen::MatrixXd active_pair_adjoint(n_active_pairs, n_active_pairs);
-  for (Eigen::Index row = 0; row < n_active_pairs; ++row) {
-    for (Eigen::Index column = 0; column < n_active_pairs; ++column) {
-      const int first = static_cast<int>(row > column ? row : column);
-      const int second = static_cast<int>(row > column ? column : row);
-      const int packed_index =
-          xmvb::core::PairIndex::packed_pair_of_pairs_index(first, second);
-      double value = packed_gradient[packed_index];
-      if (row == column) {
-        value *= 2.0;
-      }
-      active_pair_adjoint(row, column) = value;
-    }
-  }
-  return active_pair_adjoint;
-}
-
 /** @brief Shared factor/workspace budget; independent of numerical accuracy. */
 constexpr std::size_t response_workspace_bytes = ri_response_workspace_bytes;
 
@@ -140,26 +111,11 @@ void visit_accepted_factors(
   }
 }
 
-/** @brief delta B_ab = (L C_a)^T D_b + (L C_b)^T D_a. */
-void factor_direction_tile(
-    const RiActiveTwoElectronResponseCache& cache,
-    const Eigen::MatrixXd& factors,
-    const Eigen::Ref<const Eigen::MatrixXd>& direction,
-    int first_aux, int count, Eigen::MatrixXd& result) {
-  const Eigen::MatrixXd mixed = factors * direction;
-  for (Eigen::Index pair = 0; pair < result.cols(); ++pair) {
-    const int a = cache.active_pair_first_indices[pair];
-    const int b = cache.active_pair_second_indices[pair];
-    result.col(pair).segment(first_aux, count) =
-        mixed.col(b).segment(a * count, count) +
-        mixed.col(a).segment(b * count, count);
-  }
-}
-
 /** @brief Unpacks a factor adjoint with canonical diagonal multiplicity. */
 void unpack_factor_adjoint(
     const RiActiveTwoElectronResponseCache& cache,
-    const Eigen::MatrixXd& adjoint, int auxiliary, Eigen::MatrixXd& weights) {
+    const Eigen::Ref<const Eigen::MatrixXd>& adjoint,
+    int auxiliary, Eigen::MatrixXd& weights) {
   for (Eigen::Index pair = 0; pair < adjoint.cols(); ++pair) {
     const int a = cache.active_pair_first_indices[pair];
     const int b = cache.active_pair_second_indices[pair];
@@ -193,56 +149,142 @@ Eigen::MatrixXd contract_factor_adjoint(
         directional_factors = transform_ri_one_index(
             *cache.metric_whitened_ao_pair_factors, *direction, first_aux + offset, tile_count);
       }
-      const std::size_t worker_elements =
-          3ULL * n_bf * n_active + 2ULL * n_active * n_active;
-      const int workers = xmvb::bounded_openmp_thread_count(
-          static_cast<int>(std::min<std::size_t>(
-              xmvb::effective_openmp_thread_count(),
-              std::max<std::size_t>(
-                  1, response_workspace_bytes / sizeof(double) /
-                         worker_elements))),
-          tile_count);
-      std::vector<Eigen::MatrixXd> partial(
-          workers, Eigen::MatrixXd::Zero(n_bf, n_active));
+      if (direction == nullptr) {
+        // The accepted-only pullback retains its one-sided contraction.
+        const std::size_t worker_elements =
+            3ULL * n_bf * n_active + 2ULL * n_active * n_active;
+        const int workers = xmvb::bounded_openmp_thread_count(
+            static_cast<int>(std::min<std::size_t>(
+                xmvb::effective_openmp_thread_count(),
+                std::max<std::size_t>(
+                    1, response_workspace_bytes / sizeof(double) /
+                           worker_elements))),
+            tile_count);
+        std::vector<Eigen::MatrixXd> partial(
+            workers, Eigen::MatrixXd::Zero(n_bf, n_active));
 #pragma omp parallel num_threads(workers)
-      {
-        int worker = 0;
+        {
+          int worker = 0;
 #ifdef _OPENMP
-        worker = omp_get_thread_num();
+          worker = omp_get_thread_num();
 #endif
-        Eigen::MatrixXd image(n_bf, n_active);
-        Eigen::MatrixXd weights(n_active, n_active);
-        Eigen::MatrixXd delta_image(n_bf, n_active);
-        Eigen::MatrixXd delta_weights(n_active, n_active);
+          Eigen::MatrixXd image(n_bf, n_active), weights(n_active, n_active);
 #pragma omp for schedule(static)
-        for (int auxiliary = 0; auxiliary < tile_count; ++auxiliary) {
-          for (int a = 0; a < n_active; ++a) {
-            image.col(a) = factors.row(
-                a * count + offset + auxiliary).transpose();
-          }
-          unpack_factor_adjoint(
-              cache, adjoint, first_aux + offset + auxiliary, weights);
-          if (direction == nullptr) {
+          for (int auxiliary = 0; auxiliary < tile_count; ++auxiliary) {
+            for (int a = 0; a < n_active; ++a)
+              image.col(a) = factors.row(a * count + offset + auxiliary).transpose();
+            unpack_factor_adjoint(cache, adjoint,
+                                  first_aux + offset + auxiliary, weights);
             partial[worker].noalias() += image * weights;
-          } else {
-            for (int a = 0; a < n_active; ++a) {
-              delta_image.col(a) = directional_factors.row(
-                  a * tile_count + auxiliary).transpose();
-            }
-            unpack_factor_adjoint(cache, *directional_adjoint,
-                                  first_aux + offset + auxiliary,
-                                  delta_weights);
-            partial[worker].noalias() += delta_image * weights;
-            partial[worker].noalias() += image * delta_weights;
           }
         }
+        for (const auto& value : partial) result += value;
+      } else {
+        detail::accumulate_ri_fixed_factor_tile(
+            cache, factors, count, offset, directional_factors, tile_count, 0,
+            adjoint, *directional_adjoint, first_aux + offset, tile_count,
+            response_workspace_bytes,
+            result);
       }
-      for (const auto& value : partial) result += value;
     }
   });
   return result;
 }
 }  // namespace
+
+namespace detail {
+
+Eigen::MatrixXd build_ri_active_pair_adjoint(
+    const std::vector<double>& packed_gradient,
+    const RiActiveTwoElectronResponseCache& cache) {
+  const Eigen::Index n_active_pairs = static_cast<Eigen::Index>(
+      cache.active_pair_first_indices.size());
+  const std::size_t expected_size =
+      static_cast<std::size_t>(n_active_pairs) *
+      (static_cast<std::size_t>(n_active_pairs) + 1) / 2;
+  if (packed_gradient.size() != expected_size) {
+    throw std::invalid_argument(
+        "packed RI active-2e adjoint has the wrong size");
+  }
+  Eigen::MatrixXd active_pair_adjoint(n_active_pairs, n_active_pairs);
+  for (Eigen::Index row = 0; row < n_active_pairs; ++row) {
+    for (Eigen::Index column = 0; column < n_active_pairs; ++column) {
+      const int first = static_cast<int>(row > column ? row : column);
+      const int second = static_cast<int>(row > column ? column : row);
+      const int packed_index =
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(first, second);
+      active_pair_adjoint(row, column) =
+          (row == column ? 2.0 : 1.0) * packed_gradient[packed_index];
+    }
+  }
+  return active_pair_adjoint;
+}
+
+void fill_ri_factor_direction_tile(
+    const RiActiveTwoElectronResponseCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& accepted,
+    const Eigen::Ref<const Eigen::MatrixXd>& direction,
+    int first_aux, int count, Eigen::MatrixXd& result) {
+  const Eigen::MatrixXd mixed = accepted * direction;
+  for (Eigen::Index pair = 0; pair < result.cols(); ++pair) {
+    const int a = cache.active_pair_first_indices[pair];
+    const int b = cache.active_pair_second_indices[pair];
+    result.col(pair).segment(first_aux, count) =
+        mixed.col(b).segment(a * count, count) +
+        mixed.col(a).segment(b * count, count);
+  }
+}
+
+void accumulate_ri_fixed_factor_tile(
+    const RiActiveTwoElectronResponseCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& accepted,
+    int accepted_aux_stride, int accepted_aux_offset,
+    const Eigen::Ref<const Eigen::MatrixXd>& direction,
+    int direction_aux_stride, int direction_aux_offset,
+    const Eigen::Ref<const Eigen::MatrixXd>& accepted_adjoint,
+    const Eigen::Ref<const Eigen::MatrixXd>& directional_adjoint,
+    int adjoint_offset, int count, std::size_t worker_budget_bytes,
+    Eigen::MatrixXd& result) {
+  const int n_bf = cache.n_basis_functions;
+  const int n_active = cache.n_active_orbitals;
+  const std::size_t worker_elements =
+      3ULL * n_bf * n_active + 2ULL * n_active * n_active;
+  const int workers = xmvb::bounded_openmp_thread_count(
+      static_cast<int>(std::min<std::size_t>(
+          std::min(xmvb::effective_openmp_thread_count(), n_bf),
+          std::max<std::size_t>(
+              1, worker_budget_bytes / sizeof(double) / worker_elements))),
+      count);
+  std::vector<Eigen::MatrixXd> partial(
+      workers, Eigen::MatrixXd::Zero(n_bf, n_active));
+#pragma omp parallel num_threads(workers)
+  {
+    int worker = 0;
+#ifdef _OPENMP
+    worker = omp_get_thread_num();
+#endif
+    Eigen::MatrixXd image(n_bf, n_active), delta_image(n_bf, n_active);
+    Eigen::MatrixXd weights(n_active, n_active), delta_weights(n_active, n_active);
+#pragma omp for schedule(static)
+    for (int auxiliary = 0; auxiliary < count; ++auxiliary) {
+      for (int a = 0; a < n_active; ++a) {
+        image.col(a) = accepted.row(
+            a * accepted_aux_stride + accepted_aux_offset + auxiliary).transpose();
+        delta_image.col(a) = direction.row(
+            a * direction_aux_stride + direction_aux_offset + auxiliary).transpose();
+      }
+      unpack_factor_adjoint(cache, accepted_adjoint,
+                            adjoint_offset + auxiliary, weights);
+      unpack_factor_adjoint(cache, directional_adjoint,
+                            adjoint_offset + auxiliary, delta_weights);
+      partial[worker].noalias() += delta_image * weights;
+      partial[worker].noalias() += image * delta_weights;
+    }
+  }
+  for (const auto& value : partial) result += value;
+}
+
+}  // namespace detail
 
 RiActiveTwoElectronResponseCache build_ri_active_two_electron_response_cache(
     const RiAoFactorization& ao_ri_factorization,
@@ -383,7 +425,7 @@ Eigen::MatrixXd compute_ri_active_pair_factor_directional_derivative(
       accepted_cache.active_pair_first_indices.size());
   visit_accepted_factors(accepted_cache,
       [&](const Eigen::MatrixXd& factors, int first, int count) {
-        factor_direction_tile(accepted_cache, factors, dense_active_direction,
+        detail::fill_ri_factor_direction_tile(accepted_cache, factors, dense_active_direction,
                               first, count, result);
       });
   return result;
@@ -413,7 +455,7 @@ compute_ri_active_pair_factor_directional_derivative_batch(
   visit_accepted_factors(accepted_cache,
       [&](const Eigen::MatrixXd& factors, int first, int count) {
         for (std::size_t i = 0; i < dense_active_directions.size(); ++i) {
-          factor_direction_tile(accepted_cache, factors,
+          detail::fill_ri_factor_direction_tile(accepted_cache, factors,
                                 dense_active_directions[i], first, count,
                                 results[i]);
         }
@@ -509,7 +551,7 @@ Eigen::MatrixXd backpropagate_ri_packed_active_two_electron_gradient(
     const RiActiveTwoElectronResponseCache& accepted_cache) {
   validate_cache(accepted_cache, "RI packed active-2e pullback");
   const Eigen::MatrixXd active_pair_adjoint =
-      build_active_pair_adjoint(
+      detail::build_ri_active_pair_adjoint(
           packed_active_two_electron_gradient,
           accepted_cache);
   if (accepted_cache.orbital_pair_products.size() != 0) {
@@ -559,7 +601,7 @@ Eigen::MatrixXd apply_ri_active_two_electron_jet_impl(
   }
 
   const Eigen::MatrixXd active_pair_adjoint =
-      build_active_pair_adjoint(
+      detail::build_ri_active_pair_adjoint(
           packed_accepted_gradient,
           accepted_cache);
   const Eigen::MatrixXd accepted_factor_adjoint =
@@ -571,7 +613,7 @@ Eigen::MatrixXd apply_ri_active_two_electron_jet_impl(
   Eigen::MatrixXd directional_pair_adjoint;
   if (packed_gradient_direction != nullptr) {
     directional_pair_adjoint =
-        build_active_pair_adjoint(*packed_gradient_direction, accepted_cache);
+        detail::build_ri_active_pair_adjoint(*packed_gradient_direction, accepted_cache);
     if (!use_orbital_pairs) {
       directional_factor_adjoint.noalias() +=
           *accepted_cache.accepted_active_pair_factors * directional_pair_adjoint;

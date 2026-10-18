@@ -42,7 +42,7 @@ public:
   const Eigen::MatrixXd& kernel(int group) const noexcept { return group ? blocks_[group].kernel:kernel_; }
 };
 
-/** @brief Ragged source/state matrices and full-channel images in group order.
+/** @brief Ragged row-major sources and full-channel column-major images in group order.
  * The row maps are shared by every response. Numerical panels are never
  * copied to rearrange rows. Unrestricted tiles use implicit identity maps.
  */
@@ -98,8 +98,11 @@ inline void multiply_channels(const ChannelProduct& basis,const ChannelLayout& l
     const int channels=basis.channels(group);
     Eigen::Map<const ChannelRows> input(source+layout.offset(group)+static_cast<std::size_t>(first)*channels,
         last-first,channels);
-    Eigen::Map<ChannelRows> output(destination+static_cast<std::size_t>(layout.begin(group)+first)*pairs,
-        last-first,pairs);
+    // The full image is column-major with leading dimension count*width.
+    // A fixed output channel is then contiguous across all image rows.
+    Eigen::Map<Eigen::MatrixXd,0,Eigen::OuterStride<>> output(
+        destination+layout.begin(group)+first,last-first,pairs,
+        Eigen::OuterStride<>(count*width));
     if (add) output.noalias()+=scale*input*basis.kernel(group).transpose();
     else output.noalias()=scale*input*basis.kernel(group).transpose();
     // Exchange orbits have weight two except on alpha=beta. Correct only

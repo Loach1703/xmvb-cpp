@@ -43,7 +43,8 @@ ExactHvpOperator::State::prepare_direction(
 
 integrals::RiAoProjectedResponse ExactHvpOperator::State::ri_ao_response(
     const PrecomputedDirection& direction,
-    const Eigen::Ref<const Eigen::MatrixXd>& weighted_active) const {
+    const Eigen::Ref<const Eigen::MatrixXd>& weighted_active,
+    bool fixed_two_electron) const {
   const auto& geometry=*accepted_orbital_preparation_cache_;
   const auto& input=current_input_->orbital_preparation_input;
   const int n=input.n_basis_functions;
@@ -67,12 +68,19 @@ integrals::RiAoProjectedResponse ExactHvpOperator::State::ri_ao_response(
   const auto& frame=accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform;
   const Eigen::MatrixXd weights=frame.size() ?
       (weighted_active*frame.transpose()).eval() : Eigen::MatrixXd(weighted_active);
+  const Eigen::MatrixXd active_weight=fixed_two_electron
+      ? (frame.size() ? Eigen::MatrixXd(frame*accepted_hho_gradient_symmetric_*frame.transpose())
+                      : accepted_hho_gradient_symmetric_)
+      : Eigen::MatrixXd{};
+  const integrals::RiActiveHvpInput jet{direction.integral_tangent,active_weight,
+      accepted_point_context_->packed_active_two_electron_gradient};
   auto response=integrals::apply_ri_projected_ao_response(*accepted_ri_two_electron_cache_,
       duals,horizontal,weights,geometry.inactive_auxiliary,
       ri_ao_response_workspace_,
       integrals::ri_response_workspace_bytes,
       {accepted_ri_inactive_one_index_factors_.size() != 0
-          ? &accepted_ri_inactive_one_index_factors_ : nullptr, moving});
+          ? &accepted_ri_inactive_one_index_factors_ : nullptr, moving},
+      fixed_two_electron ? &jet : nullptr);
   if (frame.size()) response.active=(response.active*frame).eval();
   return response;
 }

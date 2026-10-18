@@ -1,4 +1,5 @@
 #include "integrals/response/ri_ao.hpp"
+#include "integrals/response/ri_internal.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -148,7 +149,7 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
     const Eigen::Ref<const Eigen::MatrixXd>& weighted_active,
     const Eigen::Ref<const Eigen::MatrixXd>& full_inactive_duals,
     RiAoResponseWorkspace& workspace, std::size_t workspace_bytes,
-    RiInactiveFactorView inactive) {
+    RiInactiveFactorView inactive, const RiActiveHvpInput* fixed_hvp) {
   const int n = active.n_basis_functions;
   const int na = active.n_active_orbitals;
   const int nm = moving_inactive_duals.cols();
@@ -191,10 +192,19 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
     }
   }
 
-  RiAoProjectedResponse result{
-      Eigen::MatrixXd::Zero(n, nf), Eigen::MatrixXd::Zero(n, na)};
+  const int active_pairs = na * (na + 1) / 2;
+  if (fixed_hvp != nullptr &&
+      (fixed_hvp->direction.rows() != n || fixed_hvp->direction.cols() != na ||
+       fixed_hvp->weight.rows() != na || fixed_hvp->weight.cols() != na ||
+       active.accepted_active_pair_factors == nullptr ||
+       active.accepted_active_pair_factors->rows() != n_aux ||
+       active.accepted_active_pair_factors->cols() != active_pairs ||
+       active.active_pair_first_indices.size() != static_cast<std::size_t>(active_pairs) ||
+       active.active_pair_second_indices.size() != static_cast<std::size_t>(active_pairs)))
+    throw std::invalid_argument("invalid fused RI fixed-HVP dimensions");
+
   // D=0 and no inactive cotangent exists in this case.
-  if (nf == 0) return result;
+  if (nf == 0) return {Eigen::MatrixXd(n, 0), Eigen::MatrixXd::Zero(n, na)};
   const int outputs = nf + na;
   const int workers = std::min(effective_openmp_thread_count(), n);
   const Eigen::Index pairs = static_cast<Eigen::Index>(n) * (n + 1) / 2;
@@ -202,11 +212,25 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
   const auto [active_rows,active_columns]=projection_grid(n,na,workers);
   const std::size_t limit = workspace_bytes / sizeof(double);
   const std::size_t fixed = static_cast<std::size_t>(n) * (rank + outputs + workers) +
-      pairs + 2ULL * n_aux;
-  // Shared accepted/directional slabs and their narrow projections coexist
-  // with one returned transform and its bounded AO-row workspace.
+      pairs + 2ULL * n_aux + (fixed_hvp != nullptr
+          ? static_cast<std::size_t>(n_aux) * active_pairs +
+                static_cast<std::size_t>(active_pairs) * active_pairs +
+                static_cast<std::size_t>(n) * na +
+                static_cast<std::size_t>(workers) *
+                    (3ULL * n * na + 2ULL * na * na)
+          : 0);
+  // The previous directional tile is dead before the next transform. Keep
+  // only accepted + new directional slabs live; a missing accepted image
+  // temporarily needs at most one of the inactive/active transforms.
+  const int missing_columns = std::max(
+      inactive.factors == nullptr ? nm : 0,
+      active.accepted_one_index_factors ? 0 : na);
   const std::size_t per_aux = static_cast<std::size_t>(n) *
-      (3ULL * rank + workers) + 2ULL * rank * outputs;
+      (2ULL * rank + workers + missing_columns) + 2ULL * rank * outputs +
+      (fixed_hvp != nullptr
+          ? 2ULL * active_pairs + 2ULL * na * na +
+                static_cast<std::size_t>(workers) * na
+          : 0);
   if (fixed + per_aux > limit)
     throw std::length_error("minimum projected RI AO tile exceeds workspace");
   const int tile = static_cast<int>(std::min<std::size_t>(
@@ -220,20 +244,35 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
                     static_cast<Eigen::Index>(rank) * tile * outputs);
   release_oversized(workspace.accepted_projection,
                     static_cast<Eigen::Index>(rank) * tile * outputs);
+  release_oversized(workspace.charges, 2 * static_cast<Eigen::Index>(n_aux));
+  if (inactive.factors != nullptr || workspace.coulomb.size() > pairs)
+    workspace.coulomb.resize(0);
   workspace.charges.setZero(n_aux, 2);
   if (inactive.factors == nullptr) workspace.coulomb.resize(pairs);
-  else workspace.coulomb.resize(0);
+  // Shrink obsolete slabs before allocating this request's fixed outputs.
+  // Otherwise a smaller request could transiently retain the larger old tile.
+  RiAoProjectedResponse result{
+      Eigen::MatrixXd::Zero(n, nf), Eigen::MatrixXd::Zero(n, na)};
+  Eigen::MatrixXd pair_adjoint;
+  if (fixed_hvp != nullptr) {
+    pair_adjoint = detail::build_ri_active_pair_adjoint(fixed_hvp->adjoint, active);
+    result.factor_direction.resize(n_aux, active_pairs);
+    result.fixed_two_electron.setZero(n, na);
+  }
   Eigen::MatrixXd u(n, rank);
   u.leftCols(nm) = horizontal_direction;
-  u.rightCols(na) = weighted_active;
+  if (fixed_hvp != nullptr) u.rightCols(na) = fixed_hvp->direction;
+  else u.rightCols(na) = weighted_active;
   const auto& c = *active.accepted_active_coefficients;
   for (int first = 0; first < n_aux; first += tile) {
     const int count = std::min(tile, n_aux - first);
     const int leading = count * rank, moving_rows = count * nm;
     {
       profiling::ScopedPhase phase(profiling::Phase::RiAoDirection);
-      workspace.direction = transform_ri_one_index(
+      workspace.direction.resize(0, 0);
+      auto next_direction = transform_ri_one_index(
           *active.metric_whitened_ao_pair_factors, u, first, count);
+      workspace.direction.swap(next_direction);
     }
     {
       profiling::ScopedPhase phase(profiling::Phase::RiAoAccepted);
@@ -260,6 +299,31 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
             *active.metric_whitened_ao_pair_factors, c, first, count);
       }
     }
+    if (fixed_hvp != nullptr) {
+      const Eigen::Ref<const Eigen::MatrixXd> active_factors(
+          workspace.accepted.bottomRows(count * na));
+      detail::fill_ri_factor_direction_tile(
+          active, active_factors, fixed_hvp->direction, first, count,
+          result.factor_direction);
+      const Eigen::MatrixXd accepted_factor_adjoint =
+          active.accepted_active_pair_factors->middleRows(first, count) * pair_adjoint;
+      const Eigen::MatrixXd directional_factor_adjoint =
+          result.factor_direction.middleRows(first, count) * pair_adjoint;
+      detail::accumulate_ri_fixed_factor_tile(
+          active, active_factors, count, 0,
+          workspace.direction.bottomRows(count * na), count, 0,
+          accepted_factor_adjoint, directional_factor_adjoint,
+          0, count, workspace_bytes, result.fixed_two_electron);
+      // Each AO column stores a [auxiliary,active] slab. The fixed jet has
+      // consumed L D, so this in-place small-matrix action now supplies L Wbar.
+#pragma omp parallel for schedule(static) num_threads(workers)
+      for (int mu = 0; mu < n; ++mu) {
+        Eigen::Map<Eigen::MatrixXd> direction_image(
+            workspace.direction.col(mu).data() + moving_rows, count, na);
+        const Eigen::MatrixXd weighted_image = direction_image * fixed_hvp->weight;
+        direction_image = weighted_image;
+      }
+    }
     profiling::ScopedPhase exchange_phase(profiling::Phase::RiAoExchange);
     workspace.accepted_projection.resize(leading, outputs);
     workspace.direction_projection.resize(leading, outputs);
@@ -283,8 +347,9 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
         const int moving_end = std::min(end, moving_rows);
         if (moving_end > begin) {
           const int moving_size = moving_end - begin;
-          workspace.accepted_projection.block(begin, nf, moving_size, na).noalias() =
-              -workspace.accepted.middleRows(begin, moving_size) * c;
+          if (inactive.orbitals.empty())
+            workspace.accepted_projection.block(begin, nf, moving_size, na).noalias() =
+                -workspace.accepted.middleRows(begin, moving_size) * c;
           workspace.direction_projection.block(begin, nf, moving_size, na).noalias() =
               -workspace.direction.middleRows(begin, moving_size) * c;
         }
@@ -299,16 +364,39 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
           workspace.direction_projection.block(active_begin, 0, end - active_begin, nf) *= -1;
         }
       }
+#pragma omp barrier
+      if (!inactive.orbitals.empty()) {
+        // (L A_m)^T C_a = (L C_a)^T A0_{moving[m]}; the latter is already in
+        // the scaled accepted projection above. No second accepted GEMM.
+#pragma omp for schedule(static)
+        for (int moving = 0; moving < nm; ++moving)
+          for (int auxiliary = 0; auxiliary < count; ++auxiliary)
+            for (int orbital = 0; orbital < na; ++orbital)
+              workspace.accepted_projection(moving * count + auxiliary,
+                                            nf + orbital) =
+                  workspace.accepted_projection((nm + orbital) * count + auxiliary,
+                                                inactive.orbitals[moving]);
+      }
       const int aux_begin = worker * count / workers;
       const int aux_end = (worker + 1) * count / workers;
       const int aux_size = aux_end - aux_begin;
       if (aux_size) {
         auto rho_d = workspace.charges.col(0).segment(first + aux_begin, aux_size);
         auto rho_r = workspace.charges.col(1).segment(first + aux_begin, aux_size);
+        if (!inactive.orbitals.empty()) {
+          // The moving diagonal of -4 (L X)^T A0 is already present.
+          for (int orbital = 0; orbital < nm; ++orbital)
+            for (int auxiliary = aux_begin; auxiliary < aux_end; ++auxiliary)
+              rho_d[auxiliary - aux_begin] -= 0.5 *
+                  workspace.direction_projection(orbital * count + auxiliary,
+                                                 inactive.orbitals[orbital]);
+        }
         for (int mu = 0; mu < n; ++mu) {
-          for (int orbital = 0; orbital < nm; ++orbital) if (horizontal_direction(mu, orbital) != 0)
-            rho_d.noalias() += 2 * horizontal_direction(mu, orbital) *
-                workspace.accepted.col(mu).segment(orbital * count + aux_begin, aux_size);
+          if (inactive.orbitals.empty())
+            for (int orbital = 0; orbital < nm; ++orbital)
+              if (horizontal_direction(mu, orbital) != 0)
+                rho_d.noalias() += 2 * horizontal_direction(mu, orbital) *
+                    workspace.accepted.col(mu).segment(orbital * count + aux_begin, aux_size);
           for (int orbital = 0; orbital < na; ++orbital) if (weighted_active(mu, orbital) != 0)
             rho_r.noalias() += weighted_active(mu, orbital) *
                 workspace.accepted.col(mu).segment((nm + orbital) * count + aux_begin, aux_size);

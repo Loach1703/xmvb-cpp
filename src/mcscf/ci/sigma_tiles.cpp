@@ -19,8 +19,6 @@
 namespace xmvb::mcscf {
 namespace {
 
-using ChannelMatrix=Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::RowMajor>;
-
 /** @brief Exclusive scratch lease; cache one idle slab, never one per thread.
  * Concurrent or recursive actions still own disjoint buffers. Earlier returns
  * release their buffer while another lease is active, so the idle cache cannot
@@ -351,6 +349,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
       double* scattered=workspace.get()+scratch_size;
       double* state_channels=scattered+source_capacity;
       double* transformed=state_channels+(separate_output ? packed_size:0);
+      // Scattered/state channels are ragged row-major until multiplication;
+      // full transformed/forcing images use column-major image-by-channel rows.
 
       const int first = count * width * thread / team;
       const int last = count * width * (thread + 1) / team;
@@ -467,12 +467,17 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               state_channels,scattered,thread,team,false,diagonal_rows,count,width,exchange_parity!=0);
           if (add_columns) {
             // Both images use identical group row ownership.
+            const Eigen::OuterStride<> image_stride(count*width);
             for (int group=0;group<channel_product.groups();++group) {
               const int size=channel_layout.size(group);
               const int begin=channel_layout.begin(group)+size*thread/team;
               const int end=channel_layout.begin(group)+size*(thread+1)/team;
-              Eigen::Map<ChannelMatrix>(transformed+static_cast<std::size_t>(begin)*pairs,end-begin,pairs)+=
-                  Eigen::Map<const ChannelMatrix>(scattered+static_cast<std::size_t>(begin)*pairs,end-begin,pairs);
+              if (begin==end) continue;
+              Eigen::Map<Eigen::MatrixXd,0,Eigen::OuterStride<>> output(
+                  transformed+begin,end-begin,pairs,image_stride);
+              Eigen::Map<const Eigen::MatrixXd,0,Eigen::OuterStride<>> forcing(
+                  scattered+begin,end-begin,pairs,image_stride);
+              output+=forcing;
             }
           }
         } else if (direction && add_columns) {
@@ -489,6 +494,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
             // owns panel lifetimes and schedules disjoint beta/RHS/alpha ranges.
             const auto write_image = [&](const DirectCiTileWriter& writer,
                                          const double* channel_values) {
+              const std::size_t image_rows=static_cast<std::size_t>(count)*width;
               const DirectCiColumnAccumulator accumulate = [&,channel_values](int source, int v,
                 int first,int last,double* destination,const int* rows,int n_rows) {
               if (first==last) return;
@@ -511,11 +517,11 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                   if (index[local] >= 0) {
                     const int row=index[local];
                     for (const int p : alpha_->occupied(a))
-                      sum += channel_values[static_cast<std::size_t>(row) * pairs +
-                          core::PairIndex::packed_pair_index(p, p)];
+                      sum += channel_values[row+static_cast<std::size_t>(
+                          core::PairIndex::packed_pair_index(p, p))*image_rows];
                     for (const int p : beta_occupied)
-                      sum += channel_values[static_cast<std::size_t>(row) * pairs +
-                          core::PairIndex::packed_pair_index(p, p)];
+                      sum += channel_values[row+static_cast<std::size_t>(
+                          core::PairIndex::packed_pair_index(p, p))*image_rows];
                   }
                   const auto& links = alpha_->singles(a);
                   for (int link = 0; link < static_cast<int>(links.size()); ++link) {
@@ -523,8 +529,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                     const int target = h < 0 ? -1 : index[h];
                     if (target >= 0)
                       sum += links[link].sign *
-                          channel_values[static_cast<std::size_t>(target) * pairs +
-                              links[link].pair];
+                          channel_values[target+static_cast<std::size_t>(
+                              links[link].pair)*image_rows];
                   }
                   destination[rows ? i:a] += sum;
                 }
@@ -533,9 +539,10 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               // the entire alpha range. Do not rediscover them for every pixel.
               for (int edge = offsets[source]; edge < offsets[source + 1]; ++edge) {
                 const auto& link = incoming[edge];
-                const double* values = channel_values + link.pair;
+                const double* values = channel_values +
+                    static_cast<std::size_t>(link.pair)*image_rows;
                 const auto& group=groups[link.group];
-                detail::gather_beta_rows(values,pairs,v,link.sign,
+                detail::gather_beta_rows(values,1,v,link.sign,
                     {target_rows.data()+group.begin,static_cast<std::size_t>(group.end-group.begin)},
                     halo[first],halo[last-1]+1,destination,rows,n_rows);
               }

@@ -32,6 +32,8 @@ struct ExactHvpOperator::State::PrecomputedDirection {
   OrbitalPreparationDirectionalResult orbital_preparation_directional_result;
   /** Fixed accepted integral frame, dC R^-1; shared by forward and reverse. */
   Eigen::MatrixXd integral_tangent;
+  /** Fixed 2e response consumed during the shared RI AO direction sweep. */
+  Eigen::MatrixXd ri_fixed_two_electron;
   std::optional<PrecomputedOuterResponse> outer_response;
 };
 

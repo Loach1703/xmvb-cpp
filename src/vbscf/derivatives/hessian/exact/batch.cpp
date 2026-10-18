@@ -238,6 +238,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
   const auto batch_h1e_start_time = std::chrono::steady_clock::now();
   Eigen::MatrixXd combined_ao_columns;
   Eigen::MatrixXd active_projection_columns;
+  std::vector<Eigen::MatrixXd> ri_active_pair_factor_directions;
   if (accepted_ri_factorization_ != nullptr) {
     const int n_inactive = (current_input_->orbital_preparation_input.n_total_electrons -
         current_input_->orbital_preparation_input.n_active_electrons) / 2;
@@ -247,10 +248,15 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
     for (Eigen::Index column = 0; column < n_directions; ++column) {
       const Eigen::Map<const Eigen::MatrixXd> weights(weighted_active_columns.col(column).data(),
           n_basis_functions,n_active_orbitals);
-      const auto ri=ri_ao_response(precomputed_directions[column],weights);
+      auto ri=ri_ao_response(precomputed_directions[column],weights,
+          components.direct_core_response);
       combined_ao_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(ri.inactive.data(),projection_size);
       active_projection_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(
           ri.active.data(),n_basis_functions*n_active_orbitals);
+      if (ri.fixed_two_electron.size()) {
+        precomputed_directions[column].ri_fixed_two_electron=std::move(ri.fixed_two_electron);
+        ri_active_pair_factor_directions.push_back(std::move(ri.factor_direction));
+      }
     }
   } else {
     const auto& frame=accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform;
@@ -286,7 +292,6 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
 
   Eigen::MatrixXd delta_packed_active_two_electron_columns;
   std::vector<xmvb::integrals::ExactCtxPairMatrix> directional_pair_products;
-  std::vector<Eigen::MatrixXd> ri_active_pair_factor_directions;
   const bool build_orbital_coupling = coupling_output != nullptr;
   const bool compute_outer_response =
       components.local_active_response || components.structure_response ||
@@ -305,8 +310,9 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
   if (accepted_ri_two_electron_cache_.has_value()) {
     const auto batch_active_two_electron_start_time =
         std::chrono::steady_clock::now();
-    if (components.direct_core_response ||
-        (compute_outer_response && !ri_orbital_pair_direction)) {
+    if (ri_active_pair_factor_directions.empty() &&
+        (components.direct_core_response ||
+         (compute_outer_response && !ri_orbital_pair_direction))) {
       ri_active_pair_factor_directions =
           integrals::compute_ri_active_pair_factor_directional_derivative_batch(
               *accepted_ri_two_electron_cache_, dense_active_directions);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <span>
+#include <vector>
 #include <Eigen/Core>
 
 #include "integrals/response/ri.hpp"
@@ -11,10 +12,23 @@ namespace xmvb::integrals {
 struct RiAoProjectedResponse {
   Eigen::MatrixXd inactive; ///< 2 G(2 D + K/2) A0, AO by all inactive.
   Eigen::MatrixXd active;   ///< G(D) C, AO by active.
+  Eigen::MatrixXd factor_direction{}; ///< Optional delta B, auxiliary by active pair.
+  Eigen::MatrixXd fixed_two_electron{}; ///< Optional fixed-adjoint image, AO by active.
+};
+
+/** @brief Borrowed fixed-2e request in the accepted active coefficient frame.
+ * `weight` maps the active direction to the AO-response density weight:
+ * Wbar = direction * weight. `adjoint` is the accepted packed 2e cotangent.
+ */
+struct RiActiveHvpInput {
+  const Eigen::MatrixXd& direction;
+  const Eigen::MatrixXd& weight;
+  const std::vector<double>& adjoint;
 };
 
 /** @brief Shared auxiliary slabs and narrow tile projections.
- * Workers write disjoint ranges; no worker owns an output or factor replica.
+ * AO projections have disjoint writers. Only the fixed-jet reduction uses
+ * small AO-by-active worker accumulators; integral slabs remain shared.
  */
 struct RiAoResponseWorkspace {
   Eigen::MatrixXd direction, accepted;
@@ -46,6 +60,9 @@ Eigen::MatrixXd apply_ri_active_density_response(
  * are transformed; a full L_A A0 transform is never required. The returned
  * inactive projection includes the factor two required by the symmetric
  * inactive-density pullback. No AO-square response is materialized.
+ * With `fixed_hvp`, `weighted_active` must equal
+ * `fixed_hvp->direction * fixed_hvp->weight`; the returned optional images
+ * are in the accepted active-coefficient frame.
  */
 RiAoProjectedResponse apply_ri_projected_ao_response(
     const RiActiveTwoElectronResponseCache& active,
@@ -55,6 +72,7 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
     const Eigen::Ref<const Eigen::MatrixXd>& full_inactive_duals,
     RiAoResponseWorkspace& workspace,
     std::size_t workspace_bytes = ri_response_workspace_bytes,
-    RiInactiveFactorView inactive = {});
+    RiInactiveFactorView inactive = {},
+    const RiActiveHvpInput* fixed_hvp = nullptr);
 
 } // namespace xmvb::integrals

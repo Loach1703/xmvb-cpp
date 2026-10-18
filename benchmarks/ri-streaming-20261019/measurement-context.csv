@@ -1,0 +1,13 @@
+role,job,node,affinity,source,notes
+qualification,293882,anode003,,source.sha256,28 CTests and four full-gradient/HVP finite-difference cases; frozen indexed sources exclude unrelated worktree changes
+native-ri,293883,anode003,160-191,ri.csv,final-version five-case native series; same node and mask as saved RI baseline
+native-exact,293884,anode060,224-255,exact.csv,final-version native exact series; same node and mask as saved exact baseline
+native-ri-preaudit,293874,anode003,160-191,preaudit-ri.csv,preceding new snapshot before small-AO worker cap and cross-call workspace cleanup
+native-exact-preaudit,293877,anode060,224-255,preaudit-exact.csv,preceding new snapshot before final workspace audit
+native-ri-c12-preaudit-repeat,293878,anode003,160-191,repeat-ri-c12.csv,single repeat of preceding new snapshot to check C12 slowdown; no old executable rerun
+phase-ri-c12-before-layout,293861,anode014,224-255,../ri-cost-20261019/phase-293861,saved prior-run phase evidence; no rerun
+phase-ri-c12-layout-only,293867,anode014,224-255,layout-phases.csv,intermediate new-version output-layout qualification
+phase-ri-c12-fusion-before-lifetime-fix,293870,anode014,224-255,fusion-phases.csv,same-node phase control isolating AO/fixed fusion; nested timings are not additive
+phase-ri-c12-final,293885,anode014,224-255,phases.csv,same node and mask as saved phase control; nested phase clocks are not additive
+phase-ri-mnf2-before-lifetime-fix,293872,anode003,160-191,workspace-phases.csv,intermediate new version revealing doubled auxiliary tile count
+phase-ri-mnf2-final,293875,anode060,224-255,workspace-phases.csv,different node; use tile/call count reduction rather than claiming native speedup from phase clocks

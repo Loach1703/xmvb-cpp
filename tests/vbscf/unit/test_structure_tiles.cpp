@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -2053,42 +2054,93 @@ void check_sigma_tile_plan() {
       }
 }
 
+/** @brief Full-channel images are column-major; ragged sources remain row-major. */
+void check_full_channel_image_layout() {
+  using namespace xmvb::mcscf::detail;
+  constexpr int count=4,width=3,pairs=6,threads=2;
+  Eigen::MatrixXd kernel(pairs,pairs),direction(pairs,pairs);
+  for (int j=0;j<pairs;++j) for (int i=0;i<pairs;++i) {
+    kernel(i,j)=0.13*(i+1)-0.07*(j+2)+0.011*i*j;
+    direction(i,j)=0.09*(j+1)+0.023*i-0.004*i*j;
+  }
+  const std::vector<int> groups{0,1,5,0},diagonal_rows{1,3};
+  for (bool restricted:{false,true}) for (bool exchange:{false,true}) {
+    const ChannelProduct basis(kernel,3,restricted),derivative(direction,3,restricted);
+    ChannelLayout layout;
+    layout.reset(basis,restricted ? std::span<const int>(groups):std::span<const int>{},count,width);
+    std::vector<double> source(layout.entries()),image(count*width*pairs,-1.0);
+    for (std::size_t i=0;i<source.size();++i) source[i]=0.02*(i+1)-0.17;
+    Eigen::MatrixXd expected=Eigen::MatrixXd::Zero(count*width,pairs);
+    const auto accumulate=[&](const Eigen::MatrixXd& k,bool add) {
+      for (int row=0;row<count*width;++row) {
+        const int group=restricted ? groups[row%count]:0;
+        const bool diagonal=std::find(diagonal_rows.begin(),diagonal_rows.end(),row%count)!=diagonal_rows.end();
+        const double scale=exchange ? (diagonal ? 1.0:2.0):1.0;
+        for (int pair=0;pair<pairs;++pair) {
+          double value=0.0;
+          for (int channel=0;channel<basis.channels(group);++channel)
+            value+=source[layout.packed(row)+channel]*k(pair,basis.global(group,channel));
+          if (add) expected(layout.image(row),pair)+=scale*value;
+          else expected(layout.image(row),pair)=scale*value;
+        }
+      }
+    };
+    for (int thread=0;thread<threads;++thread)
+      multiply_channels(basis,layout,source.data(),image.data(),thread,threads,false,
+          diagonal_rows,count,width,exchange);
+    accumulate(kernel,false);
+    Eigen::Map<const Eigen::MatrixXd> first(image.data(),count*width,pairs);
+    require((first-expected).norm()<1e-12,"full-channel image layout changed the dense product");
+    for (int thread=0;thread<threads;++thread)
+      multiply_channels(derivative,layout,source.data(),image.data(),thread,threads,true,
+          diagonal_rows,count,width,exchange);
+    accumulate(direction,true);
+    Eigen::Map<const Eigen::MatrixXd> combined(image.data(),count*width,pairs);
+    require((combined-expected).norm()<1e-12,"full-channel forcing changed the dense product");
+  }
+}
+
 /** @brief Composed beta addresses preserve grouped RHS, intervals and holes. */
 void check_sparse_beta_gather() {
   const std::vector<int> halo{0,2,3,6,7,9},targets{0,2,4,5};
   const std::vector<int> index{2,-1,0,-1,3,1},sparse{1,3,6,7,10};
-  constexpr int pairs=3;
+  constexpr int pairs=3,channel=2;
   const Eigen::MatrixXd kernel=Eigen::MatrixXd::Identity(pairs,pairs);
   using namespace xmvb::mcscf::detail;
   const ChannelProduct basis(kernel,2,true);
   const std::vector<int> groups{0,1,0,1};
   for (const int width:{1,2,3}) for (const bool grouped:{false,true}) {
-  xmvb::mcscf::detail::ChannelLayout layout;
-  layout.reset(basis,grouped ? std::span<const int>(groups):std::span<const int>{},4,width);
-  Eigen::VectorXd values=Eigen::VectorXd::LinSpaced(4*width*pairs,-0.7,1.1);
-  std::vector<SigmaGatherRow> composed;
-  for (const int h:targets) {
-    const int image=layout.image(index[h]);
-    composed.push_back({halo[h],image,width>1 ? layout.image(4+index[h])-image:0});
-  }
-  for (int rhs=0;rhs<width;++rhs) for (const bool selected:{false,true})
-    for (int first=0;first<=static_cast<int>(halo.size());++first)
-      for (int last=first;last<=static_cast<int>(halo.size());++last) {
-        Eigen::VectorXd actual=Eigen::VectorXd::Constant(selected ? sparse.size():11,0.25);
-        Eigen::VectorXd expected=actual;
-        for (int out=0;out<expected.size();++out) {
-          const int alpha=selected ? sparse[out]:out;
-          for (int h=first;h<last;++h)
-            if (halo[h]==alpha && index[h]>=0)
-              expected[out]-=values[layout.image(index[h]+4*rhs)*pairs];
-        }
-        const int begin=first<static_cast<int>(halo.size()) ? halo[first]:11;
-        const int end=last>first ? halo[last-1]+1:begin;
-        gather_beta_rows(values.data(),pairs,rhs,-1.0,
-            composed,begin,end,actual.data(),
-            selected ? sparse.data():nullptr,selected ? sparse.size():0);
-        require((actual-expected).norm()==0,"sparse beta gather changed a halo interval or destination support");
+    ChannelLayout layout;
+    layout.reset(basis,grouped ? std::span<const int>(groups):std::span<const int>{},4,width);
+    for (const bool column_major:{false,true}) {
+      const int image_rows=4*width;
+      Eigen::VectorXd values=Eigen::VectorXd::LinSpaced(image_rows*pairs,-0.7,1.1);
+      std::vector<SigmaGatherRow> composed;
+      for (const int h:targets) {
+        const int image=layout.image(index[h]);
+        composed.push_back({halo[h],image,width>1 ? layout.image(4+index[h])-image:0});
       }
+      for (int rhs=0;rhs<width;++rhs) for (const bool selected:{false,true})
+        for (int first=0;first<=static_cast<int>(halo.size());++first)
+          for (int last=first;last<=static_cast<int>(halo.size());++last) {
+            Eigen::VectorXd actual=Eigen::VectorXd::Constant(selected ? sparse.size():11,0.25);
+            Eigen::VectorXd expected=actual;
+            for (int out=0;out<expected.size();++out) {
+              const int alpha=selected ? sparse[out]:out;
+              for (int h=first;h<last;++h)
+                if (halo[h]==alpha && index[h]>=0)
+                  expected[out]-=values[column_major ? layout.image(index[h]+4*rhs)+channel*image_rows :
+                      layout.image(index[h]+4*rhs)*pairs+channel];
+            }
+            const int begin=first<static_cast<int>(halo.size()) ? halo[first]:11;
+            const int end=last>first ? halo[last-1]+1:begin;
+            gather_beta_rows(values.data()+(column_major ? channel*image_rows:channel),
+                column_major ? 1:pairs,rhs,-1.0,
+                composed,begin,end,actual.data(),
+                selected ? sparse.data():nullptr,selected ? sparse.size():0);
+            require((actual-expected).norm()==0,"sparse beta gather changed a halo interval or destination support");
+          }
+    }
   }
 }
 
@@ -3517,6 +3569,7 @@ int main(int argc, char** argv) {
       check_sigma_columns(make_fixture(4, 4, 1), 2);
       check_sigma_columns(make_fixture(10, 5, 4), 2);
       check_sigma_tile_plan();
+      check_full_channel_image_layout();
       check_sparse_beta_gather();
       check_packed_sigma_tile_plan();
       check_prefix_words();
