@@ -4,6 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 #include <cblas.h>
 #include "parallel/openmp.hpp"
 #include "core/timing.hpp"
@@ -14,6 +15,24 @@
 
 namespace xmvb::integrals {
 namespace {
+
+/** @brief Equal-work rectangular GEMM grid with minimum tile perimeter. */
+std::pair<int,int> projection_grid(int rows, int cols, int workers) {
+  std::pair<int,int> result{workers,1};
+  double perimeter = static_cast<double>(rows) / workers + cols;
+  for (int columns=2;columns<=std::min(cols,workers);++columns) {
+    if (workers % columns != 0) continue;
+    const int row_blocks=workers/columns;
+    if (row_blocks>rows) continue;
+    const double candidate=static_cast<double>(rows)/row_blocks +
+        static_cast<double>(cols)/columns;
+    if (candidate<perimeter) {
+      perimeter=candidate;
+      result={row_blocks,columns};
+    }
+  }
+  return result;
+}
 
 /** @brief Add scale*(U^T V+V^T U), with one writer per lower AO rectangle. */
 void add_symmetric_product(const Eigen::MatrixXd& u, const Eigen::MatrixXd& v,
@@ -121,128 +140,247 @@ Eigen::MatrixXd apply_ri_active_density_response(
   return result;
 }
 
-RiAoResponse apply_ri_ao_response(
+
+RiAoProjectedResponse apply_ri_projected_ao_response(
     const RiActiveTwoElectronResponseCache& active,
-    const Eigen::Ref<const Eigen::MatrixXd>& inactive_duals,
+    const Eigen::Ref<const Eigen::MatrixXd>& moving_inactive_duals,
     const Eigen::Ref<const Eigen::MatrixXd>& horizontal_direction,
     const Eigen::Ref<const Eigen::MatrixXd>& weighted_active,
-    RiAoResponseWorkspace& workspace,std::size_t workspace_bytes,
+    const Eigen::Ref<const Eigen::MatrixXd>& full_inactive_duals,
+    RiAoResponseWorkspace& workspace, std::size_t workspace_bytes,
     RiInactiveFactorView inactive) {
-  const int n=active.n_basis_functions, na=active.n_active_orbitals;
-  const int ni=inactive_duals.cols(), rank=ni+na, n_aux=active.n_auxiliary_functions;
-  if (n<=0 || na<=0 || n_aux<=0 || inactive_duals.rows()!=n ||
-      horizontal_direction.rows()!=n || horizontal_direction.cols()!=ni ||
-      weighted_active.rows()!=n || weighted_active.cols()!=na ||
-      !active.accepted_active_coefficients || !active.metric_whitened_ao_pair_factors)
-    throw std::invalid_argument("invalid factor-native RI AO response dimensions");
-  if (inactive.factors && (inactive.factors->cols() != n ||
-      inactive.factors->rows() % n_aux != 0 || inactive.orbitals.size() !=
-          static_cast<std::size_t>(ni)))
-    throw std::invalid_argument("invalid accepted inactive RI factor view");
-  // Previous slabs are not inputs to this action. Release them before a
-  // different rank/tile plan allocates its first returned transform.
-  workspace.direction.resize(0,0);
-  workspace.accepted.resize(0,0);
-  const auto& c=*active.accepted_active_coefficients;
-  // The response source is Z=U V^T+V U^T, with no numerical rank discovery.
-  Eigen::MatrixXd u(n,rank),v(n,rank);
-  u.leftCols(ni)=2*horizontal_direction;
-  u.rightCols(na)=0.5*weighted_active;
-  v.leftCols(ni)=inactive_duals;
-  v.rightCols(na)=c;
-  const int ao_workers=std::min(effective_openmp_thread_count(),n);
-  const std::size_t limit=workspace_bytes/sizeof(double);
-  const std::size_t fixed=2ULL*n*rank+n_aux+static_cast<std::size_t>(n)*(n+1)/2;
-  const std::size_t per_worker=3ULL*n*na+2ULL*na*na;
-  // Account for both live slabs and a returned transform while the previous
-  // slab still exists, plus AO row slices owned by the shared transform team.
-  const std::size_t per_aux=static_cast<std::size_t>(n)*(3*rank+ao_workers);
-  if (fixed+per_worker+per_aux>limit)
-    throw std::length_error("minimum factor-native RI AO tile exceeds workspace");
-  const int workers=std::min<std::size_t>(std::min(ao_workers,n_aux),
-      (limit-fixed-per_aux)/per_worker);
-  const int tile=std::min<std::size_t>(n_aux,(limit-fixed-workers*per_worker)/per_aux);
-  workspace.workers.resize(workers);
-  if (ni) for (auto& worker:workspace.workers) {
-    worker.left.resize(n,na); worker.right.resize(n,na);
-    worker.projection.setZero(n,na);
-    worker.core.resize(na,na); worker.mixed.resize(na,na);
+  const int n = active.n_basis_functions;
+  const int na = active.n_active_orbitals;
+  const int nm = moving_inactive_duals.cols();
+  const int nf = full_inactive_duals.cols();
+  const int n_aux = active.n_auxiliary_functions;
+  const int rank = nm + na;
+  if (n <= 0 || na <= 0 || n_aux <= 0 || nm > nf ||
+      moving_inactive_duals.rows() != n ||
+      horizontal_direction.rows() != n ||
+      horizontal_direction.cols() != nm ||
+      weighted_active.rows() != n || weighted_active.cols() != na ||
+      full_inactive_duals.rows() != n ||
+      active.accepted_active_coefficients == nullptr ||
+      active.accepted_active_coefficients->rows() != n ||
+      active.accepted_active_coefficients->cols() != na ||
+      active.metric_whitened_ao_pair_factors == nullptr ||
+      active.metric_whitened_ao_pair_factors->rows() != n_aux ||
+      active.metric_whitened_ao_pair_factors->cols() !=
+          static_cast<Eigen::Index>(n) * (n + 1) / 2 ||
+      (active.accepted_one_index_factors &&
+       (active.accepted_one_index_factors->rows() !=
+            static_cast<Eigen::Index>(n_aux) * na ||
+        active.accepted_one_index_factors->cols() != n))) {
+    throw std::invalid_argument("invalid projected RI AO response dimensions");
   }
-  workspace.coulomb.resize(n_aux);
-  RiAoResponse result{Eigen::MatrixXd::Zero(n,n),Eigen::MatrixXd::Zero(n,na)};
+  if (inactive.factors != nullptr &&
+      (inactive.factors->rows() != static_cast<Eigen::Index>(n_aux) * nf ||
+       inactive.factors->cols() != n)) {
+    throw std::invalid_argument("invalid full inactive RI one-index factors");
+  }
+  if ((!inactive.orbitals.empty() &&
+       inactive.orbitals.size() != static_cast<std::size_t>(nm)) ||
+      (inactive.factors != nullptr &&
+       inactive.orbitals.size() != static_cast<std::size_t>(nm))) {
+    throw std::invalid_argument("invalid moving inactive RI factor mapping");
+  }
+  for (int orbital : inactive.orbitals) {
+    if (orbital < 0 || orbital >= nf) {
+      throw std::invalid_argument("moving inactive RI factor index is out of range");
+    }
+  }
 
-  for (int first=0;first<n_aux;first+=tile) {
-    const int count=std::min(tile,n_aux-first),leading=count*rank;
-    profiling::ScopedPhase direction_phase(profiling::Phase::RiAoDirection);
-    workspace.direction=transform_ri_one_index(*active.metric_whitened_ao_pair_factors,u,first,count);
-    direction_phase.stop();
-    profiling::ScopedPhase accepted_phase(profiling::Phase::RiAoAccepted);
-    if (active.accepted_one_index_factors || inactive.factors) {
-      workspace.accepted.resize(leading,n);
-      if (ni && inactive.factors) {
-        for (int a = 0; a < ni; ++a)
-          workspace.accepted.middleRows(a * count, count) =
-              inactive.factors->middleRows(
-                  static_cast<Eigen::Index>(inactive.orbitals[a]) * n_aux + first, count);
-      } else if (ni) {
-        workspace.accepted.topRows(ni*count)=
-            transform_ri_one_index(*active.metric_whitened_ao_pair_factors,inactive_duals,first,count);
+  RiAoProjectedResponse result{
+      Eigen::MatrixXd::Zero(n, nf), Eigen::MatrixXd::Zero(n, na)};
+  // D=0 and no inactive cotangent exists in this case.
+  if (nf == 0) return result;
+  const int outputs = nf + na;
+  const int workers = std::min(effective_openmp_thread_count(), n);
+  const Eigen::Index pairs = static_cast<Eigen::Index>(n) * (n + 1) / 2;
+  const auto [inactive_rows,inactive_columns]=projection_grid(n,nf,workers);
+  const auto [active_rows,active_columns]=projection_grid(n,na,workers);
+  const std::size_t limit = workspace_bytes / sizeof(double);
+  const std::size_t fixed = static_cast<std::size_t>(n) * (rank + outputs + workers) +
+      pairs + 2ULL * n_aux;
+  // Shared accepted/directional slabs and their narrow projections coexist
+  // with one returned transform and its bounded AO-row workspace.
+  const std::size_t per_aux = static_cast<std::size_t>(n) *
+      (3ULL * rank + workers) + 2ULL * rank * outputs;
+  if (fixed + per_aux > limit)
+    throw std::length_error("minimum projected RI AO tile exceeds workspace");
+  const int tile = static_cast<int>(std::min<std::size_t>(
+      n_aux, (limit - fixed) / per_aux));
+  const auto release_oversized = [](Eigen::MatrixXd& slab, Eigen::Index elements) {
+    if (slab.size() > elements) slab.resize(0, 0);
+  };
+  release_oversized(workspace.direction, static_cast<Eigen::Index>(n) * rank * tile);
+  release_oversized(workspace.accepted, static_cast<Eigen::Index>(n) * rank * tile);
+  release_oversized(workspace.direction_projection,
+                    static_cast<Eigen::Index>(rank) * tile * outputs);
+  release_oversized(workspace.accepted_projection,
+                    static_cast<Eigen::Index>(rank) * tile * outputs);
+  workspace.charges.setZero(n_aux, 2);
+  workspace.coulomb.resize(pairs);
+  Eigen::MatrixXd u(n, rank);
+  u.leftCols(nm) = horizontal_direction;
+  u.rightCols(na) = weighted_active;
+  const auto& c = *active.accepted_active_coefficients;
+  for (int first = 0; first < n_aux; first += tile) {
+    const int count = std::min(tile, n_aux - first);
+    const int leading = count * rank, moving_rows = count * nm;
+    {
+      profiling::ScopedPhase phase(profiling::Phase::RiAoDirection);
+      workspace.direction = transform_ri_one_index(
+          *active.metric_whitened_ao_pair_factors, u, first, count);
+    }
+    {
+      profiling::ScopedPhase phase(profiling::Phase::RiAoAccepted);
+      workspace.accepted.resize(leading, n);
+      if (nm != 0) {
+        if (inactive.factors != nullptr) {
+          for (int moving = 0; moving < nm; ++moving)
+            workspace.accepted.middleRows(moving * count, count) =
+                inactive.factors->middleRows(
+                    inactive.orbitals[moving] * n_aux + first, count);
+        } else {
+          workspace.accepted.topRows(moving_rows) = transform_ri_one_index(
+              *active.metric_whitened_ao_pair_factors,
+              moving_inactive_duals, first, count);
+        }
       }
-      // Borrow the already-computed active transform, never recompute L C_a.
       if (active.accepted_one_index_factors) {
-        for (int a=0;a<na;++a)
-          workspace.accepted.middleRows((ni+a)*count,count)=
-              active.accepted_one_index_factors->middleRows(a*n_aux+first,count);
+        for (int orbital = 0; orbital < na; ++orbital)
+          workspace.accepted.middleRows((nm + orbital) * count, count) =
+              active.accepted_one_index_factors->middleRows(
+                  orbital * n_aux + first, count);
       } else {
-        workspace.accepted.bottomRows(na * count) = transform_ri_one_index(
+        workspace.accepted.bottomRows(count * na) = transform_ri_one_index(
             *active.metric_whitened_ao_pair_factors, c, first, count);
       }
-    } else {
-      workspace.accepted=transform_ri_one_index(*active.metric_whitened_ao_pair_factors,v,first,count);
     }
-    accepted_phase.stop();
+    profiling::ScopedPhase exchange_phase(profiling::Phase::RiAoExchange);
+    workspace.accepted_projection.resize(leading, outputs);
+    workspace.direction_projection.resize(leading, outputs);
+    // Form (L A, L C)^T A0 and (L X, L W)^T A0 in tall GEMMs.
+    // Only moving rows need projection onto C; the unused active rows are
+    // neither generated nor consumed. There is no auxiliary-by-auxiliary GEMM.
 #pragma omp parallel num_threads(workers)
     {
-      int thread=0;
+      int worker = 0;
 #ifdef _OPENMP
-      thread=omp_get_thread_num();
+      worker = omp_get_thread_num();
 #endif
-      auto& scratch=workspace.workers[thread];
-      const int begin=thread*count/workers,end=(thread+1)*count/workers;
-      auto charge=workspace.coulomb.segment(first+begin,end-begin);
-      charge.setZero();
-      // Contiguous auxiliary segments, not an auxiliary-major strided scan
-      // through the same slab for every scalar charge.
-      for (int mu=0;mu<n;++mu) for (int a=0;a<rank;++a)
-        if (u(mu,a)!=0)
-          charge.noalias()+=2*u(mu,a)*workspace.accepted.col(mu).segment(a*count+begin,end-begin);
-      if (ni) {
-#pragma omp for schedule(static)
-      for (int aux=0;aux<count;++aux) {
-        for (int mu=0;mu<n;++mu) {
-          const double* accepted=workspace.accepted.col(mu).data()+aux;
-          const double* direction=workspace.direction.col(mu).data()+aux;
-          for (int a=0;a<na;++a) {
-            scratch.left(mu,a)=direction[(ni+a)*count];
-            scratch.right(mu,a)=accepted[(ni+a)*count];
-          }
+      const int begin = worker * leading / workers;
+      const int end = (worker + 1) * leading / workers;
+      const int size = end - begin;
+      if (size) {
+        workspace.accepted_projection.block(begin, 0, size, nf).noalias() =
+            workspace.accepted.middleRows(begin, size) * full_inactive_duals;
+        workspace.direction_projection.block(begin, 0, size, nf).noalias() =
+            workspace.direction.middleRows(begin, size) * full_inactive_duals;
+        const int moving_end = std::min(end, moving_rows);
+        if (moving_end > begin) {
+          const int moving_size = moving_end - begin;
+          workspace.accepted_projection.block(begin, nf, moving_size, na).noalias() =
+              -workspace.accepted.middleRows(begin, moving_size) * c;
+          workspace.direction_projection.block(begin, nf, moving_size, na).noalias() =
+              -workspace.direction.middleRows(begin, moving_size) * c;
         }
-        // Only the narrow G(K) C correction is needed, not the AO matrix G(K).
-        scratch.core.noalias()=c.transpose()*scratch.right;
-        scratch.mixed.noalias()=weighted_active.transpose()*scratch.right;
-        const double weight=4*(weighted_active.array()*scratch.right.array()).sum();
-        scratch.projection.noalias()+=weight*scratch.right;
-        scratch.projection.noalias()-=2*scratch.left*scratch.core;
-        scratch.projection.noalias()-=scratch.right*scratch.mixed;
+        const int inactive_end = std::min(end, moving_rows);
+        if (inactive_end > begin) {
+          workspace.accepted_projection.block(begin, 0, inactive_end - begin, nf) *= -4;
+          workspace.direction_projection.block(begin, 0, inactive_end - begin, nf) *= -4;
+        }
+        const int active_begin = std::max(begin, moving_rows);
+        if (end > active_begin) {
+          workspace.accepted_projection.block(active_begin, 0, end - active_begin, nf) *= -1;
+          workspace.direction_projection.block(active_begin, 0, end - active_begin, nf) *= -1;
+        }
       }
+      const int aux_begin = worker * count / workers;
+      const int aux_end = (worker + 1) * count / workers;
+      const int aux_size = aux_end - aux_begin;
+      if (aux_size) {
+        auto rho_d = workspace.charges.col(0).segment(first + aux_begin, aux_size);
+        auto rho_r = workspace.charges.col(1).segment(first + aux_begin, aux_size);
+        for (int mu = 0; mu < n; ++mu) {
+          for (int orbital = 0; orbital < nm; ++orbital) if (horizontal_direction(mu, orbital) != 0)
+            rho_d.noalias() += 2 * horizontal_direction(mu, orbital) *
+                workspace.accepted.col(mu).segment(orbital * count + aux_begin, aux_size);
+          for (int orbital = 0; orbital < na; ++orbital) if (weighted_active(mu, orbital) != 0)
+            rho_r.noalias() += weighted_active(mu, orbital) *
+                workspace.accepted.col(mu).segment((nm + orbital) * count + aux_begin, aux_size);
+        }
+        rho_r += 2 * rho_d;
+      }
+#pragma omp barrier
+      // A 2-D output grid keeps GEMMs rectangular instead of reducing their
+      // AO dimension to only a few rows when many workers are requested.
+#pragma omp for schedule(static)
+      for (int block=0;block<workers;++block) {
+        const int r=block/inactive_columns,c=block%inactive_columns;
+        const int row=r*n/inactive_rows, rows=(r+1)*n/inactive_rows-row;
+        const int col=c*nf/inactive_columns, cols=(c+1)*nf/inactive_columns-col;
+        result.inactive.block(row,col,rows,cols).noalias() +=
+            workspace.direction.middleCols(row,rows).transpose() *
+                workspace.accepted_projection.middleCols(col,cols);
+        result.inactive.block(row,col,rows,cols).noalias() +=
+            workspace.accepted.middleCols(row,rows).transpose() *
+                workspace.direction_projection.middleCols(col,cols);
+      }
+      if (nm != 0) {
+#pragma omp for schedule(static)
+        for (int block=0;block<workers;++block) {
+          const int r=block/active_columns,c=block%active_columns;
+          const int row=r*n/active_rows, rows=(r+1)*n/active_rows-row;
+          const int col=c*na/active_columns, cols=(c+1)*na/active_columns-col;
+          result.active.block(row,col,rows,cols).noalias() +=
+              workspace.direction.topRows(moving_rows).middleCols(row,rows).transpose() *
+                  workspace.accepted_projection.block(0,nf+col,moving_rows,cols);
+          result.active.block(row,col,rows,cols).noalias() +=
+              workspace.accepted.topRows(moving_rows).middleCols(row,rows).transpose() *
+                  workspace.direction_projection.block(0,nf+col,moving_rows,cols);
+        }
+      }
+#pragma omp for schedule(static)
+      for (int mu=0;mu<n;++mu) {
+        if (nm != 0) {
+          for (int orbital = 0; orbital < na; ++orbital)
+            result.active(mu, orbital) += 2 *
+                workspace.accepted.col(mu).segment((nm + orbital) * count, count)
+                    .dot(workspace.charges.col(0).segment(first, count));
+        }
       }
     }
-    add_symmetric_product(workspace.direction,workspace.accepted,-1,result.combined);
   }
-  add_coulomb(*active.metric_whitened_ao_pair_factors,workspace.coulomb,result.combined);
-  if (ni) {
-    for (const auto& worker:workspace.workers) result.projection-=0.25*worker.projection;
-    result.projection.noalias()+=0.5*result.combined*c;
+  // Coulomb is separable: contract the auxiliary charge before acting on A0.
+  // This avoids transforming L_A A0 for every inactive orbital in every HVP.
+  // Store only the symmetric packed vector, never an AO-square response.
+  {
+    profiling::ScopedPhase phase(profiling::Phase::RiAoCoulomb);
+#pragma omp parallel num_threads(workers)
+    {
+      int worker = 0;
+#ifdef _OPENMP
+      worker = omp_get_thread_num();
+#endif
+      const Eigen::Index begin = worker * pairs / workers;
+      const Eigen::Index end = (worker + 1) * pairs / workers;
+      workspace.coulomb.segment(begin, end - begin).noalias() =
+          4 * active.metric_whitened_ao_pair_factors->middleCols(begin, end - begin)
+                  .transpose() * workspace.charges.col(1);
+#pragma omp barrier
+      Eigen::VectorXd row(n);
+#pragma omp for schedule(static)
+      for (int mu = 0; mu < n; ++mu) {
+        for (int nu = 0; nu < n; ++nu) {
+          const int hi = std::max(mu, nu), lo = std::min(mu, nu);
+          row[nu] = workspace.coulomb[static_cast<Eigen::Index>(hi) * (hi + 1) / 2 + lo];
+        }
+        result.inactive.row(mu).noalias() += row.transpose() * full_inactive_duals;
+      }
+    }
   }
   return result;
 }

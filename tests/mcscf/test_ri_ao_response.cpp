@@ -105,6 +105,10 @@ void check(int ni,bool cached,std::size_t budget) {
   Matrix inactive_image=Matrix::Zero(aux*(ni+2),n);
   std::vector<int> selected(ni);
   for (int j=0;j<ni;++j) selected[j]=ni-j;
+  Matrix a0(n,ni+2);
+  for (int j=0;j<a0.cols();++j) for (int mu=0;mu<n;++mu)
+    a0(mu,j)=0.17*std::cos(0.19*(mu+2)*(j+1));
+  for (int j=0;j<ni;++j) a0.col(selected[j])=a.col(j);
   for (int q=0;q<aux;++q) {
     Matrix l(n,n);
     for (int mu=0;mu<n;++mu) for (int nu=0;nu<=mu;++nu)
@@ -113,9 +117,9 @@ void check(int ni,bool cached,std::size_t budget) {
     gk.noalias()+=2*(l.array()*k.array()).sum()*l-l*k*l;
     active_reference.noalias()+=2*(l.array()*active_density.array()).sum()*l-
         l*active_density*l;
-    const Matrix la=l*a;
-    for (int j=0;j<ni;++j)
-      inactive_image.row(selected[j]*aux+q)=la.col(j).transpose();
+    const Matrix la0=l*a0;
+    for (int j=0;j<a0.cols();++j)
+      inactive_image.row(j*aux+q)=la0.col(j).transpose();
     const Matrix lc=l*c;
     const Matrix active_pair=c.transpose()*lc;
     for (int j=0;j<na;++j) for (int i=0;i<=j;++i)
@@ -127,23 +131,23 @@ void check(int ni,bool cached,std::size_t budget) {
   }
   cache.accepted_one_index_factors=std::move(resident);
   xmvb::integrals::RiAoResponseWorkspace workspace;
-  auto actual=xmvb::integrals::apply_ri_ao_response(cache,a,x,w,workspace,budget);
-  close(actual.combined,2*gd+0.5*gk);
-  close(actual.projection,gd*c);
-  close(actual.combined,actual.combined.transpose());
-  const auto reused=xmvb::integrals::apply_ri_ao_response(
-      cache,a,x,w,workspace,budget,{&inactive_image,selected});
-  close(reused.combined,actual.combined);
-  close(reused.projection,actual.projection);
+  auto actual=xmvb::integrals::apply_ri_projected_ao_response(
+      cache,a,x,w,a0,workspace,budget,{nullptr,selected});
+  close(actual.inactive,2*(2*gd+0.5*gk)*a0);
+  close(actual.active,gd*c);
+  const auto reused=xmvb::integrals::apply_ri_projected_ao_response(
+      cache,a,x,w,a0,workspace,budget,{&inactive_image,selected});
+  close(reused.inactive,actual.inactive);
+  close(reused.active,actual.active);
   for (int tile:{1,7,aux}) {
     cache.auxiliary_tile_size=tile;
     close(xmvb::integrals::apply_ri_active_density_response(cache,weights),active_reference);
   }
   // Reuse must clear all per-worker projections and leave no stale charge.
-  const auto zero=xmvb::integrals::apply_ri_ao_response(
-      cache,a,0*x,0*w,workspace,budget,{&inactive_image,selected});
-  close(zero.combined,Matrix::Zero(n,n));
-  close(zero.projection,Matrix::Zero(n,na));
+  const auto zero=xmvb::integrals::apply_ri_projected_ao_response(
+      cache,a,0*x,0*w,a0,workspace,budget,{&inactive_image,selected});
+  close(zero.inactive,Matrix::Zero(n,a0.cols()));
+  close(zero.active,Matrix::Zero(n,na));
   check_diagonals(factors,c,ni,budget);
 }
 } // namespace

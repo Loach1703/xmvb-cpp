@@ -11,6 +11,8 @@ set(_xmvb_vbscf_unit_targets
   test_integral_transform
   test_ri_integral_transform
   test_orthogonal_ri_transform
+  test_projected_orbital_pullback
+  test_ri_projected_response
   test_accepted_pair_tile
   test_hessian_diagonal
   test_keyframe
@@ -70,6 +72,8 @@ if (BUILD_TESTING)
   add_test(NAME integral_transform COMMAND test_integral_transform)
   add_test(NAME ri_integral_transform COMMAND test_ri_integral_transform)
   add_test(NAME orthogonal_ri_transform COMMAND test_orthogonal_ri_transform)
+  add_test(NAME projected_orbital_pullback COMMAND test_projected_orbital_pullback)
+  add_test(NAME ri_projected_response COMMAND test_ri_projected_response)
   add_test(NAME accepted_pair_tile COMMAND test_accepted_pair_tile)
   add_test(NAME hessian_diagonal COMMAND test_hessian_diagonal)
   add_test(NAME keyframe COMMAND test_keyframe)

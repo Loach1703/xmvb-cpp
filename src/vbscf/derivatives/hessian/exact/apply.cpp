@@ -430,17 +430,24 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       orbital_preparation_directional_result.delta_active_auxiliary_orbitals *
       accepted_hho_gradient_symmetric_;
   Eigen::MatrixXd total_inactive_density_direction;
+  Eigen::MatrixXd inactive_density_projection;
   Eigen::MatrixXd delta_ao_effective_h1e_times_active_auxiliary_orbitals;
+  const int n_inactive = (current_input_->orbital_preparation_input.n_total_electrons -
+      current_input_->orbital_preparation_input.n_active_electrons) / 2;
+  const Eigen::Index response_columns = accepted_ri_factorization_ != nullptr
+      ? n_inactive : n_basis_functions;
   if (precomputed_ao_response != nullptr || precomputed_active_projection != nullptr) {
     if (precomputed_ao_response == nullptr || precomputed_active_projection == nullptr ||
-        precomputed_ao_response->size() != static_cast<Eigen::Index>(ao_matrix_size) ||
+        precomputed_ao_response->size() != n_basis_functions * response_columns ||
         precomputed_active_projection->rows() != n_basis_functions ||
         precomputed_active_projection->cols() != accepted_active_auxiliary_orbitals_.cols()) {
       throw std::invalid_argument(
           "precomputed block AO-H1E response has inconsistent dimensions");
     }
-    total_inactive_density_direction = Eigen::Map<const Eigen::MatrixXd>(
-        precomputed_ao_response->data(), n_basis_functions, n_basis_functions);
+    const Eigen::Map<const Eigen::MatrixXd> response(
+        precomputed_ao_response->data(), n_basis_functions, response_columns);
+    if (accepted_ri_factorization_ != nullptr) inactive_density_projection = response;
+    else total_inactive_density_direction = response;
     delta_ao_effective_h1e_times_active_auxiliary_orbitals = *precomputed_active_projection;
   } else {
     const auto ao_effective_one_electron_fused_start_time =
@@ -448,8 +455,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::AoResponse);
     if (accepted_ri_factorization_ != nullptr) {
       auto ri=ri_ao_response(prepared_direction,delta_active_times_hho_symmetric);
-      total_inactive_density_direction=std::move(ri.combined);
-      delta_ao_effective_h1e_times_active_auxiliary_orbitals=std::move(ri.projection);
+      inactive_density_projection=std::move(ri.inactive);
+      delta_ao_effective_h1e_times_active_auxiliary_orbitals=std::move(ri.active);
     } else {
       Eigen::MatrixXd total_ao_effective_one_electron_direction =
           orbital_preparation_directional_result.delta_inactive_density;
@@ -974,8 +981,14 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
 
     const auto orbital_backprop_start_time =
         std::chrono::steady_clock::now();
-    const std::vector<double> orbital_value_gradient =
-        backpropagate_active_space_orbital_gradient(
+    const std::vector<double> orbital_value_gradient = accepted_ri_factorization_ != nullptr
+        ? backpropagate_active_space_orbital_gradient(
+            delta_auxiliary_active_gradient,
+            InactiveDensityProjection{inactive_density_projection},
+            current_input_->orbital_preparation_input,
+            accepted_point_context_->prepared_active_space.orbital_result,
+            *orbital_preparation_cache)
+        : backpropagate_active_space_orbital_gradient(
             delta_auxiliary_active_gradient,
             total_inactive_density_direction,
             current_input_->orbital_preparation_input,

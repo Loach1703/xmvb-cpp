@@ -237,15 +237,18 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
   Eigen::MatrixXd combined_ao_columns;
   Eigen::MatrixXd active_projection_columns;
   if (accepted_ri_factorization_ != nullptr) {
-    combined_ao_columns.resize(ao_matrix_size, n_directions);
+    const int n_inactive = (current_input_->orbital_preparation_input.n_total_electrons -
+        current_input_->orbital_preparation_input.n_active_electrons) / 2;
+    const Eigen::Index projection_size = n_basis_functions * n_inactive;
+    combined_ao_columns.resize(projection_size, n_directions);
     active_projection_columns.resize(n_basis_functions * n_active_orbitals, n_directions);
     for (Eigen::Index column = 0; column < n_directions; ++column) {
       const Eigen::Map<const Eigen::MatrixXd> weights(weighted_active_columns.col(column).data(),
           n_basis_functions,n_active_orbitals);
       const auto ri=ri_ao_response(precomputed_directions[column],weights);
-      combined_ao_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(ri.combined.data(),ao_matrix_size);
+      combined_ao_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(ri.inactive.data(),projection_size);
       active_projection_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(
-          ri.projection.data(),n_basis_functions*n_active_orbitals);
+          ri.active.data(),n_basis_functions*n_active_orbitals);
     }
   } else {
     detail::apply_exact_ao_response(

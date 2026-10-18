@@ -36,6 +36,14 @@ struct OrbitalPreparationPullback {
   Eigen::MatrixXd inactive_density_gradient_symmetric;
 };
 
+/** The only inactive-density weight needed by the orbital pullback.
+ * `symmetric_times_duals = (D + D.transpose()) * A_i`, where
+ * `A_i = C_i (C_i.transpose() * S * C_i)^{-1}`.
+ */
+struct InactiveDensityProjection {
+  const Eigen::MatrixXd& symmetric_times_duals;
+};
+
 /** Dense representative of one sparse-coordinate orbital tangent. */
 struct DenseOrbitalTangentContext {
   Eigen::MatrixXd normalized_orbitals;
@@ -72,6 +80,14 @@ OrbitalPreparationPullback build_orbital_preparation_pullback(
 std::vector<double> backpropagate_active_space_orbital_gradient(
     const Eigen::Ref<const Eigen::MatrixXd>& active_auxiliary_gradient,
     const Eigen::Ref<const Eigen::MatrixXd>& inactive_density_gradient,
+    const OrbitalPreparationInput& input,
+    const OrbitalPreparationResult& orbital_preparation_result,
+    const AcceptedOrbitalPreparationCache& cache);
+
+/** Pull back using a precontracted inactive-density covector. */
+std::vector<double> backpropagate_active_space_orbital_gradient(
+    const Eigen::Ref<const Eigen::MatrixXd>& active_auxiliary_gradient,
+    InactiveDensityProjection inactive_density_projection,
     const OrbitalPreparationInput& input,
     const OrbitalPreparationResult& orbital_preparation_result,
     const AcceptedOrbitalPreparationCache& cache);
