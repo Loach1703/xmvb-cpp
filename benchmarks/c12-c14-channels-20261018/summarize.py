@@ -26,9 +26,14 @@ def main():
     parser.add_argument("job")
     parser.add_argument("baseline", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--cases", nargs="+", help="Select cases without rerunning other inputs")
     args = parser.parse_args()
     with args.baseline.open() as stream:
         baseline = list(csv.DictReader(stream))
+    if args.cases:
+        baseline = [row for row in baseline if row["case"] in args.cases]
+        if {row["case"] for row in baseline} != set(args.cases):
+            raise RuntimeError("requested case is absent from the saved baseline")
     current, comparisons = [], []
     for old in baseline:
         case = old["case"]
@@ -62,7 +67,9 @@ def main():
                 hvp_seconds += float(values["hvp_seconds"])
             elif columns[3] == "ciah_keyframe_cost":
                 keyframe_seconds += float(values["seconds"])
-        row = dict(case=case, job=f"{args.job}_{len(current)}",
+        task = {"c12-cov": 0, "c12-ion02": 1, "c12-full": 2,
+                "c14-cov": 3, "c12-cov-64": 4}[case]
+        row = dict(case=case, job=f"{args.job}_{task}",
                    node=(path / "node.txt").read_text().strip(),
                    steps=len(trace), hvp=sum(int(t["orbital_hvp_actions"]) for t in trace),
                    per_step_hvp=":".join(t["orbital_hvp_actions"] for t in trace),

@@ -86,8 +86,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
   std::vector<int> reachable;
   std::vector<bool> reachable_mask(panels,false);
   if (support && !support->full()) {
-    auto cursor=support->cursor(0); int b;
-    while (cursor.next_column(b)) reachable_mask[b/extent]=true;
+    for (const int b:support->columns()) reachable_mask[b/extent]=true;
   } else std::fill(reachable_mask.begin(),reachable_mask.end(),true);
   for (int p=0;p<panels;++p) if (reachable_mask[p]) reachable.push_back(p);
   int sampled_beta_columns=0;
@@ -114,10 +113,7 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
     std::vector<int> rows;
     for (int b=0;b<count;++b) {
       if (!p->full) {
-        auto cursor=support->column(panel*extent+b,0); int a,beta; bool label;
-        const auto begin=rows.size();
-        while (cursor.next(a,beta,label)) rows.push_back(a);
-        std::sort(rows.begin()+begin,rows.end());
+        support->append_column_rows(panel*extent+b,rows);
       }
       p->offsets[b+1]=p->full ? (b+1)*n_unique_alpha_:rows.size();
     }

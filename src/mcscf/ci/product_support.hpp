@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <numeric>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -36,6 +37,7 @@ public:
       throw std::invalid_argument("covalent product support requires half filling");
     covalent_.emplace(n_, alpha_, beta_);
     paths_.emplace(n_, na_, nb_, std::vector<Seed>{}, true);
+    prepare_columns();
   }
 
   /** @brief Seeds are flattened alpha*n_beta+beta indices, not CI amplitudes. */
@@ -64,6 +66,7 @@ public:
     if (complete_covalent_) covalent_.emplace(n_, alpha_, beta_);
     if (!full_ && !complete_covalent_) seeds_ = seeds;
     paths_.emplace(n_, na_, nb_, std::move(seeds), complete_covalent_);
+    prepare_columns();
   }
 
   /** @brief Pulls products as indices in the original spin-string lists. */
@@ -123,6 +126,29 @@ public:
 
   bool full() const noexcept { return full_; }
 
+  /** @brief Reachable depth-zero beta columns in caller index order.
+   * Built once with the immutable support, shared by CI and derivative tiles.
+   */
+  const std::vector<int>& columns() const noexcept { return columns_; }
+
+  /** @brief Append depth-zero alpha support in sorted caller index order.
+   * Complete covalent support uses its shared prefix DAG. General selections
+   * use their maximal-generator paths; neither stores a product-space table.
+   */
+  void append_column_rows(int beta,std::vector<int>& rows) const {
+    if (beta<0 || static_cast<std::size_t>(beta)>=beta_.size())
+      throw std::invalid_argument("product support column is outside the spin space");
+    if (covalent_) {
+      covalent_->append_column_rows(beta,rows);
+      return;
+    }
+    const auto begin=rows.size();
+    auto cursor=column(beta,0);
+    int a,b; bool label;
+    while (cursor.next(a,b,label)) rows.push_back(a);
+    std::sort(rows.begin()+begin,rows.end());
+  }
+
   /** @brief Certified frontier channel envelope, or unrestricted {-1,-1}.
    * The covalent prefix certificate applies to the complete singly occupied
    * seed family, not to arbitrary selected structures. Other families retain
@@ -151,7 +177,7 @@ public:
   }
 
   std::size_t dynamic_bytes() const noexcept {
-    return (alpha_.capacity() + beta_.capacity()) * sizeof(Mask) +
+    return columns_.capacity()*sizeof(int)+(alpha_.capacity() + beta_.capacity()) * sizeof(Mask) +
         seeds_.capacity() * sizeof(Seed) +
         (alpha_index_.bucket_count() + beta_index_.bucket_count()) * sizeof(void*) +
         (alpha_index_.size() + beta_index_.size()) *
@@ -161,6 +187,16 @@ public:
   }
 
 private:
+  void prepare_columns() {
+    if (full_ || complete_covalent_) {
+      columns_.resize(beta_.size());
+      std::iota(columns_.begin(),columns_.end(),0);
+    } else {
+      auto c=cursor(0); int b;
+      while (c.next_column(b)) columns_.push_back(b);
+      std::sort(columns_.begin(),columns_.end());
+    }
+  }
   Mask highest(int electrons) const noexcept {
     const Mask full = (Mask{1} << n_) - 1;
     return full ^ ((Mask{1} << (n_ - electrons)) - 1);
@@ -199,6 +235,7 @@ private:
   int n_, na_ = 0, nb_ = 0;
   bool complete_covalent_ = false, full_ = false;
   std::vector<Mask> alpha_, beta_;
+  std::vector<int> columns_;
   std::unordered_map<Mask, int> alpha_index_, beta_index_;
   std::vector<Seed> seeds_;
   std::optional<CovalentSupport> covalent_;

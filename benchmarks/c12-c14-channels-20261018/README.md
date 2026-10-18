@@ -1,5 +1,70 @@
 # Native C12/C14 follow-up
 
+## Selected metric and symbolic column reuse (current follow-up)
+
+This round changes neither the Hamiltonian/HVP nor CIAH policies, physical
+spaces, thresholds, workspace allowance or thread count. The coupled CI metric
+now uses the already-resident exact accepted-point selected Gram when present.
+Selections without that Gram retain their exact streamed metric action.
+
+Complete covalent support prepares a coefficient-independent prefix DAG once
+per support object. Its three edge/subtree flags use
+`U_beta * (n_act+1) * (n_alpha_electrons+1)` bytes, with linear single-spin
+permutation/prefix data. This is not a product-sized mask or numerical cache.
+Complete subtrees emit colex intervals; a temporary one-column bitset restores
+arbitrary caller index order without sorting. CI and derivative tiles use the
+same row-generation interface and immutable reachable beta list. General
+selected structures retain their exact maximal-generator constraints: they
+are not incorrectly given the complete-covalent support certificate.
+The derivation is in `article/exterior_column_schedule.md`.
+
+Qualification293346 passes12/12 tests in1.80s. Tests independently check
+prefix support for unequal spins and permuted indices, arbitrary selections,
+the explicit horizontal metric, absence of metric-triggered product generation,
+multistate transport derivatives and existing orthogonal-CI actions.
+Frozen binary SHA256:
+`d500edd47116a4af6bd3cfb8ca1dfaecbb8e8c92fd691a8253b098a1b19b7d80`.
+`projection.sbatch` retains configuration, source hashes, build and test logs.
+
+Native array293347_[0,3] runs the two unchanged inputs to convergence with
+32 physical cores, exact Libcint/cc-pVDZ, CIAH/Davidson, BLAS1 and the same
+4GiB shared CI budget. No archived executable is rerun. The comparison uses
+the better saved normalization293313 records, not the slower intermediate
+or cross-cluster controls. Times below are GNU-time complete process times;
+application report timer boundaries changed during the output-layer refactor.
+
+| Case | Steps old/new | HVP old/new | Energy new (Eh) | Process s old/new | RSS GiB old/new |
+|---|---:|---:|---:|---:|---:|
+| C12 COV132 |4/4|33/33|-399.106646267318|13.30/17.39|3.454/3.403|
+| C14 COV429 |4/4|46/46|-535.672671742975|212.15/202.49|7.980/7.947|
+
+Both initial energies match and final differences are1.1e-12Eh or less. Each
+per-macro HVP sequence is unchanged. C14 is4.6% faster on the same anode064
+EPYC9755 node. C12 uses anode031 instead of the archived anode019, both EPYC9755,
+and does **not** beat the13.30s excellent record. Its CI time increases from
+3.855s to5.499s despite the same79 CI actions; HVP time also increases from
+3.738s to4.809s despite the same33 expansions. The present evidence does not
+attribute that difference or demonstrate an all-system end-to-end speedup.
+Against the immediately preceding saved output-layer COV run293330_0,
+17.85s/4steps/33HVP, the new native time is17.39s, a small observed improvement.
+
+Current-only phase audit293348 verifies the actual removed work. Compared with
+saved audit293333, pure-overlap product actions decrease33->9: the coupled
+accepted-point metric replays disappear, while the nine trial-chart keyframe
+normalizations remain. They cannot use an origin-chart Gram. The79 Hamiltonian
+actions are unchanged; their cumulative `ci_product_pattern` scope falls from
+1.353187s to0.307037s (4.4x). Including the removed metric calls, that scope
+falls1.865668s->0.343368s. These are diagnostic scope measurements, not an
+end-to-end speedup or additive wall-time partition.
+
+Initial qualification293341 and native293343/audit293344 measured the then-new
+DAG before replacing permuted-index sorts with bitset emission; they are retained
+as intermediate evidence, not substituted for final qualification293346 and
+native293347. No historical baseline was rerun in either implementation check.
+`projection.csv` and `projection-comparison.csv` are parsed by `summarize.py`
+using `--cases c12-cov c14-cov`; raw reports and resource logs remain in the
+corresponding remote `run-293347/`, with compact local diagnostic copies.
+
 The user switched performance validation from C16 to C12/C14. New C16
 jobs293254/293255 were cancelled before completion; their partial timing is
 not an end-to-end result. Historical executables are not rerun.

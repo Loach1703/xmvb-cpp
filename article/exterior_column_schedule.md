@@ -24,6 +24,58 @@ orthonormal direct-CI Hamiltonian action. The formulas do not assume that
 the selected structures are closed under the exterior map or Hamiltonian.
 The current change leaves these operators and their derivatives unchanged.
 
+## Reusing the selected metric and symbolic column plan
+
+At a fixed accepted orbital chart, write $F=TW$ and $M=F^TF$. If $Z$ embeds
+the independent horizontal CI coordinates into structure coefficients, their
+metric action is exactly
+
+$$
+G_c q=Z^TMZq.
+$$
+
+When the exact selected Gram already exists, this expression uses that same
+matrix, rather than replaying $F$ and $F^T$. It neither constructs an additional
+Gram nor assumes a complete CAS. Large selections without a resident Gram
+still use the exact streamed action. A trial orbital chart has its own metric;
+an accepted-point Gram cannot be reused at a different chart.
+
+For the complete singly occupied seed family, let $b_k$ count beta electrons
+on the first $k$ sites. The exact depth-zero upper-triangular support condition
+is $a_k+b_k\ge k$. Define $d_b(k,e)$ as the number of allowed alpha occupations
+on those sites with $e$ electrons. Then
+
+$$
+d_b(0,0)=1,\qquad
+d_b(k,e)=\mathbf 1_{e+b_k\ge k}
+  \left[d_b(k-1,e)+d_b(k-1,e-1)\right],
+$$
+
+with impossible states equal to zero. A node $(k,e)$ has two edges, corresponding
+to the last site being empty or occupied. These edges are independent of CI
+coefficients and orbital-transform values. If
+
+$$
+d_b(k,e)=\binom{k}{e},
+$$
+
+the whole subtree is admissible. Its colex indices form one interval, so tile
+row generation emits that interval without rebuilding a prefix search. The
+occupied edge shifts the interval origin by $\binom{k-1}{e}$. The caller's
+spin-string permutation is retained exactly. For an arbitrary original index
+order, a temporary $U_\alpha$-bit mask emits original indices in increasing
+order, avoiding a comparison sort. This mask belongs only to the current
+column, never to all spin products.
+
+Only the two edge flags and complete-subtree flag are retained at each node.
+Persistent storage is $O(U_\beta n_{\mathrm{act}}(n_\alpha+1)+U_\alpha)$,
+where $n_\alpha$ is an electron count, not a string count. Counts are temporary
+single-column construction scratch. No $U_\alpha U_\beta$ row table is stored.
+The current tile still owns its emitted row indices. General selected seed
+families keep the exact maximal-generator support and do not receive the
+covalent certificate. Their reachable beta-column list is also immutable and
+is generated once per support object.
+
 ## Requested columns, not enclosing panels
 
 For the exact set $B$ of beta columns requested by one sigma halo, and the

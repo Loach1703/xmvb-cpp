@@ -447,8 +447,11 @@ StructureTangent StructureTangentOperator::apply_metric(
 Eigen::VectorXd StructureTangentOperator::apply_metric_coordinates(
     const Eigen::VectorXd& coordinates) const {
   const StructureTangent horizontal = expand(coordinates);
-  const Eigen::MatrixXd overlap =
-      action_->apply_overlap(horizontal.scaled_coefficients);
+  // The accepted Gram is exactly F^T F at this chart. Reusing it avoids
+  // replaying F and F^T just to apply the same structure tangent metric.
+  const Eigen::MatrixXd overlap = accepted_point_->selected_metric
+      ? Eigen::MatrixXd(accepted_point_->selected_metric->overlap * horizontal.scaled_coefficients)
+      : action_->apply_overlap(horizontal.scaled_coefficients);
   validate_shape(overlap);
   return project_coordinates(overlap);
 }

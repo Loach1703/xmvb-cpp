@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <numeric>
 
 #include <Eigen/SparseCore>
 
@@ -107,16 +108,13 @@ StructureResponseSweep StructureAction::contract_product_tiles(
   std::vector<std::uint8_t> column_support(n_unique_beta_,support ? 0:1);
   std::vector<int> reachable_columns;
   if (support && !support->full()) {
-    auto columns=support->cursor(0);
-    int beta;
-    while (columns.next_column(beta)) {
-      column_support[beta]=1;
-    }
+    reachable_columns=support->columns();
+    for (const int beta:reachable_columns) column_support[beta]=1;
   } else {
     std::fill(column_support.begin(),column_support.end(),1);
+    reachable_columns.resize(n_unique_beta_);
+    std::iota(reachable_columns.begin(),reachable_columns.end(),0);
   }
-  for (int beta=0;beta<n_unique_beta_;++beta)
-    if (column_support[beta]) reachable_columns.push_back(beta);
   const bool ordered_beta=detail::prefer_ordered_beta(spin_products_.size(),
       n_unique_alpha_,n_unique_beta_,beta_transform.shear_pair_count(),reachable_columns.size());
   // Weak references share input/output patterns without an unbounded support
@@ -132,10 +130,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     if (pattern->full) pattern->offsets[1]=n_unique_alpha_;
     else {
       std::vector<int> rows;
-      auto cursor=support->column(beta,0);
-      int a,b; bool label;
-      while (cursor.next(a,b,label)) rows.push_back(a);
-      if (!std::is_sorted(rows.begin(),rows.end())) std::sort(rows.begin(),rows.end());
+      support->append_column_rows(beta,rows);
       pattern->offsets[1]=rows.size();
       pattern->rows=Eigen::Map<const Eigen::VectorXi>(rows.data(),rows.size());
     }
