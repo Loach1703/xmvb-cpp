@@ -1,0 +1,3 @@
+case,before_job,after_job,before_node,before_steps,before_hvp,before_process_s,before_application_s,before_rss_GiB,before_final_Eh,after_node,after_steps,after_hvp,after_process_s,after_application_s,after_rss_GiB,after_final_Eh,speedup,delta_Eh
+c12-cov,293313_0,293416_0,anode019,4,33,13.3,13.095919,3.4535369873046875,-399.106646267317,anode003,4,33,15.34,15.227825,3.2469253540039062,-399.106646267317,0.8670143415906129,0.0
+c14-cov,293376_3,293417_3,anode064,4,46,201.8,201.567494,7.856716156005859,-535.672671742974,anode064,4,46,205.56,205.330769,7.971523284912109,-535.672671742972,0.9817085035999222,1.9326762412674725e-12

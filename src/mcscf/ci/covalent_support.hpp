@@ -27,13 +27,13 @@ public:
       lengths_[k / 8] |= static_cast<std::uint64_t>(k + 1) << (8 * (k % 8));
   }
 
-  /** @brief Emit sorted original-alpha indices from a reusable prefix DAG.
+  /** @brief Emit sorted support/closure alpha indices from a reusable prefix DAG.
    * Entire legal subtrees are colex intervals. Scratch consists only of the
    * bounded traversal stack and the caller's current tile row list. Persistent
    * storage is O(U_beta * n_orbitals * (n_alpha_electrons+1)), never U_alpha*U_beta.
    */
-  void append_column_rows(int beta,std::vector<int>& rows) const {
-    columns_.append(beta,rows);
+  void append_column_rows(int beta,std::vector<int>& rows,int depth=0) const {
+    columns_.append(beta,rows,depth);
   }
 
   bool contains(int alpha, int beta, int depth = 0) const noexcept {

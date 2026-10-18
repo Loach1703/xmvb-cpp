@@ -131,19 +131,19 @@ public:
    */
   const std::vector<int>& columns() const noexcept { return columns_; }
 
-  /** @brief Append depth-zero alpha support in sorted caller index order.
+  /** @brief Append support or one-generator closure in sorted caller index order.
    * Complete covalent support uses its shared prefix DAG. General selections
    * use their maximal-generator paths; neither stores a product-space table.
    */
-  void append_column_rows(int beta,std::vector<int>& rows) const {
+  void append_column_rows(int beta,std::vector<int>& rows,int depth=0) const {
     if (beta<0 || static_cast<std::size_t>(beta)>=beta_.size())
       throw std::invalid_argument("product support column is outside the spin space");
     if (covalent_) {
-      covalent_->append_column_rows(beta,rows);
+      covalent_->append_column_rows(beta,rows,depth);
       return;
     }
     const auto begin=rows.size();
-    auto cursor=column(beta,0);
+    auto cursor=column(beta,depth);
     int a,b; bool label;
     while (cursor.next(a,b,label)) rows.push_back(a);
     std::sort(rows.begin()+begin,rows.end());

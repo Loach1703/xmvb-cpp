@@ -1,5 +1,35 @@
 # Exact-demand exterior columns for tiled structure actions
 
+## Reuse the one-generator column DAG
+
+For the complete singly occupied seed family, let $b_k$ count occupied beta
+orbitals among the first $k$ sites. An alpha prefix containing $e$ electrons
+belongs to depth $d$ precisely when $e+b_k+d\ge k$ for every prefix. Existing
+support and one-generator closure correspond to $d=0$ and $d=1$.
+The coefficient-independent feasible-prefix counts obey
+
+$$
+f^{(d)}_{k,e}=
+\mathbf 1_{e+b_k+d\ge k}
+\left(f^{(d)}_{k-1,e}+f^{(d)}_{k-1,e-1}\right),
+\qquad f^{(d)}_{0,0}=1.
+$$
+
+Retain the two edge flags and complete-subtree flag, not the emitted rows.
+A subtree with $f^{(d)}_{k,e}=\binom{k}{e}$ emits a colex interval directly.
+Both depths share the orbital combinatorics and caller permutation. The
+sigma planner requests one depth-one beta column, consumes its alpha row
+indices across budget-limited tiles, then discards them at the next beta.
+It no longer regenerates occupation masks and hashes each emitted product
+at every Hamiltonian/response action. Depth-zero labels still use the exact
+packed prefix test, not coefficient magnitudes.
+
+Storage is $O(2U_\beta(n+1)(n_\alpha+1)+U_\alpha)$ symbolic metadata plus
+one $O(U_\alpha)$ row list. General selected seed families retain their own
+maximal-generator cursor and labels; they are not assigned the complete
+covalent certificate. This removes repeated scheduling work, not the physical
+one-generator closure or a universal exponential scaling factor.
+
 ## Physical operator
 
 Let $W$ map selected VB structure coefficients to their original spin-string
@@ -563,6 +593,8 @@ channels are certified absent by $J_g$. There is no dense intermediate input,
 no numerical row permutation and no post-GEMM unpacking. Integer row maps
 connect the original product enumeration to the grouped output. All output
 channels remain present, so the existing complete-image adjoint is retained.
+The separately documented two-sided projection experiment is not part of
+this retained executor.
 
 The reverse contraction now also uses the smaller matrices:
 

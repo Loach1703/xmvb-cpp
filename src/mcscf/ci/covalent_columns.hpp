@@ -9,7 +9,7 @@
 
 namespace xmvb::mcscf {
 
-/** @brief Shared prefix DAG for complete-covalent depth-zero column support.
+/** @brief Shared prefix DAG for complete-covalent support and one-body closure.
  * Nodes record empty/occupied edges and complete colex intervals, not emitted
  * products. Membership-only views may have incomplete spin lists; they do not
  * prepare this generator or expand a full spin universe.
@@ -28,7 +28,7 @@ public:
     }
     if (choose_[n_*stride_+electrons_]!=alpha.size()) return;
     alpha_order_.resize(alpha.size());
-    branches_.resize(beta.size()*choose_.size(),0);
+    branches_.resize(2*beta.size()*choose_.size(),0);
     for (int i=0;i<static_cast<int>(alpha.size());++i) {
       std::size_t rank=0;
       int e=0;
@@ -38,16 +38,16 @@ public:
     }
     ordered_=std::is_sorted(alpha_order_.begin(),alpha_order_.end());
     std::vector<std::uint64_t> counts(choose_.size());
-    for (std::size_t b=0;b<beta.size();++b) {
+    for (std::size_t b=0;b<beta.size();++b) for (int depth=0;depth<=1;++depth) {
       std::fill(counts.begin(),counts.end(),0);
       counts[0]=1;
-      auto* nodes=branches_.data()+b*choose_.size();
+      auto* nodes=branches_.data()+(2*b+depth)*choose_.size();
       nodes[0]=Complete;
       int beta_count=0;
       for (int k=1;k<=n_;++k) {
         beta_count+=(beta[b]>>(k-1))&1;
         for (int e=0;e<=std::min(k,electrons_);++e) {
-          if (e+beta_count<k) continue;
+          if (e+beta_count+depth<k) continue;
           const auto zero=counts[(k-1)*stride_+e];
           const auto one=e ? counts[(k-1)*stride_+e-1]:0;
           counts[k*stride_+e]=zero+one;
@@ -63,10 +63,12 @@ public:
    * Generating columns requires a complete alpha carrier; prefix membership
    * queries on a sampled carrier remain independent of this operation.
    */
-  void append(int beta,std::vector<int>& rows) const {
+  void append(int beta,std::vector<int>& rows,int depth=0) const {
+    if (depth!=0 && depth!=1)
+      throw std::invalid_argument("covalent column depth must be zero or one");
     if (alpha_order_.empty())
       throw std::logic_error("covalent column generation requires complete alpha strings");
-    const auto* nodes=branches_.data()+static_cast<std::size_t>(beta)*choose_.size();
+    const auto* nodes=branches_.data()+(2*static_cast<std::size_t>(beta)+depth)*choose_.size();
     // A one-column bitset restores a permuted caller order without sorting.
     std::vector<std::uint64_t> indices(ordered_ ? 0:(alpha_order_.size()+63)/64,0);
     const auto visit=[&](auto&& self,int k,int e,std::size_t rank)->void {

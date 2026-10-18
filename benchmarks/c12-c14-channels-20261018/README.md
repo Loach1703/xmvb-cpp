@@ -1,5 +1,102 @@
 # Native C12/C14 follow-up
 
+## Retained one-generator closure DAG
+
+The production change extends the existing complete-covalent column DAG to
+depth one. Sigma requests its current beta column directly, rather than
+reconstructing occupation masks and hashing every generated product on each
+CI/HVP action. Depth-zero support labels and alpha/beta exchange quotienting
+remain exact. Only one column's alpha indices are live; the two small flag
+DAGs share combinatorics and caller permutations. General selected families
+retain their own maximal-generator paths, not an assumed covalent closure.
+The derivation is in `article/exterior_column_schedule.md`.
+
+No CIAH strategy, physical action, precision, threshold, BLAS/OpenMP setting,
+or 4GiB shared CI allowance changes. The numerical sigma channel buffers and
+their OpenMP consumers are the existing implementation. There is no new
+product-sized cache or per-worker carrier copy.
+
+Qualification293462 passes13/13 tests in5.45s. The independent original-seed
+column oracle now covers both depths, unequal spins, permuted string indices,
+arbitrary selections and exact single-generator closure. Existing sigma,
+gradient/HVP, CI transport, multistate, output and CIAH tests also pass.
+The earlier qualification293425 caught a missing exchange-half-space filter
+in the new generator path; it failed before native benchmarking. The existing
+filter was restored, without weakening a test, in qualification293442. Final
+qualification293462 additionally removes the unsuccessful compressed-output
+prototype described below. Its frozen binary SHA256 is
+`b4ed2762c9001b1695e2256836554583edacaf925d08610214a4c2311848c23d`.
+
+All four final original inputs converge. `closure.csv` retains the initial
+native jobs293463/293464/293466. C12 COV and FULL there use anode031 CPUs
+96-105,116-127,224-233, spanning two NUMA domains, and take15.69/52.33s.
+To resolve that placement difference, the SAME new binary was run once more
+for these two cases on anode064 CPUs96-127, not concurrently with sampling.
+These separately labeled placement checks are `closure-single-numa.csv`,
+job293471. No archived executable was rerun and no three-repeat sweep was made.
+
+| Case | Steps/HVP old = new | Final new energy / Eh | Excellent saved / new process s | RSS old / new GiB |
+|---|---:|---:|---:|---:|
+| C12 COV132 |4/33|-399.106646267318|13.30 /13.11|3.454 /3.382|
+| C12 ION(0:2)47256 |4/44|-399.397232509245|67.45 /68.53|3.859 /3.841|
+| C12 FULL226512 |4/40|-399.417495587055|46.23 /46.85|4.597 /4.512|
+| C14 COV429 |4/46|-535.672671742972|201.80 /178.87|7.857 /8.097|
+
+Times are GNU-time complete process times, with32 physical cores, exact
+Libcint/cc-pVDZ and CIAH/Davidson. C14's saved293376 and new293464 runs use the
+same anode064 and CPUs96-127: the observed reduction is11.36%, with113 CI
+actions and per-macro HVP counts5:10:28:3 unchanged. CI time is81.44->69.25s,
+HVP time80.05->72.30s and keyframe time13.92->11.75s. RSS increases by0.240GiB;
+this is not an RSS-reduction claim. C12 COV is approximately level with its
+13.30s excellent single-domain record, not a significant demonstrated speedup.
+ION/FULL are also approximately level and are not claimed to benefit from a
+complete-covalent certificate they do not have. All printed final energies
+agree within3e-12Eh; every initial energy and per-macro HVP sequence matches.
+
+`best-controls.csv` chooses the fastest matching saved native records from
+normalization/projection/keyframe and the parsed output-layer records. In
+particular it uses FULL's46.23s, not the slower47.09s control. The compact
+output-layer CSV lacked input hashes, so `output-layer-native.csv` is regenerated
+from the ORIGINAL saved293330 logs with `summarize.py`; hash and energy guards
+remain enabled. No old calculation is rerun to obtain this record.
+
+Current-only phase audit293465 completes126 sigma sweeps and the same38378340
+targets as saved293377. Its prepare scope is1.597s versus2.293s in that saved
+audit. The runs have different NUMA placement: this is an observed stage
+reduction, not a matched isolated-kernel speedup. Full-channel slab peak stays
+549.746MiB, not a new workspace allocation. The DAG adds only linear symbolic
+metadata. `closure-phases.csv` retains prepare/read/compute/write scopes and
+workspace measurements; these nested measurements are not added to predict
+native wall time.
+
+### Rejected two-sided output storage
+
+Starting-revision8747da7b sampling293400 resolves the tiled generator adjoint
+as a hot call path. GNU gprofng2.42 again warns about a changed collection timer;
+its symbols are leads, not accurate CPU percentages. The native/phase evidence
+is kept separate from the capture.
+
+The exact two-sided selector identity is recorded in
+`article/selected_channel_projection.md`. Its prototype restricts output as
+well as input channels and passes the complete-image, supported-image,
+directional forcing, independent integral-adjoint and temporal-response tests.
+Without the closure DAG, C14 takes205.95/205.56s, versus201.80s saved. With the
+DAG it takes176.02s, versus178.87s for the retained simpler executor; this small
+difference does not justify retaining another image format and its scalar
+address mapping. The smaller slab is real (361.427 versus549.746MiB in the C12
+audits), but whole-process C14 RSS is8.331GiB rather than8.097GiB. Thus the
+production code removes the extra output API, ragged image-address records,
+selector-square kernels and associated branches. The algebraic observation
+is retained, not an inactive implementation or fallback.
+
+The proposed channel multiplication terms decrease from171861612468 to
+143180646362 on the recorded C12 sequence (16.69%); that is not a universal
+asymptotic exponent reduction. `two-sided-trial.csv`, `row-address-trial.csv`
+and `packed-dag-trial.csv` preserve all measured end-to-end outcomes, including
+regressions and placement differences. Only the small closure-DAG change is
+retained in production. Remaining evidenced costs are the actual sigma gather
+and physical HVP contractions; this round does not claim they are solved.
+
 ## Trial-chart keyframe overlap reuse
 
 The transport point now retains shared immutable ownership of its own exact

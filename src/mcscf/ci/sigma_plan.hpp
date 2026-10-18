@@ -45,6 +45,7 @@ private:
   int parity_;
   SigmaTileBudget budget_;
   std::vector<int> beta_targets_,seen_alpha_,new_alpha_,new_beta_,last_use_,release_order_;
+  std::vector<int> column_rows_;
   std::vector<unsigned char> alpha_seen_;
   std::optional<ProductSupport::Cursor> cursor_;
   std::optional<Node> pending_;

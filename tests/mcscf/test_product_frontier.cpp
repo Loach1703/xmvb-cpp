@@ -185,11 +185,11 @@ void check_column_plans() {
       products.push_back(xmvb::mcscf::product_index(i,j,b.size()));
     }
     const Support support(n,a,b,products);
-    for (int j=0;j<static_cast<int>(b.size());++j) {
+    for (int depth=0;depth<=1;++depth) for (int j=0;j<static_cast<int>(b.size());++j) {
       std::vector<int> actual{-1}, expected{-1};
-      support.append_column_rows(j,actual);
+      support.append_column_rows(j,actual,depth);
       for (int i=0;i<static_cast<int>(a.size());++i)
-        if (reachable(a[i],b[j],seeds,n,0)) expected.push_back(i);
+        if (reachable(a[i],b[j],seeds,n,depth)) expected.push_back(i);
       require(actual==expected,"shared covalent column plan differs from seed oracle");
     }
     require(support.columns().size()==b.size(),"covalent beta columns were lost");
@@ -198,13 +198,13 @@ void check_column_plans() {
     seeds.resize(products.size());
     const Support selected(n,a,b,products);
     std::vector<int> columns;
-    for (int j=0;j<static_cast<int>(b.size());++j) {
+    for (int depth=0;depth<=1;++depth) for (int j=0;j<static_cast<int>(b.size());++j) {
       std::vector<int> actual,expected;
-      selected.append_column_rows(j,actual);
+      selected.append_column_rows(j,actual,depth);
       for (int i=0;i<static_cast<int>(a.size());++i)
-        if (reachable(a[i],b[j],seeds,n,0)) expected.push_back(i);
+        if (reachable(a[i],b[j],seeds,n,depth)) expected.push_back(i);
       require(actual==expected,"arbitrary column plan enlarged the selected support");
-      if (!actual.empty()) columns.push_back(j);
+      if (!depth && !actual.empty()) columns.push_back(j);
     }
     require(selected.columns()==columns,"shared beta column list is wrong");
   }

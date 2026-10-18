@@ -17,7 +17,10 @@ SigmaTilePlan::SigmaTilePlan(const SpinConnections& alpha,const SpinConnections&
   if (budget.packed_slabs<0 || budget.packed_slabs>budget.slabs ||
       (budget.packed_slabs && (!support || !support->has_channel_envelopes())))
     throw std::invalid_argument("packed sigma channels require a certified support");
-  if (support_) {
+  if (support_ && support_->has_channel_envelopes()) {
+    // Every beta column belongs to the complete singly occupied family.
+    beta_targets_=support_->columns();
+  } else if (support_) {
     auto cursor=support_->cursor(1);
     int b;
     while (cursor.next_column(b)) beta_targets_.push_back(b);
@@ -62,7 +65,15 @@ bool SigmaTilePlan::pull(Node& node) {
   if (pending_) { node=*pending_; pending_.reset(); return true; }
   while (next_beta_<beta_targets_.size()) {
     const int b=beta_targets_[next_beta_];
-    if (support_) {
+    if (support_ && support_->has_channel_envelopes()) {
+      if (column_rows_.empty()) support_->append_column_rows(b,column_rows_,1);
+      while (next_alpha_<static_cast<int>(column_rows_.size())) {
+        const int a=column_rows_[next_alpha_++];
+        if (parity_ && (a>b || (a==b && parity_<0))) continue;
+        node={a,b,support_->contains(a,b)};
+        return true;
+      }
+    } else if (support_) {
       if (!cursor_) cursor_.emplace(support_->column(b,1));
       int a,ignored; bool label;
       while (cursor_->next(a,ignored,label)) {
@@ -77,7 +88,7 @@ bool SigmaTilePlan::pull(Node& node) {
         return true;
       }
     }
-    cursor_.reset(); next_alpha_=0; ++next_beta_;
+    cursor_.reset(); column_rows_.clear(); next_alpha_=0; ++next_beta_;
   }
   return false;
 }
