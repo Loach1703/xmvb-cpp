@@ -574,7 +574,9 @@ DavidsonResult GeneralizedEigensolver::solve_davidson(
           projected_eigenvalues[0],
           *std::max_element(
               result.relative_residual_norms.begin(),
-              result.relative_residual_norms.end()));
+              result.relative_residual_norms.end()),
+          *std::max_element(result.stationarity_residual_norms.begin(),
+              result.stationarity_residual_norms.end()));
     }
 
     if (converged) {

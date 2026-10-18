@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include <Eigen/SparseCore>
 
 namespace xmvb::vb {
 
@@ -84,10 +85,10 @@ public:
    */
   std::shared_ptr<const Eigen::MatrixXd> row_block(int begin, int count) const;
 
-  /** @brief Generate exactly the requested exterior rows, without an LRU.
-   * Used by sigma readers to avoid constructing unrequested beta columns.
+  /** @brief Requested rows in exact CSC format, sharing the bounded factor LRU.
+   * Only exact zeros are omitted. No unrequested beta columns are generated.
    */
-  Eigen::MatrixXd generate_rows(std::span<const int> rows) const;
+  Eigen::SparseMatrix<double> generate_rows(std::span<const int> rows) const;
 
   /** @brief Applies the inverse exterior transform to rows in place. */
   void apply_inverse_left(Eigen::MatrixXd* coefficients) const;

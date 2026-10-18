@@ -198,12 +198,24 @@ public:
     return panels_.front().tile;
   }
 
+  /** @brief Consume and free a column whose final physical user has completed. */
+  void release(int index) {
+    const auto found=index_.find(index);
+    if (found==index_.end()) return;
+    auto panel=found->second;
+    resident_-=panel->tile.bytes();
+    if (consume_) consume_(panel->index,panel->tile);
+    panels_.erase(panel);
+    index_.erase(found);
+    ++releases;
+  }
+
   void finish() {
     if (consume_) for (auto& panel:panels_) consume_(panel.index,panel.tile);
     panels_.clear(); index_.clear(); resident_=0;
   }
 
-  std::size_t evictions=0,peak_bytes=0;
+  std::size_t evictions=0,peak_bytes=0,releases=0;
 
 private:
   struct Entry { int index; ColumnTile tile; };

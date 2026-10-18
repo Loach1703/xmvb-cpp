@@ -77,6 +77,7 @@ public:
   }
 
   const ColumnPanels& cache() const noexcept { return cache_; }
+  void release(int beta) { cache_.release(beta); }
 
 private:
   using Consume=std::function<void(std::span<const int>,const std::vector<ColumnTile>&)>;

@@ -5,7 +5,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -13,12 +12,12 @@
 #include "core/pair_index.hpp"
 #include "core/timing.hpp"
 #include "mcscf/ci/product_support.hpp"
+#include "mcscf/ci/sigma_plan.hpp"
 
 namespace xmvb::mcscf {
 namespace {
 
 using ChannelMatrix=Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::RowMajor>;
-constexpr std::size_t kWorkspaceBytes=64ULL*1024*1024;
 
 /** @brief Exclusive scratch lease; cache one idle slab, never one per thread.
  * Concurrent or recursive actions still own disjoint buffers. Earlier returns
@@ -41,21 +40,26 @@ class ChannelWorkspace {
   };
   static Pool& pool() { static Pool shared; return shared; }
   Storage storage_;
+  std::size_t budget_;
   bool reused_=false;
   std::size_t allocations_=0;
 
 public:
-  ChannelWorkspace() {
+  explicit ChannelWorkspace(std::size_t budget):budget_(budget) {
     auto& shared=pool();
     std::lock_guard lock(shared.mutex);
     ++shared.active;
     storage_.swap(shared.idle);
+    if (storage_.capacity>budget_/sizeof(double)) {
+      storage_.data.reset();
+      storage_.capacity=0;
+    }
     reused_=storage_.capacity!=0;
   }
   ~ChannelWorkspace() {
     auto& shared=pool();
     std::lock_guard lock(shared.mutex);
-    if (--shared.active==0 && storage_.capacity<=kWorkspaceBytes/sizeof(double))
+    if (--shared.active==0 && storage_.capacity<=budget_/sizeof(double))
       storage_.swap(shared.idle);
   }
   ChannelWorkspace(const ChannelWorkspace&)=delete;
@@ -65,7 +69,7 @@ public:
     if (required<=storage_.capacity) return;
     storage_.data.reset();
     storage_.capacity=0;
-    const auto capacity=std::max(required,kWorkspaceBytes/sizeof(double));
+    const auto capacity=required;
     storage_.data=std::make_unique_for_overwrite<double[]>(capacity);
     storage_.capacity=capacity;
     ++allocations_;
@@ -93,10 +97,11 @@ void multiply_in_place(Eigen::Ref<ChannelMatrix> values,
 void DirectCiSigmaAction::apply_tiled(
     int width,
     const DirectCiTileReader& read_columns, const DirectCiTileWriter& add_columns,
-    const ProductSupport* support, int exchange_parity) const {
+    const ProductSupport* support, int exchange_parity,
+    const DirectCiColumnRelease& release,std::size_t workspace_bytes) const {
   profiling::ScopedPhase phase(profiling::Phase::CiSigma);
   const DirectCiTileRequest request{read_columns,add_columns};
-  contract_tiled(width,{&request,1},{},false,support,exchange_parity);
+  contract_tiled(width,{&request,1},{},false,support,exchange_parity,release,workspace_bytes);
 }
 
 DirectCiIntegralAdjoint DirectCiSigmaAction::apply_tiled_with_adjoint(
@@ -129,7 +134,8 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::apply_tiled_responses(
 
 std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
     int width,std::span<const DirectCiTileRequest> requests,const DirectCiTileReader& state,
-    bool collect_integrals,const ProductSupport* support,int exchange_parity) const {
+    bool collect_integrals,const ProductSupport* support,int exchange_parity,
+    const DirectCiColumnRelease& release,std::size_t workspace_bytes) const {
   if (width<=0 || requests.empty() || (requests.size()>1 && !state))
     throw std::invalid_argument("invalid tiled direct-CI width or response sequence");
   if (exchange_parity < -1 || exchange_parity > 1 ||
@@ -156,7 +162,6 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   std::vector<Eigen::MatrixXd> kernel_adjoints(requests.size());
   if (collect_integrals) for (auto& gradient:kernel_adjoints)
     gradient=Eigen::MatrixXd::Zero(pairs,pairs);
-  constexpr std::size_t workspace_bytes=kWorkspaceBytes;
   // Only these channel slabs coexist: response/state and, for a direction,
   // its output. Response and state refill the same input halo sequentially.
   const bool separate_output=has_direction || requests.size()>1;
@@ -171,48 +176,26 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(),
       static_cast<std::size_t>(row_limit) * width * pairs);
 
-  struct Group { int beta, begin, end, capacity, limit; int column=0; };
   struct Incoming { int group, pair; double sign; };
-  std::vector<Group> groups;
-  std::vector<int> active, group_index, halo, columns, distinct_alpha,diagonal_rows;
-  std::vector<int> halo_index(n_alpha_, -1), column_index(n_beta_, -1);
-  std::vector<unsigned char> alpha_seen(n_alpha_, 0), active_support;
-  std::vector<int> same_group, offsets, positions, target_index,beta_offsets;
+  detail::SigmaTilePlan plan(*alpha_,beta_graph,support,exchange_parity,
+      {width,pairs,static_cast<int>(slab_factor),workers,temporal_in_place,workspace_bytes},
+      static_cast<bool>(release));
+  auto& groups=plan.groups;
+  auto& active=plan.active;
+  auto& group_index=plan.group_index;
+  auto& halo=plan.halo;
+  auto& columns=plan.columns;
+  auto& halo_index=plan.halo_index;
+  auto& column_index=plan.column_index;
+  auto& active_support=plan.active_support;
+  auto& released_columns=plan.released;
+  std::vector<int> diagonal_rows,same_group,offsets,positions,target_index;
+  std::vector<Eigen::Index> beta_offsets;
   std::vector<Incoming> incoming;
-  active.reserve(row_limit);
-  active_support.reserve(row_limit);
-  group_index.reserve(row_limit);
-  ChannelWorkspace workspace;
-  std::size_t panel_size = 0, channel_size = 0,scratch_size=0;
-  int count = 0, n_halo = 0, n_columns = 0;
-
-  // Project the prefix tree onto beta first. Only O(U_beta) column indices
-  // survive here; alpha products are generated independently inside a batch.
-  std::vector<int> beta_targets;
-  if (support) {
-    auto cursor = support->cursor(1);
-    int beta;
-    while (cursor.next_column(beta)) beta_targets.push_back(beta);
-  } else {
-    for (int beta = 0; beta < n_beta_; ++beta) beta_targets.push_back(beta);
-  }
-  if (exchange_parity < 0)
-    beta_targets.erase(std::remove(beta_targets.begin(), beta_targets.end(), 0),
-                       beta_targets.end());
-  std::size_t next_beta = 0;
-  std::optional<ProductSupport::Cursor> continuation;
-  int full_alpha_offset = 0;
-  bool continued = false, finished = false;
-  const std::size_t maximum_neighbors=alpha_->n_singles()+1;
-  // One halo is live: the response scatter completes before state refills it.
-  // Reserve its union support plus channel slabs and the shared target map.
-  const auto payload = [&](std::size_t rows, std::size_t h, std::size_t b, std::size_t g) {
-    return sizeof(double) * width *
-        (static_cast<long double>(h) * b +
-         static_cast<long double>(slab_factor) * rows * pairs) +
-        (temporal_in_place ? sizeof(double)*std::min<std::size_t>(workers,rows*width)*pairs:0) +
-        sizeof(int) * static_cast<long double>(h) * g;
-  };
+  ChannelWorkspace workspace(workspace_bytes);
+  std::size_t panel_size=0,channel_size=0,scratch_size=0;
+  int count=0,n_halo=0,n_columns=0;
+  bool finished=false;
   std::exception_ptr failure;
   const bool timing = profiling::phase_totals().enabled;
   using Clock = std::chrono::steady_clock;
@@ -238,153 +221,24 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
 #pragma omp single
       {
         try {
-          prepare_start = tick();
-          for (const int a : halo) halo_index[a] = -1;
-          for (const int b : columns) column_index[b] = -1;
-          for (const int a : distinct_alpha) alpha_seen[a] = 0;
-          distinct_alpha.clear();
-          active.clear();
+          prepare_start=tick();
+          finished=!plan.next();
           diagonal_rows.clear();
-          group_index.clear();
-          groups.clear();
-          halo.clear();
-          columns.clear();
-          int reserved = 0;
-          while (next_beta + groups.size() < beta_targets.size() && reserved < row_limit) {
-            const int beta = beta_targets[next_beta + groups.size()];
-            // Reserve only possible exchange representatives, not the absent
-            // lower triangle. This reduces batches without increasing memory.
-            const int limit = exchange_parity ? beta + (exchange_parity > 0) : n_alpha_;
-            std::size_t b = columns.size();
-            b += column_index[beta] < 0;
-            for (const auto& edge:beta_graph.singles(beta))
-              b += column_index[edge.source] < 0;
-            const auto bound = [&](int rows) {
-              const auto h = std::min<std::size_t>(n_alpha_,
-                  static_cast<std::size_t>(rows) * maximum_neighbors);
-              return payload(rows, h, b, groups.size() + 1);
-            };
-            int slots = std::min(limit, row_limit - reserved);
-            if (!groups.empty() && (slots < limit ||
-                bound(reserved + slots) > workspace_bytes)) break;
-            // Split a single large alpha column without retaining its full
-            // list. The same cursor resumes next batch; nothing is regenerated.
-            if (groups.empty()) {
-              int low = 1, high = slots;
-              while (low < high) {
-                const int middle = low + (high - low + 1) / 2;
-                if (bound(middle) <= workspace_bytes) low = middle;
-                else high = middle - 1;
-              }
-              slots = low;
-            }
-            const auto include = [](int i, std::vector<int>& ids, std::vector<int>& index) {
-              if (index[i] < 0) { index[i] = 0; ids.push_back(i); }
-            };
-            groups.push_back({beta, reserved, reserved, slots, limit});
-            reserved += slots;
-            include(beta, columns, column_index);
-            for (const auto& edge:beta_graph.singles(beta))
-              include(edge.source, columns, column_index);
-            if (slots < limit) break;
-          }
-          active.resize(reserved);
-          active_support.resize(reserved);
-          continued = false;
-          finished = groups.empty();
-        } catch (...) { failure = std::current_exception(); }
-      }
-      if (failure || finished) break;
-#pragma omp for schedule(static)
-      for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
-        try {
-          auto& group = groups[g];
-          if (support) {
-            auto cursor = g == 0 && continuation ? std::move(*continuation) :
-                support->column(group.beta, 1);
-            int a, b;
-            bool label;
-            while (group.end - group.begin < group.capacity && cursor.next(a, b, label)) {
-              if (exchange_parity && (a > b || (a == b && exchange_parity < 0))) continue;
-              active[group.end] = a;
-              active_support[group.end++] = label;
-            }
-            if (group.capacity < group.limit) {
-              continued = group.end - group.begin == group.capacity;
-              if (continued) continuation.emplace(std::move(cursor));
-              else continuation.reset();
-            }
-          } else {
-            const int first_alpha = g == 0 ? full_alpha_offset : 0;
-            const int alpha_end = exchange_parity ? group.beta + (exchange_parity > 0) : n_alpha_;
-            for (int a = first_alpha; a < alpha_end && group.end - group.begin < group.capacity; ++a) {
-              active[group.end] = a;
-              active_support[group.end++] = 1;
-            }
-            if (group.capacity < group.limit) {
-              full_alpha_offset = first_alpha + group.end - group.begin;
-              continued = full_alpha_offset < alpha_end;
-              if (!continued) full_alpha_offset = 0;
-            }
-          }
-        } catch (...) {
-#pragma omp critical(ci_tile_failure)
-          { failure = std::current_exception(); }
-        }
-      }
-#pragma omp single
-      {
-        try {
           if (!failure) {
-            next_beta += groups.size() - static_cast<std::size_t>(continued);
-            int packed = 0;
-            for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
-              auto& group = groups[g];
-              const int length = group.end - group.begin;
-              for (int i = 0; i < length; ++i) {
-                active[packed + i] = active[group.begin + i];
-                active_support[packed + i] = active_support[group.begin + i];
-                if (exchange_parity && active[packed+i]==group.beta)
-                  diagonal_rows.push_back(packed+i);
-                unsupported_targets += !active_support[packed + i];
-              }
-              group.begin = packed;
-              packed += length;
-              group.end = packed;
-            }
-            active.resize(packed);
-            active_support.resize(packed);
-            group_index.resize(packed);
-            for (int g = 0; g < static_cast<int>(groups.size()); ++g)
-              std::fill(group_index.begin() + groups[g].begin,
-                        group_index.begin() + groups[g].end, g);
-            const auto include = [&](int a) {
-              if (halo_index[a] < 0) { halo_index[a] = 0; halo.push_back(a); }
-            };
-            for (const int a : active) {
-              if (alpha_seen[a]) continue;
-              alpha_seen[a] = 1;
-              distinct_alpha.push_back(a);
-              include(a);
-              for (const auto& edge:alpha_->singles(a)) include(edge.source);
+            for (int i=0;i<static_cast<int>(active.size());++i) {
+              unsupported_targets+=!active_support[i];
+              if (exchange_parity && active[i]==groups[group_index[i]].beta)
+                diagonal_rows.push_back(i);
             }
             if (!active.empty()) {
               count = active.size();
-              std::sort(halo.begin(), halo.end());
-              std::sort(columns.begin(), columns.end());
               n_halo = halo.size();
               n_columns = columns.size();
-              for (int i = 0; i < n_halo; ++i) halo_index[halo[i]] = i;
-              for (int i = 0; i < n_columns; ++i) column_index[columns[i]] = i;
               panel_size = static_cast<std::size_t>(n_halo) * n_columns * width;
               channel_size = static_cast<std::size_t>(count) * width * pairs;
               scratch_size=temporal_in_place ? std::max(panel_size,
                   static_cast<std::size_t>(std::min(team,count*width))*pairs):panel_size;
               const std::size_t required = scratch_size + slab_factor * channel_size;
-              if (separate_output && required * sizeof(double) +
-                      sizeof(int) * static_cast<std::size_t>(n_halo) * groups.size() >
-                      workspace_bytes)
-                throw std::length_error("tiled direction exceeds 64 MiB workspace");
               workspace.reserve(required);
               Eigen::Map<Eigen::MatrixXd> input(workspace.get(), n_halo,
                   static_cast<Eigen::Index>(n_columns) * width);
@@ -419,7 +273,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               positions = offsets;
               incoming.resize(offsets.back());
               beta_offsets.resize(groups.size()*beta_graph.n_singles());
-              beta_map_bytes=std::max(beta_map_bytes,beta_offsets.capacity()*sizeof(int));
+              beta_map_bytes=std::max(beta_map_bytes,beta_offsets.capacity()*sizeof(Eigen::Index));
               for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
                 groups[g].column=column_index[groups[g].beta]*width;
                 const auto& links = beta_graph.singles(groups[g].beta);
@@ -427,8 +281,9 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                   incoming[positions[column_index[links[link].source]]++] =
                       {g, links[link].pair, links[link].sign};
                   // The same beta edge serves every alpha target and RHS.
-                  // A halo is bounded by 64 MiB, so its double offset fits int.
-                  beta_offsets[g*beta_graph.n_singles()+link]=static_cast<int>(
+                  // Offsets follow the shared runtime budget, not a 32-bit
+                  // assumption tied to the former 64 MiB halo.
+                  beta_offsets[g*beta_graph.n_singles()+link]=static_cast<Eigen::Index>(
                       static_cast<std::size_t>(n_halo)*column_index[links[link].source]*width);
                 }
               }
@@ -441,7 +296,6 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
         } catch (...) { failure = std::current_exception(); }
       }
       if (failure || finished) break;
-      if (active.empty()) continue;
 
       Eigen::Map<const Eigen::MatrixXd> input(workspace.get(), n_halo,
           static_cast<Eigen::Index>(n_columns) * width);
@@ -722,6 +576,17 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
         }
         if (failure) break;
       } // temporal responses share the generated graph and accepted channels
+      if (failure) break;
+      if (release && !released_columns.empty()) {
+#pragma omp single
+        {
+          try {
+            const auto begin=tick();
+            release(released_columns);
+            write_time+=seconds(begin,tick());
+          } catch (...) { failure=std::current_exception(); }
+        }
+      }
       if (failure) break;
     }
   }

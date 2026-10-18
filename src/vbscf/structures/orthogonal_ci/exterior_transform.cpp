@@ -7,6 +7,7 @@
 #include <iterator>
 #include <list>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <numeric>
 #include <stdexcept>
@@ -57,6 +58,43 @@ struct ExteriorOrbitalTransform::RowCache {
   std::list<Entry> entries;
   std::unordered_map<std::uint64_t, std::list<Entry>::iterator> index;
   std::atomic<std::size_t> cached_bytes{0};
+
+  static std::uint64_t key(int begin,int count) noexcept {
+    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(begin))<<32) |
+        static_cast<std::uint32_t>(count);
+  }
+  std::shared_ptr<const Eigen::MatrixXd> find(std::uint64_t key) {
+    std::lock_guard lock(mutex);
+    const auto found=index.find(key);
+    if (found==index.end()) return {};
+    entries.splice(entries.begin(),entries,found->second);
+    return found->second->rows;
+  }
+  std::shared_ptr<const Eigen::MatrixXd> retain(std::uint64_t key,
+      std::shared_ptr<const Eigen::MatrixXd> rows) {
+    constexpr std::size_t budget=64ULL*1024*1024;
+    const std::size_t bytes=sizeof(double)*rows->size();
+    if (bytes>budget) return rows;
+    std::lock_guard lock(mutex);
+    const auto found=index.find(key);
+    if (found!=index.end()) {
+      entries.splice(entries.begin(),entries,found->second);
+      return found->second->rows;
+    }
+    std::size_t resident=cached_bytes.load(std::memory_order_relaxed);
+    while (resident>budget-bytes) {
+      auto last=std::prev(entries.end());
+      resident-=last->bytes;
+      index.erase(last->key);
+      entries.erase(last);
+    }
+    cached_bytes.store(resident,std::memory_order_relaxed);
+    entries.push_front({key,rows,bytes});
+    try { index.emplace(key,entries.begin()); }
+    catch (...) { entries.pop_front(); throw; }
+    cached_bytes.store(resident+bytes,std::memory_order_relaxed);
+    return rows;
+  }
 };
 
 ExteriorOrbitalTransform::ExteriorOrbitalTransform(
@@ -402,64 +440,64 @@ std::shared_ptr<const Eigen::MatrixXd> ExteriorOrbitalTransform::row_block(
   if (begin < 0 || count <= 0 || begin > dimension() - count) {
     throw std::invalid_argument("exterior row block is out of range");
   }
-  constexpr std::size_t kCacheBytes = 64ULL * 1024ULL * 1024ULL;
-  const std::uint64_t key =
-      (static_cast<std::uint64_t>(static_cast<std::uint32_t>(begin)) << 32) |
-      static_cast<std::uint32_t>(count);
-  {
-    std::lock_guard<std::mutex> lock(row_cache_->mutex);
-    const auto found = row_cache_->index.find(key);
-    if (found != row_cache_->index.end()) {
-      row_cache_->entries.splice(row_cache_->entries.begin(),
-                                 row_cache_->entries, found->second);
-      return found->second->rows;
-    }
-  }
-
+  const auto key=RowCache::key(begin,count);
+  if (auto rows=row_cache_->find(key)) return rows;
   // Generate outside the mutex; other readers may use cached rows meanwhile.
   std::vector<int> selected(count);
   std::iota(selected.begin(),selected.end(),begin);
-  auto rows = std::make_shared<Eigen::MatrixXd>(generate_rows(selected));
   const std::size_t width = static_cast<std::size_t>(dimension());
   if (static_cast<std::size_t>(count) >
       std::numeric_limits<std::size_t>::max() / width / sizeof(double)) {
     throw std::length_error("exterior row block byte count overflows");
   }
-  const std::size_t bytes =
-      static_cast<std::size_t>(count) * width * sizeof(double);
-  if (bytes > kCacheBytes) return rows;
-
-  std::lock_guard<std::mutex> lock(row_cache_->mutex);
-  const auto found = row_cache_->index.find(key);
-  if (found != row_cache_->index.end()) {
-    row_cache_->entries.splice(row_cache_->entries.begin(),
-                               row_cache_->entries, found->second);
-    return found->second->rows;
-  }
-  std::size_t resident = row_cache_->cached_bytes.load(std::memory_order_relaxed);
-  while (resident > kCacheBytes - bytes) {
-    auto last = std::prev(row_cache_->entries.end());
-    resident -= last->bytes;
-    row_cache_->index.erase(last->key);
-    row_cache_->entries.erase(last);
-  }
-  row_cache_->cached_bytes.store(resident, std::memory_order_relaxed);
-  row_cache_->entries.push_front(RowCache::Entry{key, rows, bytes});
-  try {
-    row_cache_->index.emplace(key, row_cache_->entries.begin());
-  } catch (...) {
-    row_cache_->entries.pop_front();
-    throw;
-  }
-  row_cache_->cached_bytes.store(resident + bytes, std::memory_order_relaxed);
-  return rows;
+  return row_cache_->retain(key,std::make_shared<Eigen::MatrixXd>(
+      row_plan_->apply(orbital_transform_,masks_,selected)));
 }
 
-Eigen::MatrixXd ExteriorOrbitalTransform::generate_rows(std::span<const int> rows) const {
+Eigen::SparseMatrix<double> ExteriorOrbitalTransform::generate_rows(std::span<const int> rows) const {
   for (const int row:rows)
     if (row<0 || row>=dimension())
       throw std::invalid_argument("exterior row index is out of range");
-  return row_plan_->apply(orbital_transform_,masks_,rows);
+  // A cached factor is contiguous by row. Assemble it in the same ordering;
+  // converting the complete panel once avoids per-row scattered stores.
+  ExteriorRowPlan::Rows result(rows.size(),dimension());
+  std::vector<int> missing,positions;
+  for (int i=0;i<static_cast<int>(rows.size());++i) {
+    if (auto value=row_cache_->find(RowCache::key(rows[i],1))) result.row(i)=value->row(0);
+    else { missing.push_back(rows[i]); positions.push_back(i); }
+  }
+  if (!missing.empty()) {
+    const auto values=row_plan_->apply(orbital_transform_,masks_,missing);
+    for (int i=0;i<static_cast<int>(missing.size());++i) {
+      result.row(positions[i])=values.row(i);
+      // Cache immutable orbital factors, not state-dependent CI columns.
+      // Input generation and output projection share the existing row budget.
+      row_cache_->retain(RowCache::key(missing[i],1),
+          std::make_shared<Eigen::MatrixXd>(values.row(i)));
+    }
+  }
+  // Convert the assembled panel once, then count/pack independent CSC
+  // columns in parallel. No per-spin-product allocation or serial sparse scan.
+  const Eigen::MatrixXd dense=result;
+  Eigen::SparseMatrix<double> factors(dense.rows(),dense.cols());
+  int* offsets=factors.outerIndexPtr();
+  offsets[0]=0;
+  const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),dense.size());
+  cooperative_openmp_for(dense.cols(),workers,[&](std::ptrdiff_t column) {
+    offsets[column+1]=(dense.col(column).array()!=0.0).count();
+  });
+  for (int column=0;column<dense.cols();++column) offsets[column+1]+=offsets[column];
+  factors.resizeNonZeros(offsets[dense.cols()]);
+  cooperative_openmp_for(dense.cols(),workers,[&](std::ptrdiff_t column) {
+    int slot=offsets[column];
+    for (int row=0;row<dense.rows();++row) {
+      const double value=dense(row,column);
+      if (value==0.0) continue;
+      factors.innerIndexPtr()[slot]=row;
+      factors.valuePtr()[slot++]=value;
+    }
+  });
+  return factors;
 }
 
 void ExteriorOrbitalTransform::validate_inverse() const {

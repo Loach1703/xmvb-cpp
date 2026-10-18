@@ -15,10 +15,11 @@ namespace xmvb::vb {
  */
 class ExteriorRowPlan {
 public:
+  using Rows=Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::RowMajor>;
   ExteriorRowPlan(int n_orbitals, int n_electrons,
       std::span<const std::uint64_t> masks);
 
-  Eigen::MatrixXd apply(const Eigen::MatrixXd& upper,
+  Rows apply(const Eigen::MatrixXd& upper,
       std::span<const std::uint64_t> masks, std::span<const int> rows) const;
   std::size_t dynamic_bytes() const noexcept;
 

@@ -34,6 +34,12 @@ using DirectCiTileReader = std::function<void(const std::vector<int>&,
 using DirectCiTileWriter = std::function<void(const std::vector<int>&,
     const std::vector<int>&, const DirectCiColumnAccumulator&)>;
 
+/** @brief Release columns after their last one-generator consumer has finished.
+ * Indices will not be read or written again in this action. Called by the
+ * coordinator after all workers have consumed the batch; views are borrowed.
+ */
+using DirectCiColumnRelease = std::function<void(std::span<const int>)>;
+
 /** @brief One temporal response on a common accepted state and generated graph.
  * Image receives H*response, plus direction*state when direction is supplied.
  * Forcing optionally receives only direction*state. All views are borrowed;
@@ -203,7 +209,9 @@ public:
       const DirectCiTileReader& read_columns,
       const DirectCiTileWriter& add_columns,
       const ProductSupport* support = nullptr,
-      int exchange_parity = 0) const;
+      int exchange_parity = 0,
+      const DirectCiColumnRelease& release = {},
+      std::size_t workspace_bytes = 64ULL*1024*1024) const;
 
   /** @brief Stream H*response and the integral adjoint of <response,H*state>.
    * Uses the same generated channel sweep and bounded numerical slabs as
@@ -390,7 +398,9 @@ private:
   /** @brief Generated channel graph shared by tiled sigma and its integral VJP. */
   std::vector<DirectCiIntegralAdjoint> contract_tiled(int block_width,
       std::span<const DirectCiTileRequest> requests,const DirectCiTileReader& state,
-      bool collect_integrals,const ProductSupport* support,int exchange_parity) const;
+      bool collect_integrals,const ProductSupport* support,int exchange_parity,
+      const DirectCiColumnRelease& release = {},
+      std::size_t workspace_bytes = 64ULL*1024*1024) const;
 
   /** @brief Cooperative sigma contraction inside the current OpenMP team.
    * Each output beta column has one owner. All workers must call this method.

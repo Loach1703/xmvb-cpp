@@ -35,13 +35,13 @@ std::uint64_t ExteriorRowPlan::choose(int n,int k) const noexcept {
   return n<0 || k<0 || k>n ? 0:binomial_[n*(n_+1)+k];
 }
 
-Eigen::MatrixXd ExteriorRowPlan::apply(const Eigen::MatrixXd& upper,
+ExteriorRowPlan::Rows ExteriorRowPlan::apply(const Eigen::MatrixXd& upper,
     std::span<const std::uint64_t> masks,std::span<const int> rows) const {
   profiling::ScopedPhase phase(profiling::Phase::CiTransformRight);
   const std::size_t dimension=masks.size();
   // A worker owns contiguous rows. Writing a column-major result here would
   // make neighboring workers repeatedly invalidate the same cache lines.
-  Eigen::Matrix<double,Eigen::Dynamic,Eigen::Dynamic,Eigen::RowMajor> result(rows.size(),dimension);
+  Rows result(rows.size(),dimension);
   // This is derived scratch residency, not a change of representation.
   constexpr std::size_t scratch_bytes=64ULL*1024*1024;
   const int workers=bounded_openmp_thread_count(cooperative_openmp_thread_count(),

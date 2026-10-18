@@ -20,6 +20,7 @@
 #include "mcscf/ci/sigma.hpp"
 #include "mcscf/ci/factors.hpp"
 #include "mcscf/ci/product_support.hpp"
+#include "mcscf/ci/sigma_plan.hpp"
 #include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
@@ -379,9 +380,10 @@ void check_rumer_case(int n) {
   require((action.apply_hamiltonian(vectors)-actual.hamiltonian).norm()<
       2e-11*std::max(1.0,actual.hamiltonian.norm()),
       "Hamiltonian-only projection differs from the combined H/M action");
-  // Force one-column panels and eviction/recomputation in both caches.
-  // The resource choice must not change the operator or selected subspace.
-  check_images(action.apply_streamed(vectors, 512), actual);
+  // A shared budget must also hold one sigma target and its halo, unlike
+  // the former column-only budget (which had an independent 64 MiB sigma).
+  // Direct LRU eviction is separately exercised by check_input_columns().
+  check_images(action.apply_streamed(vectors,16*1024),actual);
   check_images(actual, reference_images(
       fixture, expansion.terms, expansion.product_alpha,
       expansion.product_beta, vectors));
@@ -425,7 +427,7 @@ void check_selected_unequal_spin_case() {
       "unequal-spin Hamiltonian-only projection lost selected products");
   check_images(action.apply(vectors), reference_images(
       fixture, terms, product_alpha, product_beta, vectors));
-  check_images(action.apply_streamed(vectors, 512), reference_images(
+  check_images(action.apply_streamed(vectors,16*1024), reference_images(
       fixture, terms, product_alpha, product_beta, vectors));
   check_images(action.apply_sources(vectors), action.apply(vectors));
   check_images(action.apply_sources(vectors,
@@ -974,7 +976,7 @@ void check_broad_product_projection(bool unequal,bool partial=false,int parity=0
     require(hs.tiles.source_workspace_bound==0 && hs.tiles.input_resident_bytes>0,
         "broad selected H/M regression did not execute the product contraction");
     check_images(hs,reference_images(fixture,terms,alpha,beta,c));
-    check_images(hs,action.apply_streamed(c,128));
+    check_images(hs,action.apply_streamed(c,16*1024));
     require((action.apply_hamiltonian(c)-hs.hamiltonian).norm()<3e-11,
         "ordered Hamiltonian-only contraction changed selected-space projection");
   }
@@ -1332,7 +1334,7 @@ void check_mixed_exchange_space() {
   const auto vectors = test_vectors(3, 2);
   const auto reference = reference_images(fixture, terms, alpha, beta, vectors);
   check_images(action.apply(vectors), reference);
-  check_images(action.apply_streamed(vectors, 512), reference);
+  check_images(action.apply_streamed(vectors,16*1024),reference);
 }
 
 void check_input_columns() {
@@ -1380,6 +1382,11 @@ void check_input_columns() {
   input.prepare({3});
   require(generated.size()==before && input.cache().evictions>0,
       "column hit regenerated data or the tiny-budget test did not evict");
+  input.release(3);
+  require(!input.cache().contains(3) && input.cache().releases==1,
+      "completed input column was not released");
+  input.release(3);
+  require(input.cache().releases==1,"an absent column was released twice");
 }
 
 void check_exterior_team() {
@@ -1548,7 +1555,26 @@ void check_sigma_columns(const Fixture& fixture, int width) {
                 3e-11*std::max(1.0,reference.pair_kernel.norm()),
             "generated sigma/adjoint channel sweep differs from the full oracle");
   };
-  sigma.apply_tiled(width, read, add);
+  std::vector<bool> released(n_beta,false);
+  int release_calls=0;
+  sigma.apply_tiled(width,
+      [&](const auto& betas,const auto& rows,Eigen::Ref<Eigen::MatrixXd> block) {
+        for (const int beta:betas)
+          require(!released[beta],"sigma read a released input column");
+        read(betas,rows,block);
+      },[&](const auto& betas,const auto& rows,const auto& accumulate) {
+        for (const int beta:betas)
+          require(!released[beta],"sigma wrote a released output column");
+        add(betas,rows,accumulate);
+      },nullptr,0,[&](std::span<const int> betas) {
+        if (!betas.empty()) ++release_calls;
+        for (const int beta:betas) {
+          require(!released[beta],"sigma released a column more than once");
+          released[beta]=true;
+        }
+      });
+  require(release_calls>0 && std::all_of(released.begin(),released.end(),[](bool x){return x;}),
+      "sigma did not finish every input/output column lifetime");
   const Eigen::MatrixXd ordinary = sigma.apply(carrier);
   require((tiled - ordinary).norm() <=
               2e-11 * std::max(1.0, ordinary.norm()),
@@ -1905,6 +1931,51 @@ void check_generic_product_support() {
           "63-orbital path generation failed");
 }
 
+void check_sigma_tile_plan() {
+  using namespace xmvb::mcscf;
+  SpinConnections graph;
+  graph.strings=4; graph.degree=3;
+  graph.occupations.resize(1,4);
+  for (int b=0;b<4;++b) {
+    graph.occupations(0,b)=b;
+    for (int a=0;a<4;++a) if (a!=b)
+      graph.links.push_back({a,0,0,0,1.0});
+  }
+  const std::vector<std::uint64_t> masks{1,2,4,8};
+  const ProductSupport support(4,masks,masks,{3,12});
+  for (const ProductSupport* selected:std::array<const ProductSupport*,2>{nullptr,&support})
+    for (int parity:{0,1,-1})
+      for (const std::size_t bytes:{800U,8192U}) {
+        detail::SigmaTilePlan plan(graph,graph,selected,parity,
+            {2,10,2,2,false,bytes},true);
+        std::array<int,16> visits{};
+        std::array<bool,4> retired{};
+        while (plan.next()) {
+          require(plan.payload_bytes()<=bytes,"sigma plan exceeds numeric payload budget");
+          for (const int column:plan.columns)
+            require(!retired[column],"sigma plan reads a retired column");
+          for (int i=0;i<static_cast<int>(plan.active.size());++i) {
+            const int a=plan.active[i],b=plan.groups[plan.group_index[i]].beta;
+            ++visits[4*a+b];
+            require(static_cast<bool>(plan.active_support[i])==(!selected || selected->contains(a,b)),
+                "sigma plan changed the structural support label");
+          }
+          for (const int column:plan.released) {
+            require(!retired[column],"sigma plan retires a column twice");
+            retired[column]=true;
+          }
+        }
+        for (int a=0;a<4;++a) for (int b=0;b<4;++b) {
+          const bool expected=(!selected || selected->contains(a,b,1)) &&
+              (!parity || a<b || (a==b && parity>0));
+          require(visits[4*a+b]==static_cast<int>(expected),
+              "sigma plan lost or duplicated a target at a tile boundary");
+        }
+        require(std::all_of(retired.begin(),retired.end(),[](bool value) { return value; }),
+            "sigma plan omitted a final column release");
+      }
+}
+
 void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
                            const std::vector<xmvb::mcscf::ProductIndex>& products = {}) {
   const auto fixture = make_fixture(n, n_alpha, n_beta_electrons);
@@ -1957,6 +2028,12 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
   auto expected = sigma.apply(carrier);
   require((actual - expected).norm() <= 2e-11 * std::max(1.0, expected.norm()),
           "generated closure sigma differs from full sigma, including outside-S outputs");
+  if (n==4 && n_alpha==2 && n_beta_electrons==2) {
+    actual.setZero();
+    sigma.apply_tiled(width,read,add,&support,0,{},2048);
+    require((actual-expected).norm()<=2e-11*std::max(1.0,expected.norm()),
+        "small-budget sigma changed the Hamiltonian action");
+  }
   actual.setZero();
   const auto fused=sigma.apply_tiled_with_adjoint(width,read,add,{},&support);
   const auto integral=sigma.integral_adjoint(carrier,carrier);
@@ -2199,7 +2276,7 @@ void check_covalent_subset(int selected_count, bool add_ionic) {
   const auto expected = reference_images(fixture, expansion.terms,
       expansion.product_alpha, expansion.product_beta, vectors);
   check_images(action.apply(vectors), expected);
-  check_images(action.apply_streamed(vectors, 512), expected);
+  check_images(action.apply_streamed(vectors,16*1024),expected);
   check_images(action.apply_sources(vectors), expected);
   require((action.apply_overlap(vectors) - expected.overlap).norm() <=
               2e-11 * std::max(1.0, expected.overlap.norm()),
@@ -3278,6 +3355,7 @@ int main(int argc, char** argv) {
       check_sigma_columns(make_fixture(4, 0, 1), 2);
       check_sigma_columns(make_fixture(4, 4, 1), 2);
       check_sigma_columns(make_fixture(10, 5, 4), 2);
+      check_sigma_tile_plan();
       check_prefix_words();
       check_supported_sigma(4, 2, 2, 2);
       check_supported_sigma(5, 3, 2, 3);

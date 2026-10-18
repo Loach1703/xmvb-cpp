@@ -129,6 +129,7 @@ void print_usage() {
                " [--gradient-tolerance <value>]"
                " [--energy-tolerance <value>]"
                " [--exact-exchange-memory-mib <nonnegative integer>]"
+               " [--ci-workspace-mib <positive integer, default 4096>]"
                "\n"
                " [--standard-two-electron-mode auto|exact|ri]"
                " [--skip-orbital-guess true|false]"
@@ -175,6 +176,7 @@ std::optional<Options> parse_options(int argc, char** argv) {
   bool user_specified_structure_eigensolver = false;
   bool user_specified_max_iterations = false;
   std::size_t exchange_budget = 64 * 1024 * 1024;
+  std::size_t ci_budget = mcscf::kDefaultCiWorkspaceBytes;
   for (int argument_index = 2; argument_index < argc; argument_index += 2) {
     const std::string argument_name = argv[argument_index];
     const std::string argument_value = argv[argument_index + 1];
@@ -203,6 +205,13 @@ std::optional<Options> parse_options(int argc, char** argv) {
         if (mib > std::numeric_limits<std::size_t>::max() / (1024 * 1024))
           throw std::invalid_argument("exchange memory budget is too large");
         exchange_budget = static_cast<std::size_t>(mib) * 1024 * 1024;
+      } else if (argument_name == "--ci-workspace-mib") {
+        if (argument_value.empty() || argument_value.find_first_not_of("0123456789") != std::string::npos)
+          throw std::invalid_argument("CI workspace must be a positive integer");
+        const auto mib = std::stoull(argument_value);
+        if (!mib || mib > std::numeric_limits<std::size_t>::max() / (1024 * 1024))
+          throw std::invalid_argument("CI workspace is zero or too large");
+        ci_budget = static_cast<std::size_t>(mib) * 1024 * 1024;
       } else if (argument_name == "--standard-two-electron-mode") {
         apply_standard_two_electron_mode_argument(argument_value, &load_options);
       } else if (argument_name == "--skip-orbital-guess") {
@@ -230,6 +239,7 @@ std::optional<Options> parse_options(int argc, char** argv) {
   Options parsed;
   parsed.input_path = input_path;
   parsed.exact_exchange_memory_budget_bytes = exchange_budget;
+  parsed.ci_workspace_bytes = ci_budget;
   parsed.load = std::move(load_options);
   parsed.optimizer = std::move(options);
   parsed.trace_directory = std::move(dump_trace_dir);

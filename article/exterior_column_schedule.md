@@ -187,3 +187,164 @@ Accepted-point jet residency is not silently declared solved. Its separate
 cost must be measured after this initial-CI repair; the jet still has its own
 panel sweep. This work removes enclosing-panel replay in structure H/S actions,
 not every possible regeneration in all gradient/HVP consumers.
+
+## Last-consumer scheduling
+
+The intermediate channel target $(a,b)$ reads and writes beta columns in
+$N[b]$, the identity plus the one-replacement neighbors of $b$. For the
+actual beta-target order $b_0,\ldots,b_{L-1}$, define
+
+$$
+\ell(j)=\max\{t:j\in N[b_t]\}.
+$$
+
+This is an integer lifetime bound derived from the generator graph, not an
+amplitude threshold. Computing it requires one pass over the single-spin
+links and $O(U_\beta)$ integers; neither channel amplitudes nor a product
+table are stored. It remains a valid conservative bound for arbitrary
+selected support, unequal spins and exchange-representative sweeps.
+
+After the final alpha chunk of target $b_t$ has been consumed, a column
+with $\ell(j)\le t$ cannot participate in any remaining scatter or adjoint
+scatter. Release its input immediately. Consume and release its output;
+its last partial contribution can join the existing bounded projection
+batch. If several alpha chunks belong to one target, the target remains
+live until the cursor is exhausted. Parallel workers and writer tasks must
+finish before release.
+
+This eliminates the mathematically unnecessary residency of dead columns.
+Previously a final-use column could become most recently used in the LRU,
+displacing a live column whose transform then had to be repeated. Removing
+a dead entry cannot introduce a later input miss. Output release does not
+add a projection: the same completed partial image otherwise had to be
+projected on eviction or at the final flush. This does **not** eliminate
+pressure-driven eviction of still-live columns; the latter requires a
+different scheduling argument and must be measured separately.
+
+## Share orbital factors, not state-dependent columns
+
+The same exterior row $t_j=(T_\beta)_{j,:}$ occurs in both input construction
+and the projected output sum above. It is independent of $C$, the channel
+kernel, and the Davidson RHS. Its value therefore remains identical across
+both consumers and every CI iteration at a fixed orbital point.
+
+The pre-existing 64 MiB exterior-row cache now admits exact requested
+single rows under one shared key. Missing rows are still generated as a
+parallel batch; cache admission remains single-row. Contiguous row-block
+consumers share the same total budget, not a second factor cache. Returned
+matrices are operation-local copies, so eviction cannot invalidate sigma
+views. A new orbital transform creates a new cache, preventing reuse across
+different orbital points. This removes duplicate factor generation on hits
+without storing a complete exterior matrix or a spin-product grid. The
+state-dependent input and output column budgets are unchanged.
+
+Generated minors, cached single rows, and intermediate row assembly now all
+use row-contiguous storage. Only the completed requested-row panel is
+converted to the column-major view consumed by the source contraction. This
+removes an intermediate full-panel conversion and repeated strided row
+stores. It changes neither a minor recurrence nor a contraction sum.
+
+## Contract only nonzero beta factors
+
+For a requested beta-row set $B$, define
+
+$$
+J_b=\{j\in B:(T_\beta)_{j,b}\ne0\}.
+$$
+
+The input scatter and output contraction use only these entries:
+
+$$
+V_{a_g,j}\mathrel{+}=(WC)_g(T_\beta)_{j,b_g},\qquad j\in J_{b_g},
+$$
+
+$$
+h_g\mathrel{+}=\sum_{j\in J_{b_g}}
+(T_\alpha^T Z_{:,B})_{a_g,j}(T_\beta)_{j,b_g}.
+$$
+
+Each bounded sampled-factor panel is stored in compressed sparse column
+(CSC) format, indexed by the original beta string $b$. Two parallel passes
+count and pack disjoint CSC columns; only their offset prefix sum is serial.
+The conversion removes only values equal to floating-point zero, not values
+below a magnitude tolerance. Tiny nonzero values, including subnormals, are kept.
+The same CSC panel serves every RHS and the input overlap consumer; there is
+no allocation per touched product.
+
+For an upper-triangular $R$, $T_{I,J}=0$ unless $j_r\ge i_r$ for every
+occupation. In the complete $m$-electron spin sector the number of symbolically
+allowed pairs is
+
+$$
+N_{\mathrm{nz}}^{\mathrm{sym}}(T)
+=\binom{n}{m}^2-\binom{n}{m-1}\binom{n}{m+1}
+=U_\sigma^2\frac{n+1}{(m+1)(n-m+1)}.
+$$
+
+The subtraction follows by reflecting the two occupation-prefix paths at
+their first ordering violation. At $(n,m)=(16,8)$ the full-spin factor density
+is at most $17/81$, about 21.0%; actual sampled panels can have a different
+density and additional exact zeros. This counting does not assume closure of
+the selected VB structures.
+
+If $G$ is the touched original-product set, the two contractions formerly
+visit $O(b|G||B|)$ entries. CSC consumption visits
+$O(b\sum_{g\in G}|J_{b_g}|)$ entries instead. The current conversion still
+scans a bounded dense factor panel in $O(U_\beta|B|)$, and the row recurrence
+still has its stated generation cost. Thus this is not a claim that the
+entire H/S action has acquired the sparse-consumption complexity. Storage
+for CSC is proportional to its panel nonzeros plus $U_\beta$ offsets; neither
+a complete exterior matrix nor a complete product grid is retained.
+
+## One-pass target planning and a shared resource budget
+
+Let $I_t$ be the exact generated target set in a tile, $A_t$ its distinct
+alpha strings, and $B_t$ its distinct beta strings. With $N_\sigma(i)$ denoting
+the identity plus single-replacement neighbors, the input rectangle is
+
+$$
+\mathcal H_t=\bigcup_{a\in A_t}N_\alpha(a),\qquad
+\mathcal D_t=\bigcup_{b\in B_t}N_\beta(b).
+$$
+
+These are unions, not the product of a target count and a worst-case degree.
+A persistent support cursor emits each target once. A trial target adds
+only previously unseen neighbors; if admitting it would exceed the numeric
+payload budget, that one target is held for the next tile. The cursor is
+never rewound. Halo sorting, coordinate-map construction and target packing
+are performed once per completed tile, rather than in separate repeated
+planning passes. This changes the partition, not the target set, its
+support labels, or exchange multiplicities.
+
+For $r=|I_t|$, $h=|\mathcal H_t|$, $d=|\mathcal D_t|$, $g=|B_t|$,
+RHS width $b$, channel count $P$, and $s$ simultaneously live channel slabs,
+the planned numeric payload is
+
+$$
+B_t^{\mathrm{num}}=8\left(bhd+sbrP\right)+4hg.
+$$
+
+The final term is the target-index map. For an in-place temporal response,
+the input allocation is instead $8\max(bhd,\min(n_{\mathrm{workers}},br)P)$;
+the already-consumed halo supplies the GEMM scratch. No channel slab is
+replicated by worker count. Single-spin links, cursors, and small metadata
+are separate from this numeric bound.
+
+The H/S action now defaults to a **4 GiB process-shared tile budget**,
+configurable with `--ci-workspace-mib`. Input and output column residency
+receive one quarter each; sigma receives one quarter; the remaining quarter
+is reserved for transformation panels. Allocation remains demand-driven:
+small carriers do not allocate the full allowance. Exterior-factor caches
+are immutable accepted-point data with their existing separate bounded
+residency; AO integrals, Davidson vectors and library/allocator storage are
+also outside this tile-payload budget. It is therefore not a process RSS
+limit. The resource option changes neither precision nor the variational
+space. Other derivative consumers keep their existing explicit bounds until
+their combined working sets are profiled; they do not silently acquire a
+4 GiB allowance each.
+
+Column retirement still uses exact last generator use. Its sorted order is
+built once and advanced monotonically, avoiding a scan of all beta strings
+at every tile boundary. The numerical workspace retains one shared idle
+allocation, never one allocation per OpenMP worker; a smaller-budget caller
+discards an oversized idle allocation before beginning its action.

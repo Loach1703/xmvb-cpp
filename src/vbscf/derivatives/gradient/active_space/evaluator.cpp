@@ -182,13 +182,13 @@ xmvb::linalg::DavidsonResult solve_selected_structure_roots(
   options.residual_preconditioner = std::move(residual_preconditioner);
   options.identity_overlap=identity_overlap;
   if (mcscf::diagnostics::ciah_event_trace_enabled()) {
-    options.observe_iteration = [](int iteration, int dimension,
-        double energy, double residual) {
+    options.observe_iteration = [start=std::chrono::steady_clock::now()](int iteration, int dimension,
+        double energy, double residual, double stationarity) {
       // Existing quantities only; no additional action or certification.
-      if (iteration == 1 || iteration % 32 == 0)
-        mcscf::diagnostics::ciah_trace("ciah_ci_iteration",
-            "iteration=%d,basis=%d,energy=%.17g,relative_residual=%.17g",
-            iteration,dimension,energy,residual);
+      mcscf::diagnostics::ciah_trace("ciah_ci_iteration",
+          "iteration=%d,basis=%d,energy=%.17g,relative_residual=%.17g,stationarity=%.17g,seconds=%.17g",
+          iteration,dimension,energy,residual,stationarity,
+          std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count());
     };
   }
   const bool can_recycle =
@@ -536,6 +536,11 @@ void solve_structure_problem(
           std::chrono::steady_clock::now() - stage_start_time)
           .count();
   select_structure_states(n_structures, selected_state_indices, context);
+  mcscf::diagnostics::ciah_trace("ciah_ci_solved",
+      "seconds=%.17g,energy=%.17g,iterations=%d,actions=%d",
+      context->eigensolver_wall_time_seconds,context->selected_state_energies[0],
+      context->davidson_diagnostics ? context->davidson_diagnostics->iterations:0,
+      context->davidson_diagnostics ? context->davidson_diagnostics->block_actions:0);
 }
 
 ActiveSpaceGradientForwardContext build_active_space_gradient_forward_context(

@@ -17,6 +17,7 @@
 
 #include <Eigen/Core>
 #include <Eigen/LU>
+#include <Eigen/SparseCore>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -168,6 +169,16 @@ Eigen::MatrixXd explicit_exterior(
 }
 
 void check_generated_exterior_rows() {
+  {
+    Eigen::MatrixXd upper=Eigen::MatrixXd::Identity(3,3);
+    upper(0,1)=-1e-250;
+    upper(0,2)=1e-180;
+    const xmvb::vb::ExteriorOrbitalTransform transform(complete_space(3,1),upper);
+    const std::vector<int> selected{0,1,2};
+    const auto factors=transform.generate_rows(selected);
+    require(factors.nonZeros()==5 && factors.coeff(0,1)==-1e-250 && factors.coeff(0,2)==1e-180,
+        "exact exterior CSC packing dropped a nonzero small factor");
+  }
   for (int n:{3,6,8}) for (int electrons=0;electrons<=n;++electrons) {
     auto strings=complete_space(n,electrons);
     std::reverse(strings.begin(),strings.end());
@@ -180,10 +191,16 @@ void check_generated_exterior_rows() {
     const Eigen::MatrixXd reference=explicit_exterior(strings,upper);
     std::vector<int> selected{static_cast<int>(strings.size())-1,0,
         static_cast<int>(strings.size()/2)};
-    const auto rows=transform.generate_rows(selected);
+    const Eigen::MatrixXd rows=transform.generate_rows(selected);
     for (int i=0;i<static_cast<int>(selected.size());++i)
       require((rows.row(i)-reference.row(selected[i])).cwiseAbs().maxCoeff()<2e-13,
           "direct exterior rows differ from independent minors/permuted occupations");
+    const auto retained=transform.dynamic_bytes();
+    const Eigen::MatrixXd repeated=transform.generate_rows(selected);
+    const auto single=transform.row_block(selected.front(),1);
+    require(transform.dynamic_bytes()==retained && (repeated-rows).norm()==0.0 &&
+        (single->row(0)-rows.row(0)).norm()==0.0,
+        "input and projection rows do not share the same bounded orbital factors");
     Eigen::MatrixXd team;
 #pragma omp parallel num_threads(2)
 #pragma omp single

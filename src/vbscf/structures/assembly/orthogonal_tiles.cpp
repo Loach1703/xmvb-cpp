@@ -1,6 +1,9 @@
 #include "vbscf/structures/assembly/action.hpp"
 
 #include <algorithm>
+#include <array>
+
+#include <Eigen/SparseCore>
 
 #include "parallel/openmp.hpp"
 #include "core/timing.hpp"
@@ -49,8 +52,10 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
     bool overlap_only,
     std::size_t workspace_bytes) const {
   if (source_contraction_)
+    // Source order has no product-column caches or separate sigma slab;
+    // its factor workspace receives the unsplit action budget.
     return apply_source_tiles(vectors, alpha_transform, beta_transform, sigma,
-        overlap_only, 64ULL * 1024ULL * 1024ULL);
+        overlap_only,workspace_bytes);
   return contract_product_tiles(vectors,alpha_transform,beta_transform,sigma,
       overlap_only,workspace_bytes).images;
 }
@@ -61,6 +66,15 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,std::size_t workspace_bytes,
     bool collect_overlap) const {
   constexpr bool collect_images=true;
+  // Opt-in deltas survive an externally bounded diagnostic. Nested phase
+  // totals describe call paths; they are not additive stage wall times.
+  auto& phases=profiling::phase_totals();
+  constexpr std::array measured{profiling::Phase::CiTransformLeft,
+      profiling::Phase::CiTransformRight,profiling::Phase::CiProductGenerate,
+      profiling::Phase::CiProductProjection,profiling::Phase::CiProductPattern};
+  std::array<unsigned long long,measured.size()> phase_begin{};
+  if (phases.enabled) for (std::size_t i=0;i<measured.size();++i)
+    phase_begin[i]=phases.nanoseconds[static_cast<std::size_t>(measured[i])].load(std::memory_order_relaxed);
   StructureResponseSweep sweep{{Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,vectors.cols()),
       Eigen::MatrixXd::Zero(collect_images && collect_overlap ? n_structures_:0,vectors.cols())},
       Eigen::MatrixXd{},
@@ -168,7 +182,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
               vectors(spin_terms_[term].structure, vector_begin + vector);
     Eigen::MatrixXd h_products = Eigen::MatrixXd::Zero(!ordered ? spin_products_.size():0, width);
     Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(!ordered && collect_overlap ? spin_products_.size():0, width);
-    const auto project_pattern = [&](const ColumnPattern& pattern, const Eigen::MatrixXd& rows,
+    const auto project_pattern = [&](const ColumnPattern& pattern, const Eigen::SparseMatrix<double>& rows,
                              Eigen::MatrixXd& image, Eigen::MatrixXd& target) {
       profiling::ScopedPhase phase(profiling::Phase::CiProductProjection);
       // C^T (T_alpha^T image T_beta): only touched original spin products
@@ -181,9 +195,12 @@ StructureResponseSweep StructureAction::contract_product_tiles(
       cooperative_openmp_for(spin_products_.size(),workers,[&](std::ptrdiff_t group) {
         const int alpha = spin_products_[group] / n_unique_beta_;
         const int beta = spin_products_[group] % n_unique_beta_;
-        for (int vector = 0; vector < width; ++vector)
-          target(group, vector) += image.row(alpha)
-              .segment(vector * rows.rows(), rows.rows()).dot(rows.col(beta));
+        for (int vector = 0; vector < width; ++vector) {
+          double sum=0.0;
+          for (Eigen::SparseMatrix<double>::InnerIterator entry(rows,beta);entry;++entry)
+            sum+=image(alpha,vector*rows.rows()+entry.row())*entry.value();
+          target(group,vector)+=sum;
+        }
       });
     };
     const auto contract = [&]() {
@@ -227,6 +244,14 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     };
 
     std::vector<bool> overlap_consumed(n_unique_beta_, !collect_overlap);
+    std::size_t factor_entries=0,factor_slots=0;
+    const auto sample_factors=[&](std::span<const int> betas) {
+      // Exact zero only: no amplitude threshold and no selected-space closure.
+      auto factors=beta_transform.generate_rows(betas);
+      factor_entries+=factors.nonZeros();
+      factor_slots+=static_cast<std::size_t>(factors.rows())*factors.cols();
+      return factors;
+    };
     detail::InputColumns input(n_unique_alpha_,width,extent,cache_bytes,column_support,
         [&](std::span<const int> betas) -> std::vector<ColumnTile> {
       profiling::ScopedPhase phase(profiling::Phase::CiProductGenerate);
@@ -240,7 +265,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
         column_patterns[b]=pattern_at(betas[b]);
       });
       const auto pattern=merge_patterns(column_patterns);
-      const Eigen::MatrixXd rows=beta_transform.generate_rows(betas);
+      const auto rows=sample_factors(betas);
       Eigen::MatrixXd values = Eigen::MatrixXd::Zero(n_unique_alpha_, width * rows.rows());
       // Each alpha owns its row. CSR maps structures straight to strings;
       // no determinant vector or full raw spin-product grid is formed.
@@ -249,10 +274,9 @@ StructureResponseSweep StructureAction::contract_product_tiles(
         auto group = std::lower_bound(spin_products_.begin(), spin_products_.end(), first);
         for (; group != spin_products_.end() && *group < first + n_unique_beta_; ++group) {
           const auto id = static_cast<std::size_t>(group - spin_products_.begin());
-          for (int vector = 0; vector < width; ++vector) {
-            values.row(alpha).segment(vector * rows.rows(), rows.rows()).noalias() +=
-                coefficients(id, vector) * rows.col(*group - first).transpose();
-          }
+          for (Eigen::SparseMatrix<double>::InnerIterator entry(rows,*group-first);entry;++entry)
+            for (int vector=0;vector<width;++vector)
+              values(alpha,vector*rows.rows()+entry.row())+=coefficients(id,vector)*entry.value();
         }
       });
       if (pattern.full) alpha_transform.apply_left(&values);
@@ -310,7 +334,7 @@ StructureResponseSweep StructureAction::contract_product_tiles(
         else for (int a=0;a<tile.values.rows();++a)
           image(tile.pattern->rows[a],packed)=tile.values(a,v);
       });
-      const auto rows=beta_transform.generate_rows(completed_betas);
+      const auto rows=sample_factors(completed_betas);
       project_pattern(pattern,rows,image,h_products);
       completed_images.clear(); completed_betas.clear();
     };
@@ -403,7 +427,14 @@ StructureResponseSweep StructureAction::contract_product_tiles(
             }
           }
         };
-    sigma.apply_tiled(width,read,add,support,spin_exchange_parity_);
+    sigma.apply_tiled(width,read,add,support,spin_exchange_parity_,
+        [&](std::span<const int> betas) {
+      if (ordered) return;
+      for (const int beta:betas) {
+        input.release(beta);
+        output.release(beta);
+      }
+    },std::max<std::size_t>(1,workspace_bytes/4));
     output.finish();
     flush_output();
     // Exchange quotienting may never request some input columns. The overlap
@@ -414,6 +445,9 @@ StructureResponseSweep StructureAction::contract_product_tiles(
         if (!overlap_consumed[beta]) missing.push_back(beta);
       input.prepare(missing);
     }
+    if (profiling::phase_totals().enabled)
+      std::fprintf(stderr,"XMVB_COLUMN_RELEASE,input=%zu,output=%zu,factor_entries=%zu,factor_slots=%zu\n",
+          input.cache().releases,output.releases,factor_entries,factor_slots);
     result.tiles.input_evictions += input.cache().evictions;
     result.tiles.output_evictions += output.evictions;
     result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes,
@@ -427,6 +461,11 @@ StructureResponseSweep StructureAction::contract_product_tiles(
         static_cast<long>(vectors.cols()),overlap_only,result.tiles.expansions,
         result.tiles.input_panels,result.tiles.hamiltonian_projections,
         result.tiles.input_evictions,result.tiles.output_evictions,ordered_beta,resident_rhs);
+  if (phases.enabled) for (std::size_t i=0;i<measured.size();++i)
+    std::fprintf(stderr,"XMVB_PRODUCT_PHASE,stage=%s,wall=%.9f\n",
+        profiling::PhaseTotals::name(measured[i]),
+        (phases.nanoseconds[static_cast<std::size_t>(measured[i])].load(std::memory_order_relaxed)-
+          phase_begin[i])*1e-9);
   return sweep;
 }
 

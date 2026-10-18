@@ -8,6 +8,7 @@
 
 #include <Eigen/Core>
 #include "mcscf/ci/product_index.hpp"
+#include "mcscf/ci/workspace.hpp"
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "integrals/active/two_electron.hpp"
@@ -195,7 +196,7 @@ public:
    */
   StructureActionResult apply_streamed(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
-      std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
+      std::size_t workspace_bytes = mcscf::ci_workspace_bytes()) const;
 
   /** @brief Exact H/M through minimum row/column source factors and channel tiles.
    * Arbitrary selected structures need no closure. This explicit contraction
@@ -433,7 +434,7 @@ private:
       const ExteriorOrbitalTransform& beta_transform,
       const mcscf::DirectCiSigmaAction& sigma,
       bool overlap_only = false,
-      std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
+      std::size_t workspace_bytes = mcscf::ci_workspace_bytes()) const;
   /** @brief Generated accepted/tangent jet with immediate shared consumers. */
   StructureResponseSweep product_jet(const StructureAdjointState& state,
       const Eigen::MatrixXd* response, const Eigen::MatrixXd* delta_upper,
