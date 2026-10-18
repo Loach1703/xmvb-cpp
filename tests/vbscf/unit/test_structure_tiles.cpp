@@ -21,6 +21,7 @@
 #include "mcscf/ci/factors.hpp"
 #include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma_plan.hpp"
+#include "mcscf/ci/sigma_gather.hpp"
 #include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
@@ -2010,6 +2011,34 @@ void check_sigma_tile_plan() {
       }
 }
 
+/** @brief Sparse beta pullback preserves halo intervals and destination holes. */
+void check_sparse_beta_gather() {
+  const std::vector<int> halo{0,2,3,6,7,9},targets{0,2,4,5};
+  const std::vector<int> index{2,-1,0,-1,3,1},sparse{1,3,6,7,10};
+  constexpr int pairs=3;
+  const Eigen::MatrixXd kernel=Eigen::MatrixXd::Identity(pairs,pairs);
+  const xmvb::mcscf::detail::ChannelProduct basis(kernel,2,false);
+  xmvb::mcscf::detail::ChannelLayout layout;
+  layout.reset(basis,{},4,2);
+  Eigen::VectorXd values=Eigen::VectorXd::LinSpaced(8*pairs,-0.7,1.1);
+  for (const int shift:{0,4}) for (const bool selected:{false,true})
+    for (int first=0;first<static_cast<int>(halo.size());++first)
+      for (int last=first;last<=static_cast<int>(halo.size());++last) {
+        Eigen::VectorXd actual=Eigen::VectorXd::Constant(selected ? sparse.size():11,0.25);
+        Eigen::VectorXd expected=actual;
+        for (int out=0;out<expected.size();++out) {
+          const int alpha=selected ? sparse[out]:out;
+          for (int h=first;h<last;++h)
+            if (halo[h]==alpha && index[h]>=0)
+              expected[out]-=values[(index[h]+shift)*pairs];
+        }
+        xmvb::mcscf::detail::gather_beta_rows(values.data(),pairs,shift,-1.0,
+            targets,index.data(),halo,layout,first,last,actual.data(),
+            selected ? sparse.data():nullptr,selected ? sparse.size():0);
+        require((actual-expected).norm()==0,"sparse beta gather changed a halo interval or destination support");
+      }
+}
+
 /** @brief Ragged-channel capacity never drops nodes at a budget boundary. */
 void check_packed_sigma_tile_plan() {
   using namespace xmvb::mcscf;
@@ -3434,6 +3463,7 @@ int main(int argc, char** argv) {
       check_sigma_columns(make_fixture(4, 4, 1), 2);
       check_sigma_columns(make_fixture(10, 5, 4), 2);
       check_sigma_tile_plan();
+      check_sparse_beta_gather();
       check_packed_sigma_tile_plan();
       check_prefix_words();
       check_supported_sigma(4, 2, 2, 2);

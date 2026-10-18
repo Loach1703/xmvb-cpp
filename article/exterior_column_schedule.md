@@ -529,3 +529,38 @@ global Gram entries without allocating extra scratch.
 The unrestricted family is the same algorithm with $J_g=I$ and implicit
 identity row maps. The earlier full-channel packing implementation and its
 in-place expansion logic are removed, rather than kept as a second solver.
+
+## Sparse beta pullback and exchange weights
+
+At a fixed target beta string $b$, let $\mathcal T_b$ be the alpha rows
+actually present in the current tile. If the tile image is $F_{t,u}$, the
+contribution of a beta generator edge $b\to b'$ is
+
+$$
+z_{a,b'}\mathrel{+}=s_{b'b}F_{(a,b),u},
+\qquad a\in\mathcal T_b\cap\mathcal D_{b'},
+$$
+
+where $s_{b'b}$ is its fermionic sign and $\mathcal D_{b'}$ is the destination
+column's allowed alpha support. An absent tile row contributes exactly zero;
+scanning the full alpha halo separately for every beta edge is unnecessary.
+Build the sorted halo addresses of $\mathcal T_b$ once from the existing
+target map, then intersect those addresses with the writer's alpha interval
+and $\mathcal D_{b'}$. This requires one integer per tile target, charged to
+the shared workspace. The existing RHS-dependent channel map locates each
+image; channel groups need not coincide with beta groups. No product-space
+closure is assumed.
+
+For exchange quotienting, let $D_g$ select the alpha-equals-beta rows in group
+$g$. The image supplied to the pullback is
+
+$$
+\widetilde C_g=W_g A_g(KJ_g)^T
+=2A_g(KJ_g)^T-D_g A_g(KJ_g)^T.
+$$
+
+The factor two is a BLAS scalar. The second term is evaluated only for the
+diagonal rows. Thus the full-image postmultiplication scaling pass and its
+ownership-transition barrier disappear. Directional forcing uses the same
+identity term by term; Gram weights and the unweighted accepted-state panel
+are unchanged. Unequal-spin sectors have $W_g=I$ and need neither operation.

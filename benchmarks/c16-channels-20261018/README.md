@@ -72,5 +72,29 @@ fixture large enough to exercise the per-worker grouped Gram. Frozen binary:
 `26652e9d1abe9cd1adace1fefe19336dcefca17af41272513facf086be066e58`.
 Native one-step293205 runs on anode014; bounded420-second profiling job293206
 runs on anode031. Both use32cores. No historical version is rerun;
-timings/RSS remain pending. Profiling is for attribution, not native speed
-claims. The one-step test does not establish SCF convergence.
+profiling is for attribution, not native speed claims. The one-step test does
+not establish SCF convergence.
+
+Native293205 completed in762.94s with11215844KiB GNU-time peak RSS,7 orbital
+HVPs,4 keyframes and11 microiterations. The accepted energy is
+-616.00691234564522Eh,4.8e-12Eh from control293167. Total time is5.03% lower
+and peak RSS4.14% lower. CI/HVP/keyframe totals are343.011/189.207/55.985s;
+the corresponding control totals are358.592/224.766/65.086s. The remaining
+unpartitioned time is174.737s versus154.886s; it is not attributed to a
+particular phase without further measurements.
+
+Bounded capture293206 has no reported errors or warnings; its child
+experiment is intentionally unclosed at the420-second timeout. Exclusive CPU
+sample shares: team/barrier waiting39.87%, sigma pullback16.44%, scatter6.69%,
+BLAS compute kernels6.83%. These are not wall-time fractions or a matched
+full-phase before/after profile.
+
+The next change traverses compact beta target rows and fuses exchange weights
+into the channel products. It removes full-halo scans of absent target rows,
+a full-image scaling pass and one team barrier. Qualification and C16 timing
+will be recorded after execution; no speedup is inferred from the code change.
+
+Qualification293253 passed6/6 tests in6.57s. At the user's request, follow-up
+native/profile jobs293254/293255 were cancelled after four minutes and replaced
+by C12/C14 array293257. Their incomplete timings are not performance results.
+See `benchmarks/c12-c14-channels-20261018/README.md`.

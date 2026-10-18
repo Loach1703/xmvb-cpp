@@ -85,10 +85,13 @@ public:
 /** @brief Multiply without packing; each worker owns a slice of every group.
  * Source and destination must be disjoint. Addition fuses directional forcing
  * into an existing image without materializing a second full-channel image.
+ * Exchange weights are fused into BLAS alpha, with a diagonal-row correction.
  */
 inline void multiply_channels(const ChannelProduct& basis,const ChannelLayout& layout,
-    const double* source,double* destination,int thread,int team,bool add=false) {
+    const double* source,double* destination,int thread,int team,bool add,
+    std::span<const int> diagonal_rows,int count,int width,bool exchange) {
   const int pairs=basis.channels(0);
+  const double scale=exchange ? 2.0:1.0;
   for (int group=0;group<basis.groups();++group) {
     const int size=layout.size(group),first=size*thread/team,last=size*(thread+1)/team;
     if (first==last) continue;
@@ -97,8 +100,15 @@ inline void multiply_channels(const ChannelProduct& basis,const ChannelLayout& l
         last-first,channels);
     Eigen::Map<ChannelRows> output(destination+static_cast<std::size_t>(layout.begin(group)+first)*pairs,
         last-first,pairs);
-    if (add) output.noalias()+=input*basis.kernel(group).transpose();
-    else output.noalias()=input*basis.kernel(group).transpose();
+    if (add) output.noalias()+=scale*input*basis.kernel(group).transpose();
+    else output.noalias()=scale*input*basis.kernel(group).transpose();
+    // Exchange orbits have weight two except on alpha=beta. Correct only
+    // those rows; a separate read/write pass over every full image is avoided.
+    if (exchange) for (int v=0;v<width;++v) for (const int row:diagonal_rows) {
+      const int local=layout.image(v*count+row)-layout.begin(group)-first;
+      if (local>=0 && local<last-first)
+        output.row(local).noalias()-=input.row(local)*basis.kernel(group).transpose();
+    }
   }
 }
 

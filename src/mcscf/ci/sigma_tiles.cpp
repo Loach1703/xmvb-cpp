@@ -14,6 +14,7 @@
 #include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma_plan.hpp"
 #include "mcscf/ci/channel_product.hpp"
+#include "mcscf/ci/sigma_gather.hpp"
 
 namespace xmvb::mcscf {
 namespace {
@@ -198,7 +199,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   auto& column_index=plan.column_index;
   auto& active_support=plan.active_support;
   auto& released_columns=plan.released;
-  std::vector<int> diagonal_rows,same_group,offsets,positions,target_index;
+  std::vector<int> diagonal_rows,same_group,offsets,positions,target_index,target_rows;
   const auto& channel_groups=plan.channel_groups;
   detail::ChannelLayout channel_layout;
   std::vector<Eigen::Index> beta_offsets;
@@ -277,11 +278,17 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
 
               same_group.assign(n_columns, -1);
               target_index.assign(static_cast<std::size_t>(n_halo) * groups.size(), -1);
+              target_rows.resize(count);
               offsets.assign(n_columns + 1, 0);
               for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
                 same_group[column_index[groups[g].beta]] = g;
                 for (int i = groups[g].begin; i < groups[g].end; ++i)
-                  target_index[static_cast<std::size_t>(g) * n_halo + halo_index[active[i]]] = i;
+                  target_index[static_cast<std::size_t>(g)*n_halo+halo_index[active[i]]]=i;
+                // Sort once through the existing row map. Every beta edge
+                // then traverses only its valid targets, rather than the halo.
+                int target=groups[g].begin;
+                const int* index=target_index.data()+static_cast<std::size_t>(g)*n_halo;
+                for (int h=0;h<n_halo;++h) if (index[h]>=0) target_rows[target++]=h;
                 for (const auto& edge:beta_graph.singles(groups[g].beta))
                   ++offsets[column_index[edge.source] + 1];
               }
@@ -425,13 +432,13 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
         // have different owners. Publish all source rows before multiplication.
 #pragma omp barrier
         if (add_columns) detail::multiply_channels(channel_product,channel_layout,
-            scattered,transformed,thread,team);
+            scattered,transformed,thread,team,false,diagonal_rows,count,width,exchange_parity!=0);
         if (add_forcing) {
           // Expanding packed A into a full forcing image may overlap rows
           // owned by other workers. Every base multiplication must finish.
 #pragma omp barrier
           detail::multiply_channels(directional_products[request_id],channel_layout,
-              state_channels,scattered,thread,team);
+              state_channels,scattered,thread,team,false,diagonal_rows,count,width,exchange_parity!=0);
           if (add_columns) {
             // Both images use identical group row ownership.
             for (int group=0;group<channel_product.groups();++group) {
@@ -444,27 +451,9 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
           }
         } else if (direction && add_columns) {
           detail::multiply_channels(directional_products[request_id],channel_layout,
-              state_channels,transformed,thread,team,true);
+              state_channels,transformed,thread,team,true,diagonal_rows,count,width,exchange_parity!=0);
         }
-        // Return from grouped owners to original-row owners for exchange weights.
-#pragma omp barrier
-        // E commutes with spin exchange. In a fixed-parity bilinear form,
-        // off-diagonal exchange orbits have two identical contributions.
-        if (add_columns && exchange_parity)
-          for (int row = first; row < last; ++row) {
-            const int local = row % count;
-            if (active[local] != groups[group_index[local]].beta)
-              Eigen::Map<Eigen::VectorXd>(transformed+
-                  static_cast<std::size_t>(channel_layout.image(row))*pairs,pairs)*=2.0;
-          }
-        if (add_forcing && exchange_parity)
-          for (int row = first; row < last; ++row) {
-            const int local = row % count;
-            if (active[local] != groups[group_index[local]].beta) {
-              Eigen::Map<Eigen::VectorXd>(scattered+
-                  static_cast<std::size_t>(channel_layout.image(row))*pairs,pairs)*=2.0;
-            }
-          }
+        // Publish grouped images before the single writer schedules tasks.
 #pragma omp barrier
 
 #pragma omp single
@@ -492,7 +481,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                   if (local<first || local>=last) continue;
                   double sum = 0;
                   if (index[local] >= 0) {
-                    const int row = channel_layout.image(v * count + index[local]);
+                    const int row=channel_layout.image(v*count+index[local]);
                     for (const int p : alpha_->occupied(a))
                       sum += channel_values[static_cast<std::size_t>(row) * pairs +
                           core::PairIndex::packed_pair_index(p, p)];
@@ -506,7 +495,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                     const int target = h < 0 ? -1 : index[h];
                     if (target >= 0)
                       sum += links[link].sign *
-                          channel_values[static_cast<std::size_t>(channel_layout.image(v * count + target)) * pairs +
+                          channel_values[static_cast<std::size_t>(channel_layout.image(v*count+target)) * pairs +
                               links[link].pair];
                   }
                   destination[rows ? i:a] += sum;
@@ -518,16 +507,10 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                 const auto& link = incoming[edge];
                 const int* index = target_index.data() + static_cast<std::size_t>(link.group) * n_halo;
                 const double* values = channel_values + link.pair;
-                const double sign = link.sign;
-                for (int i=begin;i<end;++i) {
-                  const int a=rows ? rows[i]:halo[i];
-                  const int local=rows ? (identity_halo ? a:halo_index[a]):i;
-                  if (local<first || local>=last) continue;
-                  const int target=index[local];
-                  if (target>=0)
-                    destination[rows ? i:a]+=sign*values[
-                        static_cast<std::size_t>(channel_layout.image(v*count+target))*pairs];
-                }
+                const auto& group=groups[link.group];
+                detail::gather_beta_rows(values,pairs,v*count,link.sign,
+                    {target_rows.data()+group.begin,static_cast<std::size_t>(group.end-group.begin)},
+                    index,halo,channel_layout,first,last,destination,rows,n_rows);
               }
             };
               writer(columns, halo, accumulate);
