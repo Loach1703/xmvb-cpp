@@ -38,6 +38,7 @@ export LD_LIBRARY_PATH=/home/guqqgroup/taoxia/xmvb-runs/porphine-current-2026101
 export LC_ALL=C OMP_NUM_THREADS=32 OMP_PLACES=cores OMP_PROC_BIND=close
 export OMP_MAX_ACTIVE_LEVELS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1
 unset XMVB_PHASE_TIMING XMVB_CIAH_TRACE
+if [[ ${CI_BENCH_TRACE:-} == scalar ]]; then export XMVB_CIAH_TRACE=scalar; fi
 export CI_BENCH_ARTIFACT="$artifact" CI_BENCH_BUDGET="$budget"
 env | sort > environment.txt
 sha256sum bin/xmvb-cpp.exe input.xmi cc-pvdz.gbs > hashes.txt

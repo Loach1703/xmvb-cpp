@@ -1,5 +1,12 @@
 # Cached advancement of clipped CIAH proposals
 
+The historical results below describe the original path-advancement change.
+The2026-10-18 driver additionally admits a remaining path only after its
+cached images satisfy the existing forcing condition for the current RHS.
+This corrects the C12 FULL five-step regression without a threshold change;
+see `../c12-c14-channels-20261018/README.md` and
+`article/ciah_clipped_path.md` for its derivation and native comparisons.
+
 ## Change
 
 An admitted AH proposal can require several component-limited pieces. Retain

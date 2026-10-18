@@ -77,3 +77,47 @@ Raw native artifacts are retained remotely under
 `/home/guqqgroup/taoxia/work/xmvb-ciah-subspace-20261017/benchmarks/c12-c14-channels-20261018/run-293257`.
 Local diagnostic records retain traces, resource logs, affinity and hashes in
 `results/diagnostics/c12-c14-channels-20261018/run-293257/`.
+
+## Correct current-RHS replay after the FULL step regression
+
+The five-step FULL run cannot stop at step4: its energy decrease is
+9.7894656e-7Eh, above the unchanged1e-7Eh threshold. Historical FULL reached
+its near-final energy during macro3 with22 HVPs; unconditional clipped-path
+replay instead used11 and left a correction for macro4 and a fifth acceptance.
+
+The driver formerly consumed an unused AH path without testing its current
+right-hand side. An exact source Ritz residual does not certify that
+remaining direction after the gradient changes. Use cached H/G images to
+form its complete current AH residual, including outside-space components,
+and apply the existing1/3 forcing fraction. Failure discards only the unused
+path and reprojects in the retained span before any enrichment. No new HVP,
+metric solve, true gradient, threshold or molecule-dependent policy is added.
+The formula and independent augmented-matrix check are recorded in
+`article/ciah_clipped_path.md`.
+
+Qualification293280 passes8/8 tests in7.23s, including `ciah` and `keyframe`.
+Frozen binary SHA256:
+`ab08632d8da2d6be5952760eda828dc6bd0b96b21d29a4c6de19a12bd44c1e5e`.
+Array293281_[0-3] converges all four original inputs on Hanhai25 with32 cores,
+the same4GiB shared budget and unchanged outer criteria. Scalar event traces
+do not enable physical-model audits. No prior executable is rerun.
+
+| Case | Steps before/after | HVP before/after | Process s before/after | GNU RSS GiB before/after |
+|---|---:|---:|---:|---:|
+| C12 COV |4/4|33/33|15.42/15.12|3.423/3.345|
+| C12 ION(0:2) |4/4|50/44|82.66/77.29|3.848/3.869|
+| C12 FULL |5/4|44/40|109.18/104.58|4.387/4.503|
+| C14 COV |4/4|39/46|220.36/222.50|7.985/7.986|
+
+COV has zero replay resets and preserves its trajectory. The other three
+cases each reject three stale remainders. FULL's per-macro HVP counts return
+to8,7,22,3 and its energy is -399.417495587054Eh, unchanged from the preceding
+run. ION's energy is unchanged; C14 ends at -535.672671742975Eh (4.8e-11Eh
+from the preceding result). C14's HVP count increases; this correction is
+not a demonstrated all-system reduction of action counts. COV/ION/FULL use
+the same respective nodes as293257; C14 changes from anode060 to anode033.
+All these nodes are EPYC9755, but the allocations are not exclusive repeats.
+
+The two frozen measurements remain separate in `current.csv` and `replay.csv`;
+`replay-comparison.csv` pairs their original input hashes. Raw logs and traces
+are in the corresponding `run-293281/` directory alongside `run-293257/`.

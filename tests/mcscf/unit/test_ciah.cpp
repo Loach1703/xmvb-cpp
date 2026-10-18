@@ -682,6 +682,39 @@ void check_clipped_ah_step_path() {
   require(actions == 1, "unclipped AH path evaluated the operator again");
 }
 
+/** @brief An exact old AH root need not resolve the current unused path. */
+void check_clipped_path_current_residual() {
+  Eigen::MatrixXd hessian=2.0*Eigen::MatrixXd::Identity(1,1);
+  const Eigen::MatrixXd metric=1.7*Eigen::MatrixXd::Identity(1,1);
+  for (const double magnitude:{10.0,1.0e-4}) {
+    const Eigen::VectorXd gradient=Eigen::VectorXd::Constant(1,magnitude);
+    int actions=0;
+    const auto problem=dense_problem(hessian,metric,gradient,&actions);
+    CiahWorkspace workspace(problem);
+    const CiahResult proposal=workspace.next(gradient);
+    require(proposal.resolved(gradient.norm(),1.0/3.0),
+        "current-RHS fixture does not have an exact source Ritz root");
+    CiahStepPath path;
+    path.set(proposal);
+    const auto [prefix,image]=path.take(0.4);
+    const Eigen::VectorXd current=gradient+image;
+    const Eigen::VectorXd remaining=0.6*proposal.step;
+    Eigen::Matrix2d augmented,augmented_metric;
+    augmented << 0.0,current[0],current[0],hessian(0,0);
+    augmented_metric << 1.0,0.0,0.0,metric(0,0);
+    Eigen::Vector2d vector; vector << 1.0,remaining[0];
+    const double omega=current.dot(remaining);
+    const Eigen::Vector2d full=augmented*vector-omega*augmented_metric*vector;
+    const Eigen::VectorXd residual=path.residual_at(current);
+    require(std::abs(full[0])<1e-14,"current AH reference row is inconsistent");
+    require_close(residual,full.tail(1),2e-14,
+        "cached unused-step residual omits an AH or metric term");
+    require((residual.norm()<=current.norm()/3.0)==(magnitude<1.0),
+        "clipped path admits a stale AH root or rejects a near-Newton remainder");
+    require(actions==1,"current-RHS path check evaluated a new Hessian action");
+  }
+}
+
 /** @brief A true keyframe replaces the path; its unused residual remains expandable. */
 void check_ah_step_path_keyframe_refresh() {
   Eigen::Matrix3d hessian;
@@ -1077,6 +1110,7 @@ int main() {
     check_metric_validation();
     check_accumulated_microstep_images();
     check_clipped_ah_step_path();
+    check_clipped_path_current_residual();
     check_ah_step_path_keyframe_refresh();
     check_keyframe_energy_model();
     check_converged_root_reuse();

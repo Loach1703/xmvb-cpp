@@ -64,6 +64,41 @@ $$
 
 ## What the path does not certify
 
+### Current-RHS admission of a remaining segment
+
+Exact reconstruction of a source step is not sufficient to justify consuming
+its unused part after the RHS changes. For the current gradient $g_j$, set
+$s_j=\rho_jt$ and use the retained images $Ht$ and $Gt$. In the augmented
+equation with reference component one, the reference row fixes the shift:
+
+$$
+\omega_j=g_j^Ts_j,\qquad
+r_j=g_j+Hs_j-\omega_jGs_j
+=g_j+\rho_jHt-\rho_j^2(g_j^Tt)Gt.
+$$
+
+The reference-row residual is then zero. The vector $r_j$ is the complete
+remaining-row residual, including components outside the retained subspace.
+It requires no Hessian or metric application. Replay is admitted only if
+
+$$
+\|r_j\|_*\leq\eta\|g_j\|_*,\qquad \eta=1/3,
+$$
+
+using the existing CIAH coordinate norm and forcing fraction. If it fails,
+discard the unused path and call `reset_rhs()` followed by `next(g_j)`.
+This first reprojects in the existing space and makes no new HVP. Necessary
+complement enrichment remains governed by the unchanged current-RHS rule.
+This is a correction to unconditional replay, not an outer stopping test.
+In particular, no extra metric inverse or true keyframe is required.
+
+The independent regression forms the full augmented matrix at an intermediate
+gradient. A fully solved source AH root can fail this current-RHS test far
+from the Newton regime, whereas a near-Newton remainder passes. Checking the
+stored source residual alone cannot distinguish these cases.
+
+### Source-root residual
+
 The source AH eigenpair does not become a new AH eigenpair for the gradient
 at an intermediate point. For example, if $g_j=g_a+(1-\rho_j)Ht$, the residual
 of the remaining direction at the old shift is

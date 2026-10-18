@@ -130,6 +130,17 @@ public:
   double remaining_fraction() const noexcept { return remaining_; }
   const Eigen::VectorXd& direction() const noexcept { return proposal_->step; }
 
+  /** @brief Current AH residual of the unused step, using cached H/G images.
+   * With s=remaining*p, choose omega=g^T*s to satisfy the reference row.
+   * The remaining row is g+H*s-omega*G*s. Its source Ritz residual is not
+   * a certificate after the gradient changes, even for a quadratic model.
+   */
+  Eigen::VectorXd residual_at(const Eigen::VectorXd& gradient) const {
+    const double omega=remaining_*gradient.dot(proposal_->step);
+    return gradient+remaining_*proposal_->hessian_step-
+        (omega*remaining_)*proposal_->metric_step;
+  }
+
   /** @brief Take a positive fraction, at most one, of the remaining path. */
   std::pair<Eigen::VectorXd, Eigen::VectorXd> take(double fraction) {
     const double part = fraction * remaining_;

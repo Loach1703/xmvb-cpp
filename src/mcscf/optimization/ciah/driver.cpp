@@ -52,15 +52,29 @@ CiahMicroResult run_ciah_microsteps(CiahWorkspace& workspace,
   bool audited_keyframe = false;
   CiahStepPath path;
   while (true) {
-    const bool replayed = path.pending();
+    bool replayed = path.pending();
+    const double rhs_norm = coordinate_norm(predicted_gradient);
+    double replay_residual=0.0;
+    if (replayed) {
+      replay_residual=coordinate_norm(path.residual_at(predicted_gradient));
+      if (!(replay_residual<=rhs_norm/gradient_trust)) {
+        diagnostics::ciah_trace("ciah_replay_reset",
+            "basis=%d,remaining_fraction=%.17g,current_residual=%.17g,target=%.17g",
+            candidate.basis_size,path.remaining_fraction(),replay_residual,rhs_norm/gradient_trust);
+        path.clear();
+        // The gradient changed after consuming a clipped prefix. Reproject
+        // it in the existing span before considering another physical HVP.
+        workspace.reset_rhs();
+        replayed=false;
+      }
+    }
     if (!replayed) {
       candidate = workspace.next(predicted_gradient);
       ++result.micro_iterations;
     }
-    const double rhs_norm = coordinate_norm(predicted_gradient);
     // A cached-only candidate is usable when the current AH equation is
     // resolved. Otherwise enrich before consuming an approximate step.
-    const bool forcing_resolved = !replayed &&
+    const bool forcing_resolved = replayed ||
         candidate.resolved(rhs_norm, 1.0 / gradient_trust);
     const bool ready = replayed || candidate.converged || candidate.exhaustion ||
         (candidate.basis_size >= ah_start_cycle &&
