@@ -11,6 +11,9 @@ set(_xmvb_vbscf_unit_targets
   test_integral_transform
   test_ri_integral_transform
   test_orthogonal_ri_transform
+  test_fused_integral_frame
+  test_two_electron_jet
+  test_raw_integral_frame
   test_projected_orbital_pullback
   test_ri_projected_response
   test_accepted_pair_tile
@@ -72,6 +75,11 @@ if (BUILD_TESTING)
   add_test(NAME integral_transform COMMAND test_integral_transform)
   add_test(NAME ri_integral_transform COMMAND test_ri_integral_transform)
   add_test(NAME orthogonal_ri_transform COMMAND test_orthogonal_ri_transform)
+  add_test(NAME fused_integral_frame COMMAND test_fused_integral_frame)
+  add_test(NAME two_electron_jet COMMAND test_two_electron_jet)
+  add_test(NAME raw_integral_frame COMMAND test_raw_integral_frame)
+  set_tests_properties(fused_integral_frame two_electron_jet raw_integral_frame PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME projected_orbital_pullback COMMAND test_projected_orbital_pullback)
   add_test(NAME ri_projected_response COMMAND test_ri_projected_response)
   add_test(NAME accepted_pair_tile COMMAND test_accepted_pair_tile)

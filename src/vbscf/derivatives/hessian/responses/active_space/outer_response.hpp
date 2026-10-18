@@ -69,7 +69,8 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
     const xmvb::integrals::RiActiveTwoElectronResponseCache* ri_two_electron_cache,
     const xmvb::integrals::RiAoFactorization* ri_factorization,
     std::vector<double>* symmetric_active_overlap_gradient_workspace,
-    std::vector<double>* symmetric_active_one_electron_gradient_workspace);
+    std::vector<double>* symmetric_active_one_electron_gradient_workspace,
+    const Eigen::MatrixXd* two_electron_orbital_gradient = nullptr);
 
 bool has_active_matrix_gradient(
     const AcceptedPointContext& context,

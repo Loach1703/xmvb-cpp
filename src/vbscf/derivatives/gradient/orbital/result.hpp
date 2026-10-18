@@ -115,9 +115,12 @@ struct OrbitalGradientResult {
   Eigen::MatrixXd active_one_electron_integrals;
 
   /**
-   * @brief Packed active-space two-electron integrals used to derive `J` and `K`.
+   * @brief Packed active integrals in the frame specified by two_electron_frame.
    */
   std::vector<double> packed_active_two_electron_integrals;
+
+  /** @brief Upper R for the C R^-1 integral frame; empty denotes raw orbitals. */
+  Eigen::MatrixXd two_electron_frame;
 
   /**
    * @brief Flat indices of the explicit sparse orbital coefficients.

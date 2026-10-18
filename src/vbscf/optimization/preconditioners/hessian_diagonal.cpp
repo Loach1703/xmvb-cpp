@@ -159,11 +159,19 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
       orbital_input.ao_overlap_matrix.data(), n_bf, n_bf);
   const Eigen::Map<const Eigen::MatrixXd> active_overlap(
       orbitals.active_orbital_overlap_matrix.data(), n_active, n_active);
-  Eigen::LLT<Eigen::MatrixXd> active_llt(active_overlap);
-  if (active_llt.info() != Eigen::Success) {
-    throw std::runtime_error("active overlap factorization failed");
+  const auto& active_two_electron = prepared.active_space_two_electron_result;
+  const bool two_electron_pretransformed =
+      active_two_electron.orbital_transform.size() != 0;
+  Eigen::MatrixXd active_transform;
+  if (two_electron_pretransformed) {
+    active_transform = active_two_electron.orbital_transform;
+  } else {
+    Eigen::LLT<Eigen::MatrixXd> active_llt(active_overlap);
+    if (active_llt.info() != Eigen::Success) {
+      throw std::runtime_error("active overlap factorization failed");
+    }
+    active_transform = active_llt.matrixU();
   }
-  const Eigen::MatrixXd active_transform = active_llt.matrixU();
   const Eigen::MatrixXd inverse_active_transform =
       active_transform.template triangularView<Eigen::Upper>().solve(
           Eigen::MatrixXd::Identity(n_active, n_active));
@@ -171,9 +179,12 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
   Eigen::MatrixXd mo = orbitals.auxiliary_orbital_matrix;
   mo.leftCols(n_core) =
       orbitals.physical_orbital_frame.inactive_orthonormal_orbital_matrix;
-  mo.middleCols(n_core, n_active) =
-      orbitals.auxiliary_orbital_matrix.middleCols(n_core, n_active) *
-      inverse_active_transform;
+  if (two_electron_pretransformed)
+    mo.middleCols(n_core, n_active) = active_two_electron.dense_active_coefficients;
+  else
+    mo.middleCols(n_core, n_active) =
+        orbitals.auxiliary_orbital_matrix.middleCols(n_core, n_active) *
+        inverse_active_transform;
   if ((mo.transpose() * overlap * mo -
        Eigen::MatrixXd::Identity(n_bf, n_bf)).cwiseAbs().maxCoeff() > 2.0e-8) {
     throw std::runtime_error("analytic orbital frame is not AO-metric orthonormal");
@@ -183,12 +194,18 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
       accepted.active_one_electron_gradient.data(), n_active, n_active);
   const Eigen::MatrixXd dm1 =
       active_transform * original_dm1 * active_transform.transpose();
-  const std::vector<double> packed_dm2 = pack_symmetric_dm2(
-      transform_dm2(
-          unpack_symmetric_active_two_rdm(
-              accepted.packed_active_two_electron_gradient, n_active),
-          active_transform),
-      n_active);
+  std::vector<double> owned_packed_dm2;
+  const std::vector<double>* packed_dm2 =
+      &accepted.packed_active_two_electron_gradient;
+  if (!two_electron_pretransformed) {
+    owned_packed_dm2 = pack_symmetric_dm2(
+        transform_dm2(
+            unpack_symmetric_active_two_rdm(
+                accepted.packed_active_two_electron_gradient, n_active),
+            active_transform),
+        n_active);
+    packed_dm2 = &owned_packed_dm2;
+  }
 
   AnalyticDiagonalIntermediates x;
   x.n_core = n_core;
@@ -198,8 +215,9 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
   x.v_core = mo.transpose() *
       prepared.ao_effective_one_electron_result.ao_coulomb_exchange_matrix * mo;
 
-  const auto& active_two_electron = prepared.active_space_two_electron_result;
-  xmvb::integrals::ExactCtxPairMatrix active_pair_products;
+  xmvb::integrals::ExactCtxPairMatrix owned_active_pair_products;
+  const xmvb::integrals::ExactCtxPairMatrix* active_pair_products =
+      &owned_active_pair_products;
   if (active_two_electron.representation ==
       xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
     if (active_two_electron.ri_active_pair_factors.size() == 0 ||
@@ -207,23 +225,33 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
       throw std::invalid_argument(
           "RI analytic Hessian diagonal requires accepted active-pair factors");
     }
-    const Eigen::MatrixXd orthogonal_active_factors =
-        xmvb::integrals::transform_ri_pair_factors(
-            active_two_electron.ri_active_pair_factors, inverse_active_transform);
-    active_pair_products.noalias() =
+    Eigen::MatrixXd transformed_active_factors;
+    const Eigen::MatrixXd* orthogonal_active_factors =
+        &active_two_electron.ri_active_pair_factors;
+    if (!two_electron_pretransformed) {
+      transformed_active_factors = xmvb::integrals::transform_ri_pair_factors(
+          active_two_electron.ri_active_pair_factors,
+          inverse_active_transform);
+      orthogonal_active_factors = &transformed_active_factors;
+    }
+    owned_active_pair_products.noalias() =
         input.ri_factorization->metric_whitened_ao_pair_factors.transpose() *
-        orthogonal_active_factors;
+        *orthogonal_active_factors;
   } else if (active_two_electron.dense_ao_pair_products.size() != 0) {
-    active_pair_products.noalias() =
-        active_two_electron.dense_ao_pair_products *
-        build_pair_transform(inverse_active_transform);
+    if (two_electron_pretransformed) {
+      active_pair_products = &active_two_electron.dense_ao_pair_products;
+    } else {
+      owned_active_pair_products.noalias() =
+          active_two_electron.dense_ao_pair_products *
+          build_pair_transform(inverse_active_transform);
+    }
   } else {
     // The memory-bounded exact forward path deliberately does not retain
     // G*Q_active. Rebuild only that absent accepted tensor from the AO graph.
     xmvb::integrals::ExactCtxPairMatrix active_pair_map;
     xmvb::integrals::build_packed_orbital_pair_map(
         mo.middleCols(n_core, n_active), &active_pair_map);
-    active_pair_products = apply_ao_pair_operator(input, active_pair_map);
+    owned_active_pair_products = apply_ao_pair_operator(input, active_pair_map);
   }
   const int n_active_pairs = n_active * (n_active + 1) / 2;
   x.j_active.resize(static_cast<std::size_t>(n_bf) * n_active * n_active);
@@ -237,28 +265,46 @@ AnalyticOrbitalDiagonal build_analytic_orbital_diagonal(
       for (int nu = 0; nu <= mu; ++nu, ++pair) {
         const double coefficient =
             mo(mu, p) * mo(nu, p) * (mu == nu ? 1.0 : 2.0);
-        contraction.noalias() += coefficient * active_pair_products.row(pair);
+        contraction.noalias() += coefficient * active_pair_products->row(pair);
       }
     for (int a = 0; a < n_active; ++a)
       for (int b = 0; b < n_active; ++b)
         x.j_active[mcscf::orbital_diagonal_slice_index(p, a, b, n_active)] =
             contraction[xmvb::core::PairIndex::packed_pair_index(a, b)];
   }
-  xmvb::integrals::ExactCtxPairMatrix active_pair_map;
-  xmvb::integrals::build_packed_orbital_pair_map(
-      mo.middleCols(n_core, n_active), &active_pair_map);
-  const Eigen::MatrixXd active_pairs =
-      active_pair_map.transpose() * active_pair_products;
   x.active_eri.resize(static_cast<std::size_t>(n_active) *
                       n_active * n_active * n_active);
-  for (int a = 0; a < n_active; ++a)
-    for (int b = 0; b < n_active; ++b)
-      for (int c = 0; c < n_active; ++c)
-        for (int d = 0; d < n_active; ++d)
-          x.active_eri[mcscf::orbital_diagonal_tensor4_index(a, b, c, d, n_active)] = active_pairs(
-              xmvb::core::PairIndex::packed_pair_index(a, b),
-              xmvb::core::PairIndex::packed_pair_index(c, d));
-  const auto dm2 = unpack_symmetric_active_two_rdm(packed_dm2,n_active);
+  const auto& packed_active_eri =
+      active_two_electron.packed_active_two_electron_integrals;
+  if (two_electron_pretransformed && !packed_active_eri.empty()) {
+    const std::size_t expected_size =
+        static_cast<std::size_t>(n_active_pairs) * (n_active_pairs + 1) / 2;
+    if (packed_active_eri.size() != expected_size) {
+      throw std::invalid_argument("framed active two-electron tensor size mismatch");
+    }
+    for (int a = 0; a < n_active; ++a)
+      for (int b = 0; b < n_active; ++b)
+        for (int c = 0; c < n_active; ++c)
+          for (int d = 0; d < n_active; ++d)
+            x.active_eri[mcscf::orbital_diagonal_tensor4_index(a, b, c, d, n_active)] =
+                packed_active_eri[xmvb::core::PairIndex::packed_pair_of_pairs_index(
+                    xmvb::core::PairIndex::packed_pair_index(a, b),
+                    xmvb::core::PairIndex::packed_pair_index(c, d))];
+  } else {
+    xmvb::integrals::ExactCtxPairMatrix active_pair_map;
+    xmvb::integrals::build_packed_orbital_pair_map(
+        mo.middleCols(n_core, n_active), &active_pair_map);
+    const Eigen::MatrixXd active_pairs =
+        active_pair_map.transpose() * *active_pair_products;
+    for (int a = 0; a < n_active; ++a)
+      for (int b = 0; b < n_active; ++b)
+        for (int c = 0; c < n_active; ++c)
+          for (int d = 0; d < n_active; ++d)
+            x.active_eri[mcscf::orbital_diagonal_tensor4_index(a, b, c, d, n_active)] = active_pairs(
+                xmvb::core::PairIndex::packed_pair_index(a, b),
+                xmvb::core::PairIndex::packed_pair_index(c, d));
+  }
+  const auto dm2 = unpack_symmetric_active_two_rdm(*packed_dm2,n_active);
   const auto active_end = trace ? std::chrono::steady_clock::now() :
       std::chrono::steady_clock::time_point{};
   const auto densities =

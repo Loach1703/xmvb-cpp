@@ -16,6 +16,7 @@
 #include "integrals/response/adjoint.hpp"
 #include "vbscf/integrals/active/space.hpp"
 #include "integrals/active/two_electron.hpp"
+#include "integrals/active/frame.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
 
@@ -382,7 +383,8 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
     const xmvb::integrals::RiActiveTwoElectronResponseCache* ri_two_electron_cache,
     const xmvb::integrals::RiAoFactorization* ri_factorization,
     std::vector<double>* symmetric_active_overlap_gradient_workspace,
-    std::vector<double>* symmetric_active_one_electron_gradient_workspace) {
+    std::vector<double>* symmetric_active_one_electron_gradient_workspace,
+    const Eigen::MatrixXd* two_electron_orbital_gradient) {
   const int n_inactive_doubly_occupied_orbitals =
       (input.orbital_preparation_input.n_total_electrons -
        input.orbital_preparation_input.n_active_electrons) / 2;
@@ -441,7 +443,9 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
     throw std::invalid_argument(
         "RI outer-response requires both active and AO RI caches");
   }
-  if (exact_two_electron_cache != nullptr &&
+  if (two_electron_orbital_gradient != nullptr) {
+    active_two_electron_auxiliary_gradient=*two_electron_orbital_gradient;
+  } else if (exact_two_electron_cache != nullptr &&
       exact_two_electron_cache->n_basis_functions > 0) {
     active_two_electron_auxiliary_gradient =
         xmvb::integrals::backpropagate_exact_packed_active_two_electron_gradient(
@@ -457,17 +461,24 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
   } else {
     throw std::logic_error("unreachable active 2e representation");
   }
+  if (two_electron_orbital_gradient==nullptr)
+    active_two_electron_auxiliary_gradient=integrals::active_frame_pullback(
+        active_two_electron_auxiliary_gradient,
+        prepared_active_space.active_space_two_electron_result.orbital_transform);
 
   AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator;
   std::vector<double> total_inactive_density_gradient;
+  const auto integral_h1e_weight=integrals::active_frame_one_electron_weight(
+      symmetric_active_one_electron_gradient,
+      prepared_active_space.active_space_two_electron_result.orbital_transform);
   if (exact_two_electron_cache != nullptr &&
       exact_two_electron_cache->exchange_integrals.size() != 0) {
     total_inactive_density_gradient = xmvb::integrals::backpropagate_exact_active_h1e_gradient(
-        symmetric_active_one_electron_gradient, *exact_two_electron_cache);
+        integral_h1e_weight, *exact_two_electron_cache);
   } else if (ri_factorization != nullptr) {
     total_inactive_density_gradient =
         ao_effective_one_electron_backpropagator.backpropagate(
-            symmetric_active_one_electron_gradient,
+            integral_h1e_weight,
             *ri_two_electron_cache).inactive_density_gradient;
   } else {
     total_inactive_density_gradient =

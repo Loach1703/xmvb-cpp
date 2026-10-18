@@ -87,7 +87,7 @@ private:
       const Eigen::Ref<const Eigen::MatrixXd>& weighted_active) const;
 
   ActiveSpaceIntegralDirectionView build_active_integral_direction(
-      const OrbitalPreparationDirectionalResult& orbital_direction,
+      const PrecomputedDirection& direction,
       const Eigen::Ref<const Eigen::MatrixXd>& delta_h1e_times_active,
       const Eigen::VectorXd* precomputed_delta_packed_two_electron,
       ActiveSpaceIntegralDirectionWorkspace* workspace,
@@ -101,7 +101,6 @@ private:
       const Eigen::VectorXd* precomputed_delta_packed_active_two_electron,
       const Eigen::MatrixXd* precomputed_ri_active_pair_factor_direction,
       const xmvb::integrals::ExactCtxPairMatrix* precomputed_directional_pair_products,
-      const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
       const PrecomputedDirection* precomputed_direction,
       OrbitalCouplingAction* coupling_output,
       bool horizontal_forcing = true,StructureResponseRequest* ci_response=nullptr) const;

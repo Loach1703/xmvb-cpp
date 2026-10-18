@@ -11,6 +11,7 @@
 #include "linalg/storage.hpp"
 #include "core/pair_index.hpp"
 #include "integrals/active/two_electron.hpp"
+#include "integrals/active/frame.hpp"
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 
 namespace xmvb::vb {
@@ -350,7 +351,9 @@ OrbitalGradientResult OrbitalGradientEvaluator::evaluate_from_active_space_gradi
   const auto ao_effective_one_electron_backpropagation_result =
       use_standard_ri_ao_effective_one_electron_path(input)
           ? ao_effective_one_electron_backpropagator_.backpropagate(
-                active_space_gradient_result.active_one_electron_gradient,
+                integrals::active_frame_one_electron_weight(
+                    active_space_gradient_result.active_one_electron_gradient,
+                    active_space_gradient_result.active_space_two_electron_result.orbital_transform),
                 integrals::build_ri_active_two_electron_response_cache(
                     ensure_vbscf_input_ri_cache(input),
                     active_space_gradient_result.active_space_two_electron_result,
@@ -422,6 +425,8 @@ OrbitalGradientResult OrbitalGradientEvaluator::evaluate_from_active_space_gradi
   result.packed_active_two_electron_integrals =
       std::move(active_space_gradient_result.active_space_two_electron_result
                     .packed_active_two_electron_integrals);
+  result.two_electron_frame = std::move(
+      active_space_gradient_result.active_space_two_electron_result.orbital_transform);
   result.sparse_orbital_energy_gradient =
       orbital_backpropagation_result.orbital_value_gradient;
   result.differentiable_parameter_indices = collect_differentiable_parameter_indices(
@@ -476,7 +481,8 @@ OrbitalGradientEvaluator::evaluate_sparse_orbital_gradient_with_fixed_active_spa
   // vector. Avoid materializing the full orbital-gradient result and its
   // cached copies on every `H v` application.
   const auto timed_active_space_context =
-      prepare_timed_active_space_context(input);
+      prepare_timed_active_space_context(input,
+          &accepted_point_context.prepared_active_space.active_space_two_electron_result.orbital_transform);
   const auto& prepared_active_space =
       timed_active_space_context.prepared_active_space;
   const auto& orbital_result = prepared_active_space.orbital_result;
@@ -530,7 +536,9 @@ OrbitalGradientEvaluator::evaluate_sparse_orbital_gradient_with_fixed_active_spa
   const auto ao_effective_one_electron_backpropagation_result =
       use_standard_ri_ao_effective_one_electron_path(input)
           ? ao_effective_one_electron_backpropagator_.backpropagate(
-                accepted_point_context.active_one_electron_gradient,
+                integrals::active_frame_one_electron_weight(
+                    accepted_point_context.active_one_electron_gradient,
+                    active_space_two_electron_result.orbital_transform),
                 integrals::build_ri_active_two_electron_response_cache(
                     ensure_vbscf_input_ri_cache(input),active_space_two_electron_result,
                     input.orbital_preparation_input.n_active_orbitals),

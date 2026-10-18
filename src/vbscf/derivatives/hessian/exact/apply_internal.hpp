@@ -30,6 +30,8 @@ struct ExactHvpOperator::State::PrecomputedDirection {
   Eigen::VectorXd packed_direction;
   DenseOrbitalTangentContext dense_orbital_tangent_context;
   OrbitalPreparationDirectionalResult orbital_preparation_directional_result;
+  /** Fixed accepted integral frame, dC R^-1; shared by forward and reverse. */
+  Eigen::MatrixXd integral_tangent;
   std::optional<PrecomputedOuterResponse> outer_response;
 };
 

@@ -1,4 +1,5 @@
 #include "vbscf/optimization/driver/session.hpp"
+#include "integrals/active/raw.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -186,7 +187,9 @@ void record_accepted_iteration_snapshot(
     snapshot.active_one_electron_integrals =
         gradient_result.active_one_electron_integrals;
     snapshot.packed_active_two_electron_integrals =
-        gradient_result.packed_active_two_electron_integrals;
+        integrals::materialize_raw_pair_kernel(
+            gradient_result.packed_active_two_electron_integrals,
+            gradient_result.two_electron_frame);
     snapshot.sparse_orbital_energy_gradient =
         gradient_result.sparse_orbital_energy_gradient;
     if (include_reference_energy_gradient) {

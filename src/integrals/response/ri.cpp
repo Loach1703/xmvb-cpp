@@ -510,13 +510,14 @@ Eigen::MatrixXd backpropagate_ri_packed_active_two_electron_gradient(
       accepted_cache, factor_adjoint, nullptr, nullptr);
 }
 
-Eigen::MatrixXd
-apply_ri_packed_active_two_electron_adjoint_hessian_vector(
-    const std::vector<double>& packed_active_two_electron_gradient,
+namespace {
+Eigen::MatrixXd apply_ri_active_two_electron_jet_impl(
+    const std::vector<double>& packed_accepted_gradient,
     const RiActiveTwoElectronResponseCache& accepted_cache,
     const Eigen::Ref<const Eigen::MatrixXd>& dense_active_direction,
+    const std::vector<double>* packed_gradient_direction,
     const Eigen::MatrixXd* directional_active_pair_factors) {
-  validate_cache(accepted_cache, "RI fixed-adjoint active-2e HVP");
+  validate_cache(accepted_cache, "RI active-2e jet");
   if (dense_active_direction.rows() != accepted_cache.n_basis_functions ||
       dense_active_direction.cols() != accepted_cache.n_active_orbitals) {
     throw std::invalid_argument(
@@ -543,15 +544,44 @@ apply_ri_packed_active_two_electron_adjoint_hessian_vector(
 
   const Eigen::MatrixXd active_pair_adjoint =
       build_active_pair_adjoint(
-          packed_active_two_electron_gradient,
+          packed_accepted_gradient,
           accepted_cache);
   const Eigen::MatrixXd accepted_factor_adjoint =
       *accepted_cache.accepted_active_pair_factors * active_pair_adjoint;
-  const Eigen::MatrixXd directional_factor_adjoint =
+  Eigen::MatrixXd directional_factor_adjoint =
       *factor_direction * active_pair_adjoint;
+  if (packed_gradient_direction != nullptr) {
+    const Eigen::MatrixXd directional_pair_adjoint =
+        build_active_pair_adjoint(*packed_gradient_direction, accepted_cache);
+    directional_factor_adjoint.noalias() +=
+        *accepted_cache.accepted_active_pair_factors * directional_pair_adjoint;
+  }
   return contract_factor_adjoint(
       accepted_cache, accepted_factor_adjoint, &directional_factor_adjoint,
       &dense_active_direction);
+}
+}  // namespace
+
+Eigen::MatrixXd apply_ri_active_two_electron_jet(
+    const std::vector<double>& packed_accepted_gradient,
+    const RiActiveTwoElectronResponseCache& accepted_cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& dense_active_direction,
+    const std::vector<double>& packed_gradient_direction,
+    const Eigen::MatrixXd* directional_active_pair_factors) {
+  return apply_ri_active_two_electron_jet_impl(
+      packed_accepted_gradient, accepted_cache, dense_active_direction,
+      &packed_gradient_direction, directional_active_pair_factors);
+}
+
+Eigen::MatrixXd
+apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+    const std::vector<double>& packed_active_two_electron_gradient,
+    const RiActiveTwoElectronResponseCache& accepted_cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& dense_active_direction,
+    const Eigen::MatrixXd* directional_active_pair_factors) {
+  return apply_ri_active_two_electron_jet_impl(
+      packed_active_two_electron_gradient, accepted_cache,
+      dense_active_direction, nullptr, directional_active_pair_factors);
 }
 
 }  // namespace xmvb::integrals

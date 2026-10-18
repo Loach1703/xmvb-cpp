@@ -1257,7 +1257,8 @@ ActiveSpaceGradientEvaluator::evaluate_with_fixed_active_space_adjoint(
   }
 
   auto timed_active_space_context =
-      prepare_timed_active_space_context(input);
+      prepare_timed_active_space_context(input,
+          &accepted_point_context.prepared_active_space.active_space_two_electron_result.orbital_transform);
 
   ActiveSpaceGradientResult result;
   initialize_active_space_gradient_probe_result(

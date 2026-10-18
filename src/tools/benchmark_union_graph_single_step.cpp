@@ -204,7 +204,9 @@ int main(int argc, char** argv) {
     }
 
 
-    const auto timed_active_space = xmvb::vb::prepare_timed_active_space_context(input);
+    const Eigen::MatrixXd raw_two_electron_frame;
+    const auto timed_active_space = xmvb::vb::prepare_timed_active_space_context(
+        input, &raw_two_electron_frame);
     const auto& prepared_active_space = timed_active_space.prepared_active_space;
     const auto& active_overlap_storage =
         prepared_active_space.orbital_result.active_orbital_overlap_matrix;

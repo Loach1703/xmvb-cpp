@@ -10,6 +10,7 @@
 #include "vbscf/derivatives/hessian/responses/active_space/integral_direction.hpp"
 #include "vbscf/derivatives/hessian/responses/orbital/preparation.hpp"
 #include "integrals/response/ri.hpp"
+#include "integrals/active/frame.hpp"
 
 namespace xmvb::vb {
 
@@ -34,6 +35,9 @@ ExactHvpOperator::State::prepare_direction(
           n_inactive,
           orbital_input.n_active_orbitals,
           *accepted_orbital_preparation_cache_,accepted_ri_factorization_==nullptr);
+  result.integral_tangent=integrals::active_frame_tangent(
+      result.orbital_preparation_directional_result.delta_active_auxiliary_orbitals,
+      accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform);
   return result;
 }
 
@@ -60,17 +64,22 @@ integrals::RiAoProjectedResponse ExactHvpOperator::State::ri_ao_response(
   // A column absent from delta C_i contributes exactly zero to delta P_i.
   // This is structural zero pruning, with no numerical rank threshold.
   const Eigen::MatrixXd horizontal=delta-geometry.inactive_auxiliary*(sci.transpose()*delta);
-  return integrals::apply_ri_projected_ao_response(*accepted_ri_two_electron_cache_,
-      duals,horizontal,weighted_active,geometry.inactive_auxiliary,
+  const auto& frame=accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform;
+  const Eigen::MatrixXd weights=frame.size() ?
+      (weighted_active*frame.transpose()).eval() : Eigen::MatrixXd(weighted_active);
+  auto response=integrals::apply_ri_projected_ao_response(*accepted_ri_two_electron_cache_,
+      duals,horizontal,weights,geometry.inactive_auxiliary,
       ri_ao_response_workspace_,
       integrals::ri_response_workspace_bytes,
       {accepted_ri_inactive_one_index_factors_.size() != 0
           ? &accepted_ri_inactive_one_index_factors_ : nullptr, moving});
+  if (frame.size()) response.active=(response.active*frame).eval();
+  return response;
 }
 
 ActiveSpaceIntegralDirectionView
 ExactHvpOperator::State::build_active_integral_direction(
-    const OrbitalPreparationDirectionalResult& orbital_direction,
+    const PrecomputedDirection& direction,
     const Eigen::Ref<const Eigen::MatrixXd>& delta_h1e_times_active,
     const Eigen::VectorXd* precomputed_delta_packed_two_electron,
     ActiveSpaceIntegralDirectionWorkspace* workspace,
@@ -90,8 +99,8 @@ ExactHvpOperator::State::build_active_integral_direction(
   return xmvb::vb::build_active_space_integral_direction(
       integral_context,
       ActiveSpaceIntegralTangent{
-          orbital_direction.delta_active_auxiliary_orbitals,
-          orbital_direction.delta_active_auxiliary_orbitals,
+          direction.orbital_preparation_directional_result.delta_active_auxiliary_orbitals,
+          direction.integral_tangent,
           delta_h1e_times_active,
           precomputed_delta_packed_two_electron,
           packed_two_electron_required},

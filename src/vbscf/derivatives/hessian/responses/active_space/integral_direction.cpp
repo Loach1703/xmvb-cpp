@@ -106,7 +106,8 @@ ActiveSpaceIntegralDirectionView build_active_space_integral_direction(
         tangent.dense_active_coefficients,
         context.input.ao_integral_input,
         &workspace->two_electron,
-        &workspace->packed_two_electron);
+        &workspace->packed_two_electron,
+        false);
   }
 
   return {

@@ -2,6 +2,7 @@
 #include "core/timing.hpp"
 
 #include "vbscf/derivatives/hessian/exact/apply_internal.hpp"
+#include "integrals/active/frame.hpp"
 
 #include "vbscf/derivatives/hessian/exact/ao_one_electron_internal.hpp"
 
@@ -141,7 +142,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced(
       nullptr,
       nullptr,
       nullptr,
-      nullptr,
       nullptr);
 }
 
@@ -164,7 +164,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_orbital(
        .fixed_upstream_pullback = true,
        .local_active_response = true,
        .structure_response = false},
-      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
       &gauge, false);
 }
 
@@ -177,7 +177,7 @@ OrbitalCouplingAction ExactHvpOperator::State::apply_orbital_coupling(
        .fixed_upstream_pullback = true,
        .local_active_response = true,
        .structure_response = false},
-      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
       &result,true,ci_response);
   return result;
 }
@@ -326,7 +326,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     const Eigen::VectorXd* precomputed_delta_packed_active_two_electron,
     const Eigen::MatrixXd* precomputed_ri_active_pair_factor_direction,
     const xmvb::integrals::ExactCtxPairMatrix* precomputed_directional_pair_products,
-    const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
     const PrecomputedDirection* precomputed_direction,
     OrbitalCouplingAction* coupling_output,
     bool horizontal_forcing,StructureResponseRequest* ci_response) const {
@@ -419,7 +418,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       n_basis_functions,
       n_basis_functions);
   const auto& delta_dense_active_coefficients =
-      orbital_preparation_directional_result.delta_active_auxiliary_orbitals;
+      prepared_direction.integral_tangent;
   apply_timing_totals_.core_setup_wall_time_seconds +=
       detail::exact_hvp_elapsed_seconds(core_setup_start_time);
   setup_phase.stop();
@@ -469,8 +468,11 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           orbital_preparation_directional_result.delta_inactive_density.data(), ao_matrix_size, 1);
       const Eigen::Map<const Eigen::MatrixXd> pullback(
           ao_h1e_symmetrized_gradient_workspace_.data(), ao_matrix_size, 1);
+      const auto& frame=accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform;
+      const Eigen::MatrixXd integral_weights=frame.size() ?
+          (delta_active_times_hho_symmetric*frame.transpose()).eval() : delta_active_times_hho_symmetric;
       const Eigen::Map<const Eigen::MatrixXd> weights(
-          delta_active_times_hho_symmetric.data(), delta_active_times_hho_symmetric.size(), 1);
+          integral_weights.data(), integral_weights.size(), 1);
       Eigen::MatrixXd response, projection;
       detail::apply_exact_ao_response(density, pullback, weights,
           accepted_exact_two_electron_cache_,
@@ -481,6 +483,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       delta_ao_effective_h1e_times_active_auxiliary_orbitals =
           Eigen::Map<const Eigen::MatrixXd>(projection.data(), n_basis_functions,
                                          accepted_active_auxiliary_orbitals_.cols());
+      if (frame.size()) delta_ao_effective_h1e_times_active_auxiliary_orbitals=
+          (delta_ao_effective_h1e_times_active_auxiliary_orbitals*frame).eval();
     }
     apply_timing_totals_.ao_effective_one_electron_fused_wall_time_seconds +=
         detail::exact_hvp_elapsed_seconds(ao_effective_one_electron_fused_start_time);
@@ -520,6 +524,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     }
   }
   std::vector<double> combined_core_orbital_value_gradient;
+  bool two_electron_jet_consumed=false;
 
   if (compute_outer_response) {
     const auto outer_response_start_time =
@@ -541,7 +546,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
               precomputed_outer_response->integral_direction
                   .packed_two_electron}
         : build_active_integral_direction(
-              orbital_preparation_directional_result,
+              prepared_direction,
               delta_ao_effective_h1e_times_active_auxiliary_orbitals,
               packed_outer_two_electron_required
                   ? precomputed_delta_packed_active_two_electron
@@ -881,6 +886,35 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     validate_outer_response_active_gradient(
         directional_active_space_gradient);
 
+    Eigen::MatrixXd two_electron_jet;
+    const Eigen::MatrixXd* two_electron_orbital_gradient=nullptr;
+    if (components.direct_core_response) {
+      xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::TwoElectronResponse);
+      const auto start=std::chrono::steady_clock::now();
+      if (accepted_ri_two_electron_cache_) {
+        two_electron_jet=integrals::apply_ri_active_two_electron_jet(
+            accepted_point_context_->packed_active_two_electron_gradient,
+            *accepted_ri_two_electron_cache_,delta_dense_active_coefficients,
+            directional_active_space_gradient.packed_active_two_electron_gradient,
+            ri_directional_active_pair_factors);
+      } else {
+        const auto* products=precomputed_directional_pair_products ?
+            precomputed_directional_pair_products :
+            &outer_response_integral_direction_workspace_.two_electron.directional_pair_products;
+        integrals::apply_exact_active_two_electron_jet(
+            accepted_exact_two_electron_cache_,delta_dense_active_coefficients,
+            directional_active_space_gradient.packed_active_two_electron_gradient,
+            current_input_->ao_integral_input,&accepted_exact_two_electron_apply_workspace_,
+            &two_electron_jet,products->size() ? products : nullptr);
+      }
+      two_electron_jet=integrals::active_frame_pullback(two_electron_jet,
+          accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform);
+      two_electron_orbital_gradient=&two_electron_jet;
+      two_electron_jet_consumed=true;
+      apply_timing_totals_.active_two_electron_wall_time_seconds +=
+          detail::exact_hvp_elapsed_seconds(start);
+    }
+
     const auto orbital_pullback_start_time =
         std::chrono::steady_clock::now();
     backward_phase.stop();
@@ -899,7 +933,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
                 : nullptr,
             accepted_ri_factorization_,
             &outer_response_symmetric_active_overlap_gradient_workspace_,
-            &outer_response_symmetric_active_one_electron_gradient_workspace_);
+            &outer_response_symmetric_active_one_electron_gradient_workspace_,
+            two_electron_orbital_gradient);
     add_orbital_value_gradient_in_place(
         &combined_core_orbital_value_gradient,
         outer_response_orbital_value_gradient,
@@ -921,63 +956,51 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     delta_auxiliary_active_gradient.noalias() +=
         ao_effective_h1e *
         delta_active_times_hho_symmetric;
-    const auto active_two_electron_start_time =
-        std::chrono::steady_clock::now();
-    xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::TwoElectronResponse);
-    if (accepted_ri_two_electron_cache_.has_value()) {
-      accepted_exact_two_electron_apply_workspace_
-          .dense_active_gradient_direction =
-          xmvb::integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
-              accepted_point_context_->packed_active_two_electron_gradient,
-              *accepted_ri_two_electron_cache_,
-              delta_dense_active_coefficients,
-              ri_directional_active_pair_factors);
-    } else if (precomputed_two_electron_fixed_adjoint != nullptr &&
-        precomputed_two_electron_fixed_adjoint->rows() == n_basis_functions &&
-        precomputed_two_electron_fixed_adjoint->cols() == n_active_orbitals) {
-      accepted_exact_two_electron_apply_workspace_
-          .dense_active_gradient_direction =
-              *precomputed_two_electron_fixed_adjoint;
-    } else if (compute_outer_response &&
-        accepted_exact_two_electron_cache_.accepted_pair_products == nullptr &&
-        outer_response_integral_direction_workspace_.two_electron
-                .dense_fixed_adjoint_direction.rows() == n_basis_functions &&
-        outer_response_integral_direction_workspace_.two_electron
-                .dense_fixed_adjoint_direction.cols() == n_active_orbitals) {
-      accepted_exact_two_electron_apply_workspace_
-          .dense_active_gradient_direction =
-              outer_response_integral_direction_workspace_.two_electron
-                  .dense_fixed_adjoint_direction;
-    } else if (compute_outer_response &&
-        (precomputed_directional_pair_products != nullptr
-             ? precomputed_directional_pair_products
-             : &outer_response_integral_direction_workspace_.two_electron
-                    .directional_pair_products)->size() > 0) {
-      xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector_fused(
-          accepted_exact_two_electron_cache_,
-          delta_dense_active_coefficients,
-          current_input_->ao_integral_input,
-          *(precomputed_directional_pair_products != nullptr
-                ? precomputed_directional_pair_products
-                : &outer_response_integral_direction_workspace_.two_electron
-                       .directional_pair_products),
-          &accepted_exact_two_electron_apply_workspace_,
-          &accepted_exact_two_electron_apply_workspace_
-               .dense_active_gradient_direction);
-    } else {
-      xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
-          accepted_exact_two_electron_cache_,
-          delta_dense_active_coefficients,
-          current_input_->ao_integral_input,
-          &accepted_exact_two_electron_apply_workspace_,
-          &accepted_exact_two_electron_apply_workspace_
-               .dense_active_gradient_direction);
-    }
-    apply_timing_totals_.active_two_electron_wall_time_seconds +=
-        detail::exact_hvp_elapsed_seconds(active_two_electron_start_time);
-    delta_auxiliary_active_gradient.noalias() +=
+    if (!two_electron_jet_consumed) {
+      const auto active_two_electron_start_time =
+          std::chrono::steady_clock::now();
+      xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::TwoElectronResponse);
+      if (accepted_ri_two_electron_cache_.has_value()) {
         accepted_exact_two_electron_apply_workspace_
-            .dense_active_gradient_direction;
+            .dense_active_gradient_direction =
+            xmvb::integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+                accepted_point_context_->packed_active_two_electron_gradient,
+                *accepted_ri_two_electron_cache_,
+                delta_dense_active_coefficients,
+                ri_directional_active_pair_factors);
+      } else if (compute_outer_response &&
+          (precomputed_directional_pair_products != nullptr
+               ? precomputed_directional_pair_products
+               : &outer_response_integral_direction_workspace_.two_electron
+                      .directional_pair_products)->size() > 0) {
+        xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector_fused(
+            accepted_exact_two_electron_cache_,
+            delta_dense_active_coefficients,
+            current_input_->ao_integral_input,
+            *(precomputed_directional_pair_products != nullptr
+                  ? precomputed_directional_pair_products
+                  : &outer_response_integral_direction_workspace_.two_electron
+                         .directional_pair_products),
+            &accepted_exact_two_electron_apply_workspace_,
+            &accepted_exact_two_electron_apply_workspace_
+                 .dense_active_gradient_direction);
+      } else {
+        xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+            accepted_exact_two_electron_cache_,
+            delta_dense_active_coefficients,
+            current_input_->ao_integral_input,
+            &accepted_exact_two_electron_apply_workspace_,
+            &accepted_exact_two_electron_apply_workspace_
+                 .dense_active_gradient_direction);
+      }
+      apply_timing_totals_.active_two_electron_wall_time_seconds +=
+          detail::exact_hvp_elapsed_seconds(active_two_electron_start_time);
+      delta_auxiliary_active_gradient.noalias() +=
+          integrals::active_frame_pullback(
+              accepted_exact_two_electron_apply_workspace_.dense_active_gradient_direction,
+              accepted_point_context_->prepared_active_space
+                  .active_space_two_electron_result.orbital_transform);
+      }
 
     const auto orbital_backprop_start_time =
         std::chrono::steady_clock::now();

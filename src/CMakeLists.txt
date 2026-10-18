@@ -46,6 +46,7 @@ set(XMVB_INTEGRAL_SOURCES
   integrals/active/two_electron.cpp
   integrals/active/pair_map.cpp
   integrals/active/transform.cpp
+  integrals/active/raw.cpp
   integrals/response/adjoint.cpp
   integrals/response/directional.cpp
   integrals/response/ri.cpp

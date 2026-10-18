@@ -27,6 +27,12 @@ struct ActiveSpaceTwoElectronResult {
   ActiveSpaceTwoElectronRepresentation representation =
       ActiveSpaceTwoElectronRepresentation::PackedExact;
 
+  /** Upper `R` with `S_active = R^T R` when the two-electron data and
+   * `dense_active_coefficients` use `Cbar = C R^{-1}`. Empty means that all
+   * two-electron data use the original active coefficient frame `C`.
+   */
+  Eigen::MatrixXd orbital_transform;
+
   /**
    * @brief Packed active-space two-electron integrals `GGO`.
    *

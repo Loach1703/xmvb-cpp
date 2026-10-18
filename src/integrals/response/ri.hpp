@@ -129,4 +129,17 @@ apply_ri_packed_active_two_electron_adjoint_hessian_vector(
     const Eigen::Ref<const Eigen::MatrixXd>& dense_active_direction,
     const Eigen::MatrixXd* directional_active_pair_factors = nullptr);
 
+/** @brief Combined fixed-adjoint and changing-adjoint RI orbital jet.
+ *
+ * Both packed adjoints and the cache coefficients/factors are in one active
+ * orbital frame. A precomputed factor direction from the CI integral action
+ * may be borrowed. The result excludes any external frame pullback.
+ */
+Eigen::MatrixXd apply_ri_active_two_electron_jet(
+    const std::vector<double>& packed_accepted_gradient,
+    const RiActiveTwoElectronResponseCache& accepted_cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& dense_active_direction,
+    const std::vector<double>& packed_gradient_direction,
+    const Eigen::MatrixXd* directional_active_pair_factors = nullptr);
+
 }  // namespace xmvb::integrals

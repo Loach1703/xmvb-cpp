@@ -13,6 +13,7 @@
 #include "linalg/storage.hpp"
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
 #include "vbscf/integrals/active/space.hpp"
+#include "integrals/active/frame.hpp"
 #include "integrals/response/adjoint.hpp"
 #include "integrals/response/directional.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
@@ -151,10 +152,16 @@ int main(int argc, char** argv) {
       throw std::runtime_error("active-space dimensions must be positive");
     }
 
-    const auto dense_active_direction =
+    const auto raw_dense_active_direction =
         build_dense_active_direction(
             n_basis_functions,
             n_active_orbitals);
+    const auto& fixed_two_electron_frame =
+        gradient_result.active_space_two_electron_result.orbital_transform;
+    // Accepted exact kernels and their cotangent use C_bar = C_raw R^-1.
+    const Eigen::MatrixXd dense_active_direction =
+        xmvb::integrals::active_frame_tangent(
+            raw_dense_active_direction, fixed_two_electron_frame);
     auto accepted_cache = xmvb::integrals::build_exact_packed_active_two_electron_adjoint_cache(
         gradient_result.packed_active_two_electron_gradient,
         gradient_result.active_space_two_electron_result.dense_active_coefficients,
@@ -354,7 +361,7 @@ int main(int argc, char** argv) {
             column_index * n_basis_functions + basis_function_index;
         const double delta =
             options.step *
-            dense_active_direction(basis_function_index, active_orbital_index);
+            raw_dense_active_direction(basis_function_index, active_orbital_index);
         plus_auxiliary_matrix[flat_index] += delta;
         minus_auxiliary_matrix[flat_index] -= delta;
       }
@@ -362,9 +369,12 @@ int main(int argc, char** argv) {
 
     const auto pullback = [&](const std::vector<double>& coefficients) {
       xmvb::integrals::ActiveSpaceTwoElectronResult point;
-      point.dense_active_coefficients=Eigen::Map<const Eigen::MatrixXd>(
-          coefficients.data(),n_basis_functions,n_basis_functions).middleCols(
-              n_inactive_doubly_occupied_orbitals,n_active_orbitals);
+      const Eigen::MatrixXd raw_active_coefficients =
+          Eigen::Map<const Eigen::MatrixXd>(
+              coefficients.data(),n_basis_functions,n_basis_functions).middleCols(
+                  n_inactive_doubly_occupied_orbitals,n_active_orbitals);
+      point.dense_active_coefficients=xmvb::integrals::active_frame_tangent(
+          raw_active_coefficients,fixed_two_electron_frame);
       return xmvb::integrals::backpropagate_exact_packed_active_two_electron_gradient(
           gradient_result.packed_active_two_electron_gradient,input.ao_integral_input,point);
     };

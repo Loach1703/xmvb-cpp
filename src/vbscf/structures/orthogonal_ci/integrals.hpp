@@ -18,11 +18,18 @@ namespace xmvb::vb {
 struct OrthogonalActiveIntegrals : mcscf::ActiveIntegrals {
   /** Upper factor in `S_active = R^T R`. */
   Eigen::MatrixXd orbital_transform;
+  /** True when the supplied two-electron data were built from `C R^{-1}`. */
+  bool two_electron_pretransformed = false;
   /** Accepted orthogonal RI factors, shared by all integral directions. */
   Eigen::MatrixXd ri_pair_factors;
 };
 
-/** @brief Active-integral adjoint in the original nonorthogonal orbital basis. */
+/** @brief Integral adjoints at the physical VB input boundary.
+ * Overlap and one-electron entries use the original nonorthogonal basis.
+ * The pair kernel uses the input two-electron frame: raw for raw inputs,
+ * accepted orthogonal for pretransformed inputs. Its directional derivative
+ * includes the frame generator, so physical pullback uses a fixed R.
+ */
 struct NonorthogonalActiveIntegralAdjoint {
   Eigen::MatrixXd overlap;
   Eigen::MatrixXd one_electron;
@@ -43,7 +50,8 @@ OrthogonalActiveIntegrals orthogonalize_active_integrals(
  *
  * The returned `orbital_transform` is `delta R`; the other members are the
  * first derivatives of the orthonormal one- and two-electron integrals.
- * RI callers supply raw factor directions and leave the packed tensor empty;
+ * RI callers supply factor directions in the accepted input integral frame
+ * and leave the packed tensor empty;
  * accepted orthogonal factors are reused without a raw four-index direction.
  */
 OrthogonalActiveIntegrals orthogonalize_active_integral_direction(
