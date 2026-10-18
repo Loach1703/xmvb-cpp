@@ -56,7 +56,7 @@ long double SigmaTilePlan::payload(std::size_t rows,std::size_t h,std::size_t b,
        budget_.packed_slabs*static_cast<long double>(entries));
   const long double maps=budget_.packed_slabs ?
       static_cast<long double>(rows)*(sizeof(int)+budget_.width*(sizeof(int)+sizeof(std::size_t))):0;
-  return sizeof(double)*(input+channels)+sizeof(int)*static_cast<long double>(h)*g+
+  return sizeof(double)*(input+channels)+sizeof(int)*static_cast<long double>(budget_.width)*h*g+
       sizeof(SigmaGatherRow)*static_cast<long double>(rows)+maps;
 }
 

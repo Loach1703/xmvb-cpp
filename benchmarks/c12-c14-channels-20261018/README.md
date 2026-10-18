@@ -1,5 +1,69 @@
 # Native C12/C14 follow-up
 
+## Alpha-adjoint image-map composition
+
+The alpha gather now reads physical grouped image rows directly. The existing
+tile index no longer stores original target rows that require another layout
+lookup along every valid alpha edge. A map is composed once for each RHS and
+shared by every temporal response and output task. Diagonal contributions use
+the same map, and the fixed beta occupation view is hoisted out of the alpha
+row loop. All physical alpha/beta terms, edge order, sigma channels, CI/HVP,
+optimizer policies and thresholds remain unchanged. No alternate gather path
+or compatibility wrapper is added. The formula and memory bound are in
+`article/sigma_gather_schedule.md`.
+
+For one RHS, the index size is unchanged. Additional RHS require additional
+integer addresses, charged to tile admission rather than worker-private
+storage or numerical carrier copies. Qualification293502 passes13/13 tests
+in4.90s. The supported-sigma oracle now tests RHS widths1,2,3 with the small
+2048-byte workspace as well as ordinary capacity; existing unequal-spin,
+exchange-parity, selected-space, independent adjoint, temporal response,
+transport and gradient/HVP checks remain enabled. Frozen binary SHA256:
+`4a9ca78cc2e830fcfa248ed3ac18a85e1a5bb8fc186b4883a7d44d66139a8577`.
+
+Original exact Libcint/cc-pVDZ inputs converge with32 physical cores, BLAS1,
+CIAH/Davidson and4GiB shared CI allowance. GNU-time process totals include
+initialization and final output. `alpha-gather.csv` and
+`alpha-gather-comparison.csv` compare the NEW runs only with the saved
+preceding `gather.csv` records; input hash, convergence and energy guards
+remain enabled. No archived executable is rerun.
+
+| Case | Steps/HVP before = new | Final new energy / Eh | Preceding saved / new process s | RSS before / new GiB |
+|---|---:|---:|---:|---:|
+| C12 COV132 |4/33|-399.106646267320|12.68 /12.38|3.444 /3.427|
+| C14 COV429 |4/46|-535.672671742972|174.32 /173.82|8.163 /8.153|
+
+The observed reductions are2.37% /0.29%: C12 is modestly faster, whereas C14
+is effectively level. Initial energies, CI actions79/113, accepted steps and
+per-macro HVP sequences6:16:8:3 /5:10:28:3 match; final energy differences
+are at most1.1e-12Eh. C14 CI scope falls67.1243->65.6948s, but physical HVP
+70.3682->70.7519s and keyframes11.5051->11.8217s do not improve. The whole
+process, not the CI subtotal, determines the reported end-to-end outcome.
+
+Placement matters: the saved controls use anode064 CPUs96-127. That node
+became fully occupied, so pending pinned jobs293510/293513 were canceled
+without running a workload. New C12 job293520_0 uses anode003 CPUs128-159.
+The first NEW C14 allocation293520_3 used anode070 across multiple NUMA
+domains (84-85,208-223,232-239,246-251); it was stopped after48s, not used
+as a converged timing. Its dependent diagnostic293522 was canceled as well.
+C14 was submitted as293523_3 to anode003 CPUs128-159 and completed. Both
+retained new runs thus use a single NUMA domain and the same EPYC9755 model
+as the saved controls, but DIFFERENT nodes. The small timing changes are not
+a strictly matched same-node estimate of alpha-only speedup. The canceled
+run and scheduler accounting are retained, not substituted for measurements.
+
+Current-only phase audit293524 uses anode003 CPUs128-159. It completes the
+same126 sweeps and38378340 targets as the saved audits. Its prepare/compute/
+write scopes are1.49188/1.29035/2.47011s. Saved beta-composed293483 has
+1.66858/1.21178/3.88621s, but uses anode031 across NUMA domains; that
+difference cannot be called an isolated alpha optimization speedup. Earlier
+saved293377 is on anode003 CPUs160-191, before BOTH the DAG and address
+composition work, with2.29269/1.23947/3.12787s. `alpha-gather-phases.csv`
+keeps all three placements and scopes rather than conflating them. The
+modeled peak tile payload increases3415104 bytes for the extra RHS index
+plane; the576450208-byte numerical slab is unchanged. This is bounded
+symbolic addressing, not a new numerical cache or per-worker large array.
+
 ## Composed sigma-adjoint target addresses
 
 The beta adjoint now composes each target's alpha address, grouped image row

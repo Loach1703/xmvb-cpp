@@ -3500,7 +3500,7 @@ int main(int argc, char** argv) {
       check_sparse_beta_gather();
       check_packed_sigma_tile_plan();
       check_prefix_words();
-      check_supported_sigma(4, 2, 2, 2);
+      for (const int width:{1,2,3}) check_supported_sigma(4, 2, 2, width);
       check_supported_sigma(5, 3, 2, 3);
       check_supported_sigma(6, 3, 3, 1);
       // Enough halo scratch for the grouped per-worker Gram, including

@@ -46,6 +46,49 @@ population, **not** the beta-group population. With one RHS it can be zero.
 Every temporal response uses the same records but retains its own channel
 values and cotangents.
 
+## Alpha links
+
+For a fixed target beta group $g$, the alpha adjoint previously looked up an
+original target row through the halo map, then decoded its grouped image
+address separately for each excitation edge. The grouped image address is
+independent of that edge and of the temporal response. Define instead
+
+$$
+J_{v g}(h)=
+\begin{cases}
+\pi(v N_T+i_g(a_h)), &(a_h,g)\in\mathcal T,\\
+-1, &(a_h,g)\notin\mathcal T,
+\end{cases}
+$$
+
+where $a_h$ is halo row $h$ and $\mathcal T$ is the current tile's actual
+target set. Composing this map once gives exactly the alpha-edge contraction
+
+$$
+\sigma^{(v)}_{a g}\mathrel{+}=
+\sum_{\ell\in\mathcal L_\alpha(a)}
+\mathbf 1_{J_{v g}(h(a_\ell))\ge0}\,
+s_\ell Z_{J_{v g}(h(a_\ell)),p_\ell}.
+$$
+
+Here $\mathcal L_\alpha(a)$ is the immutable single-replacement row of string
+$a$, $a_\ell$ is its neighboring string and $h(a_\ell)$ is its halo address.
+A missing halo neighbor contributes zero before querying $J$. Diagonal
+occupation terms use the same composed address. Their alpha and beta
+occupations and the edge signs, order and numerical additions are unchanged.
+The fixed beta occupation view is obtained once per output interval rather
+than inside the alpha-row loop.
+
+The stored map now contains $wGh$ integers for $w$ RHS rather than $Gh$
+original-row addresses. At $w=1$ its size is unchanged. At larger $w$ the
+additional integer addresses are explicitly charged to the existing tile
+budget, so the planner can reduce tile extent rather than exceed that budget.
+There is still no edge-by-target table or per-worker copy. The construction
+cost is $O(wN_T+wGh)$, including sentinel initialization; physical alpha-link
+contributions retain their necessary work. Reusing $J$ removes the repeated
+layout decode along each valid edge and across temporal responses without
+changing $E^T$, the CI space, spin exchange quotient or output projection.
+
 ## Strictly removed work and storage bound
 
 The generator already supplies every target. Constructing a sorted target
@@ -62,7 +105,7 @@ order, channel multiplication, overlap action, orbital response or optimizer.
 It is a reduction in repeated sparse address work, not a claimed lower
 universal power of the active-space size.
 
-The current tile stores three integers per target in place of its former
+The beta schedule stores three integers per target in place of its former
 one-integer target-row list. The additional two integers are charged to the
 same tile admission budget, including when only one target fits. No numerical
 carrier, edge-by-target table, global product mask or per-worker array is

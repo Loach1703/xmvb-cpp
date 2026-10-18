@@ -199,7 +199,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
   auto& column_index=plan.column_index;
   auto& active_support=plan.active_support;
   auto& released_columns=plan.released;
-  std::vector<int> diagonal_rows,same_group,offsets,positions,target_index;
+  std::vector<int> diagonal_rows,same_group,offsets,positions,image_index;
   std::vector<detail::SigmaGatherRow> target_rows;
   const auto& channel_groups=plan.channel_groups;
   detail::ChannelLayout channel_layout;
@@ -278,15 +278,21 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                   (restricted_channels ? kernel_bytes:0));
 
               same_group.assign(n_columns, -1);
-              target_index.assign(static_cast<std::size_t>(n_halo) * groups.size(), -1);
+              image_index.assign(static_cast<std::size_t>(n_halo)*groups.size()*width,-1);
               target_rows.resize(count);
               offsets.assign(n_columns + 1, 0);
               for (int g = 0; g < static_cast<int>(groups.size()); ++g) {
                 same_group[column_index[groups[g].beta]] = g;
                 for (int i = groups[g].begin; i < groups[g].end; ++i) {
-                  target_index[static_cast<std::size_t>(g)*n_halo+halo_index[active[i]]]=i;
                   const int image=channel_layout.image(i);
-                  target_rows[i]={active[i],image,width>1 ? channel_layout.image(count+i)-image:0};
+                  const int stride=width>1 ? channel_layout.image(count+i)-image:0;
+                  target_rows[i]={active[i],image,stride};
+                  // Compose E_alpha^T's row map before traversing its links.
+                  // The same physical image serves every temporal response;
+                  // RHS maps are shared, not copied into worker workspaces.
+                  const int h=halo_index[active[i]];
+                  for (int v=0;v<width;++v)
+                    image_index[(static_cast<std::size_t>(v)*groups.size()+g)*n_halo+h]=image+v*stride;
                 }
                 // The column generator already supplies the targets. Compose
                 // their image addresses once instead of scanning the whole
@@ -480,18 +486,20 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
               }
               const int same = same_group[source];
               if (same >= 0) {
-                const int* index = target_index.data() + static_cast<std::size_t>(same) * n_halo;
+                const int* index=image_index.data()+
+                    (static_cast<std::size_t>(v)*groups.size()+same)*n_halo;
+                const auto beta_occupied=beta_graph.occupied(columns[source]);
                 for (int i=begin;i<end;++i) {
                   const int a=rows ? rows[i]:halo[i];
                   const int local=rows ? (identity_halo ? a:halo_index[a]):i;
                   if (local<first || local>=last) continue;
                   double sum = 0;
                   if (index[local] >= 0) {
-                    const int row=channel_layout.image(v*count+index[local]);
+                    const int row=index[local];
                     for (const int p : alpha_->occupied(a))
                       sum += channel_values[static_cast<std::size_t>(row) * pairs +
                           core::PairIndex::packed_pair_index(p, p)];
-                    for (const int p : beta_graph.occupied(columns[source]))
+                    for (const int p : beta_occupied)
                       sum += channel_values[static_cast<std::size_t>(row) * pairs +
                           core::PairIndex::packed_pair_index(p, p)];
                   }
@@ -501,7 +509,7 @@ std::vector<DirectCiIntegralAdjoint> DirectCiSigmaAction::contract_tiled(
                     const int target = h < 0 ? -1 : index[h];
                     if (target >= 0)
                       sum += links[link].sign *
-                          channel_values[static_cast<std::size_t>(channel_layout.image(v*count+target)) * pairs +
+                          channel_values[static_cast<std::size_t>(target) * pairs +
                               links[link].pair];
                   }
                   destination[rows ? i:a] += sum;
