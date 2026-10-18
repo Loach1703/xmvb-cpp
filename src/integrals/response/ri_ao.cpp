@@ -221,7 +221,8 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
   release_oversized(workspace.accepted_projection,
                     static_cast<Eigen::Index>(rank) * tile * outputs);
   workspace.charges.setZero(n_aux, 2);
-  workspace.coulomb.resize(pairs);
+  if (inactive.factors == nullptr) workspace.coulomb.resize(pairs);
+  else workspace.coulomb.resize(0);
   Eigen::MatrixXd u(n, rank);
   u.leftCols(nm) = horizontal_direction;
   u.rightCols(na) = weighted_active;
@@ -354,31 +355,39 @@ RiAoProjectedResponse apply_ri_projected_ao_response(
       }
     }
   }
-  // Coulomb is separable: contract the auxiliary charge before acting on A0.
-  // This avoids transforming L_A A0 for every inactive orbital in every HVP.
-  // Store only the symmetric packed vector, never an AO-square response.
+  // Coulomb is separable. Resident L_A A0 factors allow direct auxiliary
+  // contraction into each output column; otherwise use a packed AO response.
   {
     profiling::ScopedPhase phase(profiling::Phase::RiAoCoulomb);
+    if (inactive.factors != nullptr) {
+#pragma omp parallel for schedule(static) num_threads(std::min(workers,nf))
+      for (int orbital = 0; orbital < nf; ++orbital) {
+        result.inactive.col(orbital).noalias() += 4.0 *
+            inactive.factors->middleRows(orbital * n_aux, n_aux).transpose() *
+            workspace.charges.col(1);
+      }
+    } else {
 #pragma omp parallel num_threads(workers)
-    {
-      int worker = 0;
+      {
+        int worker = 0;
 #ifdef _OPENMP
-      worker = omp_get_thread_num();
+        worker = omp_get_thread_num();
 #endif
-      const Eigen::Index begin = worker * pairs / workers;
-      const Eigen::Index end = (worker + 1) * pairs / workers;
-      workspace.coulomb.segment(begin, end - begin).noalias() =
-          4 * active.metric_whitened_ao_pair_factors->middleCols(begin, end - begin)
-                  .transpose() * workspace.charges.col(1);
+        const Eigen::Index begin = worker * pairs / workers;
+        const Eigen::Index end = (worker + 1) * pairs / workers;
+        workspace.coulomb.segment(begin, end - begin).noalias() =
+            4 * active.metric_whitened_ao_pair_factors->middleCols(begin, end - begin)
+                    .transpose() * workspace.charges.col(1);
 #pragma omp barrier
-      Eigen::VectorXd row(n);
+        Eigen::VectorXd row(n);
 #pragma omp for schedule(static)
-      for (int mu = 0; mu < n; ++mu) {
-        for (int nu = 0; nu < n; ++nu) {
-          const int hi = std::max(mu, nu), lo = std::min(mu, nu);
-          row[nu] = workspace.coulomb[static_cast<Eigen::Index>(hi) * (hi + 1) / 2 + lo];
+        for (int mu = 0; mu < n; ++mu) {
+          for (int nu = 0; nu < n; ++nu) {
+            const int hi = std::max(mu, nu), lo = std::min(mu, nu);
+            row[nu] = workspace.coulomb[static_cast<Eigen::Index>(hi) * (hi + 1) / 2 + lo];
+          }
+          result.inactive.row(mu).noalias() += row.transpose() * full_inactive_duals;
         }
-        result.inactive.row(mu).noalias() += row.transpose() * full_inactive_duals;
       }
     }
   }

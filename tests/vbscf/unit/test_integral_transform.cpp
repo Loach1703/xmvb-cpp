@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -73,6 +74,39 @@ Eigen::MatrixXd pair_map_direction(const Eigen::MatrixXd& q,
   return result;
 }
 
+void check_pullback_generator_direction(
+    const Eigen::MatrixXd& kernel,
+    const Eigen::MatrixXd& gradient,
+    const Eigen::MatrixXd& direction) {
+  const int n = static_cast<int>(direction.rows());
+  const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(n, n);
+  const Eigen::MatrixXd l = pair_map_direction(identity, direction);
+  const Eigen::MatrixXd expected =
+      l * gradient + gradient * l.transpose();
+  const Eigen::MatrixXd actual =
+      xmvb::integrals::pullback_pair_generator(gradient, direction);
+  require_close(actual, expected,
+                "pair generator pullback differs from explicit pair map");
+
+  constexpr double step = 1e-6;
+  const Eigen::MatrixXd plus = pair_map(identity + step * direction);
+  const Eigen::MatrixXd minus = pair_map(identity - step * direction);
+  require_close(actual,
+                (plus * gradient * plus.transpose() -
+                 minus * gradient * minus.transpose()) / (2.0 * step),
+                "pair generator pullback fails independent finite differences",
+                3e-8);
+
+  const double left = (kernel.array() * actual.array()).sum();
+  const double right =
+      (xmvb::integrals::apply_pair_generator(kernel, direction).array() *
+       gradient.array()).sum();
+  if (std::abs(left - right) >
+      2e-11 * std::max({1.0, std::abs(left), std::abs(right)})) {
+    throw std::runtime_error("pair generator pullback violates Frobenius duality");
+  }
+}
+
 void check_size(int n) {
   const int pairs = n * (n + 1) / 2;
   const Eigen::MatrixXd k = fixture(pairs, pairs, 0.13);
@@ -126,6 +160,26 @@ void check_size(int n) {
       "pair-kernel pullback fails directional finite differences", 3e-8);
 
   const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(n, n);
+  Eigen::MatrixXd nonsymmetric_g = g;
+  if (pairs > 1) nonsymmetric_g(0, pairs - 1) += 0.41;
+  Eigen::MatrixXd diagonal_direction = Eigen::MatrixXd::Zero(n, n);
+  diagonal_direction.diagonal() = dq.diagonal();
+  Eigen::MatrixXd off_diagonal_direction = Eigen::MatrixXd::Zero(n, n);
+  if (n > 1) {
+    off_diagonal_direction(0, n - 1) = 0.37;
+    off_diagonal_direction(n - 1, 0) = -0.29;
+  }
+  const Eigen::MatrixXd zero_direction = Eigen::MatrixXd::Zero(n, n);
+  const std::array<Eigen::MatrixXd, 4> pullback_directions{
+      dq, diagonal_direction, off_diagonal_direction, zero_direction};
+  for (const auto& direction : pullback_directions) {
+    check_pullback_generator_direction(k, nonsymmetric_g, direction);
+  }
+  require_close(
+      xmvb::integrals::pullback_pair_generator(
+          nonsymmetric_g, zero_direction),
+      Eigen::MatrixXd::Zero(pairs, pairs),
+      "zero orbital direction must have zero pair-generator pullback", 0.0);
   const Eigen::MatrixXd generator =
       xmvb::integrals::orbital_generator_adjoint(k, g);
   const Eigen::MatrixXd identity_map = pair_map(identity);

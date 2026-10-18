@@ -56,6 +56,18 @@ Eigen::MatrixXd apply_pair_generator(
     const Eigen::Ref<const Eigen::MatrixXd>& orbital_direction);
 
 /**
+ * @brief Frobenius adjoint of the pair generator with respect to its kernel.
+ *
+ * If L(D) is the directional derivative of the symmetric-pair map T(Q) at
+ * Q=I, returns L(D) G + G L(D)^T. G need not have pair-exchange symmetry.
+ * Costs O(n^5) time and O(n^4) output storage, without a four-index tensor
+ * workspace or an identity-matrix product.
+ */
+Eigen::MatrixXd pullback_pair_generator(
+    const Eigen::Ref<const Eigen::MatrixXd>& gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>& orbital_direction);
+
+/**
  * @brief Gradient in Q of <G, transform_pair_kernel(K,Q)> at Q=I.
  *
  * Returns a dense old-orbital-by-new-orbital matrix. K and G may each lack

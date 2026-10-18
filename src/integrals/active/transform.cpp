@@ -206,6 +206,38 @@ Eigen::MatrixXd apply_pair_generator(
   return result;
 }
 
+Eigen::MatrixXd pullback_pair_generator(
+    const Eigen::Ref<const Eigen::MatrixXd>& gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>& orbital_direction) {
+  const Eigen::Index n = orbital_count(gradient);
+  if (orbital_direction.rows() != n || orbital_direction.cols() != n) {
+    throw std::invalid_argument("pair generator direction has inconsistent dimensions");
+  }
+  const Eigen::Index pairs = gradient.rows();
+  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(pairs, pairs);
+  // For a source pair (i,j), L(D) replaces either orbital with a. Scatter
+  // each nonzero L(output,source) into both sides of L G + G L^T. The two
+  // replacements intentionally coincide for diagonal source pairs.
+  const auto scatter = [&result, &gradient, pairs](
+      Eigen::Index output, Eigen::Index source, double value) {
+    if (value == 0.0) return;
+    for (Eigen::Index other = 0; other < pairs; ++other) {
+      result(output, other) += value * gradient(source, other);
+      result(other, output) += value * gradient(other, source);
+    }
+  };
+  for (Eigen::Index j = 0; j < n; ++j) {
+    for (Eigen::Index i = j; i < n; ++i) {
+      const Eigen::Index source = pair_index(i, j);
+      for (Eigen::Index a = 0; a < n; ++a) {
+        scatter(pair_index(a, j), source, orbital_direction(a, i));
+        scatter(pair_index(i, a), source, orbital_direction(a, j));
+      }
+    }
+  }
+  return result;
+}
+
 Eigen::MatrixXd orbital_generator_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& kernel,
     const Eigen::Ref<const Eigen::MatrixXd>& gradient) {

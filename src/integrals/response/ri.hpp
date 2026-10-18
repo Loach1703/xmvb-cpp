@@ -61,6 +61,11 @@ RiActiveTwoElectronResponseCache build_ri_active_two_electron_response_cache(
  */
 void prepare_ri_orbital_pair_products(RiActiveTwoElectronResponseCache& cache);
 
+/** @brief Whether the resident three-active image has lower changing-adjoint
+ * contraction cost than the auxiliary-factor product for this cache.
+ */
+bool ri_uses_orbital_pairs(const RiActiveTwoElectronResponseCache& cache) noexcept;
+
 /**
  * @brief Forms the active-pair factor direction `delta B = L delta T(C)[D]`.
  *

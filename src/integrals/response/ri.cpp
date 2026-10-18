@@ -353,6 +353,22 @@ void prepare_ri_orbital_pair_products(RiActiveTwoElectronResponseCache& cache) {
   });
 }
 
+bool ri_uses_orbital_pairs(
+    const RiActiveTwoElectronResponseCache& cache) noexcept {
+  if (cache.orbital_pair_products.rows() !=
+          static_cast<Eigen::Index>(cache.n_basis_functions) *
+              cache.n_active_orbitals ||
+      cache.orbital_pair_products.cols() !=
+          static_cast<Eigen::Index>(cache.active_pair_first_indices.size()))
+    return false;
+  const long double pairs =
+      static_cast<long double>(cache.active_pair_first_indices.size());
+  // B * delta G costs 2 R P^2; image pullback costs 2 N A^2 P.
+  return static_cast<long double>(cache.n_auxiliary_functions) * pairs >
+      static_cast<long double>(cache.n_basis_functions) *
+          cache.n_active_orbitals * cache.n_active_orbitals;
+}
+
 Eigen::MatrixXd compute_ri_active_pair_factor_directional_derivative(
     const RiActiveTwoElectronResponseCache& accepted_cache,
     const Eigen::Ref<const Eigen::MatrixXd>& dense_active_direction) {
@@ -550,15 +566,29 @@ Eigen::MatrixXd apply_ri_active_two_electron_jet_impl(
       *accepted_cache.accepted_active_pair_factors * active_pair_adjoint;
   Eigen::MatrixXd directional_factor_adjoint =
       *factor_direction * active_pair_adjoint;
+  const bool use_orbital_pairs = packed_gradient_direction != nullptr &&
+      ri_uses_orbital_pairs(accepted_cache);
+  Eigen::MatrixXd directional_pair_adjoint;
   if (packed_gradient_direction != nullptr) {
-    const Eigen::MatrixXd directional_pair_adjoint =
+    directional_pair_adjoint =
         build_active_pair_adjoint(*packed_gradient_direction, accepted_cache);
-    directional_factor_adjoint.noalias() +=
-        *accepted_cache.accepted_active_pair_factors * directional_pair_adjoint;
+    if (!use_orbital_pairs) {
+      directional_factor_adjoint.noalias() +=
+          *accepted_cache.accepted_active_pair_factors * directional_pair_adjoint;
+    }
   }
-  return contract_factor_adjoint(
+  Eigen::MatrixXd result = contract_factor_adjoint(
       accepted_cache, accepted_factor_adjoint, &directional_factor_adjoint,
       &dense_active_direction);
+  if (use_orbital_pairs) {
+    const OrbitalPairMatrix pair_adjoint = directional_pair_adjoint;
+    result += pullback_orbital_pairs(
+        accepted_cache.orbital_pair_products, pair_adjoint,
+        accepted_cache.active_pair_first_indices,
+        accepted_cache.active_pair_second_indices,
+        accepted_cache.n_active_orbitals);
+  }
+  return result;
 }
 }  // namespace
 

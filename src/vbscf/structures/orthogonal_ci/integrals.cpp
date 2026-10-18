@@ -130,7 +130,13 @@ OrthogonalActiveIntegrals orthogonalize_active_integrals(
         : xmvb::integrals::transform_ri_pair_factors(
               two_electron.ri_active_pair_factors, inverse_transform);
     const auto& factors = result.ri_pair_factors;
-    result.pair_kernel.noalias() = factors.transpose() * factors;
+    if (result.two_electron_pretransformed &&
+        !two_electron.packed_active_two_electron_integrals.empty()) {
+      result.pair_kernel = unpack_two_electron_kernel(
+          two_electron.packed_active_two_electron_integrals, n_active_orbitals);
+    } else {
+      result.pair_kernel.noalias() = factors.transpose() * factors;
+    }
   } else {
     Eigen::MatrixXd original_kernel(n_pairs, n_pairs);
     const xmvb::integrals::ActiveSpaceTwoElectronView view =
@@ -361,11 +367,9 @@ backpropagate_orthogonal_active_integral_adjoint_direction(
   result.one_electron =
       (0.5 * (result.one_electron + result.one_electron.transpose())).eval();
   if (accepted.two_electron_pretransformed) {
-    result.pair_kernel = xmvb::integrals::pullback_pair_kernel_direction(
-        orthogonal_pair_kernel_gradient,
-        orthogonal_pair_kernel_gradient_direction,
-        Eigen::MatrixXd::Identity(n_orbitals, n_orbitals),
-        -relative_direction);
+    result.pair_kernel = orthogonal_pair_kernel_gradient_direction +
+        xmvb::integrals::pullback_pair_generator(
+            orthogonal_pair_kernel_gradient, -relative_direction);
   } else {
     result.pair_kernel = xmvb::integrals::pullback_pair_kernel_direction(
         orthogonal_pair_kernel_gradient,

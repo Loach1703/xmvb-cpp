@@ -1,4 +1,5 @@
 #include "vbscf/derivatives/hessian/exact/operator.hpp"
+#include "core/timing.hpp"
 
 #include "vbscf/derivatives/hessian/exact/ao_one_electron_internal.hpp"
 #include "vbscf/derivatives/hessian/exact/apply_internal.hpp"
@@ -21,6 +22,7 @@
 #include "vbscf/derivatives/hessian/responses/structure/directional.hpp"
 #include "integrals/response/directional.hpp"
 #include "integrals/response/ri.hpp"
+#include "integrals/response/orbital_pair.hpp"
 #include "integrals/ao/exact.hpp"
 #include "integrals/ao/ri_operator.hpp"
 
@@ -293,15 +295,34 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
       outer_response_context()
           .selected_state_eigen_response_operator.structure_action
           ->supports_integral_direction();
+  // Share the factor direction with the fixed-curvature jet when it exists.
+  const bool ri_orbital_pair_direction = direct_active_gradient &&
+      !components.direct_core_response &&
+      accepted_ri_two_electron_cache_ &&
+      integrals::ri_uses_orbital_pairs(*accepted_ri_two_electron_cache_);
   const bool packed_outer_two_electron_required =
-      !accepted_ri_two_electron_cache_.has_value();
-  if (accepted_ri_two_electron_cache_.has_value() &&
-      (compute_outer_response || components.direct_core_response)) {
+      !accepted_ri_two_electron_cache_ || ri_orbital_pair_direction;
+  if (accepted_ri_two_electron_cache_.has_value()) {
     const auto batch_active_two_electron_start_time =
         std::chrono::steady_clock::now();
-    ri_active_pair_factor_directions =
-        xmvb::integrals::compute_ri_active_pair_factor_directional_derivative_batch(
-            *accepted_ri_two_electron_cache_, dense_active_directions);
+    if (components.direct_core_response ||
+        (compute_outer_response && !ri_orbital_pair_direction)) {
+      ri_active_pair_factor_directions =
+          integrals::compute_ri_active_pair_factor_directional_derivative_batch(
+              *accepted_ri_two_electron_cache_, dense_active_directions);
+    }
+    if (ri_orbital_pair_direction) {
+      profiling::ScopedPhase phase(profiling::Phase::ActiveDirection);
+      const auto& cache = *accepted_ri_two_electron_cache_;
+      const Eigen::Index pairs = cache.active_pair_first_indices.size();
+      delta_packed_active_two_electron_columns.resize(
+          pairs * (pairs + 1) / 2, n_directions);
+      for (Eigen::Index column = 0; column < n_directions; ++column)
+        delta_packed_active_two_electron_columns.col(column) =
+            integrals::packed_orbital_pair_direction(cache.orbital_pair_products,
+                dense_active_directions[column], cache.active_pair_first_indices,
+                cache.active_pair_second_indices, cache.n_active_orbitals);
+    }
     const double batch_active_two_electron_seconds =
         detail::exact_hvp_elapsed_seconds(batch_active_two_electron_start_time);
     apply_timing_totals_.active_two_electron_wall_time_seconds +=
@@ -356,7 +377,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
 
       const auto integral_start = std::chrono::steady_clock::now();
       Eigen::VectorXd delta_packed_two_electron;
-      if (!accepted_ri_two_electron_cache_.has_value()) {
+      if (packed_outer_two_electron_required) {
         delta_packed_two_electron =
             delta_packed_active_two_electron_columns.col(column);
       }
@@ -407,11 +428,11 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
               ? build_selected_structure_direction(
                   outer_response_context(),
                   integral_directions[static_cast<std::size_t>(column)],
-                  accepted_ri_two_electron_cache_.has_value()
+                  accepted_ri_two_electron_cache_.has_value() && !ri_orbital_pair_direction
                       ? accepted_ri_two_electron_cache_
                             ->accepted_active_pair_factors
                       : nullptr,
-                  accepted_ri_two_electron_cache_.has_value()
+                  accepted_ri_two_electron_cache_.has_value() && !ri_orbital_pair_direction
                       ? &ri_active_pair_factor_directions[
                             static_cast<std::size_t>(column)]
                       : nullptr)
@@ -546,12 +567,10 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
         components,
         &combined_ao,
         &active_projection,
-        (components.local_active_response || components.structure_response) &&
-                packed_outer_two_electron_required
+        compute_outer_response && packed_outer_two_electron_required
             ? &delta_packed_active_two_electron
             : nullptr,
-        accepted_ri_two_electron_cache_.has_value() &&
-                (compute_outer_response || components.direct_core_response)
+        !ri_active_pair_factor_directions.empty()
             ? &ri_active_pair_factor_directions[
                   static_cast<std::size_t>(column)]
             : nullptr,

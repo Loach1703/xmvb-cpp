@@ -122,10 +122,9 @@ void check_exact() {
   }
 }
 
-void check_ri() {
+void check_ri(int auxiliary, bool expect_resident_plan) {
   constexpr int basis = 4;
   constexpr int active = 2;
-  constexpr int auxiliary = 5;
   constexpr int basis_pairs = basis * (basis + 1) / 2;
   xmvb::integrals::RiAoFactorization factorization;
   factorization.n_basis_functions = basis;
@@ -151,6 +150,36 @@ void check_ri() {
       factorization.metric_whitened_ao_pair_factors * pair_map;
   auto resident = xmvb::integrals::build_ri_active_two_electron_response_cache(
       factorization, accepted, active);
+  xmvb::integrals::prepare_ri_orbital_pair_products(resident);
+  if (resident.orbital_pair_products.size() == 0 ||
+      xmvb::integrals::ri_uses_orbital_pairs(resident) != expect_resident_plan)
+    throw std::runtime_error("RI resident contraction selected the wrong plan");
+
+  const auto gradient_at = [&](double step) {
+    const Eigen::MatrixXd shifted_coefficients =
+        accepted_coefficients + step * direction;
+    xmvb::integrals::PackedOrbitalPairMapMatrix shifted_pair_map;
+    xmvb::integrals::build_packed_orbital_pair_map(
+        shifted_coefficients, &shifted_pair_map);
+    xmvb::integrals::ActiveSpaceTwoElectronResult shifted;
+    shifted.representation =
+        xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
+    shifted.n_auxiliary_functions = auxiliary;
+    shifted.dense_active_coefficients = shifted_coefficients;
+    shifted.ri_active_pair_factors =
+        factorization.metric_whitened_ao_pair_factors * shifted_pair_map;
+    const auto shifted_cache =
+        xmvb::integrals::build_ri_active_two_electron_response_cache(
+            factorization, shifted, active);
+    std::vector<double> shifted_gradient = accepted_gradient;
+    for (std::size_t i = 0; i < shifted_gradient.size(); ++i)
+      shifted_gradient[i] += step * gradient_direction[i];
+    return xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
+        shifted_gradient, shifted_cache);
+  };
+  constexpr double fd_step = 1e-5;
+  const Eigen::MatrixXd finite_difference =
+      (gradient_at(fd_step) - gradient_at(-fd_step)) / (2 * fd_step);
   for (bool streamed : {false, true}) {
     auto cache = resident;
     if (streamed) {
@@ -158,6 +187,9 @@ void check_ri() {
       cache.orbital_pair_products.resize(0, 0);
       cache.auxiliary_tile_size = 1;
     }
+    if (xmvb::integrals::ri_uses_orbital_pairs(cache) !=
+        (!streamed && expect_resident_plan))
+      throw std::runtime_error("RI jet contraction plan did not respect residence");
     const Eigen::MatrixXd factor_direction =
         xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
             cache, direction);
@@ -174,6 +206,13 @@ void check_ri() {
         xmvb::integrals::apply_ri_active_two_electron_jet(
             accepted_gradient, cache, direction, gradient_direction),
         reference, "RI generated-factor jet disagrees with separate contractions");
+    const Eigen::MatrixXd jet =
+        xmvb::integrals::apply_ri_active_two_electron_jet(
+            accepted_gradient, cache, direction, gradient_direction,
+            &factor_direction);
+    if ((jet - finite_difference).norm() >
+        2e-7 * std::max(1.0, finite_difference.norm()))
+      throw std::runtime_error("RI jet disagrees with independent finite difference");
   }
 }
 
@@ -181,5 +220,6 @@ void check_ri() {
 
 int main() {
   check_exact();
-  check_ri();
+  check_ri(5, false);
+  check_ri(7, true);
 }

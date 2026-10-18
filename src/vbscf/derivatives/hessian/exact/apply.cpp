@@ -3,6 +3,7 @@
 
 #include "vbscf/derivatives/hessian/exact/apply_internal.hpp"
 #include "integrals/active/frame.hpp"
+#include "integrals/response/orbital_pair.hpp"
 
 #include "vbscf/derivatives/hessian/exact/ao_one_electron_internal.hpp"
 
@@ -497,12 +498,33 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       outer_response_context()
           .selected_state_eigen_response_operator.structure_action
           ->supports_integral_direction();
+  // A fixed-curvature jet already needs delta B: reuse that image for CI.
+  // The three-active contraction removes delta B only in response-only calls.
+  const bool ri_orbital_pair_direction = direct_active_gradient &&
+      !components.direct_core_response &&
+      accepted_ri_two_electron_cache_ &&
+      integrals::ri_uses_orbital_pairs(*accepted_ri_two_electron_cache_);
   const bool packed_outer_two_electron_required =
-      !accepted_ri_two_electron_cache_.has_value();
+      !accepted_ri_two_electron_cache_ || ri_orbital_pair_direction;
+  Eigen::VectorXd local_packed_two_electron;
+  const Eigen::VectorXd* packed_two_electron_direction = precomputed_delta_packed_active_two_electron;
+  if (ri_orbital_pair_direction && packed_two_electron_direction == nullptr) {
+    profiling::ScopedPhase phase(profiling::Phase::ActiveDirection);
+    const auto start = std::chrono::steady_clock::now();
+    const auto& cache = *accepted_ri_two_electron_cache_;
+    local_packed_two_electron = integrals::packed_orbital_pair_direction(
+        cache.orbital_pair_products, delta_dense_active_coefficients,
+        cache.active_pair_first_indices, cache.active_pair_second_indices,
+        cache.n_active_orbitals);
+    packed_two_electron_direction = &local_packed_two_electron;
+    apply_timing_totals_.outer_response_active_space_integrals_wall_time_seconds +=
+        detail::exact_hvp_elapsed_seconds(start);
+  }
   std::optional<Eigen::MatrixXd> local_ri_factor_direction;
   const Eigen::MatrixXd* ri_directional_active_pair_factors = nullptr;
   if (accepted_ri_two_electron_cache_.has_value() &&
-      (compute_outer_response || components.direct_core_response)) {
+      (components.direct_core_response ||
+       (compute_outer_response && !ri_orbital_pair_direction))) {
     if (precomputed_ri_active_pair_factor_direction != nullptr) {
       if (precomputed_ri_active_pair_factor_direction->rows() !=
               accepted_ri_two_electron_cache_->n_auxiliary_functions ||
@@ -523,6 +545,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       ri_directional_active_pair_factors = &*local_ri_factor_direction;
     }
   }
+  const Eigen::MatrixXd* selected_ri_factor_direction =
+      ri_orbital_pair_direction ? nullptr : ri_directional_active_pair_factors;
   std::vector<double> combined_core_orbital_value_gradient;
   bool two_electron_jet_consumed=false;
 
@@ -549,7 +573,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
               prepared_direction,
               delta_ao_effective_h1e_times_active_auxiliary_orbitals,
               packed_outer_two_electron_required
-                  ? precomputed_delta_packed_active_two_electron
+                  ? packed_two_electron_direction
                   : nullptr,
               &outer_response_integral_direction_workspace_,
               packed_outer_two_electron_required);
@@ -631,11 +655,11 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
             : build_selected_structure_direction(
                   outer_response_context(),
                   active_space_integral_direction,
-                  accepted_ri_two_electron_cache_.has_value()
+                  accepted_ri_two_electron_cache_.has_value() && !ri_orbital_pair_direction
                       ? accepted_ri_two_electron_cache_
                             ->accepted_active_pair_factors
                       : nullptr,
-                  ri_directional_active_pair_factors,ci_response);
+                  selected_ri_factor_direction,ci_response);
         directional_pair_tiles_consumed = use_directional_pair_tiles;
         local_direct_ci_direction = std::move(images.direct_ci_direction);
         apply_timing_totals_
@@ -802,7 +826,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
               active_space_integral_direction.packed_two_electron,
               direct_ci_direction,
               components.local_active_response,
-              ri_directional_active_pair_factors),
+              selected_ri_factor_direction),
           n_active_orbitals);
       if (reuse_normalization) {
         // Q_g=aC changes every fixed-energy active adjoint by exactly 2a.

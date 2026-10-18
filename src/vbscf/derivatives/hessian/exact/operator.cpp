@@ -207,6 +207,16 @@ ExactHvpOperator::State::State(
             *cache.metric_whitened_ao_pair_factors,
             accepted_orbital_preparation_cache_->inactive_auxiliary);
     }
+    if (accepted_ri_two_electron_cache_ && profiling::phase_totals().enabled) {
+      const auto& cache = *accepted_ri_two_electron_cache_;
+      std::fprintf(stderr,
+          "XMVB_RI_CONTRACTION,basis=%d,active=%d,auxiliary=%d,"
+          "three_active_bytes=%zu,direct_pair_plan=%d,inactive_bytes=%zu\n",
+          cache.n_basis_functions, cache.n_active_orbitals, cache.n_auxiliary_functions,
+          static_cast<std::size_t>(cache.orbital_pair_products.size()) * sizeof(double),
+          static_cast<int>(integrals::ri_uses_orbital_pairs(cache)),
+          static_cast<std::size_t>(accepted_ri_inactive_one_index_factors_.size()) * sizeof(double));
+    }
   }
 }
 

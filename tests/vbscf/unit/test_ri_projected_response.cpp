@@ -147,6 +147,8 @@ int main() {
         for (bool cached : {false, true}) {
           check_case(3, 2, cached, budget);
           check_case(3, 0, cached, budget);
+          check_case(5, 1, cached, budget);
+          check_case(5, 0, cached, budget);
           check_case(0, 0, cached, budget);
         }
       }
