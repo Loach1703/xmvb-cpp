@@ -14,6 +14,7 @@
 #include "integrals/ao/ri.hpp"
 #include "scf/driver/solver.hpp"
 #include "scf/hf/potential.hpp"
+#include "scf/mixing/diis.hpp"
 
 namespace {
 using Matrix = Eigen::MatrixXd;
@@ -239,6 +240,34 @@ void check_invalid_inputs(const Matrix& overlap, const Matrix& core) {
   }), "mismatched overlap/core dimensions were not rejected");
 }
 
+/** @brief DIIS depends on residual directions, not their absolute units. */
+void check_diis_scaling() {
+  Matrix f0 = Matrix::Zero(2, 2);
+  Matrix f1 = Matrix::Identity(2, 2);
+  Matrix e0(2, 2), e1(2, 2);
+  e0 << 1, 0, 0, 0;
+  e1 << 0, 0, 0, 2;
+  const Matrix expected = 0.2 * f1;
+  for (double scale : {1.0, 1e-14, 1e-150, 1e150}) {
+    xmvb::scf::Diis diis(6);
+    diis.push(f0, scale * e0);
+    diis.push(f1, scale * e1);
+    Matrix mixed;
+    require(diis.extrapolate(&mixed) && (mixed - expected).norm() < 1e-12,
+            "DIIS changed under a common residual scaling");
+    // Duplicating a residual leaves the constrained residual minimizer intact.
+    diis.push(f1, scale * e1);
+    require(diis.extrapolate(&mixed) && (mixed - expected).norm() < 1e-12,
+            "dependent DIIS history disabled or changed extrapolation");
+  }
+  xmvb::scf::Diis zero(2);
+  zero.push(f0, Matrix::Zero(2, 2));
+  zero.push(f1, Matrix::Zero(2, 2));
+  Matrix mixed;
+  require(zero.extrapolate(&mixed) && (mixed - f1).norm() == 0.0,
+          "zero-error DIIS history did not retain the latest Fock");
+}
+
 }  // namespace
 
 int main() {
@@ -248,6 +277,7 @@ int main() {
     check_constant_model(overlap, core);
     check_nonlinear_models(overlap, core);
     check_invalid_inputs(overlap, core);
+    check_diis_scaling();
     std::cout << "restricted SCF invariants and exact/RI nonlinear models: PASS\n";
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

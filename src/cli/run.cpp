@@ -1,5 +1,6 @@
 #include "cli/run.hpp"
 #include "cli/casscf.hpp"
+#include "cli/dft.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -30,6 +31,9 @@ int run(Options command_line) {
   workspace::set_limit(command_line.ci_workspace_bytes);
   const std::string& input_path = command_line.input_path;
   const auto deck = vb::parse_input_deck_model(input_path);
+  if (deck.metadata.electronic_method == vb::ElectronicMethod::Dft) {
+    return run_dft(command_line, deck);
+  }
   if (deck.metadata.electronic_method == vb::ElectronicMethod::Casscf) {
     return run_casscf(command_line, deck);
   }

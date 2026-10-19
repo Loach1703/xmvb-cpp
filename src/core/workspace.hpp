@@ -9,7 +9,7 @@
 
 namespace xmvb::workspace {
 
-/** @brief Shared CI/RI payload allowance; not a process RSS limit.
+/** @brief Shared numerical payload allowance for CI/RI/DFT; not an RSS limit.
  * Retained panels and accepted RI images are charged once for their lifetime.
  * Each sequential kernel plans temporary panels from available(). Static AO
  * integrals, immutable excitation links and eigensolver vectors are separate.

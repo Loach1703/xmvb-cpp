@@ -1,8 +1,9 @@
 #include "scf/mixing/diis.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
-#include <Eigen/LU>
+#include <Eigen/QR>
 
 namespace xmvb::scf {
 
@@ -51,23 +52,34 @@ bool Diis::extrapolate(Eigen::MatrixXd* fock) const {
     return false;
   }
 
+  double error_scale = 0.0;
+  for (const auto& entry : history_) {
+    error_scale = std::max(error_scale, entry.error.cwiseAbs().maxCoeff());
+  }
+  if (error_scale == 0.0) {
+    *fock = history_.back().fock;
+    return true;
+  }
+
+  // Common residual scaling leaves the constrained minimizer unchanged.
+  // Without it, the unit constraint dominates the rank test as SCF converges.
   Eigen::MatrixXd system = Eigen::MatrixXd::Zero(size + 1, size + 1);
   Eigen::VectorXd rhs = Eigen::VectorXd::Zero(size + 1);
   rhs(size) = -1.0;
   for (int row = 0; row < size; ++row) {
     for (int column = 0; column < size; ++column) {
       system(row, column) =
-          (history_[row].error.array() * history_[column].error.array()).sum();
+          ((history_[row].error.array() / error_scale) *
+           (history_[column].error.array() / error_scale)).sum();
     }
     system(row, size) = -1.0;
     system(size, row) = -1.0;
   }
 
-  Eigen::FullPivLU<Eigen::MatrixXd> lu(system);
-  if (!lu.isInvertible()) {
-    return false;
-  }
-  const Eigen::VectorXd weights = lu.solve(rhs);
+  // Redundant histories do not invalidate DIIS: solve on their numerical
+  // range rather than discarding acceleration when errors become dependent.
+  const Eigen::VectorXd weights =
+      system.completeOrthogonalDecomposition().solve(rhs);
   if (!weights.allFinite()) {
     return false;
   }

@@ -39,6 +39,7 @@ set(XMVB_INTEGRAL_SOURCES
   integrals/ao/ri_operator.cpp
   integrals/ao/ri_transform.cpp
   integrals/jk/contraction.cpp
+  integrals/basis/values.cpp
   integrals/active/one_electron.cpp
   integrals/active/exact.cpp
   integrals/active/ri.cpp
@@ -121,10 +122,19 @@ set(XMVB_SCF_SOURCES
   scf/mixing/diis.cpp
   scf/hf/potential.cpp)
 
+set(XMVB_DFT_SOURCES
+  dft/grid/atomic.cpp
+  dft/grid/partition.cpp
+  dft/xc/functional.cpp
+  dft/integration/density.cpp
+  dft/integration/potential.cpp
+  dft/driver/rks.cpp)
+
 set(XMVB_INPUT_SOURCES
   input/loading/generated_structures.cpp
   input/loading/loader.cpp
   input/loading/casscf.cpp
+  input/loading/molecule.cpp
 )
 
 set(XMVB_OUTPUT_SOURCES
@@ -147,6 +157,7 @@ file(
   RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/guess/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/scf/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/dft/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/input/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/output/*.cpp"
@@ -159,6 +170,7 @@ set(_xmvb_declared_component_sources
   ${XMVB_LIBCINT_SOURCES}
   ${XMVB_GUESS_SOURCES}
   ${XMVB_SCF_SOURCES}
+  ${XMVB_DFT_SOURCES}
   ${XMVB_INPUT_SOURCES}
   ${XMVB_OUTPUT_SOURCES}
   ${XMVB_LINALG_SOURCES}
@@ -239,6 +251,10 @@ target_link_libraries(xmvb_integrals PUBLIC xmvb_linalg ${CINT_LIB})
 xmvb_add_component(xmvb_scf ${XMVB_SCF_SOURCES})
 target_link_libraries(xmvb_scf PUBLIC xmvb_integrals)
 
+xmvb_add_component(xmvb_dft ${XMVB_DFT_SOURCES})
+target_include_directories(xmvb_dft PRIVATE ${LIBXC_INCLUDE_DIR})
+target_link_libraries(xmvb_dft PUBLIC xmvb_scf PRIVATE ${LIBXC_LIBRARY})
+
 xmvb_add_component(xmvb_mcscf ${XMVB_MCSCF_SOURCES})
 target_link_libraries(xmvb_mcscf PUBLIC xmvb_linalg)
 target_link_libraries(xmvb_mcscf PUBLIC xmvb_integrals)
@@ -252,6 +268,7 @@ file(GLOB_RECURSE _xmvb_common_headers CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/parallel/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/scf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/scf/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/dft/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/dft/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/integrals/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/integrals/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.cpp"
@@ -262,7 +279,7 @@ foreach(_xmvb_common_file IN LISTS _xmvb_common_headers)
   if (_xmvb_vb_includes)
     message(FATAL_ERROR "Common/CASSCF source depends on VBSCF: ${_xmvb_common_file}")
   endif()
-  if (_xmvb_common_file MATCHES "/(linalg|parallel|scf)/")
+  if (_xmvb_common_file MATCHES "/(linalg|parallel|scf|dft)/")
     file(STRINGS "${_xmvb_common_file}" _xmvb_model_includes
       REGEX "^[ \t]*#[ \t]*include[ \t]*\"(mcscf|casscf)/")
     if (_xmvb_model_includes)
@@ -285,6 +302,19 @@ unset(_xmvb_model_includes)
 unset(_xmvb_integral_model_includes)
 
 if (XMVB_BUILD_DEV_TARGETS)
+  foreach(_xmvb_dft_test basis grid xc)
+    add_executable(test_dft_${_xmvb_dft_test}
+      ${CMAKE_SOURCE_DIR}/tests/dft/test_${_xmvb_dft_test}.cpp)
+    target_link_libraries(test_dft_${_xmvb_dft_test} PRIVATE xmvb_dft)
+    if (BUILD_TESTING)
+      add_test(NAME dft_${_xmvb_dft_test} COMMAND test_dft_${_xmvb_dft_test})
+      set_tests_properties(dft_${_xmvb_dft_test} PROPERTIES
+        ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+    endif()
+  endforeach()
+  unset(_xmvb_dft_test)
+  add_executable(dft_molecule ${CMAKE_SOURCE_DIR}/tests/dft/molecule.cpp)
+  target_link_libraries(dft_molecule PRIVATE xmvb_dft xmvb_input)
   foreach(_xmvb_scf_test jk solver)
     add_executable(test_scf_${_xmvb_scf_test}
       ${CMAKE_SOURCE_DIR}/tests/scf/test_${_xmvb_scf_test}.cpp)
@@ -399,6 +429,7 @@ add_executable(xmvb
   cli/main.cpp
   cli/options.cpp
   cli/run.cpp
+  cli/dft.cpp
   cli/casscf.cpp)
 set_target_properties(xmvb PROPERTIES OUTPUT_NAME xmvb-cpp.exe)
 target_link_libraries(xmvb
@@ -406,6 +437,7 @@ target_link_libraries(xmvb
     xmvb_input
     xmvb_output
     xmvb_casscf
+    xmvb_dft
     xmvb_vbscf)
 
 file(
@@ -435,6 +467,15 @@ add_custom_target(
 add_dependencies(xmvb xmvb_assets)
 
 if (BUILD_TESTING)
+  add_test(NAME dft_xmi
+    COMMAND ${CMAKE_COMMAND}
+      -DPROGRAM=$<TARGET_FILE:xmvb>
+      -DINPUT=${CMAKE_SOURCE_DIR}/testdata/dft/He.xmi
+      -DBASIS=${CMAKE_SOURCE_DIR}/basis/cc-pvdz.gbs
+      -DRUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/dft-xmi-test
+      -P ${CMAKE_SOURCE_DIR}/tests/dft/check_xmi.cmake)
+  set_tests_properties(dft_xmi PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
   add_executable(test_output_orbitals ${CMAKE_SOURCE_DIR}/tests/output/test_orbitals.cpp)
   target_link_libraries(test_output_orbitals PRIVATE xmvb_output xmvb_guess)
   add_test(NAME output_orbitals COMMAND test_output_orbitals)

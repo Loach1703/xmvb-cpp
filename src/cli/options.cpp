@@ -129,7 +129,7 @@ void print_usage() {
                " [--gradient-tolerance <value>]"
                " [--energy-tolerance <value>]"
                " [--exact-exchange-memory-mib <nonnegative integer>]"
-               " [--ci-workspace-mib <positive integer, default 4096>]"
+               " [--ci-workspace-mib <positive integer, shared CI/RI/DFT budget, default 4096>]"
                "\n"
                " [--standard-two-electron-mode auto|exact|ri]"
                " [--skip-orbital-guess true|false]"

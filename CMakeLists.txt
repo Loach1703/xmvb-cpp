@@ -38,12 +38,14 @@ endmacro()
 _xmvb_default_root_from_conda(LAPACK_ROOT_DIR "Root directory for OpenBLAS/LAPACK")
 _xmvb_default_root_from_conda(CINT_ROOT_DIR "Root directory for Libcint")
 _xmvb_default_root_from_conda(EIGEN3_ROOT_DIR "Root directory for Eigen3")
+_xmvb_default_root_from_conda(LIBXC_ROOT_DIR "Root directory for Libxc")
 
 foreach(_xmvb_prefix
     ${XMVB_CONDA_PREFIX}
     ${LAPACK_ROOT_DIR}
     ${CINT_ROOT_DIR}
-    ${EIGEN3_ROOT_DIR})
+    ${EIGEN3_ROOT_DIR}
+    ${LIBXC_ROOT_DIR})
   if (_xmvb_prefix)
     list(PREPEND CMAKE_PREFIX_PATH "${_xmvb_prefix}")
   endif()
@@ -122,5 +124,11 @@ find_path(
     ${CINT_ROOT_DIR}/include
     ${XMVB_CONDA_PREFIX}/include
   REQUIRED)
+
+find_path(LIBXC_INCLUDE_DIR NAMES xc.h
+  HINTS ${LIBXC_ROOT_DIR}/include ${XMVB_CONDA_PREFIX}/include REQUIRED)
+find_library(LIBXC_LIBRARY NAMES xc
+  HINTS ${LIBXC_ROOT_DIR}/lib ${LIBXC_ROOT_DIR}/lib64
+        ${XMVB_CONDA_PREFIX}/lib REQUIRED)
 
 add_subdirectory(src)

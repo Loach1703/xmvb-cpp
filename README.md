@@ -25,6 +25,8 @@ src/
   input/           XMI deck contracts and VBSCF input loading
   libcint/         Method-independent libcint providers (no VB dependency)
   guess/           Initial orbitals and restricted-HF construction
+  scf/             Common restricted SCF/DIIS and Hartree-Fock evaluation
+  dft/             Molecular grids, Libxc LDA, and restricted Kohn-Sham model
   output/          Molden and accepted-iteration output
   cli/             Command-line entry point and reporting
   tools/           Benchmarking and diagnostic tools
@@ -103,6 +105,33 @@ reports omit the full structure Hamiltonian/overlap matrices and the Lowdin and
 inverse weights that require global overlap-matrix functions. Dense reference
 runs retain the complete matrices, spectrum, and all four weight definitions.
 
+### Molecular DFT
+
+Closed-shell molecular RKS currently supports Libxc LDA functionals and exact
+AO Coulomb integrals, using the same SCF/DIIS driver as restricted HF.
+Select `DFT` rather than `VBSCF` in `$CTRL`:
+
+```text
+$CTRL
+DFT BASIS=CC-PVDZ INT=LIBCINT
+XC=LDA_X,LDA_C_VWN NRAD=80 NANG=590 SCF_TOL=1.0D-9
+$END
+$GEO
+He 0.0 0.0 0.0
+$END
+```
+
+The defaults are LDA exchange plus VWN correlation and an unpruned 80-by-590
+atom-centered grid with Becke partitioning. `SCF_TOL` applies to the maximum
+AO density change and commutator residual; `ITMAX` sets the iteration limit.
+Angular grids of 302 or 590 points are supported. See `testdata/dft/` for
+He, H2, water, and F2 examples. Converged MO coefficients are written to
+`<input>.orb` in fixed-point GUS-body format.
+
+This first DFT implementation uses a core-Hamiltonian initial guess. Open-shell
+KS, GGA, hybrids, RI, supplied guesses, nuclear derivatives, and periodic DFT
+are not implemented and are not silently substituted by LDA or HF.
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE), with quadrature attribution in [NOTICE](NOTICE).

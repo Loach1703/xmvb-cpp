@@ -272,6 +272,22 @@ void apply_ctrl_assignment(
     metadata->basis_name = to_ascii_lower(raw_value);
     return;
   }
+  if (key == "XC") {
+    metadata->xc_functional = value_upper;
+    return;
+  }
+  if (key == "NRAD") {
+    metadata->grid_radial_points = std::stoi(raw_value);
+    return;
+  }
+  if (key == "NANG") {
+    metadata->grid_angular_points = std::stoi(raw_value);
+    return;
+  }
+  if (key == "SCF_TOL") {
+    metadata->scf_tolerance = parse_fortran_double(raw_value);
+    return;
+  }
   if (key == "AUXBASIS") {
     metadata->auxiliary_basis_name = to_ascii_lower(raw_value);
     return;
@@ -369,12 +385,12 @@ void apply_ctrl_flag(
     throw std::invalid_argument("metadata must not be null");
   }
   const std::string token = to_ascii_upper(raw_token);
-  if (token == "VBSCF" || token == "CASSCF") {
-    const ElectronicMethod requested = token == "CASSCF"
-        ? ElectronicMethod::Casscf : ElectronicMethod::Vbscf;
+  if (token == "VBSCF" || token == "CASSCF" || token == "DFT") {
+    const ElectronicMethod requested = token == "DFT" ? ElectronicMethod::Dft :
+        token == "CASSCF" ? ElectronicMethod::Casscf : ElectronicMethod::Vbscf;
     if (metadata->electronic_method_explicit &&
         metadata->electronic_method != requested)
-      throw std::invalid_argument("$CTRL cannot request both VBSCF and CASSCF");
+      throw std::invalid_argument("$CTRL must select only one electronic method");
     metadata->electronic_method = requested;
     metadata->electronic_method_explicit = true;
   } else if (token == "TBVBSCF") {

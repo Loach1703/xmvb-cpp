@@ -1,72 +1,19 @@
 #include "input/loading/casscf.hpp"
 
-#include <cmath>
 #include <cstddef>
 #include <stdexcept>
+#include <utility>
 #include <vector>
-
-extern "C" {
-#include "cint.h"
-}
 
 #include "casscf/orbitals/frame.hpp"
 #include "guess/block.hpp"
 #include "guess/initial.hpp"
 #include "input/deck/model.hpp"
-#include "input/deck/primary_basis.hpp"
-#include "integrals/ao/libcint.hpp"
-#include "libcint/direct_shell.hpp"
-#include "libcint/materialized_input.hpp"
-#include "libcint/materialized_provider.hpp"
+#include "input/loading/molecule.hpp"
 #include "vbscf/orbitals/preparation/input.hpp"
 
 namespace xmvb::input {
 namespace {
-
-Eigen::MatrixXd build_overlap(const integrals::LibcintInput& libcint_input) {
-  libcint::LibcintDirectShellEvaluator evaluator(libcint_input);
-  const int n=evaluator.n_basis_functions();
-  Eigen::MatrixXd overlap=Eigen::MatrixXd::Zero(n,n);
-  for (int right=0; right<libcint_input.n_shells; ++right)
-    for (int left=0; left<=right; ++left) {
-      const auto block=evaluator.evaluate_overlap_shell_pair(left,right);
-      for (int j=0; j<block.right_ao_count; ++j)
-        for (int i=0; i<block.left_ao_count; ++i) {
-          const int row=block.left_ao_offset+i;
-          const int col=block.right_ao_offset+j;
-          const double value=block.values[i+j*block.left_ao_count];
-          overlap(row,col)=value;
-          overlap(col,row)=value;
-        }
-    }
-  return overlap;
-}
-
-std::pair<int,double> electron_count_and_nuclear_energy(
-    const integrals::LibcintInput& libcint_input, int charge) {
-  integrals::validate_libcint_input_shape(libcint_input);
-  int electrons=-charge;
-  double nuclear=0.0;
-  for (int i=0; i<libcint_input.n_atoms; ++i) {
-    const int z=libcint_input.atm[i*ATM_SLOTS+CHARGE_OF];
-    const int offset=libcint_input.atm[i*ATM_SLOTS+PTR_COORD];
-    electrons+=z;
-    for (int j=0; j<i; ++j) {
-      const int other=libcint_input.atm[j*ATM_SLOTS+PTR_COORD];
-      const double dx=libcint_input.env[offset]-libcint_input.env[other];
-      const double dy=libcint_input.env[offset+1]-libcint_input.env[other+1];
-      const double dz=libcint_input.env[offset+2]-libcint_input.env[other+2];
-      const double radius=std::sqrt(dx*dx+dy*dy+dz*dz);
-      if (!(radius>0.0))
-        throw std::invalid_argument("CASSCF geometry contains overlapping nuclei");
-      nuclear+=static_cast<double>(z)*
-          libcint_input.atm[j*ATM_SLOTS+CHARGE_OF]/radius;
-    }
-  }
-  if (electrons<1)
-    throw std::invalid_argument("CASSCF molecular electron count is not positive");
-  return {electrons,nuclear};
-}
 
 Eigen::MatrixXd build_seed(const vb::InputDeck& deck,
     const std::string& input_path, const CasscfInput& input) {
@@ -112,17 +59,17 @@ CasscfInput load_casscf_input(const vb::InputDeck& deck,
       metadata.declared_active_electrons<1 ||
       metadata.declared_spin_multiplicity<1)
     throw std::invalid_argument("CASSCF requires NAO, NAE, and NMUL in $CTRL");
-  const auto basis=vb::build_input_deck_basis(deck,metadata.basis_name);
+  auto molecule=load_molecule(deck);
   CasscfInput result;
-  result.libcint_input=basis.libcint_input;
-  result.basis=basis.basis_display_name;
-  result.overlap=build_overlap(result.libcint_input);
-  const auto [total_electrons,nuclear]=
-      electron_count_and_nuclear_energy(result.libcint_input,metadata.total_charge);
+  result.libcint_input=std::move(molecule.libcint_input);
+  result.basis=std::move(molecule.basis);
+  result.overlap=std::move(molecule.overlap);
+  result.ao=std::move(molecule.ao);
+  const int total_electrons=molecule.n_electrons;
   result.nactive=metadata.declared_active_orbitals;
   result.n_electrons=total_electrons;
   result.twice_spin=metadata.declared_spin_multiplicity-1;
-  result.nuclear_energy=nuclear;
+  result.nuclear_energy=molecule.nuclear_energy;
   result.max_iterations=metadata.requested_scf_max_iterations>0 ?
       metadata.requested_scf_max_iterations : 2000;
   result.request_molden_output=metadata.request_molden_output;
@@ -137,9 +84,6 @@ CasscfInput load_casscf_input(const vb::InputDeck& deck,
       result.twice_spin>2*result.nactive-active_electrons ||
       (active_electrons-result.twice_spin)%2!=0)
     throw std::invalid_argument("CASSCF active electron, spin, or orbital partition is invalid");
-  libcint::LibcintMaterializedIntegralProvider provider;
-  result.ao=libcint::build_materialized_ao_integral_input(
-      provider.build(result.libcint_input));
   const Eigen::MatrixXd seed=build_seed(deck,input_path,result);
   result.orbitals=casscf::complete_metric_orthonormal_frame(
       seed,result.overlap,result.ncore,result.nactive);
