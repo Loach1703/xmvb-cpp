@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <span>
 #include <stdexcept>
 #include <vector>
 
@@ -246,11 +248,118 @@ void check_rectangular_pullback() {
 #endif
 }
 
+/** Independent physical oracle: differentiate L*T(C) and its Gram matrix
+ * directly from the dense AO-pair map, one orbital coordinate at a time.
+ */
+Eigen::MatrixXd dense_pair_map_pullback(
+    const xmvb::integrals::RiAoFactorization& factorization,
+    const Eigen::MatrixXd& coefficients,const std::vector<double>& gradient) {
+  constexpr double step=1e-6;
+  Eigen::MatrixXd answer(coefficients.rows(),coefficients.cols());
+  for (int a=0;a<coefficients.cols();++a)
+    for (int mu=0;mu<coefficients.rows();++mu) {
+      Eigen::MatrixXd plus=coefficients,minus=coefficients;
+      plus(mu,a)+=step;
+      minus(mu,a)-=step;
+      const Eigen::MatrixXd high_factors=
+          factorization.metric_whitened_ao_pair_factors*build_pair_map(plus);
+      const Eigen::MatrixXd low_factors=
+          factorization.metric_whitened_ao_pair_factors*build_pair_map(minus);
+      const auto high=pack_gram(high_factors);
+      const auto low=pack_gram(low_factors);
+      answer(mu,a)=(packed_dot(gradient,high)-packed_dot(gradient,low))/(2*step);
+    }
+  return answer;
+}
+
+void check_changing_adjoint_block() {
+  constexpr int n_bf=7,n_active=4,n_auxiliary=5;
+  xmvb::integrals::RiAoFactorization factorization;
+  factorization.n_basis_functions=n_bf;
+  factorization.n_auxiliary_functions=n_auxiliary;
+  factorization.n_packed_ao_pairs=n_bf*(n_bf+1)/2;
+  factorization.metric_whitened_ao_pair_factors.resize(
+      n_auxiliary,factorization.n_packed_ao_pairs);
+  for (Eigen::Index i=0;i<factorization.metric_whitened_ao_pair_factors.size();++i)
+    factorization.metric_whitened_ao_pair_factors.data()[i]=
+        0.13*std::sin(0.29*(i+1))+0.07*std::cos(0.11*(i+3));
+  Eigen::MatrixXd coefficients(n_bf,n_active);
+  for (Eigen::Index i=0;i<coefficients.size();++i)
+    coefficients.data()[i]=0.23*std::sin(0.17*(i+1))+0.19*std::cos(0.31*(i+2));
+  const auto accepted=make_result(coefficients,factorization);
+  const auto cache=xmvb::integrals::build_ri_active_two_electron_response_cache(
+      factorization,accepted,n_active);
+  require(cache.accepted_one_index_factors!=nullptr,
+      "RI changing-adjoint fixture lacks resident one-index factors");
+  auto three_active=cache;
+  xmvb::integrals::prepare_ri_orbital_pair_products(three_active);
+  require(three_active.orbital_pair_products.size()!=0,
+      "RI changing-adjoint fixture lacks three-active image");
+  auto streamed=cache;
+  streamed.accepted_one_index_factors.reset();
+  streamed.auxiliary_tile_size=3;
+  auto three_active_only=three_active;
+  three_active_only.accepted_one_index_factors.reset();
+
+  const int pairs=n_active*(n_active+1)/2;
+  const int packed=pairs*(pairs+1)/2;
+  std::array<std::vector<double>,3> gradients;
+  for (auto& gradient:gradients) gradient.resize(packed);
+  for (int i=0;i<packed;++i) {
+    gradients[0][i]=0.07*std::sin(0.23*(i+1));
+    gradients[1][i]=0.31*gradients[0][i]+0.05*std::cos(0.37*(i+2));
+    gradients[2][i]=-0.43*gradients[1][i]+0.18*gradients[0][i]+0.01*(i%4);
+  }
+  std::array<Eigen::MatrixXd,3> expected;
+  for (int r=0;r<3;++r)
+    expected[r]=dense_pair_map_pullback(factorization,coefficients,gradients[r]);
+  std::vector<double> coordinate(packed);
+  for (int i=0;i<packed;++i) coordinate[i]=0.01*(i%4);
+  const Eigen::MatrixXd coordinate_expected=
+      dense_pair_map_pullback(factorization,coefficients,coordinate);
+  const std::array<const std::vector<double>*,3> requests{
+      &gradients[0],&gradients[1],&gradients[2]};
+  for (const auto* variant:std::array<const xmvb::integrals::RiActiveTwoElectronResponseCache*,4>{
+           &cache,&three_active,&streamed,&three_active_only})
+    for (const std::size_t budget:{std::size_t{4096},std::size_t{65536}}) {
+      const auto two=xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient_batch(
+          std::span<const std::vector<double>* const>(requests.data(),2),
+          *variant,budget);
+      const auto three=xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient_batch(
+          std::span<const std::vector<double>* const>(requests.data(),requests.size()),
+          *variant,budget);
+      require(two.size()==2 && three.size()==3,
+          "RI changing-adjoint block returned the wrong number of gradients");
+      for (int r=0;r<3;++r) {
+        require(is_close(three[r],expected[r],2e-8),
+            "RI changing-adjoint block differs from physical dense pair-map gradient");
+        if (r<2) require(is_close(two[r],expected[r],2e-8),
+            "RI changing-adjoint width-two panel changed a physical gradient");
+        require(is_close(three[r],xmvb::integrals::
+            backpropagate_ri_packed_active_two_electron_gradient(
+                gradients[r],*variant),2e-12),
+            "RI changing-adjoint scalar and block consumers disagree");
+      }
+      require(is_close(three[2],-0.43*three[1]+0.18*three[0]+
+          coordinate_expected,2e-8),
+          "RI changing-adjoint mixed cotangent lost linearity");
+    }
+  require(xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient_batch(
+      {},cache).empty(),"empty RI changing-adjoint block did not stay empty");
+  bool limited=false;
+  try {
+    xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient_batch(
+        std::span<const std::vector<double>* const>(requests.data(),2),streamed,64);
+  } catch (const std::length_error&) { limited=true; }
+  require(limited,"RI changing-adjoint block did not honor a subminimal workspace");
+}
+
 }  // namespace
 
 int main() {
   check_rectangular_pullback();
   check_direct_factor_direction();
+  check_changing_adjoint_block();
   constexpr int n_bf = 3;
   constexpr int n_active = 2;
   constexpr int n_auxiliary = 4;

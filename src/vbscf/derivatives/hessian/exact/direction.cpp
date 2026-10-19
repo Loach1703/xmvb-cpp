@@ -2,6 +2,7 @@
 #include "vbscf/derivatives/hessian/exact/state_internal.hpp"
 
 #include <stdexcept>
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -41,47 +42,76 @@ ExactHvpOperator::State::prepare_direction(
   return result;
 }
 
-integrals::RiAoProjectedResponse ExactHvpOperator::State::ri_ao_response(
-    const PrecomputedDirection& direction,
-    const Eigen::Ref<const Eigen::MatrixXd>& weighted_active,
+std::vector<integrals::RiAoProjectedResponse>
+ExactHvpOperator::State::ri_ao_responses(
+    std::span<const PrecomputedDirection> directions,
+    const Eigen::Ref<const Eigen::MatrixXd>& weighted_active_columns,
     bool fixed_two_electron) const {
+  if (directions.empty()) return {};
   const auto& geometry=*accepted_orbital_preparation_cache_;
   const auto& input=current_input_->orbital_preparation_input;
-  const int n=input.n_basis_functions;
+  const int n=input.n_basis_functions, na=input.n_active_orbitals;
   const int ni=(input.n_total_electrons-input.n_active_electrons)/2;
-  // Without an inactive sector, neither its density derivative nor its
-  // cotangent is consumed by the physical orbital pullback.
-  if (!ni) return {Eigen::MatrixXd(n,0),
-      Eigen::MatrixXd::Zero(n,input.n_active_orbitals)};
-  const auto dci=direction.dense_orbital_tangent_context.delta_normalized_orbitals.leftCols(ni);
-  const auto sci=geometry.basis_overlap_times_normalized.leftCols(ni);
-  std::vector<int> moving;
-  for (int i=0;i<ni;++i) if (!dci.col(i).isZero(0)) moving.push_back(i);
-  Eigen::MatrixXd delta(n,moving.size()),duals(n,moving.size());
-  for (int i=0;i<static_cast<int>(moving.size());++i) {
-    delta.col(i)=dci.col(moving[i]);
-    duals.col(i)=geometry.inactive_auxiliary.col(moving[i]);
+  if (!ni) {
+    std::vector<integrals::RiAoProjectedResponse> result(directions.size());
+    for (auto& value : result) {
+      value.inactive.resize(n,0);
+      value.active.setZero(n,na);
+    }
+    return result;
   }
-  // A column absent from delta C_i contributes exactly zero to delta P_i.
-  // This is structural zero pruning, with no numerical rank threshold.
-  const Eigen::MatrixXd horizontal=delta-geometry.inactive_auxiliary*(sci.transpose()*delta);
-  const auto& frame=accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform;
-  const Eigen::MatrixXd weights=frame.size() ?
-      (weighted_active*frame.transpose()).eval() : Eigen::MatrixXd(weighted_active);
+
+  // The block shares one accepted inactive support. Absent columns are exact
+  // zeros, not a numerical truncation of any direction.
+  std::vector<int> moving;
+  for (int i=0;i<ni;++i) {
+    const bool touched=std::any_of(directions.begin(),directions.end(),
+        [&](const auto& direction) {
+          return !direction.dense_orbital_tangent_context
+              .delta_normalized_orbitals.col(i).isZero(0);
+        });
+    if (touched) moving.push_back(i);
+  }
+  Eigen::MatrixXd duals(n,moving.size());
+  for (int i=0;i<static_cast<int>(moving.size());++i)
+    duals.col(i)=geometry.inactive_auxiliary.col(moving[i]);
+  const auto sci=geometry.basis_overlap_times_normalized.leftCols(ni);
+  const auto& frame=accepted_point_context_->prepared_active_space
+      .active_space_two_electron_result.orbital_transform;
   const Eigen::MatrixXd active_weight=fixed_two_electron
       ? (frame.size() ? Eigen::MatrixXd(frame*accepted_hho_gradient_symmetric_*frame.transpose())
                       : accepted_hho_gradient_symmetric_)
       : Eigen::MatrixXd{};
-  const integrals::RiActiveHvpInput jet{direction.integral_tangent,active_weight,
+  const integrals::RiActiveHvpInput jet{active_weight,
       accepted_point_context_->packed_active_two_electron_gradient};
-  auto response=integrals::apply_ri_projected_ao_response(*accepted_ri_two_electron_cache_,
-      duals,horizontal,weights,geometry.inactive_auxiliary,
-      ri_ao_response_workspace_,
-      integrals::ri_response_workspace_bytes,
-      {accepted_ri_inactive_one_index_factors_.size() != 0
-          ? &accepted_ri_inactive_one_index_factors_ : nullptr, moving},
+
+  std::vector<Eigen::MatrixXd> horizontal, weights;
+  std::vector<integrals::RiAoResponseDirection> requests;
+  horizontal.reserve(directions.size());
+  weights.reserve(directions.size());
+  requests.reserve(directions.size());
+  for (std::size_t column=0;column<directions.size();++column) {
+    const auto& direction=directions[column];
+    Eigen::MatrixXd delta(n,moving.size());
+    for (int i=0;i<static_cast<int>(moving.size());++i)
+      delta.col(i)=direction.dense_orbital_tangent_context
+          .delta_normalized_orbitals.col(moving[i]);
+    horizontal.emplace_back(delta-geometry.inactive_auxiliary*(sci.transpose()*delta));
+    const Eigen::Map<const Eigen::MatrixXd> weighted(
+        weighted_active_columns.col(column).data(),n,na);
+    weights.emplace_back(frame.size() ? Eigen::MatrixXd(weighted*frame.transpose())
+                                     : Eigen::MatrixXd(weighted));
+    requests.push_back({horizontal.back(),weights.back(),
+        fixed_two_electron ? &direction.integral_tangent : nullptr});
+  }
+  auto response=integrals::apply_ri_projected_ao_response_batch(
+      *accepted_ri_two_electron_cache_,duals,requests,geometry.inactive_auxiliary,
+      ri_ao_response_workspace_,integrals::ri_response_workspace_bytes,
+      {accepted_ri_inactive_one_index_factors_.size()
+          ? &accepted_ri_inactive_one_index_factors_ : nullptr,moving},
       fixed_two_electron ? &jet : nullptr);
-  if (frame.size()) response.active=(response.active*frame).eval();
+  if (frame.size())
+    for (auto& value : response) value.active=(value.active*frame).eval();
   return response;
 }
 

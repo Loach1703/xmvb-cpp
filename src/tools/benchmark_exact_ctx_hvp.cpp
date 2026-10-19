@@ -90,6 +90,7 @@ struct BenchmarkMeasurement {
 
 struct BlockBenchmarkMeasurement {
   double external_wall_time_seconds = 0.0;
+  double scalar_reference_wall_time_seconds = 0.0;
   double response_inf_norm = 0.0;
   double scalar_reference_relative_error = 0.0;
   xmvb::vb::ExactHvpOperator::Diagnostics diagnostics;
@@ -978,10 +979,15 @@ BlockBenchmarkMeasurement run_full_block_benchmark(
       context.parameter_view,
       context.nonredundant_space.get());
   Eigen::MatrixXd scalar_reference(response.rows(), response.cols());
-  for (Eigen::Index column = 0; column < width; ++column) {
-    scalar_reference.col(column) =
-        scalar_reference_operator.apply_reduced(directions.col(column));
+  const auto scalar_start=std::chrono::steady_clock::now();
+  for (int repeat=0;repeat<repeat_count;++repeat) {
+    for (Eigen::Index column = 0; column < width; ++column) {
+      scalar_reference.col(column) =
+          scalar_reference_operator.apply_reduced(directions.col(column));
+    }
   }
+  measurement.scalar_reference_wall_time_seconds=std::chrono::duration<double>(
+      std::chrono::steady_clock::now()-scalar_start).count();
   const auto scalar_reference_diagnostics =
       scalar_reference_operator.diagnostics();
   measurement.scalar_reference_relative_error =
@@ -1462,6 +1468,8 @@ int main(int argc, char** argv) {
                 << block_average / measured_block_width << '\n';
       std::cout << "full_block_scalar_reference_relative_error = "
                 << block_measurement->scalar_reference_relative_error << '\n';
+      std::cout << "full_block_scalar_reference_wall_time_seconds = "
+                << block_measurement->scalar_reference_wall_time_seconds / block_count << '\n';
       std::cout << "full_block_diag_avg_h1e_wall_time_seconds = "
                 << average_wall_time_seconds(
                        block_measurement->diagnostics
@@ -1487,11 +1495,9 @@ int main(int argc, char** argv) {
             return measurement.component == BenchmarkComponent::Full;
           });
       if (full_measurement != measurements.end()) {
-        const double scalar_full_average =
-            full_measurement->external_wall_time_seconds /
-            static_cast<double>(options.repeats);
         const double block_speedup =
-            (measured_block_width * scalar_full_average) / block_average;
+            block_measurement->scalar_reference_wall_time_seconds /
+            block_measurement->external_wall_time_seconds;
         std::cout << "full_block_speedup_over_scalar_actions = "
                   << block_speedup << '\n';
         if (measured_block_width == 2.0) {

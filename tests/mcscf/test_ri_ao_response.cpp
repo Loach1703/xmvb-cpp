@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -131,12 +132,13 @@ void check(int ni,bool cached,std::size_t budget) {
   }
   cache.accepted_one_index_factors=std::move(resident);
   xmvb::integrals::RiAoResponseWorkspace workspace;
-  auto actual=xmvb::integrals::apply_ri_projected_ao_response(
-      cache,a,x,w,a0,workspace,budget,{nullptr,selected});
+  const std::array<xmvb::integrals::RiAoResponseDirection,1> requests{{{x,w}}};
+  auto actual=xmvb::integrals::apply_ri_projected_ao_response_batch(
+      cache,a,requests,a0,workspace,budget,{nullptr,selected}).front();
   close(actual.inactive,2*(2*gd+0.5*gk)*a0);
   close(actual.active,gd*c);
-  const auto reused=xmvb::integrals::apply_ri_projected_ao_response(
-      cache,a,x,w,a0,workspace,budget,{&inactive_image,selected});
+  const auto reused=xmvb::integrals::apply_ri_projected_ao_response_batch(
+      cache,a,requests,a0,workspace,budget,{&inactive_image,selected}).front();
   close(reused.inactive,actual.inactive);
   close(reused.active,actual.active);
   for (int tile:{1,7,aux}) {
@@ -144,8 +146,10 @@ void check(int ni,bool cached,std::size_t budget) {
     close(xmvb::integrals::apply_ri_active_density_response(cache,weights),active_reference);
   }
   // Reuse must clear all per-worker projections and leave no stale charge.
-  const auto zero=xmvb::integrals::apply_ri_projected_ao_response(
-      cache,a,0*x,0*w,a0,workspace,budget,{&inactive_image,selected});
+  const Matrix zero_x=0*x,zero_w=0*w;
+  const std::array<xmvb::integrals::RiAoResponseDirection,1> zero_request{{{zero_x,zero_w}}};
+  const auto zero=xmvb::integrals::apply_ri_projected_ao_response_batch(
+      cache,a,zero_request,a0,workspace,budget,{&inactive_image,selected}).front();
   close(zero.inactive,Matrix::Zero(n,a0.cols()));
   close(zero.active,Matrix::Zero(n,na));
   check_diagonals(factors,c,ni,budget);

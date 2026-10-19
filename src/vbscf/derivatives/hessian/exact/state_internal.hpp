@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include <Eigen/Core>
@@ -26,6 +27,7 @@ namespace xmvb::vb {
 
 struct AcceptedOrbitalPreparationCache;
 struct ActiveSpaceGradientDirection;
+struct ActiveResponseView;
 
 struct ExactHvpOperator::State {
   struct PrecomputedDirection;
@@ -83,9 +85,13 @@ private:
   PrecomputedDirection prepare_direction(
       Eigen::VectorXd packed_direction) const;
 
-  integrals::RiAoProjectedResponse ri_ao_response(const PrecomputedDirection& direction,
-      const Eigen::Ref<const Eigen::MatrixXd>& weighted_active,
+  std::vector<integrals::RiAoProjectedResponse> ri_ao_responses(
+      std::span<const PrecomputedDirection> directions,
+      const Eigen::Ref<const Eigen::MatrixXd>& weighted_active_columns,
       bool fixed_two_electron) const;
+
+  ActiveSpaceGradientDirection active_response_gradient(
+      const ActiveResponseView& response, HvpComponents components) const;
 
   ActiveSpaceIntegralDirectionView build_active_integral_direction(
       const PrecomputedDirection& direction,

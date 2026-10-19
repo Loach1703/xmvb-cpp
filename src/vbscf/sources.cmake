@@ -84,6 +84,7 @@ set(XMVB_VBSCF_DERIVATIVE_SOURCES
   vbscf/derivatives/hessian/coupled/operator.cpp
   vbscf/derivatives/hessian/coupled/structure.cpp
   vbscf/derivatives/hessian/exact/apply.cpp
+  vbscf/derivatives/hessian/exact/active_gradient.cpp
   vbscf/derivatives/hessian/exact/batch.cpp
   vbscf/derivatives/hessian/exact/direction.cpp
   vbscf/derivatives/hessian/exact/structure_response_schur.cpp

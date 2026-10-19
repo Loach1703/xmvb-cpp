@@ -55,9 +55,9 @@ Eigen::Index bounded_orbital_coupling_width(
   // A single column is the irreducible working-set floor when it exceeds 256 MiB.
   const std::size_t elements_per_column =
       (7ULL + 2ULL * workers) * ao_matrix +
-      3ULL * n_bf * input.n_orbitals + 3ULL * n_bf * n_active +
+      3ULL * n_bf * input.n_orbitals + 6ULL * n_bf * n_active +
       2ULL * ao_pairs * active_pairs + 2ULL * workers +
-      packed_active_two_electron +
+      4ULL * packed_active_two_electron + 2ULL * n_active * n_active +
       static_cast<std::size_t>(n_structures) *
           static_cast<std::size_t>(n_states);
   const std::size_t bytes_per_column =
@@ -245,11 +245,10 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
     const Eigen::Index projection_size = n_basis_functions * n_inactive;
     combined_ao_columns.resize(projection_size, n_directions);
     active_projection_columns.resize(n_basis_functions * n_active_orbitals, n_directions);
+    auto ri_responses=ri_ao_responses(precomputed_directions,weighted_active_columns,
+        components.direct_core_response);
     for (Eigen::Index column = 0; column < n_directions; ++column) {
-      const Eigen::Map<const Eigen::MatrixXd> weights(weighted_active_columns.col(column).data(),
-          n_basis_functions,n_active_orbitals);
-      auto ri=ri_ao_response(precomputed_directions[column],weights,
-          components.direct_core_response);
+      auto& ri=ri_responses[column];
       combined_ao_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(ri.inactive.data(),projection_size);
       active_projection_columns.col(column)=Eigen::Map<const Eigen::VectorXd>(
           ri.active.data(),n_basis_functions*n_active_orbitals);
@@ -556,6 +555,39 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
         outer_batch_seconds;
     apply_timing_totals_.total_apply_wall_time_seconds +=
         outer_batch_seconds;
+  }
+
+  if (accepted_ri_two_electron_cache_ && compute_outer_response) {
+    const auto start=std::chrono::steady_clock::now();
+    std::vector<const std::vector<double>*> cotangents;
+    cotangents.reserve(n_directions);
+    for (Eigen::Index column=0;column<n_directions;++column) {
+      auto& outer=*precomputed_directions[column].outer_response;
+      const auto* states=components.structure_response ? &outer.selected_state_response : nullptr;
+      outer.active_gradient=active_response_gradient(
+          {{outer.integral_direction.overlap,outer.integral_direction.one_electron,
+            outer.integral_direction.packed_two_electron},states,
+           outer.gauge_coupling ? &*outer.gauge_coupling : nullptr,
+           outer.direct_ci_direction ? &*outer.direct_ci_direction : nullptr,
+           !ri_orbital_pair_direction && !ri_active_pair_factor_directions.empty()
+               ? &ri_active_pair_factor_directions[column] : nullptr,
+           outer.local_active_gradient ? &*outer.local_active_gradient : nullptr},components);
+      cotangents.push_back(&outer.active_gradient->packed_active_two_electron_gradient);
+    }
+    {
+      profiling::ScopedPhase phase(profiling::Phase::TwoElectronResponse);
+      const auto pullback_start=std::chrono::steady_clock::now();
+      auto images=integrals::backpropagate_ri_packed_active_two_electron_gradient_batch(
+          cotangents,*accepted_ri_two_electron_cache_);
+      for (Eigen::Index column=0;column<n_directions;++column)
+        precomputed_directions[column].outer_response->changing_two_electron=
+            std::move(images[column]);
+      apply_timing_totals_.active_two_electron_wall_time_seconds+=
+          detail::exact_hvp_elapsed_seconds(pullback_start);
+    }
+    const double seconds=detail::exact_hvp_elapsed_seconds(start);
+    apply_timing_totals_.outer_response_wall_time_seconds+=seconds;
+    apply_timing_totals_.total_apply_wall_time_seconds+=seconds;
   }
 
   for (Eigen::Index column = 0;

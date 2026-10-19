@@ -6,6 +6,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Core>
@@ -21,8 +22,23 @@ namespace {
 
 using Matrix = Eigen::MatrixXd;
 using xmvb::integrals::RiActiveTwoElectronResponseCache;
+using xmvb::integrals::RiAoProjectedResponse;
+using xmvb::integrals::RiAoResponseDirection;
 using xmvb::integrals::RiAoResponseWorkspace;
 using xmvb::integrals::RiInactiveFactorView;
+
+RiAoProjectedResponse project_one(
+    const RiActiveTwoElectronResponseCache& cache, const Matrix& a,
+    const Matrix& x, const Matrix& w, const Matrix& a0,
+    RiAoResponseWorkspace& workspace, std::size_t budget,
+    RiInactiveFactorView inactive,
+    const xmvb::integrals::RiActiveHvpInput* fixed = nullptr,
+    const Matrix* active_direction = nullptr) {
+  const std::array<RiAoResponseDirection, 1> requests{{{x, w, active_direction}}};
+  auto results = xmvb::integrals::apply_ri_projected_ao_response_batch(
+      cache, a, requests, a0, workspace, budget, inactive, fixed);
+  return std::move(results.front());
+}
 
 void require_close(const Matrix& actual, const Matrix& expected,
                    const std::string& name) {
@@ -161,7 +177,7 @@ void check_case(int full_count, int moving_count, bool cached,
   const Matrix expected_active = explicit_ri_action(packed, d) * c;
 
   RiAoResponseWorkspace workspace;
-  const auto projected = xmvb::integrals::apply_ri_projected_ao_response(
+  const auto projected = project_one(
       cache, a, x, w, a0, workspace, budget, inactive);
   require_close(projected.inactive, expected_inactive,
                 "projected inactive RI response");
@@ -171,7 +187,7 @@ void check_case(int full_count, int moving_count, bool cached,
   // or worker accumulators cannot leak into the next action.
   const Matrix zero_x = Matrix::Zero(n, moving_count);
   const Matrix zero_w = Matrix::Zero(n, na);
-  const auto zero = xmvb::integrals::apply_ri_projected_ao_response(
+  const auto zero = project_one(
       cache, a, zero_x, zero_w, a0, workspace, budget, inactive);
   require_close(zero.inactive, Matrix::Zero(n, full_count),
                 "reused projected inactive RI response");
@@ -184,10 +200,10 @@ void check_case(int full_count, int moving_count, bool cached,
   const Matrix weight = 0.5 * (raw_weight + raw_weight.transpose()).eval();
   const Matrix fused_weighted = active_direction * weight;
   const std::vector<double> adjoint{0.14, -0.21, 0.09, 0.27, -0.12, 0.19};
-  const xmvb::integrals::RiActiveHvpInput fixed{
-      active_direction, weight, adjoint};
-  const auto fused = xmvb::integrals::apply_ri_projected_ao_response(
-      cache, a, x, fused_weighted, a0, workspace, budget, inactive, &fixed);
+  const xmvb::integrals::RiActiveHvpInput fixed{weight, adjoint};
+  const auto fused = project_one(
+      cache, a, x, fused_weighted, a0, workspace, budget, inactive,
+      &fixed, &active_direction);
   const Matrix fused_k = fused_weighted * c.transpose() +
       c * fused_weighted.transpose();
   require_close(fused.inactive,
@@ -203,9 +219,9 @@ void check_case(int full_count, int moving_count, bool cached,
   if (cached) {
     RiInactiveFactorView generated_inactive = inactive;
     generated_inactive.factors = nullptr;
-    const auto mixed = xmvb::integrals::apply_ri_projected_ao_response(
+    const auto mixed = project_one(
         cache, a, x, fused_weighted, a0, workspace, budget,
-        generated_inactive, &fixed);
+        generated_inactive, &fixed, &active_direction);
     require_close(mixed.inactive, fused.inactive,
                   "resident-active/generated-inactive fused response");
     require_close(mixed.active, fused.active,
@@ -225,14 +241,156 @@ void check_case(int full_count, int moving_count, bool cached,
     throw std::runtime_error("fused fixed 2e image disagrees with independent energy FD");
 
   const Matrix zero_direction = Matrix::Zero(n, na);
-  const xmvb::integrals::RiActiveHvpInput zero_fixed{
-      zero_direction, weight, adjoint};
-  const auto zero_fused = xmvb::integrals::apply_ri_projected_ao_response(
-      cache, a, x, zero_direction, a0, workspace, budget, inactive, &zero_fixed);
+  const auto zero_fused = project_one(
+      cache, a, x, zero_direction, a0, workspace, budget, inactive,
+      &fixed, &zero_direction);
   require_close(zero_fused.factor_direction, Matrix::Zero(n_aux, na * (na + 1) / 2),
                 "zero fused factor direction");
   require_close(zero_fused.fixed_two_electron, Matrix::Zero(n, na),
                 "zero fused fixed 2e image");
+}
+
+void check_block_case(int full_count, bool cached_active,
+                      bool cached_inactive, std::size_t budget) {
+  constexpr int n = 6, na = 2, n_aux = 9;
+  const int nm = full_count == 0 ? 0 : 2;
+  Matrix packed = values(n_aux, n * (n + 1) / 2, 0.12);
+  Matrix c = values(n, na, 0.43);
+  Matrix a0 = values(n, full_count, 0.71);
+  Matrix a(n, nm);
+  const std::array<int, 2> map{2, 0};
+  for (int i = 0; i < nm; ++i) a.col(i) = a0.col(map[i]);
+
+  RiActiveTwoElectronResponseCache cache;
+  cache.n_basis_functions = n;
+  cache.n_active_orbitals = na;
+  cache.n_auxiliary_functions = n_aux;
+  cache.metric_whitened_ao_pair_factors = &packed;
+  cache.accepted_active_coefficients = &c;
+  const Matrix accepted_pairs = pair_factors(packed, c);
+  cache.accepted_active_pair_factors = &accepted_pairs;
+  for (int first = 0; first < na; ++first)
+    for (int second = 0; second <= first; ++second) {
+      cache.active_pair_first_indices.push_back(first);
+      cache.active_pair_second_indices.push_back(second);
+    }
+  cache.auxiliary_tile_size = 3;
+  if (cached_active)
+    cache.accepted_one_index_factors = std::make_shared<Matrix>(
+        xmvb::integrals::transform_ri_one_index_tiled(packed, c));
+  Matrix inactive_factors;
+  RiInactiveFactorView inactive;
+  if (cached_inactive && full_count != 0) {
+    inactive_factors = xmvb::integrals::transform_ri_one_index_tiled(packed, a0);
+    inactive.factors = &inactive_factors;
+  }
+  inactive.orbitals = std::span<const int>(map.data(), nm);
+
+  std::array<Matrix, 3> horizontal{
+      values(n, nm, 1.27), Matrix(Matrix::Zero(n, nm)), values(n, nm, -0.84)};
+  if (nm != 0) horizontal[2].col(1).setZero();
+  std::array<Matrix, 3> weights{
+      values(n, na, -0.29), Matrix(Matrix::Zero(n, na)), values(n, na, 0.92)};
+  const std::array<RiAoResponseDirection, 3> plain_requests{{
+      {horizontal[0], weights[0]}, {horizontal[1], weights[1]},
+      {horizontal[2], weights[2]}}};
+  RiAoResponseWorkspace workspace;
+  const auto plain = xmvb::integrals::apply_ri_projected_ao_response_batch(
+      cache, a, plain_requests, a0, workspace, budget, inactive);
+  if (plain.size() != 3) throw std::runtime_error("RI AO block width mismatch");
+  const std::array<RiAoResponseDirection, 2> plain_two{{
+      {horizontal[0], weights[0]}, {horizontal[2], weights[2]}}};
+  const auto two = xmvb::integrals::apply_ri_projected_ao_response_batch(
+      cache, a, plain_two, a0, workspace, budget, inactive);
+  for (int i = 0; i < 2; ++i) {
+    require_close(two[i].inactive, plain[i == 0 ? 0 : 2].inactive,
+                  "width-two/three inactive response");
+    require_close(two[i].active, plain[i == 0 ? 0 : 2].active,
+                  "width-two/three active response");
+  }
+  for (int i = 0; i < 3; ++i) {
+    const Matrix d = horizontal[i] * a.transpose() +
+        a * horizontal[i].transpose();
+    const Matrix k = weights[i] * c.transpose() +
+        c * weights[i].transpose();
+    const Matrix expected_inactive = full_count == 0
+        ? Matrix(n, 0)
+        : Matrix(2.0 * explicit_ri_action(packed, 2.0 * d + 0.5 * k) * a0);
+    const Matrix expected_active = full_count == 0
+        ? Matrix(Matrix::Zero(n, na))
+        : Matrix(explicit_ri_action(packed, d) * c);
+    require_close(plain[i].inactive, expected_inactive,
+                  "block projected inactive oracle");
+    require_close(plain[i].active, expected_active,
+                  "block projected active oracle");
+    const auto single = project_one(cache, a, horizontal[i], weights[i], a0,
+                                    workspace, budget, inactive);
+    require_close(plain[i].inactive, single.inactive,
+                  "block/single inactive response");
+    require_close(plain[i].active, single.active,
+                  "block/single active response");
+  }
+
+  const Matrix raw_weight = values(na, na, -0.37);
+  const Matrix fixed_weight = 0.5 * (raw_weight + raw_weight.transpose()).eval();
+  const std::vector<double> adjoint{0.14, -0.21, 0.09, 0.27, -0.12, 0.19};
+  const xmvb::integrals::RiActiveHvpInput fixed{fixed_weight, adjoint};
+  std::array<Matrix, 3> active_directions{
+      values(n, na, 0.93), Matrix(Matrix::Zero(n, na)), values(n, na, -0.26)};
+  std::array<Matrix, 3> fixed_weights{
+      Matrix(active_directions[0] * fixed_weight),
+      Matrix(active_directions[1] * fixed_weight),
+      Matrix(active_directions[2] * fixed_weight)};
+  const std::array<RiAoResponseDirection, 3> fixed_requests{{
+      {horizontal[0], fixed_weights[0], &active_directions[0]},
+      {horizontal[1], fixed_weights[1], &active_directions[1]},
+      {horizontal[2], fixed_weights[2], &active_directions[2]}}};
+  const auto fused = xmvb::integrals::apply_ri_projected_ao_response_batch(
+      cache, a, fixed_requests, a0, workspace, budget, inactive, &fixed);
+  const std::array<RiAoResponseDirection, 2> fixed_two{{
+      {horizontal[0], fixed_weights[0], &active_directions[0]},
+      {horizontal[2], fixed_weights[2], &active_directions[2]}}};
+  const auto fused_two = xmvb::integrals::apply_ri_projected_ao_response_batch(
+      cache, a, fixed_two, a0, workspace, budget, inactive, &fixed);
+  for (int i = 0; i < 2; ++i) {
+    const auto& three = fused[i == 0 ? 0 : 2];
+    require_close(fused_two[i].inactive, three.inactive,
+                  "width-two/three fused inactive response");
+    require_close(fused_two[i].active, three.active,
+                  "width-two/three fused active response");
+    require_close(fused_two[i].factor_direction, three.factor_direction,
+                  "width-two/three fused factor direction");
+    require_close(fused_two[i].fixed_two_electron, three.fixed_two_electron,
+                  "width-two/three fused fixed 2e response");
+  }
+  for (int i = 0; i < 3; ++i) {
+    if (full_count == 0) {
+      require_close(fused[i].inactive, Matrix(n, 0),
+                    "empty-inactive block fused response");
+      require_close(fused[i].active, Matrix::Zero(n, na),
+                    "empty-inactive block active response");
+      if (fused[i].factor_direction.size() || fused[i].fixed_two_electron.size())
+        throw std::runtime_error("empty-inactive block produced fixed RI images");
+      continue;
+    }
+    const Matrix d = horizontal[i] * a.transpose() +
+        a * horizontal[i].transpose();
+    const Matrix k = fixed_weights[i] * c.transpose() +
+        c * fixed_weights[i].transpose();
+    require_close(fused[i].inactive,
+                  2.0 * explicit_ri_action(packed, 2.0 * d + 0.5 * k) * a0,
+                  "block fused inactive oracle");
+    require_close(fused[i].active, explicit_ri_action(packed, d) * c,
+                  "block fused active oracle");
+    require_close(fused[i].factor_direction,
+                  xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
+                      cache, active_directions[i]),
+                  "block fused factor direction");
+    require_close(fused[i].fixed_two_electron,
+                  xmvb::integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+                      adjoint, cache, active_directions[i]),
+                  "block fused fixed 2e image");
+  }
 }
 
 }  // namespace
@@ -256,6 +414,10 @@ int main() {
           check_case(5, 1, cached, budget);
           check_case(5, 0, cached, budget);
           check_case(0, 0, cached, budget);
+          for (bool cached_inactive : {false, true}) {
+            check_block_case(5, cached, cached_inactive, budget);
+          }
+          check_block_case(0, cached, false, budget);
         }
       }
     }

@@ -2,6 +2,7 @@
 #include "integrals/response/ri_internal.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -536,26 +537,129 @@ compute_ri_packed_active_two_electron_integral_directional_derivative_batch(
   return packed_directions;
 }
 
+std::vector<Eigen::MatrixXd> backpropagate_ri_packed_active_two_electron_gradient_batch(
+    std::span<const std::vector<double>* const> packed_gradients,
+    const RiActiveTwoElectronResponseCache& accepted_cache,
+    std::size_t workspace_bytes) {
+  validate_cache(accepted_cache, "RI packed active-2e pullback block");
+  if (packed_gradients.empty()) return {};
+  const int n=accepted_cache.n_basis_functions;
+  const int na=accepted_cache.n_active_orbitals;
+  const int n_aux=accepted_cache.n_auxiliary_functions;
+  const int pairs=static_cast<int>(accepted_cache.active_pair_first_indices.size());
+  const std::size_t packed_size=static_cast<std::size_t>(pairs)*(pairs+1)/2;
+  for (const auto* gradient:packed_gradients)
+    if (!gradient || gradient->size()!=packed_size)
+      throw std::invalid_argument("RI packed active-2e pullback block has an invalid cotangent");
+  const std::size_t limit=workspace_bytes/sizeof(double);
+  std::vector<Eigen::MatrixXd> result;
+  result.reserve(packed_gradients.size());
+  for (std::size_t r=0;r<packed_gradients.size();++r)
+    result.emplace_back(Eigen::MatrixXd::Zero(n,na));
+
+  if (accepted_cache.orbital_pair_products.size()!=0) {
+    profiling::ScopedPhase phase(profiling::Phase::OrbitalPairPullback);
+    // Reinterpret the accepted (AO,active)-by-pair image as AO-by-(active,pair).
+    // One bounded weight panel makes the accepted image a multi-RHS GEMM;
+    // no pair-square matrix or per-request copy of that image is retained.
+    const auto& products=accepted_cache.orbital_pair_products;
+    if (products.rows()!=static_cast<Eigen::Index>(n)*na ||
+        products.cols()!=pairs)
+      throw std::invalid_argument("RI orbital-pair pullback image has an invalid shape");
+    const Eigen::Map<const OrbitalPairMatrix> image(products.data(),n,na*pairs);
+    const std::size_t per_request=static_cast<std::size_t>(na)*na*pairs+
+        static_cast<std::size_t>(n)*na;
+    if (limit<per_request)
+      throw std::length_error("one RI orbital-pair cotangent exceeds workspace");
+    const std::size_t panel_width=std::min(packed_gradients.size(),limit/per_request);
+    for (std::size_t begin=0;begin<packed_gradients.size();begin+=panel_width) {
+      const int width=static_cast<int>(std::min(panel_width,packed_gradients.size()-begin));
+      Eigen::MatrixXd weights=Eigen::MatrixXd::Zero(na*pairs,na*width);
+      for (int r=0;r<width;++r) {
+        const auto& gradient=*packed_gradients[begin+r];
+        for (int p=0;p<pairs;++p) {
+          const int a=accepted_cache.active_pair_first_indices[p];
+          const int b=accepted_cache.active_pair_second_indices[p];
+          for (int q=0;q<pairs;++q) {
+            const int hi=std::max(p,q),lo=std::min(p,q);
+            const double value=(p==q ? 2.0:1.0)*gradient[
+                core::PairIndex::packed_pair_of_pairs_index(hi,lo)];
+            weights(b*pairs+q,r*na+a)+=value;
+            weights(a*pairs+q,r*na+b)+=value;
+          }
+        }
+      }
+      const Eigen::MatrixXd images=image*weights;
+      for (int r=0;r<width;++r)
+        result[begin+r]=images.middleCols(r*na,na);
+    }
+    return result;
+  }
+
+  // A missing three-active image uses the accepted one-index factors once per
+  // auxiliary tile. Contract independent packed cotangents as a bounded
+  // P-by-(P*width) RHS, then reuse the same accepted factors for each output.
+  const bool resident=static_cast<bool>(accepted_cache.accepted_one_index_factors);
+  const int workers=std::min(effective_openmp_thread_count(),n);
+  const std::size_t transformed_per_aux=resident ? 0 :
+      static_cast<std::size_t>(n)*(na+workers);
+  const std::size_t pair_square=static_cast<std::size_t>(pairs)*pairs;
+  const std::size_t per_aux=transformed_per_aux+
+      static_cast<std::size_t>(na)*na+pairs;
+  if (limit<pair_square+per_aux)
+    throw std::length_error("one streamed RI cotangent exceeds workspace");
+  const int tile=static_cast<int>(std::min<std::size_t>(
+      {static_cast<std::size_t>(n_aux),
+       static_cast<std::size_t>(accepted_cache.auxiliary_tile_size),
+       (limit-pair_square)/per_aux}));
+  for (int first=0;first<n_aux;first+=tile) {
+    const int count=std::min(tile,n_aux-first);
+    Eigen::MatrixXd owned_factors;
+    const Eigen::MatrixXd* factors=accepted_cache.accepted_one_index_factors.get();
+    if (!factors) {
+      owned_factors=transform_ri_one_index(
+          *accepted_cache.metric_whitened_ao_pair_factors,
+          *accepted_cache.accepted_active_coefficients,first,count);
+      factors=&owned_factors;
+    }
+    const int stride=resident ? n_aux:count;
+    const int offset=resident ? first:0;
+    const std::size_t fixed=transformed_per_aux*count+
+        static_cast<std::size_t>(count)*na*na;
+    const std::size_t per_request=pair_square+static_cast<std::size_t>(count)*pairs;
+    const std::size_t panel_width=std::min(packed_gradients.size(),
+        (limit-fixed)/per_request);
+    for (std::size_t begin=0;begin<packed_gradients.size();begin+=panel_width) {
+      const int width=static_cast<int>(std::min(panel_width,packed_gradients.size()-begin));
+      Eigen::MatrixXd pair_adjoint(pairs,pairs*width);
+      for (int r=0;r<width;++r) {
+        const auto& gradient=*packed_gradients[begin+r];
+        for (int p=0;p<pairs;++p) for (int q=0;q<pairs;++q) {
+          const int hi=std::max(p,q),lo=std::min(p,q);
+          pair_adjoint(q,r*pairs+p)=(p==q ? 2.0:1.0)*gradient[
+              core::PairIndex::packed_pair_of_pairs_index(hi,lo)];
+        }
+      }
+      Eigen::MatrixXd factor_adjoint(count,pairs*width);
+      factor_adjoint.noalias()=accepted_cache.accepted_active_pair_factors->
+          middleRows(first,count)*pair_adjoint;
+      for (int r=0;r<width;++r)
+        detail::accumulate_ri_factor_tile(accepted_cache,*factors,stride,offset,
+            factor_adjoint.middleCols(r*pairs,pairs),0,count,
+            sizeof(double)*static_cast<std::size_t>(count)*na*na,result[begin+r]);
+    }
+  }
+  return result;
+}
+
 Eigen::MatrixXd backpropagate_ri_packed_active_two_electron_gradient(
     const std::vector<double>& packed_active_two_electron_gradient,
     const RiActiveTwoElectronResponseCache& accepted_cache) {
-  validate_cache(accepted_cache, "RI packed active-2e pullback");
-  const Eigen::MatrixXd active_pair_adjoint =
-      detail::build_ri_active_pair_adjoint(
-          packed_active_two_electron_gradient,
-          accepted_cache);
-  if (accepted_cache.orbital_pair_products.size() != 0) {
-    const OrbitalPairMatrix pair_adjoint = active_pair_adjoint;
-    return pullback_orbital_pairs(
-        accepted_cache.orbital_pair_products, pair_adjoint,
-        accepted_cache.active_pair_first_indices,
-        accepted_cache.active_pair_second_indices,
-        accepted_cache.n_active_orbitals);
-  }
-  const Eigen::MatrixXd factor_adjoint =
-      *accepted_cache.accepted_active_pair_factors * active_pair_adjoint;
-  return contract_factor_adjoint(
-      accepted_cache, factor_adjoint, nullptr, nullptr);
+  const std::array<const std::vector<double>*,1> gradients{
+      &packed_active_two_electron_gradient};
+  auto result=backpropagate_ri_packed_active_two_electron_gradient_batch(
+      gradients,accepted_cache);
+  return std::move(result.front());
 }
 
 namespace {

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include <Eigen/Core>
@@ -118,6 +119,19 @@ compute_ri_packed_active_two_electron_integral_directional_derivative_batch(
 Eigen::MatrixXd backpropagate_ri_packed_active_two_electron_gradient(
     const std::vector<double>& packed_active_two_electron_gradient,
     const RiActiveTwoElectronResponseCache& accepted_cache);
+
+/** @brief Pull back independent packed cotangents through one accepted RI image.
+ *
+ * Each pointer is borrowed for this call and must address a canonical packed
+ * pair-of-pairs cotangent. Returned AO-by-active gradients are independent and
+ * excluded from workspace_bytes; only temporary factor, adjoint, and GEMM
+ * panels are charged. An empty span returns an empty vector. Auxiliary or
+ * request panels shrink to the budget without changing the physical action.
+ */
+std::vector<Eigen::MatrixXd> backpropagate_ri_packed_active_two_electron_gradient_batch(
+    std::span<const std::vector<double>* const> packed_gradients,
+    const RiActiveTwoElectronResponseCache& accepted_cache,
+    std::size_t workspace_bytes = ri_response_workspace_bytes);
 
 /**
  * @brief Applies the fixed-packed-adjoint RI orbital Hessian to one direction.
