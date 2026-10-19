@@ -177,6 +177,22 @@ void check_nonlinear_models(const Matrix& overlap, const Matrix& core) {
           "exact and RI HF evaluators disagree for shared synthetic ERIs");
   const auto exact_model = make_hf_model(core, ao);
   const auto ri_model = make_hf_model(core, ri);
+  // Undamped CDIIS extrapolates Focks, not densities. Each evaluation must
+  // therefore still represent a pure determinant.
+  int pure_evaluations = 0;
+  const xmvb::scf::Evaluate pure_model = [&](
+      const Eigen::Ref<const Matrix>& density) {
+    require((density * overlap * density - 2.0 * density).norm() < 1e-10,
+            "undamped CDIIS mixed an old density into its orbital candidate");
+    ++pure_evaluations;
+    return exact_model(density);
+  };
+  Options undamped_options;
+  undamped_options.old_density_weight = 0.0;
+  const Result pure = xmvb::scf::solve_restricted(
+      2, overlap, core, pure_model, undamped_options);
+  require(pure.converged && pure_evaluations > 2,
+          "undamped CDIIS did not converge on a nonlinear model");
   Matrix direction(3, 3);
   direction << 0.12, -0.17, 0.09,
               -0.17, 0.04, 0.11,
@@ -200,6 +216,8 @@ void check_nonlinear_models(const Matrix& overlap, const Matrix& core) {
                "nonlinear exact-ERI model");
   check_result(fitted, 2, overlap, core, ri_model, 2e-8,
                "nonlinear RI model");
+  require(std::abs(exact.electronic_energy - pure.electronic_energy) < 2e-8,
+          "optional density damping changed the converged HF energy");
   require((exact.density - fitted.density).norm() < 2e-8,
           "exact and RI models built from shared factors converged differently");
   require(std::abs(exact.electronic_energy - fitted.electronic_energy) < 2e-8,

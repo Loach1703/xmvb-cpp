@@ -11,6 +11,7 @@ struct Options {
   int max_iterations = 96;
   /** @brief Infinity-norm tolerance for total-density change and AO commutator. */
   double density_tolerance = 1.0e-8;
+  /** @brief Fraction of the previous density retained by linear mixing. */
   double old_density_weight = 0.20;
   int diis_history = 6;
   int diis_start_iteration = 2;
