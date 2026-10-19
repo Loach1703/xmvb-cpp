@@ -256,26 +256,16 @@ void Functional::evaluate(const Eigen::Ref<const Eigen::MatrixXd>& rho,
   }
 }
 
-void Functional::response(const Eigen::Ref<const Eigen::MatrixXd>& rho,
-                          const Eigen::Ref<const Eigen::MatrixXd>& sigma,
-                          const Eigen::Ref<const Eigen::MatrixXd>& delta_rho,
-                          const Eigen::Ref<const Eigen::MatrixXd>& delta_sigma,
-                          Eigen::MatrixXd* delta_vrho,
-                          Eigen::MatrixXd* delta_vsigma) const {
-  if (!impl_ || !delta_vrho || !delta_vsigma ||
-      delta_vrho == delta_vsigma) {
+void Functional::kernel(const Eigen::Ref<const Eigen::MatrixXd>& rho,
+                        const Eigen::Ref<const Eigen::MatrixXd>& sigma,
+                        XcKernel* out) const {
+  if (!impl_ || !out) {
     throw std::invalid_argument("invalid XC functional or response output");
   }
   const int n_spin = impl_->n_spin;
   const int n_sigma = n_spin == 1 ? 1 : 3;
   const Eigen::Index n_points = rho.rows();
   validate_inputs(rho, sigma, n_spin, impl_->gga);
-  if (delta_rho.rows() != n_points || delta_rho.cols() != n_spin ||
-      delta_sigma.rows() != n_points ||
-      delta_sigma.cols() != sigma.cols() || !delta_rho.allFinite() ||
-      (impl_->gga && !delta_sigma.allFinite())) {
-    throw std::invalid_argument("XC response direction shape or value mismatch");
-  }
   for (const auto& component : impl_->components) {
     const auto* info = xc_func_get_info(&component->function);
     if (!(xc_func_info_get_flags(info) & XC_FLAGS_HAVE_FXC)) {
@@ -283,17 +273,15 @@ void Functional::response(const Eigen::Ref<const Eigen::MatrixXd>& rho,
     }
   }
 
-  delta_vrho->setZero(n_points, n_spin);
-  delta_vsigma->setZero(n_points, impl_->gga ? n_sigma : 0);
+  out->n_spin=n_spin;
+  out->rho2.setZero(n_points,n_spin==1 ? 1 : 3);
+  out->rho_sigma.setZero(n_points,impl_->gga ? n_spin*n_sigma : 0);
+  out->sigma2.setZero(n_points,impl_->gga ? (n_spin==1 ? 1 : 6) : 0);
   if (n_points == 0) return;
 
   // Libxc stores spin-polarized derivatives as
   // rho2=(aa,ab,bb), rho-sigma=(a:aa,ab,bb; b:aa,ab,bb),
   // sigma2=(aa-aa,aa-ab,aa-bb,ab-ab,ab-bb,bb-bb).
-  constexpr int rho2_index[2][2] = {{0, 1}, {1, 2}};
-  constexpr int sigma2_index[3][3] = {{0, 1, 2},
-                                      {1, 3, 4},
-                                      {2, 4, 5}};
   constexpr Eigen::Index tile_size = 128;
   const Eigen::Index capacity = std::min(tile_size, n_points);
   const int n_rho2 = n_spin == 1 ? 1 : 3;
@@ -331,13 +319,7 @@ void Functional::response(const Eigen::Ref<const Eigen::MatrixXd>& rho,
           if (!std::isfinite(rr[index])) {
             throw std::runtime_error("Libxc returned nonfinite XC v2rho2");
           }
-        }
-        for (int spin = 0; spin < n_spin; ++spin) {
-          for (int source = 0; source < n_spin; ++source) {
-            const int index = n_spin == 1 ? 0 : rho2_index[spin][source];
-            (*delta_vrho)(point, spin) +=
-                rr[index] * delta_rho(point, source);
-          }
+          out->rho2(point,index)+=rr[index];
         }
         if (component->family != XC_FAMILY_GGA) continue;
         const double* rs = v2rhosigma.data() + offset * n_rhosigma;
@@ -346,31 +328,46 @@ void Functional::response(const Eigen::Ref<const Eigen::MatrixXd>& rho,
           if (!std::isfinite(rs[index])) {
             throw std::runtime_error("Libxc returned nonfinite XC v2rhosigma");
           }
+          out->rho_sigma(point,index)+=rs[index];
         }
         for (int index = 0; index < n_sigma2; ++index) {
           if (!std::isfinite(ss[index])) {
             throw std::runtime_error("Libxc returned nonfinite XC v2sigma2");
           }
-        }
-        for (int spin = 0; spin < n_spin; ++spin) {
-          for (int channel = 0; channel < n_sigma; ++channel) {
-            (*delta_vrho)(point, spin) +=
-                rs[spin * n_sigma + channel] * delta_sigma(point, channel);
-          }
-        }
-        for (int channel = 0; channel < n_sigma; ++channel) {
-          for (int spin = 0; spin < n_spin; ++spin) {
-            (*delta_vsigma)(point, channel) +=
-                rs[spin * n_sigma + channel] * delta_rho(point, spin);
-          }
-          for (int source = 0; source < n_sigma; ++source) {
-            const int index = n_spin == 1 ? 0 :
-                sigma2_index[channel][source];
-            (*delta_vsigma)(point, channel) +=
-                ss[index] * delta_sigma(point, source);
-          }
+          out->sigma2(point,index)+=ss[index];
         }
       }
+    }
+  }
+}
+
+void XcKernel::apply(const Eigen::Ref<const Eigen::MatrixXd>& drho,
+    const Eigen::Ref<const Eigen::MatrixXd>& dsigma,
+    Eigen::MatrixXd* dvrho, Eigen::MatrixXd* dvsigma) const {
+  const Eigen::Index rows=rho2.rows();
+  const bool gga=sigma2.cols()!=0;
+  const int ns=n_spin==1 ? 1 : 3;
+  if (!dvrho || !dvsigma || dvrho==dvsigma || drho.rows()!=rows ||
+      drho.cols()!=n_spin || !drho.allFinite() || dsigma.rows()!=rows ||
+      (gga && (dsigma.cols()!=ns || !dsigma.allFinite())))
+    throw std::invalid_argument("XC response direction shape or value mismatch");
+  dvrho->setZero(rows,n_spin);
+  dvsigma->setZero(rows,gga ? ns : 0);
+  constexpr int rr_index[2][2]={{0,1},{1,2}};
+  constexpr int ss_index[3][3]={{0,1,2},{1,3,4},{2,4,5}};
+  for (Eigen::Index p=0; p<rows; ++p) {
+    for (int s=0; s<n_spin; ++s) {
+      for (int t=0; t<n_spin; ++t)
+        (*dvrho)(p,s)+=rho2(p,n_spin==1 ? 0 : rr_index[s][t])*drho(p,t);
+      if (gga) for (int a=0; a<ns; ++a)
+        (*dvrho)(p,s)+=rho_sigma(p,s*ns+a)*dsigma(p,a);
+    }
+    if (!gga) continue;
+    for (int a=0; a<ns; ++a) {
+      for (int s=0; s<n_spin; ++s)
+        (*dvsigma)(p,a)+=rho_sigma(p,s*ns+a)*drho(p,s);
+      for (int b=0; b<ns; ++b)
+        (*dvsigma)(p,a)+=sigma2(p,n_spin==1 ? 0 : ss_index[a][b])*dsigma(p,b);
     }
   }
 }

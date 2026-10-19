@@ -213,8 +213,9 @@ void check_response_fd(const Functional& functional,
                        const Eigen::MatrixXd& delta_rho,
                        const Eigen::MatrixXd& delta_sigma) {
   Eigen::MatrixXd delta_vrho, delta_vsigma;
-  functional.response(rho, sigma, delta_rho, delta_sigma,
-                      &delta_vrho, &delta_vsigma);
+  xmvb::dft::XcKernel kernel;
+  functional.kernel(rho,sigma,&kernel);
+  kernel.apply(delta_rho,delta_sigma,&delta_vrho,&delta_vsigma);
   require(delta_vrho.rows() == rho.rows() &&
               delta_vrho.cols() == rho.cols() &&
               delta_vsigma.rows() == rho.rows() &&
@@ -292,10 +293,10 @@ void check_response() {
   const Eigen::MatrixXd b_rho = cross_rho.topRows(1);
   const Eigen::MatrixXd b_sigma = cross_sigma.topRows(1);
   Eigen::MatrixXd ha_rho, ha_sigma, hb_rho, hb_sigma;
-  polarized.response(one_rho, one_sigma, a_rho, a_sigma,
-                     &ha_rho, &ha_sigma);
-  polarized.response(one_rho, one_sigma, b_rho, b_sigma,
-                     &hb_rho, &hb_sigma);
+  xmvb::dft::XcKernel kernel;
+  polarized.kernel(one_rho,one_sigma,&kernel);
+  kernel.apply(a_rho,a_sigma,&ha_rho,&ha_sigma);
+  kernel.apply(b_rho,b_sigma,&hb_rho,&hb_sigma);
   const double a_h_b = (a_rho.cwiseProduct(hb_rho)).sum() +
                        (a_sigma.cwiseProduct(hb_sigma)).sum();
   const double b_h_a = (b_rho.cwiseProduct(ha_rho)).sum() +
@@ -312,8 +313,8 @@ void check_response() {
     tiled_direction_sigma.row(i) = a_sigma.row(0);
   }
   Eigen::MatrixXd tiled_vrho, tiled_vsigma;
-  polarized.response(tiled_rho, tiled_sigma, tiled_direction_rho,
-                     tiled_direction_sigma, &tiled_vrho, &tiled_vsigma);
+  polarized.kernel(tiled_rho,tiled_sigma,&kernel);
+  kernel.apply(tiled_direction_rho,tiled_direction_sigma,&tiled_vrho,&tiled_vsigma);
   for (Eigen::Index i = 0; i < 129; ++i) {
     near((tiled_vrho.row(i) - ha_rho.row(0)).norm(), 0.0, 1e-13,
          "XC response tile density parity");
@@ -377,18 +378,17 @@ void check_rejections() {
   Eigen::MatrixXd delta_rho = Eigen::MatrixXd::Constant(1, 2, 0.1);
   Eigen::MatrixXd delta_sigma = Eigen::MatrixXd::Constant(1, 3, 0.01);
   Eigen::MatrixXd delta_vrho, delta_vsigma;
+  xmvb::dft::XcKernel kernel;
   require_invalid([&] {
-    gga.response(rho, Eigen::MatrixXd(1, 0), delta_rho, delta_sigma,
-                 &delta_vrho, &delta_vsigma);
+    gga.kernel(rho,Eigen::MatrixXd(1,0),&kernel);
   }, "response accepted missing GGA sigma");
+  gga.kernel(rho,sigma,&kernel);
   require_invalid([&] {
-    gga.response(rho, sigma, Eigen::MatrixXd(1, 1), delta_sigma,
-                 &delta_vrho, &delta_vsigma);
+    kernel.apply(Eigen::MatrixXd(1,1),delta_sigma,&delta_vrho,&delta_vsigma);
   }, "response accepted wrong density direction shape");
   delta_sigma(0, 1) = std::numeric_limits<double>::quiet_NaN();
   require_invalid([&] {
-    gga.response(rho, sigma, delta_rho, delta_sigma,
-                 &delta_vrho, &delta_vsigma);
+    kernel.apply(delta_rho,delta_sigma,&delta_vrho,&delta_vsigma);
   }, "response accepted nonfinite sigma direction");
 }
 

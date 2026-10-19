@@ -1,5 +1,6 @@
 #include "core/workspace.hpp"
 #include "dft/grid/atomic.hpp"
+#include "dft/integration/cache.hpp"
 #include "dft/integration/potential.hpp"
 #include "dft/xc/functional.hpp"
 #include "integrals/ao/libcint_input.hpp"
@@ -357,6 +358,22 @@ void check_potential_response(const char* name, bool polarized) {
                 (response[1] - alpha_only[1] - beta_only[1]).norm() < 1.0e-10,
             "XC response is not linear in signed AO directions");
   }
+
+  // The same integrator must invalidate reference-only data when the accepted
+  // density changes, even if its shape and allocation stay unchanged.
+  alpha+=0.03*direction_alpha;
+  const auto changed=polarized
+      ? respond(integrator,alpha,beta,direction_alpha,direction_beta)
+      : respond(integrator,alpha,direction_alpha);
+  const auto next_plus=polarized
+      ? integrate(integrator,alpha+step*direction_alpha,beta+step*direction_beta)
+      : integrate(integrator,alpha+step*direction_alpha);
+  const auto next_minus=polarized
+      ? integrate(integrator,alpha-step*direction_alpha,beta-step*direction_beta)
+      : integrate(integrator,alpha-step*direction_alpha);
+  for (int spin=0; spin<spins; ++spin)
+    require((changed[spin]-(next_plus.potential[spin]-next_minus.potential[spin])/
+        (2.0*step)).norm()<2e-6,"XC response reused a stale reference density");
 }
 
 void check_response_tiling_and_budget() {
@@ -390,6 +407,45 @@ void check_response_tiling_and_budget() {
   require(exhausted, "insufficient XC response workspace was not reported");
 }
 
+void check_residency() {
+  RestoreWorkspace restore;
+  const auto before=xmvb::workspace::retained();
+  const auto input=make_two_s_basis();
+  const auto grid=make_grid();
+  xmvb::workspace::set_limit(before+10000);
+  {
+    xmvb::dft::GridBasis cache(input,grid,true);
+    cache.prepare(64,304);
+    require(cache.resident_rows()==12,"AO grid did not become resident");
+    xmvb::integrals::BasisValues scratch;
+    const auto first=cache.tile(0,12,&scratch);
+    const auto repeated=cache.tile(0,12,&scratch);
+    require(first.value.data()==repeated.value.data() && scratch.value.size()==0,
+        "resident AO tile was copied or regenerated");
+    const auto slice=cache.tile(3,4,&scratch);
+    require((slice.value-first.value.middleRows(3,4)).norm()==0.0,
+        "strided resident AO view is incorrect");
+    require(xmvb::workspace::retained()==before+12*2*4*sizeof(double),
+        "resident AO bytes are not charged once");
+
+    xmvb::dft::ResponseCache response;
+    Matrix a=Matrix::Identity(2,2), b=0.5*a;
+    const std::array<MatrixRef,2> key{a,b};
+    response.prepare(key,12,64,752,true);
+    auto* panel=response.tile(0,response.rows(0,12));
+    require(panel!=nullptr,"reference response tile was not reserved");
+    panel->kernel.rho2=Matrix::Ones(1,1);
+    response.select(key);
+    require(response.tile(0,response.rows(0,12))==panel &&
+        panel->kernel.rho2.size()==1,"unchanged reference was invalidated");
+    b(0,0)+=1e-14;
+    response.select(key);
+    require(response.tile(0,12)==nullptr,
+        "changed reference incorrectly reused the old response");
+  }
+  require(xmvb::workspace::retained()==before,"XC residency leaked its reservation");
+}
+
 }  // namespace
 
 int main() {
@@ -408,5 +464,6 @@ int main() {
   check_potential_response("GGA_X_PBE,GGA_C_PBE", false);
   check_potential_response("GGA_X_PBE,GGA_C_PBE", true);
   check_response_tiling_and_budget();
+  check_residency();
   std::cout << "dft_xc=PASS\n";
 }

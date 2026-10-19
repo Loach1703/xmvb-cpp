@@ -132,6 +132,7 @@ set(XMVB_DFT_SOURCES
   dft/grid/atomic.cpp
   dft/grid/partition.cpp
   dft/xc/functional.cpp
+  dft/integration/cache.cpp
   dft/integration/density.cpp
   dft/integration/potential.cpp
   dft/driver/ks.cpp)

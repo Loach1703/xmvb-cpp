@@ -1,6 +1,6 @@
 #include "dft/integration/density.hpp"
 
-#include "integrals/basis/values.hpp"
+#include "dft/integration/cache.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -10,7 +10,7 @@
 namespace xmvb::dft {
 
 void evaluate_density_tile(
-    const integrals::BasisValues& basis,
+    const BasisTile& basis,
     const Eigen::Ref<const Eigen::MatrixXd>& density_matrix,
     bool with_gradient,
     Eigen::Index spin,
@@ -59,15 +59,18 @@ void evaluate_density_tile(
     } else {
       (*rho)(point, spin) = raw_rho;
     }
-    if (with_gradient) {
-      for (int axis = 0; axis < 3; ++axis) {
-        const double derivative = 2.0 *
-            basis.gradient[axis].row(point).dot(projected->row(point));
-        if (!std::isfinite(derivative)) {
-          throw std::runtime_error("nonfinite AO density gradient on DFT grid");
-        }
-        (*density_gradient)[axis](point, spin) = derivative;
-      }
+  }
+  // Eigen's grid arrays are column-major. Keep the contraction on contiguous
+  // point columns instead of taking three strided AO row dots at every point.
+  if (with_gradient) {
+    for (int axis=0; axis<3; ++axis) {
+      auto gradient=(*density_gradient)[axis].col(spin);
+      gradient.setZero();
+      for (Eigen::Index j=0; j<values.cols(); ++j)
+        gradient.array()+=basis.gradient[axis].col(j).array()*projected->col(j).array();
+      gradient*=2.0;
+      if (!gradient.allFinite())
+        throw std::runtime_error("nonfinite AO density gradient on DFT grid");
     }
   }
 }

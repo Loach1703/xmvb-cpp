@@ -2,6 +2,7 @@
 
 #include "core/workspace.hpp"
 #include "dft/grid/atomic.hpp"
+#include "dft/integration/cache.hpp"
 #include "dft/integration/density.hpp"
 #include "dft/xc/functional.hpp"
 #include "integrals/basis/values.hpp"
@@ -34,13 +35,31 @@ void symmetrize_sum(Eigen::MatrixXd* matrix) {
   }
 }
 
+/** @brief Shared weak-form contraction in contiguous grid columns.
+ * Reuses A*D scratch; neither AO data nor spin channels are copied.
+ */
+void accumulate_potential(const BasisTile& basis, const Eigen::MatrixXd& vrho,
+    const std::array<Eigen::MatrixXd,3>& gradient, bool gga, int spin,
+    Eigen::MatrixXd* projected, Eigen::MatrixXd* potential) {
+  for (Eigen::Index j=0; j<basis.value.cols(); ++j) {
+    projected->col(j).array()=vrho.col(spin).array()*basis.value.col(j).array();
+    if (gga) for (int axis=0; axis<3; ++axis)
+      projected->col(j).array()+=gradient[axis].col(spin).array()*
+          basis.gradient[axis].col(j).array();
+  }
+  if (!projected->allFinite())
+    throw std::runtime_error("nonfinite weighted XC potential or response");
+  potential->noalias()+=basis.value.transpose()*(*projected);
+}
+
 }  // namespace
 
 XcIntegrator::XcIntegrator(const integrals::LibcintInput& input,
                            const Grid& grid,
                            const Functional& functional)
     : grid_(grid), functional_(functional),
-      basis_(std::make_unique<integrals::BasisEvaluator>(input)) {
+      basis_(std::make_unique<GridBasis>(input,grid,functional.is_gga())),
+      response_(std::make_unique<ResponseCache>()) {
   if (grid_.points.rows() == 0 || grid_.points.cols() != 3 ||
       grid_.weights.size() != grid_.points.rows() ||
       !grid_.points.allFinite() || !grid_.weights.allFinite() ||
@@ -87,6 +106,9 @@ XcResult XcIntegrator::evaluate(
     throw std::length_error("DFT XC tile size overflow");
   }
   const std::size_t point_doubles = basis_factor * nb + scalar_factor;
+  const auto minimum=(output_doubles+point_doubles)*sizeof(double);
+  if (workspace::available()<minimum) response_->clear();
+  basis_->prepare(output_doubles*sizeof(double),point_doubles*sizeof(double));
   const std::size_t available = workspace::available();
   if (output_doubles > available / sizeof(double) ||
       point_doubles > (available / sizeof(double) - output_doubles)) {
@@ -116,18 +138,16 @@ XcResult XcIntegrator::evaluate(
   std::array<double, 2> electron_correction{};
 
   for (Eigen::Index begin = 0; begin < grid_.points.rows();) {
-    const Eigen::Index rows = std::min<Eigen::Index>(
+    const Eigen::Index rows = basis_->rows(begin,std::min<Eigen::Index>(
         grid_.points.rows() - begin,
-        static_cast<Eigen::Index>(rows_per_tile));
-    basis_->evaluate(grid_.points.middleRows(begin, rows), gga ? 1 : 0,
-                     &basis_values);
-    const auto& ao = basis_values.value;
+        static_cast<Eigen::Index>(rows_per_tile)));
+    const auto tile=basis_->tile(begin,rows,&basis_values);
     rho.resize(rows, spins);
     if (gga) {
       for (auto& component : rho_gradient) component.resize(rows, spins);
     }
     for (int spin = 0; spin < spins; ++spin) {
-      evaluate_density_tile(basis_values, density[spin], gga, spin,
+      evaluate_density_tile(tile, density[spin], gga, spin,
                             &projected, &rho, &rho_gradient);
     }
 
@@ -171,45 +191,27 @@ XcResult XcIntegrator::evaluate(
                       &energy_correction);
     }
 
-    // projected was used for A*P above. Reuse it for the weak-form
-    // contribution and contract each spin with a single AO transpose GEMM.
-    for (int spin = 0; spin < spins; ++spin) {
-      for (Eigen::Index point = 0; point < rows; ++point) {
-        const double weight = grid_.weights[begin + point];
-        const double density_scale = 0.5 * weight * xc.vrho(point, spin);
-        std::array<double, 3> gradient_scale{};
-        if (gga) {
-          for (int axis = 0; axis < 3; ++axis) {
-            const double own = rho_gradient[axis](point, spin);
-            double t = 0.0;
-            if (spins == 1) {
-              t = 2.0 * xc.vsigma(point, 0) * own;
-            } else if (spin == 0) {
-              t = 2.0 * xc.vsigma(point, 0) * own +
-                  xc.vsigma(point, 1) * rho_gradient[axis](point, 1);
-            } else {
-              t = 2.0 * xc.vsigma(point, 2) * own +
-                  xc.vsigma(point, 1) * rho_gradient[axis](point, 0);
-            }
-            gradient_scale[axis] = weight * t;
-          }
-        }
-        for (Eigen::Index orbital = 0; orbital < n; ++orbital) {
-          double value = density_scale * ao(point, orbital);
-          if (gga) {
-            for (int axis = 0; axis < 3; ++axis) {
-              value += gradient_scale[axis] *
-                       basis_values.gradient[axis](point, orbital);
-            }
-          }
-          if (!std::isfinite(value)) {
-            throw std::runtime_error("nonfinite weighted XC potential");
-          }
-          projected(point, orbital) = value;
+    // Density/gradient inputs are no longer needed after energy integration.
+    // Reuse them for weak-form weights, updating both spins before overwriting.
+    for (Eigen::Index point=0; point<rows; ++point) {
+      const double weight=grid_.weights[begin+point];
+      for (int spin=0; spin<spins; ++spin) xc.vrho(point,spin)*=0.5*weight;
+      if (gga) for (int axis=0; axis<3; ++axis) {
+        const double a=rho_gradient[axis](point,0);
+        if (spins==1) {
+          rho_gradient[axis](point,0)=weight*(2.0*xc.vsigma(point,0)*a);
+        } else {
+          const double b=rho_gradient[axis](point,1);
+          rho_gradient[axis](point,0)=weight*(2.0*xc.vsigma(point,0)*a+
+              xc.vsigma(point,1)*b);
+          rho_gradient[axis](point,1)=weight*(2.0*xc.vsigma(point,2)*b+
+              xc.vsigma(point,1)*a);
         }
       }
-      result.potential[spin].noalias() += ao.transpose() * projected;
     }
+    for (int spin=0; spin<spins; ++spin)
+      accumulate_potential(tile,xc.vrho,rho_gradient,gga,spin,
+                           &projected,&result.potential[spin]);
     begin += rows;
   }
 
@@ -269,6 +271,12 @@ std::array<Eigen::MatrixXd, 2> XcIntegrator::response(
     throw std::length_error("DFT XC tile size overflow");
   }
   const std::size_t point_doubles = basis_factor * nb + scalar_factor;
+  response_->select(density);
+  const auto minimum=(output_doubles+point_doubles)*sizeof(double);
+  if (workspace::available()<minimum) response_->clear();
+  basis_->prepare(output_doubles*sizeof(double),point_doubles*sizeof(double));
+  response_->prepare(density,basis_->resident_rows()>0 ? basis_->resident_rows() :
+      grid_.points.rows(),output_doubles*sizeof(double),point_doubles*sizeof(double),gga);
   const std::size_t available = workspace::available();
   if (output_doubles > available / sizeof(double) ||
       point_doubles > (available / sizeof(double) - output_doubles)) {
@@ -291,34 +299,37 @@ std::array<Eigen::MatrixXd, 2> XcIntegrator::response(
   integrals::BasisValues basis_values;
   Eigen::MatrixXd projected;
   Eigen::MatrixXd rho, delta_rho, sigma, delta_sigma;
-  std::array<Eigen::MatrixXd, 3> rho_gradient, delta_rho_gradient;
-  XcValues xc;
+  std::array<Eigen::MatrixXd, 3> delta_rho_gradient;
   Eigen::MatrixXd delta_vrho, delta_vsigma;
 
   for (Eigen::Index begin = 0; begin < grid_.points.rows();) {
-    const Eigen::Index rows = std::min<Eigen::Index>(
+    const Eigen::Index rows = response_->rows(begin,basis_->rows(begin,std::min<Eigen::Index>(
         grid_.points.rows() - begin,
-        static_cast<Eigen::Index>(rows_per_tile));
-    basis_->evaluate(grid_.points.middleRows(begin, rows), gga ? 1 : 0,
-                     &basis_values);
-    const auto& ao = basis_values.value;
-    rho.resize(rows, spins);
+        static_cast<Eigen::Index>(rows_per_tile))));
+    const auto tile=basis_->tile(begin,rows,&basis_values);
+    ReferenceTile transient;
+    auto* reference=response_->tile(begin,rows);
+    if (!reference) reference=&transient;
+    const bool build_reference=reference->kernel.rho2.rows()==0;
+    auto& rho_gradient=reference->gradient;
+    if (build_reference) rho.resize(rows, spins);
     delta_rho.resize(rows, spins);
     if (gga) {
       for (int axis = 0; axis < 3; ++axis) {
-        rho_gradient[axis].resize(rows, spins);
+        if (build_reference) rho_gradient[axis].resize(rows, spins);
         delta_rho_gradient[axis].resize(rows, spins);
       }
     }
     for (int spin = 0; spin < spins; ++spin) {
-      evaluate_density_tile(basis_values, density[spin], gga, spin,
-                            &projected, &rho, &rho_gradient);
-      evaluate_density_tile(basis_values, delta_density[spin], gga, spin,
+      if (build_reference)
+        evaluate_density_tile(tile, density[spin], gga, spin,
+                              &projected, &rho, &rho_gradient);
+      evaluate_density_tile(tile, delta_density[spin], gga, spin,
                             &projected, &delta_rho, &delta_rho_gradient,
                             DensityTileMode::Directional);
     }
 
-    sigma.resize(rows, sigma_columns);
+    if (build_reference) sigma.resize(rows, sigma_columns);
     delta_sigma.resize(rows, sigma_columns);
     if (gga) {
       for (Eigen::Index point = 0; point < rows; ++point) {
@@ -327,74 +338,66 @@ std::array<Eigen::MatrixXd, 2> XcIntegrator::response(
         for (int axis = 0; axis < 3; ++axis) {
           const double alpha = rho_gradient[axis](point, 0);
           const double delta_alpha = delta_rho_gradient[axis](point, 0);
-          aa += alpha * alpha;
+          if (build_reference) aa += alpha * alpha;
           delta_aa += 2.0 * alpha * delta_alpha;
           if (spins == 2) {
             const double beta = rho_gradient[axis](point, 1);
             const double delta_beta = delta_rho_gradient[axis](point, 1);
-            ab += alpha * beta;
+            if (build_reference) ab += alpha * beta;
             delta_ab += delta_alpha * beta + alpha * delta_beta;
-            bb += beta * beta;
+            if (build_reference) bb += beta * beta;
             delta_bb += 2.0 * beta * delta_beta;
           }
         }
-        sigma(point, 0) = aa;
+        if (build_reference) sigma(point, 0) = aa;
         delta_sigma(point, 0) = delta_aa;
         if (spins == 2) {
-          sigma(point, 1) = ab;
-          sigma(point, 2) = bb;
+          if (build_reference) {
+            sigma(point, 1) = ab;
+            sigma(point, 2) = bb;
+          }
           delta_sigma(point, 1) = delta_ab;
           delta_sigma(point, 2) = delta_bb;
         }
       }
-      if (!sigma.allFinite() || !delta_sigma.allFinite()) {
+      if ((build_reference && !sigma.allFinite()) || !delta_sigma.allFinite()) {
         throw std::runtime_error("nonfinite density-gradient invariant on DFT grid");
       }
     }
-    if (gga) functional_.evaluate(rho, sigma, &xc);
-    functional_.response(rho, sigma, delta_rho, delta_sigma,
-                         &delta_vrho, &delta_vsigma);
+    if (build_reference) {
+      if (gga) {
+        XcValues xc;
+        functional_.evaluate(rho,sigma,&xc);
+        reference->vsigma=std::move(xc.vsigma);
+      }
+      functional_.kernel(rho,sigma,&reference->kernel);
+    }
+    reference->kernel.apply(delta_rho,delta_sigma,&delta_vrho,&delta_vsigma);
 
-    // Reuse projected for the differentiated weak form. The final AO
-    // transpose contraction and symmetrization match evaluate().
-    for (int spin = 0; spin < spins; ++spin) {
-      for (Eigen::Index point = 0; point < rows; ++point) {
-        const double weight = grid_.weights[begin + point];
-        const double density_scale = 0.5 * weight * delta_vrho(point, spin);
-        std::array<double, 3> gradient_scale{};
-        if (gga) {
-          const int own_channel = spins == 1 ? 0 : (spin == 0 ? 0 : 2);
-          for (int axis = 0; axis < 3; ++axis) {
-            const double own = rho_gradient[axis](point, spin);
-            const double delta_own = delta_rho_gradient[axis](point, spin);
-            double t = 2.0 * (delta_vsigma(point, own_channel) * own +
-                              xc.vsigma(point, own_channel) * delta_own);
-            if (spins == 2) {
-              const int other = 1 - spin;
-              t += delta_vsigma(point, 1) *
-                       rho_gradient[axis](point, other) +
-                   xc.vsigma(point, 1) *
-                       delta_rho_gradient[axis](point, other);
-            }
-            gradient_scale[axis] = weight * t;
-          }
-        }
-        for (Eigen::Index orbital = 0; orbital < n; ++orbital) {
-          double value = density_scale * ao(point, orbital);
-          if (gga) {
-            for (int axis = 0; axis < 3; ++axis) {
-              value += gradient_scale[axis] *
-                       basis_values.gradient[axis](point, orbital);
-            }
-          }
-          if (!std::isfinite(value)) {
-            throw std::runtime_error("nonfinite weighted XC response");
-          }
-          projected(point, orbital) = value;
+    // Overwrite only directional scratch, never the cached reference gradient.
+    for (Eigen::Index point=0; point<rows; ++point) {
+      const double weight=grid_.weights[begin+point];
+      for (int spin=0; spin<spins; ++spin) delta_vrho(point,spin)*=0.5*weight;
+      if (gga) for (int axis=0; axis<3; ++axis) {
+        const double a=rho_gradient[axis](point,0);
+        const double da=delta_rho_gradient[axis](point,0);
+        double ta=2.0*(delta_vsigma(point,0)*a+reference->vsigma(point,0)*da);
+        if (spins==1) {
+          delta_rho_gradient[axis](point,0)=weight*ta;
+        } else {
+          const double b=rho_gradient[axis](point,1);
+          const double db=delta_rho_gradient[axis](point,1);
+          double tb=2.0*(delta_vsigma(point,2)*b+reference->vsigma(point,2)*db);
+          ta+=delta_vsigma(point,1)*b+reference->vsigma(point,1)*db;
+          tb+=delta_vsigma(point,1)*a+reference->vsigma(point,1)*da;
+          delta_rho_gradient[axis](point,0)=weight*ta;
+          delta_rho_gradient[axis](point,1)=weight*tb;
         }
       }
-      result[spin].noalias() += ao.transpose() * projected;
     }
+    for (int spin=0; spin<spins; ++spin)
+      accumulate_potential(tile,delta_vrho,delta_rho_gradient,gga,spin,
+                           &projected,&result[spin]);
     begin += rows;
   }
 

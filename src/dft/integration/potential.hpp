@@ -14,6 +14,8 @@ class BasisEvaluator;
 namespace xmvb::dft {
 struct Grid;
 class Functional;
+class GridBasis;
+class ResponseCache;
 
 struct XcResult {
   double energy = 0.0;
@@ -23,6 +25,7 @@ struct XcResult {
 
 /** Integrates restricted or spin-polarized LDA/GGA on an AO grid.
  * Input, grid, and functional must outlive the integrator and remain unmodified.
+ * Owns one budgeted shared AO/reference workspace; calls are serialized by SCF.
  */
 class XcIntegrator {
  public:
@@ -44,7 +47,8 @@ class XcIntegrator {
  private:
   const Grid& grid_;
   const Functional& functional_;
-  std::unique_ptr<integrals::BasisEvaluator> basis_;
+  std::unique_ptr<GridBasis> basis_;
+  std::unique_ptr<ResponseCache> response_;
 };
 
 }  // namespace xmvb::dft
