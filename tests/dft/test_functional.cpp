@@ -207,6 +207,121 @@ void check_gga() {
           "zero spin density and gradient must remain finite");
 }
 
+void check_response_fd(const Functional& functional,
+                       const Eigen::MatrixXd& rho,
+                       const Eigen::MatrixXd& sigma,
+                       const Eigen::MatrixXd& delta_rho,
+                       const Eigen::MatrixXd& delta_sigma) {
+  Eigen::MatrixXd delta_vrho, delta_vsigma;
+  functional.response(rho, sigma, delta_rho, delta_sigma,
+                      &delta_vrho, &delta_vsigma);
+  require(delta_vrho.rows() == rho.rows() &&
+              delta_vrho.cols() == rho.cols() &&
+              delta_vsigma.rows() == rho.rows() &&
+              delta_vsigma.cols() == (functional.is_gga() ? sigma.cols() : 0),
+          "XC response output shapes");
+  const double step = 1e-5;
+  const auto plus = evaluate(functional, rho + step * delta_rho,
+                             sigma + step * delta_sigma);
+  const auto minus = evaluate(functional, rho - step * delta_rho,
+                              sigma - step * delta_sigma);
+  const Eigen::MatrixXd fd_rho = (plus.vrho - minus.vrho) / (2.0 * step);
+  const Eigen::MatrixXd fd_sigma =
+      (plus.vsigma - minus.vsigma) / (2.0 * step);
+  for (Eigen::Index i = 0; i < rho.rows(); ++i) {
+    for (Eigen::Index spin = 0; spin < rho.cols(); ++spin) {
+      near(delta_vrho(i, spin), fd_rho(i, spin),
+           3e-7 * std::max(1.0, std::abs(fd_rho(i, spin))),
+           "XC response density finite difference");
+    }
+    for (Eigen::Index channel = 0; channel < delta_vsigma.cols(); ++channel) {
+      near(delta_vsigma(i, channel), fd_sigma(i, channel),
+           3e-7 * std::max(1.0, std::abs(fd_sigma(i, channel))),
+           "XC response sigma finite difference");
+    }
+  }
+}
+
+void check_response() {
+  Eigen::MatrixXd rho(3, 1), sigma(3, 1), delta_rho(3, 1);
+  rho << 0.4, 0.8, 1.3;
+  sigma << 0.02, 0.07, 0.15;
+  delta_rho << 0.11, -0.23, 0.17;
+  Eigen::MatrixXd delta_sigma(3, 1);
+  delta_sigma << 0.008, -0.012, 0.019;
+  const Eigen::MatrixXd no_sigma(3, 0);
+  check_response_fd(Functional("LDA_X,LDA_C_VWN"), rho, no_sigma,
+                    delta_rho, no_sigma);
+  check_response_fd(Functional("GGA_X_PBE,GGA_C_PBE"), rho, sigma,
+                    delta_rho, delta_sigma);
+
+  Eigen::MatrixXd spin_rho(3, 2), spin_sigma(3, 3);
+  Eigen::MatrixXd spin_direction(3, 2), sigma_direction(3, 3);
+  spin_rho << 0.7, 0.3, 0.4, 0.9, 1.1, 0.6;
+  spin_sigma << 0.05, 0.01, 0.03,
+                0.08, 0.02, 0.06,
+                0.12, 0.03, 0.10;
+  spin_direction << 0.08, -0.12, -0.16, 0.10, 0.21, 0.07;
+  sigma_direction << 0.012, -0.005, 0.007,
+                     -0.008, 0.011, -0.009,
+                     0.015, 0.006, -0.013;
+  check_response_fd(Functional("LDA_X,LDA_C_VWN", 2), spin_rho,
+                    Eigen::MatrixXd(3, 0), spin_direction,
+                    Eigen::MatrixXd(3, 0));
+  check_response_fd(Functional("GGA_X_PBE,GGA_C_PBE", 2), spin_rho,
+                    spin_sigma, spin_direction, sigma_direction);
+  check_response_fd(Functional("LDA_X,GGA_C_PBE", 2), spin_rho,
+                    spin_sigma, spin_direction, sigma_direction);
+
+  // Isolate the off-diagonal gradient channel and the beta density column.
+  Eigen::MatrixXd cross_rho = Eigen::MatrixXd::Zero(3, 2);
+  Eigen::MatrixXd cross_sigma = Eigen::MatrixXd::Zero(3, 3);
+  cross_rho.col(1) << 0.13, -0.17, 0.09;
+  cross_sigma.col(1) << 0.007, -0.006, 0.011;
+  check_response_fd(Functional("GGA_C_PBE", 2), spin_rho,
+                    spin_sigma, cross_rho, Eigen::MatrixXd::Zero(3, 3));
+  check_response_fd(Functional("GGA_C_PBE", 2), spin_rho,
+                    spin_sigma, Eigen::MatrixXd::Zero(3, 2), cross_sigma);
+
+  // A pointwise Hessian must be symmetric across the rho/sigma blocks.
+  Functional polarized("LDA_X,GGA_C_PBE", 2);
+  const Eigen::MatrixXd one_rho = spin_rho.topRows(1);
+  const Eigen::MatrixXd one_sigma = spin_sigma.topRows(1);
+  const Eigen::MatrixXd a_rho = spin_direction.topRows(1);
+  const Eigen::MatrixXd a_sigma = sigma_direction.topRows(1);
+  const Eigen::MatrixXd b_rho = cross_rho.topRows(1);
+  const Eigen::MatrixXd b_sigma = cross_sigma.topRows(1);
+  Eigen::MatrixXd ha_rho, ha_sigma, hb_rho, hb_sigma;
+  polarized.response(one_rho, one_sigma, a_rho, a_sigma,
+                     &ha_rho, &ha_sigma);
+  polarized.response(one_rho, one_sigma, b_rho, b_sigma,
+                     &hb_rho, &hb_sigma);
+  const double a_h_b = (a_rho.cwiseProduct(hb_rho)).sum() +
+                       (a_sigma.cwiseProduct(hb_sigma)).sum();
+  const double b_h_a = (b_rho.cwiseProduct(ha_rho)).sum() +
+                       (b_sigma.cwiseProduct(ha_sigma)).sum();
+  near(a_h_b, b_h_a, 1e-12, "XC response Hessian symmetry");
+
+  // The final point crosses the internal 128-point Libxc tile boundary.
+  Eigen::MatrixXd tiled_rho(129, 2), tiled_sigma(129, 3);
+  Eigen::MatrixXd tiled_direction_rho(129, 2), tiled_direction_sigma(129, 3);
+  for (Eigen::Index i = 0; i < 129; ++i) {
+    tiled_rho.row(i) = one_rho.row(0);
+    tiled_sigma.row(i) = one_sigma.row(0);
+    tiled_direction_rho.row(i) = a_rho.row(0);
+    tiled_direction_sigma.row(i) = a_sigma.row(0);
+  }
+  Eigen::MatrixXd tiled_vrho, tiled_vsigma;
+  polarized.response(tiled_rho, tiled_sigma, tiled_direction_rho,
+                     tiled_direction_sigma, &tiled_vrho, &tiled_vsigma);
+  for (Eigen::Index i = 0; i < 129; ++i) {
+    near((tiled_vrho.row(i) - ha_rho.row(0)).norm(), 0.0, 1e-13,
+         "XC response tile density parity");
+    near((tiled_vsigma.row(i) - ha_sigma.row(0)).norm(), 0.0, 1e-13,
+         "XC response tile sigma parity");
+  }
+}
+
 void check_rejections() {
   require_invalid([] { Functional bad("LDA_X", 0); }, "n_spin=0 accepted");
   require_invalid([] { Functional bad("LDA_X", 3); }, "n_spin=3 accepted");
@@ -258,6 +373,23 @@ void check_rejections() {
   require(rounded.exc.allFinite() && rounded.vrho.allFinite() &&
               rounded.vsigma.allFinite(),
           "roundoff-scale negative sigma rejected");
+
+  Eigen::MatrixXd delta_rho = Eigen::MatrixXd::Constant(1, 2, 0.1);
+  Eigen::MatrixXd delta_sigma = Eigen::MatrixXd::Constant(1, 3, 0.01);
+  Eigen::MatrixXd delta_vrho, delta_vsigma;
+  require_invalid([&] {
+    gga.response(rho, Eigen::MatrixXd(1, 0), delta_rho, delta_sigma,
+                 &delta_vrho, &delta_vsigma);
+  }, "response accepted missing GGA sigma");
+  require_invalid([&] {
+    gga.response(rho, sigma, Eigen::MatrixXd(1, 1), delta_sigma,
+                 &delta_vrho, &delta_vsigma);
+  }, "response accepted wrong density direction shape");
+  delta_sigma(0, 1) = std::numeric_limits<double>::quiet_NaN();
+  require_invalid([&] {
+    gga.response(rho, sigma, delta_rho, delta_sigma,
+                 &delta_vrho, &delta_vsigma);
+  }, "response accepted nonfinite sigma direction");
 }
 
 }  // namespace
@@ -267,6 +399,7 @@ int main() {
     check_lda_exchange();
     check_composition();
     check_gga();
+    check_response();
     check_rejections();
   } catch (const std::exception& error) {
     std::cerr << "DFT functional test failed: " << error.what() << '\n';

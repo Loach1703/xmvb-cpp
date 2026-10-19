@@ -46,7 +46,7 @@ void Diis::push(
   history_.push_back({fock, error});
 }
 
-bool Diis::extrapolate(Eigen::MatrixXd* fock) const {
+bool Diis::extrapolate(Eigen::MatrixXd* fock, double* predicted_error_norm) const {
   if (fock == nullptr) {
     throw std::invalid_argument("SCF DIIS output must not be null");
   }
@@ -61,6 +61,7 @@ bool Diis::extrapolate(Eigen::MatrixXd* fock) const {
   }
   if (error_scale == 0.0) {
     *fock = history_.back().fock;
+    if (predicted_error_norm) *predicted_error_norm = 0.0;
     return true;
   }
 
@@ -90,6 +91,12 @@ bool Diis::extrapolate(Eigen::MatrixXd* fock) const {
       history_.front().fock.rows(), history_.front().fock.cols());
   for (int entry = 0; entry < size; ++entry) {
     *fock += weights(entry) * history_[entry].fock;
+  }
+  if (predicted_error_norm) {
+    Eigen::MatrixXd error = Eigen::MatrixXd::Zero(fock->rows(), fock->cols());
+    for (int entry = 0; entry < size; ++entry)
+      error.noalias() += weights(entry) * history_[entry].error;
+    *predicted_error_norm = error.stableNorm();
   }
   return fock->allFinite();
 }

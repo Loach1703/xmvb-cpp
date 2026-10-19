@@ -36,6 +36,11 @@ class XcIntegrator {
   XcResult evaluate(
       std::span<const Eigen::Ref<const Eigen::MatrixXd>> density) const;
 
+  /** Directional derivative of the AO XC potential at density. */
+  std::array<Eigen::MatrixXd, 2> response(
+      std::span<const Eigen::Ref<const Eigen::MatrixXd>> density,
+      std::span<const Eigen::Ref<const Eigen::MatrixXd>> delta_density) const;
+
  private:
   const Grid& grid_;
   const Functional& functional_;

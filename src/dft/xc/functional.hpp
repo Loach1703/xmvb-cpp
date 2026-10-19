@@ -42,6 +42,23 @@ class Functional {
                 const Eigen::Ref<const Eigen::MatrixXd>& sigma,
                 XcValues* out) const;
 
+  /** Apply the pointwise XC potential Hessian to a density/sigma direction.
+   * Inputs have the same shapes and low-density handling as evaluate();
+   * delta_rho and delta_sigma have the shapes of rho and sigma, respectively.
+   * For LDA, sigma and delta_sigma are ignored and delta_vsigma is N x 0.
+   * For GGA, delta_vrho and delta_vsigma contain the directional changes of
+   * the derivatives of rho * exc with respect to rho and sigma. The direction
+   * is applied at the (possibly roundoff-clamped) input; it is not clamped.
+   * Inputs and outputs must not alias. Temporary Libxc storage is limited to
+   * 128 points, so callers may supply point tiles without an N-scaled copy.
+   */
+  void response(const Eigen::Ref<const Eigen::MatrixXd>& rho,
+                const Eigen::Ref<const Eigen::MatrixXd>& sigma,
+                const Eigen::Ref<const Eigen::MatrixXd>& delta_rho,
+                const Eigen::Ref<const Eigen::MatrixXd>& delta_sigma,
+                Eigen::MatrixXd* delta_vrho,
+                Eigen::MatrixXd* delta_vsigma) const;
+
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

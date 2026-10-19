@@ -10,6 +10,8 @@ struct BasisValues;
 
 namespace xmvb::dft {
 
+enum class DensityTileMode { Physical, Directional };
+
 // Evaluate one spin channel on a shared AO tile. `projected` is reusable
 // scratch and may be overwritten once all channels have been evaluated.
 void evaluate_density_tile(
@@ -19,6 +21,7 @@ void evaluate_density_tile(
     Eigen::Index spin,
     Eigen::MatrixXd* projected,
     Eigen::MatrixXd* rho,
-    std::array<Eigen::MatrixXd, 3>* density_gradient);
+    std::array<Eigen::MatrixXd, 3>* density_gradient,
+    DensityTileMode mode = DensityTileMode::Physical);
 
 }  // namespace xmvb::dft

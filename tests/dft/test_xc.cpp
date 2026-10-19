@@ -93,6 +93,23 @@ XcResult integrate(const xmvb::dft::XcIntegrator& integrator,
   return integrator.evaluate(refs);
 }
 
+std::array<Matrix, 2> respond(const xmvb::dft::XcIntegrator& integrator,
+                              const Matrix& density,
+                              const Matrix& direction) {
+  const std::array<MatrixRef, 1> densities{density};
+  const std::array<MatrixRef, 1> directions{direction};
+  return integrator.response(densities, directions);
+}
+
+std::array<Matrix, 2> respond(const xmvb::dft::XcIntegrator& integrator,
+                              const Matrix& alpha, const Matrix& beta,
+                              const Matrix& direction_alpha,
+                              const Matrix& direction_beta) {
+  const std::array<MatrixRef, 2> densities{alpha, beta};
+  const std::array<MatrixRef, 2> directions{direction_alpha, direction_beta};
+  return integrator.response(densities, directions);
+}
+
 double contraction(const Matrix& potential, const Matrix& direction) {
   return (potential.array() * direction.array()).sum();
 }
@@ -276,6 +293,103 @@ void check_zero_beta() {
   }
 }
 
+void check_potential_response(const char* name, bool polarized) {
+  const auto input = make_two_s_basis();
+  const auto grid = make_grid();
+  const xmvb::dft::Functional functional(name, polarized ? 2 : 1);
+  const xmvb::dft::XcIntegrator integrator(input, grid, functional);
+  Matrix alpha(2, 2), beta(2, 2), direction_alpha(2, 2),
+      direction_beta(2, 2), second_alpha(2, 2), second_beta(2, 2);
+  alpha << 0.9, 0.1, 0.1, 0.5;
+  beta << 0.25, 0.03, 0.03, 0.35;
+  // The alpha perturbation is negative definite. Its directional grid
+  // density must remain signed through the AO density evaluation.
+  direction_alpha << -0.12, 0.02, 0.02, -0.04;
+  direction_beta << 0.05, -0.01, -0.01, 0.025;
+  second_alpha << 0.017, -0.009, -0.009, 0.013;
+  second_beta << -0.011, 0.004, 0.004, 0.019;
+
+  const auto response = polarized
+      ? respond(integrator, alpha, beta, direction_alpha, direction_beta)
+      : respond(integrator, alpha, direction_alpha);
+  const double step = 2.0e-5;
+  const auto plus = polarized
+      ? integrate(integrator, alpha + step * direction_alpha,
+                  beta + step * direction_beta)
+      : integrate(integrator, alpha + step * direction_alpha);
+  const auto minus = polarized
+      ? integrate(integrator, alpha - step * direction_alpha,
+                  beta - step * direction_beta)
+      : integrate(integrator, alpha - step * direction_alpha);
+  const int spins = polarized ? 2 : 1;
+  for (int spin = 0; spin < spins; ++spin) {
+    const Matrix difference =
+        (plus.potential[spin] - minus.potential[spin]) / (2.0 * step);
+    require(response[spin].allFinite() &&
+                (response[spin] - difference).norm() <
+                    2.0e-6 * std::max(1.0, difference.norm()),
+            "analytic XC potential response differs from finite difference");
+  }
+
+  const auto second_response = polarized
+      ? respond(integrator, alpha, beta, second_alpha, second_beta)
+      : respond(integrator, alpha, second_alpha);
+  double forward = contraction(response[0], second_alpha);
+  double reverse = contraction(second_response[0], direction_alpha);
+  if (polarized) {
+    forward += contraction(response[1], second_beta);
+    reverse += contraction(second_response[1], direction_beta);
+  }
+  require(std::abs(forward - reverse) <
+              3.0e-8 * std::max({1.0, std::abs(forward), std::abs(reverse)}),
+          "XC response violates bilinear symmetry");
+
+  if (polarized) {
+    const Matrix zero = Matrix::Zero(2, 2);
+    const auto alpha_only = respond(integrator, alpha, beta,
+                                    direction_alpha, zero);
+    const auto beta_only = respond(integrator, alpha, beta,
+                                   zero, direction_beta);
+    require(alpha_only[1].norm() > 1.0e-10 &&
+                beta_only[0].norm() > 1.0e-10,
+            "polarized XC response lost cross-spin coupling");
+    require((response[0] - alpha_only[0] - beta_only[0]).norm() < 1.0e-10 &&
+                (response[1] - alpha_only[1] - beta_only[1]).norm() < 1.0e-10,
+            "XC response is not linear in signed AO directions");
+  }
+}
+
+void check_response_tiling_and_budget() {
+  RestoreWorkspace restore;
+  const auto input = make_two_s_basis();
+  const auto grid = make_grid();
+  const xmvb::dft::Functional functional("GGA_X_PBE,GGA_C_PBE", 2);
+  const xmvb::dft::XcIntegrator integrator(input, grid, functional);
+  Matrix alpha(2, 2), beta(2, 2), delta_alpha(2, 2), delta_beta(2, 2);
+  alpha << 0.9, 0.1, 0.1, 0.5;
+  beta << 0.25, 0.03, 0.03, 0.35;
+  delta_alpha << -0.12, 0.02, 0.02, -0.04;
+  delta_beta << 0.05, -0.01, -0.01, 0.025;
+  xmvb::workspace::set_limit(10000);
+  const auto full = respond(integrator, alpha, beta, delta_alpha, delta_beta);
+  // nbf=2, spin=2: 64 output bytes. One GGA row reserves
+  // (5*2 + 2 + 20*2 + 14*3)*8 = 752 scratch bytes.
+  xmvb::workspace::set_limit(816);
+  const auto tiled = respond(integrator, alpha, beta, delta_alpha, delta_beta);
+  require((full[0] - tiled[0]).norm() < 1.0e-10 &&
+              (full[1] - tiled[1]).norm() < 1.0e-10,
+          "XC response depends on tile size");
+  xmvb::workspace::set_limit(815);
+  bool exhausted = false;
+  try {
+    (void)respond(integrator, alpha, beta, delta_alpha, delta_beta);
+  } catch (const std::runtime_error& error) {
+    exhausted = std::string(error.what()).find("resource_limit") !=
+                std::string::npos;
+  }
+  require(exhausted, "insufficient XC response workspace was not reported");
+}
+
 }  // namespace
 
 int main() {
@@ -289,5 +403,10 @@ int main() {
   check_unpolarized_equivalence("GGA_X_PBE,GGA_C_PBE");
   check_tiling_and_budget();
   check_zero_beta();
+  check_potential_response("LDA_X,LDA_C_VWN", false);
+  check_potential_response("LDA_X,LDA_C_VWN", true);
+  check_potential_response("GGA_X_PBE,GGA_C_PBE", false);
+  check_potential_response("GGA_X_PBE,GGA_C_PBE", true);
+  check_response_tiling_and_budget();
   std::cout << "dft_xc=PASS\n";
 }

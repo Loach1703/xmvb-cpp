@@ -36,9 +36,21 @@ struct UnrestrictedEvaluation {
 using EvaluateUnrestricted =
     std::function<UnrestrictedEvaluation(const SpinMatrices&)>;
 
+/** @brief Physical Fock response at a fixed reference density, in AO coordinates.
+ * The direction is signed. No overlap/core/nuclear response is included.
+ */
+using ApplyUnrestrictedResponse = std::function<SpinMatrices(
+    const SpinMatrices& reference, const SpinMatrices& direction)>;
+using ApplyResponse = std::function<Eigen::MatrixXd(
+    const Eigen::Ref<const Eigen::MatrixXd>& reference,
+    const Eigen::Ref<const Eigen::MatrixXd>& direction)>;
+
 struct Result {
   bool converged = false;
   int iterations = 0;
+  int orbital_steps = 0;
+  int response_actions = 0;
+  double residual = 0.0;
   double electronic_energy = 0.0;
   /** Orbitals and eigenvalues of the last orbital Fock (possibly DIIS mixed). */
   Eigen::MatrixXd orbitals;
@@ -52,6 +64,9 @@ struct Result {
 struct UnrestrictedResult {
   bool converged = false;
   int iterations = 0;
+  int orbital_steps = 0;
+  int response_actions = 0;
+  double residual = 0.0;
   double electronic_energy = 0.0;
   SpinMatrices orbitals;
   std::array<Eigen::VectorXd, 2> orbital_energies;
@@ -70,7 +85,8 @@ Result solve_restricted(
     const Eigen::Ref<const Eigen::MatrixXd>& core,
     const Evaluate& evaluate,
     const Options& options = {},
-    const Eigen::MatrixXd& initial_density = {});
+    const Eigen::MatrixXd& initial_density = {},
+    const ApplyResponse& response = {});
 
 /** Solve an unrestricted SCF problem with Tr(P_sigma S) = n_sigma. */
 UnrestrictedResult solve_unrestricted(
@@ -80,6 +96,7 @@ UnrestrictedResult solve_unrestricted(
     const Eigen::Ref<const Eigen::MatrixXd>& core,
     const EvaluateUnrestricted& evaluate,
     const Options& options = {},
-    const SpinMatrices& initial_density = {});
+    const SpinMatrices& initial_density = {},
+    const ApplyUnrestrictedResponse& response = {});
 
 }  // namespace xmvb::scf

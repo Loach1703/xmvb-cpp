@@ -52,8 +52,18 @@ KsResult solve_ks(int n_alpha, int n_beta,
       retain(physical.electronic_energy, xc);
       return physical;
     };
+    const scf::ApplyUnrestrictedResponse response=[&](const scf::SpinMatrices& density,
+        const scf::SpinMatrices& direction) {
+      const std::array<Eigen::Ref<const Eigen::MatrixXd>,2> reference{density[0],density[1]};
+      const std::array<Eigen::Ref<const Eigen::MatrixXd>,2> delta{direction[0],direction[1]};
+      auto result=integrator.response(reference,delta);
+      const Eigen::MatrixXd total=direction[0]+direction[1];
+      const auto j=integrals::contract_jk(total,ao);
+      for (auto& spin:result) spin+=j;
+      return result;
+    };
     result.state = scf::solve_unrestricted(n_alpha, n_beta, overlap, core,
-        evaluate, options.scf);
+        evaluate, options.scf,{},response);
   } else {
     const auto evaluate = [&](const Eigen::Ref<const Eigen::MatrixXd>& density) {
       const std::array<Eigen::Ref<const Eigen::MatrixXd>, 1> channels{density};
@@ -65,8 +75,16 @@ KsResult solve_ks(int n_alpha, int n_beta,
       retain(physical.electronic_energy, xc);
       return physical;
     };
+    const scf::ApplyResponse response=[&](const Eigen::Ref<const Eigen::MatrixXd>& density,
+        const Eigen::Ref<const Eigen::MatrixXd>& direction) {
+      const std::array<Eigen::Ref<const Eigen::MatrixXd>,1> reference{density};
+      const std::array<Eigen::Ref<const Eigen::MatrixXd>,1> delta{direction};
+      auto result=integrator.response(reference,delta);
+      result[0]+=integrals::contract_jk(direction,ao);
+      return std::move(result[0]);
+    };
     result.state = scf::solve_restricted(n_alpha + n_beta, overlap, core,
-        evaluate, options.scf);
+        evaluate, options.scf,{},response);
   }
   return result;
 }

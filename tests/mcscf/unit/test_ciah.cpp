@@ -1095,11 +1095,32 @@ void check_coordinate_norms() {
   require(norms == 0, "Ritz or keyframe RHS update evaluated the physical dual norm");
 }
 
+/** @brief A small residual is a direction, not an absolute rank deficiency. */
+void check_small_gradient_expansion() {
+  Eigen::Matrix3d h;
+  h << 1.0,0.3,0.0, 0.3,2.0,0.2, 0.0,0.2,3.0;
+  const Eigen::Matrix3d metric=Eigen::Matrix3d::Identity();
+  Eigen::Vector3d g; g << 1e-16,0.5e-16,-0.7e-16;
+  auto problem=dense_problem(h,metric,g);
+  CiahOptions options;
+  options.tolerance=1e-36;
+  options.max_cycle=3;
+  CiahWorkspace workspace(problem,options);
+  const auto first=workspace.next(g);
+  require(first.basis_size==1 && first.residual_norm>1e-18 &&
+      first.residual_norm<options.lindep,
+      "small-gradient fixture does not expose amplitude-based rank rejection");
+  const auto second=workspace.next(g);
+  require(second.basis_size==2 && second.new_hvp_actions==1,
+      "nonzero small AH residual failed to extend the normalized subspace");
+}
+
 }  // namespace
 
 int main() {
   try {
     check_anisotropic_spd();
+    check_small_gradient_expansion();
     check_indefinite_root_selection();
     check_cached_origin_ray();
     check_origin_ray_macro_energy();

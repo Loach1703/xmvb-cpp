@@ -1,7 +1,7 @@
 #include "casscf/orbitals/rotation.hpp"
 
 #include <stdexcept>
-#include <unsupported/Eigen/MatrixFunctions>
+#include "linalg/exponential.hpp"
 
 namespace xmvb::casscf {
 
@@ -37,7 +37,7 @@ Eigen::MatrixXd RotationChart::retract(const Eigen::MatrixXd& orbitals,
     const Eigen::VectorXd& parameters) const {
   check_matrix(orbitals);
   const Eigen::MatrixXd skew=generator(parameters);
-  const Eigen::MatrixXd exponential=skew.exp();
+  const Eigen::MatrixXd exponential=linalg::exponential(skew);
   return orbitals*exponential;
 }
 
@@ -57,14 +57,9 @@ Eigen::VectorXd RotationChart::pullback(const Eigen::MatrixXd& orbitals,
     return gradient;
   }
   const Eigen::MatrixXd frame_gradient=orbitals.transpose()*raw_gradient;
-  Eigen::MatrixXd block=Eigen::MatrixXd::Zero(2*nmo_,2*nmo_);
   // <B, L_exp(K,E)> = <L_exp(K^T,B), E>. One adjoint Frechet
   // derivative supplies every rotation component, not one exponential per E.
-  block.topLeftCorner(nmo_,nmo_)=skew.transpose();
-  block.bottomRightCorner(nmo_,nmo_)=skew.transpose();
-  block.topRightCorner(nmo_,nmo_)=frame_gradient;
-  const Eigen::MatrixXd exponential=block.exp();
-  const auto cotangent=exponential.topRightCorner(nmo_,nmo_);
+  const auto cotangent=linalg::exponential_pullback(skew,frame_gradient);
   for (int k=0; k<size(); ++k) {
     const auto [i,j]=pairs_[k];
     gradient[k]=cotangent(j,i)-cotangent(i,j);

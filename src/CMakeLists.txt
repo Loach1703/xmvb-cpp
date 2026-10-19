@@ -61,6 +61,7 @@ set(XMVB_INTEGRAL_SOURCES
   integrals/response/generated_rows.cpp)
 
 set(XMVB_LINALG_SOURCES
+  linalg/exponential.cpp
   linalg/eigensolver.cpp
   linalg/eigen_response.cpp
   linalg/minres.cpp)
@@ -77,7 +78,10 @@ set(XMVB_MCSCF_SOURCES
   mcscf/ci/planner.cpp
   mcscf/ci/strings.cpp
   mcscf/ci/spin.cpp
-  mcscf/states/weights.cpp
+  mcscf/states/weights.cpp)
+
+# Model-independent optimizers are shared by HF/KS, VBSCF and CASSCF.
+set(XMVB_OPTIMIZATION_SOURCES
   mcscf/optimization/ciah/solver.cpp
   mcscf/optimization/ciah/driver.cpp
   mcscf/optimization/neo/globalization.cpp
@@ -118,6 +122,8 @@ set(XMVB_GUESS_SOURCES
 )
 
 set(XMVB_SCF_SOURCES
+  scf/optimization/orbitals.cpp
+  scf/optimization/ciah.cpp
   scf/driver/solver.cpp
   scf/mixing/diis.cpp
   scf/hf/potential.cpp)
@@ -176,6 +182,7 @@ set(_xmvb_declared_component_sources
   ${XMVB_LINALG_SOURCES}
   ${XMVB_INTEGRAL_SOURCES}
   ${XMVB_MCSCF_SOURCES}
+  ${XMVB_OPTIMIZATION_SOURCES}
   ${XMVB_CASSCF_SOURCES})
 list(SORT _xmvb_declared_component_sources)
 list(SORT _xmvb_discovered_component_sources)
@@ -248,15 +255,18 @@ xmvb_add_component(xmvb_integrals
   ${XMVB_INTEGRAL_SOURCES})
 target_link_libraries(xmvb_integrals PUBLIC xmvb_linalg ${CINT_LIB})
 
+xmvb_add_component(xmvb_optimization ${XMVB_OPTIMIZATION_SOURCES})
+target_link_libraries(xmvb_optimization PUBLIC xmvb_linalg)
+
 xmvb_add_component(xmvb_scf ${XMVB_SCF_SOURCES})
-target_link_libraries(xmvb_scf PUBLIC xmvb_integrals)
+target_link_libraries(xmvb_scf PUBLIC xmvb_integrals xmvb_optimization)
 
 xmvb_add_component(xmvb_dft ${XMVB_DFT_SOURCES})
 target_include_directories(xmvb_dft PRIVATE ${LIBXC_INCLUDE_DIR})
 target_link_libraries(xmvb_dft PUBLIC xmvb_scf PRIVATE ${LIBXC_LIBRARY})
 
 xmvb_add_component(xmvb_mcscf ${XMVB_MCSCF_SOURCES})
-target_link_libraries(xmvb_mcscf PUBLIC xmvb_linalg)
+target_link_libraries(xmvb_mcscf PUBLIC xmvb_linalg xmvb_optimization)
 target_link_libraries(xmvb_mcscf PUBLIC xmvb_integrals)
 target_link_libraries(xmvb_vbscf PUBLIC xmvb_mcscf xmvb_integrals)
 
@@ -282,9 +292,12 @@ foreach(_xmvb_common_file IN LISTS _xmvb_common_headers)
   if (_xmvb_common_file MATCHES "/(linalg|parallel|scf|dft)/")
     file(STRINGS "${_xmvb_common_file}" _xmvb_model_includes
       REGEX "^[ \t]*#[ \t]*include[ \t]*\"(mcscf|casscf)/")
-    if (_xmvb_model_includes)
-      message(FATAL_ERROR "Numerical utility depends on an electronic model: ${_xmvb_common_file}")
-    endif()
+    foreach(_xmvb_model_include IN LISTS _xmvb_model_includes)
+      if (NOT (_xmvb_common_file MATCHES "/(scf|dft)/" AND
+          _xmvb_model_include MATCHES "\"mcscf/optimization/"))
+        message(FATAL_ERROR "Numerical utility depends on an electronic model: ${_xmvb_common_file}")
+      endif()
+    endforeach()
   endif()
   if (_xmvb_common_file MATCHES "/integrals/" AND NOT
       _xmvb_common_file MATCHES "/casscf/integrals/")
@@ -315,7 +328,7 @@ if (XMVB_BUILD_DEV_TARGETS)
   unset(_xmvb_dft_test)
   add_executable(dft_molecule ${CMAKE_SOURCE_DIR}/tests/dft/molecule.cpp)
   target_link_libraries(dft_molecule PRIVATE xmvb_dft xmvb_input)
-  foreach(_xmvb_scf_test jk solver)
+  foreach(_xmvb_scf_test jk solver orbitals)
     add_executable(test_scf_${_xmvb_scf_test}
       ${CMAKE_SOURCE_DIR}/tests/scf/test_${_xmvb_scf_test}.cpp)
     target_link_libraries(test_scf_${_xmvb_scf_test} PRIVATE xmvb_scf)

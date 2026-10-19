@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <utility>
 
 #include "linalg/eigensolver.hpp"
 #include "scf/mixing/diis.hpp"
+#include "scf/optimization/ciah.hpp"
 
 namespace xmvb::scf {
 namespace {
@@ -84,7 +86,8 @@ UnrestrictedResult solve_channels(
     const Eigen::Ref<const Eigen::MatrixXd>& core,
     const EvaluateUnrestricted& evaluate,
     const Options& options,
-    const SpinMatrices& initial_density) {
+    const SpinMatrices& initial_density,
+    const ApplyUnrestrictedResponse& response) {
   const int n_basis = static_cast<int>(core.rows());
   const Eigen::MatrixXd symmetric_overlap = symmetrize(overlap);
   const Eigen::MatrixXd symmetric_core = symmetrize(core);
@@ -103,6 +106,9 @@ UnrestrictedResult solve_channels(
         : occupied_density(result.orbitals[spin], occupied[spin], occupation);
   }
   Diis diis(options.diis_history);
+  std::optional<UnrestrictedEvaluation> queued;
+  std::optional<double> previous_error, previous_prediction, previous_energy;
+  SpinMatrices density_change;
 
   const auto checked_evaluation = [&](const SpinMatrices& at_density) {
     UnrestrictedEvaluation physical = evaluate(at_density);
@@ -122,7 +128,9 @@ UnrestrictedResult solve_channels(
   };
 
   for (int iteration = 0; iteration < options.max_iterations; ++iteration) {
-    UnrestrictedEvaluation physical = checked_evaluation(density);
+    UnrestrictedEvaluation physical = queued
+        ? std::move(*queued) : checked_evaluation(density);
+    queued.reset();
     Eigen::MatrixXd joined_fock(n_basis, n_channels * n_basis);
     Eigen::MatrixXd joined_error(n_basis, n_channels * n_basis);
     double residual = 0.0;
@@ -134,11 +142,19 @@ UnrestrictedResult solve_channels(
       residual = std::max(residual, error.cwiseAbs().maxCoeff());
     }
     diis.push(joined_fock, joined_error);
+    const double error_norm=joined_error.stableNorm();
+    // Compare model prediction with the already available physical observation.
+    // Escalate only when neither energy nor residual makes progress despite
+    // DIIS predicting a residual decrease. Ordinary energy descent stays cheap.
+    const bool model_failed=response && previous_error && previous_prediction &&
+        previous_energy && *previous_prediction<*previous_error &&
+        error_norm>=*previous_error && physical.electronic_energy>=*previous_energy;
 
     Eigen::MatrixXd orbital_fock;
+    double prediction=error_norm;
     const bool use_diis =
         iteration + 1 >= options.diis_start_iteration &&
-        diis.extrapolate(&orbital_fock);
+        diis.extrapolate(&orbital_fock,&prediction);
     if (!use_diis) {
       orbital_fock = std::move(joined_fock);
     }
@@ -156,6 +172,45 @@ UnrestrictedResult solve_channels(
               options.density_tolerance;
     }
     result.iterations = iteration + 1;
+
+    if (model_failed && !(density_close && residual<options.density_tolerance)) {
+      UnrestrictedEvaluation origin=checked_evaluation(candidate);
+      const OrbitalModel model(result.orbitals,occupied,n_channels,occupation,
+          candidate,origin.fock,response);
+      SpinMatrices change;
+      for (int spin=0; spin<n_channels; ++spin)
+        change[spin]=density_change[spin].size()!=0
+            ? density_change[spin] : (candidate[spin]-density[spin]).eval();
+      auto trial=ciah_step(model,checked_evaluation,candidate,origin,symmetric_overlap,
+          model.displacement(change,symmetric_overlap),
+          &result.response_actions);
+      if (trial) {
+        ++result.orbital_steps;
+        result.orbitals=std::move(trial->orbitals);
+        for (int spin=0; spin<n_channels; ++spin)
+          density_change[spin]=trial->density[spin]-density[spin];
+        density=std::move(trial->density);
+        queued=std::move(trial->physical);
+        diis.clear();
+        previous_error.reset();
+        previous_prediction.reset();
+        previous_energy.reset();
+        if (iteration+1<options.max_iterations) continue;
+        result.density=std::move(density);
+        result.fock=std::move(queued->fock);
+        result.electronic_energy=queued->electronic_energy;
+        for (int spin=0; spin<n_channels; ++spin) {
+          result.orbital_energies[spin]=(result.orbitals[spin].transpose()*
+              result.fock[spin]*result.orbitals[spin]).diagonal();
+          result.residual=std::max(result.residual,commutator_error(
+              result.fock[spin],result.density[spin],symmetric_overlap).cwiseAbs().maxCoeff());
+        }
+        return result;
+      }
+    }
+    previous_error=error_norm;
+    previous_energy=physical.electronic_energy;
+    previous_prediction=use_diis ? std::optional<double>(prediction) : std::nullopt;
 
     const bool residual_close = residual < options.density_tolerance;
     const bool last_iteration = iteration + 1 == options.max_iterations;
@@ -175,11 +230,14 @@ UnrestrictedResult solve_channels(
         result.density = std::move(candidate);
         result.fock = std::move(candidate_physical.fock);
         result.electronic_energy = candidate_physical.electronic_energy;
+        result.residual = candidate_residual;
         return result;
       }
     }
 
     for (int spin = 0; spin < n_channels; ++spin) {
+      density_change[spin]=(1.0-options.old_density_weight)*
+          (candidate[spin]-density[spin]);
       density[spin] = options.old_density_weight * density[spin] +
           (1.0 - options.old_density_weight) * candidate[spin];
     }
@@ -195,7 +253,8 @@ Result solve_restricted(
     const Eigen::Ref<const Eigen::MatrixXd>& core,
     const Evaluate& evaluate,
     const Options& options,
-    const Eigen::MatrixXd& initial_density) {
+    const Eigen::MatrixXd& initial_density,
+    const ApplyResponse& response) {
   validate_matrices(overlap, core);
   const int n_basis = static_cast<int>(core.rows());
   if (n_electrons < 0 || n_electrons % 2 != 0 ||
@@ -217,11 +276,22 @@ Result solve_restricted(
     adapted_physical.electronic_energy = physical.electronic_energy;
     return adapted_physical;
   };
+  ApplyUnrestrictedResponse adapted_response;
+  if (response) adapted_response=[&response](const SpinMatrices& reference,
+      const SpinMatrices& direction) {
+    SpinMatrices result;
+    result[0]=response(reference[0],direction[0]);
+    return result;
+  };
   UnrestrictedResult shared = solve_channels(
-      1, {n_electrons / 2, 0}, 2.0, overlap, core, adapted, options, initial);
+      1, {n_electrons / 2, 0}, 2.0, overlap, core, adapted, options, initial,
+      adapted_response);
   Result result;
   result.converged = shared.converged;
   result.iterations = shared.iterations;
+  result.orbital_steps = shared.orbital_steps;
+  result.response_actions = shared.response_actions;
+  result.residual = shared.residual;
   result.electronic_energy = shared.electronic_energy;
   result.orbitals = std::move(shared.orbitals[0]);
   result.orbital_energies = std::move(shared.orbital_energies[0]);
@@ -237,7 +307,8 @@ UnrestrictedResult solve_unrestricted(
     const Eigen::Ref<const Eigen::MatrixXd>& core,
     const EvaluateUnrestricted& evaluate,
     const Options& options,
-    const SpinMatrices& initial_density) {
+    const SpinMatrices& initial_density,
+    const ApplyUnrestrictedResponse& response) {
   validate_matrices(overlap, core);
   const int n_basis = static_cast<int>(core.rows());
   if (n_alpha < 0 || n_beta < 0 ||
@@ -254,7 +325,7 @@ UnrestrictedResult solve_unrestricted(
   }
   return solve_channels(
       2, {n_alpha, n_beta}, 1.0, overlap, core, evaluate, options,
-      initial_density);
+      initial_density,response);
 }
 
 }  // namespace xmvb::scf

@@ -507,7 +507,13 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   // davidson_cc does not append a residual after yielding a converged root.
   // Reproject a changed RHS in the retained space first; that new root can
   // supply a new residual if it is no longer converged.
-  const bool residual_nonzero = result.residual_norm >= options_.lindep;
+  // Test backward resolution in the equation's own units, not against an
+  // absolute residual amplitude. Rank is then tested on normalized directions.
+  const double residual_scale=current_gradient.stableNorm()+
+      result.hessian_step.stableNorm()+
+      std::abs(result.eigenvalue)*result.metric_step.stableNorm();
+  const bool residual_nonzero = result.residual_norm > options_.lindep*residual_scale;
+  if (!residual_nonzero && !result.converged) result.exhaustion=true;
   if (!result.converged && !result.exhaustion && residual_nonzero) {
     pending_residual_ = result.residual;
     pending_eigenvalue_ = result.eigenvalue;

@@ -21,7 +21,11 @@ public:
       const Eigen::Ref<const Eigen::MatrixXd>& fock,
       const Eigen::Ref<const Eigen::MatrixXd>& error);
 
-  bool extrapolate(Eigen::MatrixXd* fock) const;
+  bool extrapolate(Eigen::MatrixXd* fock,
+                   double* predicted_error_norm = nullptr) const;
+
+  /** @brief Discard a density/Fock history after a nonlinear orbital step. */
+  void clear() noexcept { history_.clear(); }
 
 private:
   struct Entry {

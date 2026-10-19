@@ -95,6 +95,9 @@ int run_dft(const Options& command_line, const vb::InputDeck& deck) {
               << "Initial energy: " << result.initial_electronic_energy + molecule.nuclear_energy << " Eh\n"
               << "Final energy: " << state.electronic_energy + molecule.nuclear_energy << " Eh\n"
               << "SCF iterations: " << state.iterations << '\n'
+              << "Orbital correction steps: " << state.orbital_steps << '\n'
+              << "Fock response actions: " << state.response_actions << '\n'
+              << "Final AO residual: " << state.residual << '\n'
               << "Converged: " << (state.converged ? "yes" : "no") << '\n';
     return state.converged;
   }, result.state);
