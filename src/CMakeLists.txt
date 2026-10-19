@@ -135,7 +135,8 @@ set(XMVB_DFT_SOURCES
   dft/integration/cache.cpp
   dft/integration/density.cpp
   dft/integration/potential.cpp
-  dft/driver/ks.cpp)
+  dft/driver/ks.cpp
+  dft/driver/potential.cpp)
 
 set(XMVB_INPUT_SOURCES
   input/loading/generated_structures.cpp

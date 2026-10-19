@@ -107,8 +107,8 @@ runs retain the complete matrices, spectrum, and all four weight definitions.
 
 ### Molecular DFT
 
-Molecular RKS and collinear UKS support pure Libxc LDA/GGA functionals and exact
-AO Coulomb integrals, using the same SCF/DIIS iteration core as restricted HF.
+Molecular RKS and collinear UKS support Libxc LDA/GGA and global-hybrid
+functionals with exact AO Coulomb/exchange integrals, using the common SCF/DIIS core.
 Select `DFT` rather than `VBSCF` in `$CTRL`:
 
 ```text
@@ -124,10 +124,17 @@ $END
 The defaults are LDA exchange plus VWN correlation and an unpruned 80-by-590
 atom-centered grid with Becke partitioning. `SCF_TOL` applies to the maximum
 AO density change and commutator residual; `ITMAX` sets the iteration limit.
-Angular grids of 302 or 590 points are supported. `XC=PBE` selects
-`GGA_X_PBE,GGA_C_PBE`. Other pure LDA/GGA components can be composed with their
-Libxc names. GGA density gradients and AO potentials are evaluated analytically
-within the same shared grid tiles as LDA.
+Angular grids of 302 or 590 points are supported. `XC` accepts `LDA`/`SVWN5`,
+`PBE`, `BLYP`, `BP86`, `PW91`, `revPBE`, `PBEsol`, `PBE0`, `B3LYP`, and `B3LYP5`.
+Explicit Libxc component names remain available, e.g. `XC=GGA_X_B88,GGA_C_LYP`.
+Names are case-insensitive; output reports the resolved definition.
+
+`PBE0` includes 25% exact exchange. `B3LYP` uses Libxc 402 (VWN-RPA), while
+`B3LYP5` uses Libxc 475 (VWN5); both include 20% exact exchange. Exact exchange
+is included consistently in energy, Fock and analytical density response.
+The output distinguishes the semilocal XC energy from the total energy.
+GGA density gradients and AO potentials use the same shared grid tiles as LDA;
+all admitted components must provide analytical first and second derivatives.
 
 `NMUL` fixes the alpha/beta populations: its default of 1 selects RKS, while
 values greater than 1 select UKS. `KS=UKS` also allows an equal-population UKS
@@ -141,9 +148,9 @@ MO coefficients are written to `<input>.orb`; UKS writes `<input>.alpha.orb`
 and `<input>.beta.orb`, all in fixed-point GUS-body format.
 
 The initial guess diagonalizes the core Hamiltonian with the requested spin
-occupations. Hybrids, meta-GGA, RI DFT, supplied guesses, nuclear derivatives,
-and periodic DFT are not implemented and are not silently substituted by
-another functional or HF.
+occupations. Range-separated hybrids, meta-GGA, double hybrids, nonlocal VV10,
+RI DFT, supplied guesses, nuclear derivatives and periodic DFT are not
+implemented and are not silently substituted by another functional or HF.
 
 ## License
 

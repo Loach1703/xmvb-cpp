@@ -1,9 +1,11 @@
 #include "core/workspace.hpp"
+#include "dft/driver/potential.hpp"
 #include "dft/grid/atomic.hpp"
 #include "dft/integration/cache.hpp"
 #include "dft/integration/potential.hpp"
 #include "dft/xc/functional.hpp"
 #include "integrals/ao/libcint_input.hpp"
+#include "integrals/ao/graph.hpp"
 
 #include <Eigen/Core>
 
@@ -276,6 +278,61 @@ void check_tiling_and_budget() {
   require(exhausted, "insufficient XC workspace was not reported");
 }
 
+/** @brief Test the production full J/K+XC model, not a copied hybrid formula. */
+void check_hybrid_model(const char* name, int n_spin) {
+  const auto basis = make_two_s_basis();
+  const auto grid = make_grid();
+  const xmvb::dft::Functional functional(name, n_spin);
+  xmvb::integrals::AoIntegralInput ao;
+  ao.n_basis_functions = 2;
+  ao.ao_core_hamiltonian_matrix.resize(2, 2);
+  ao.ao_core_hamiltonian_matrix << -1.2, 0.1, 0.1, -0.4;
+  ao.pair_graph = xmvb::integrals::build_ao_pair_graph(
+      {0, 1, 1, 2, 2, 2}, {0, 0, 1, 0, 1, 2},
+      {0.7, 0.12, 0.22, 0.3, 0.04, 0.5}, 2);
+  xmvb::dft::KsPotential potential(basis, grid, functional, ao);
+  using Spin = xmvb::scf::SpinMatrices;
+  Spin density, direction, second, plus, minus;
+  density[0] = (Matrix(2, 2) << 0.9, 0.1, 0.1, 0.5).finished();
+  direction[0] = (Matrix(2, 2) << 0.13, -0.07, -0.07, -0.11).finished();
+  second[0] = (Matrix(2, 2) << -0.04, 0.02, 0.02, 0.08).finished();
+  if (n_spin == 2) {
+    density[1] = (Matrix(2, 2) << 0.25, 0.03, 0.03, 0.35).finished();
+    direction[1] = (Matrix(2, 2) << -0.06, 0.03, 0.03, 0.09).finished();
+    second[1] = (Matrix(2, 2) << 0.11, -0.05, -0.05, -0.03).finished();
+  }
+  const auto refs = [](const Spin& matrices) {
+    return std::array<MatrixRef, 2>{matrices[0], matrices[1]};
+  };
+  const auto evaluate = [&](const Spin& at) {
+    const auto channels = refs(at);
+    return potential.evaluate(std::span(channels).first(n_spin));
+  };
+  const auto apply = [&](const Spin& v) {
+    const auto channels = refs(density), delta = refs(v);
+    return potential.response(std::span(channels).first(n_spin),
+                              std::span(delta).first(n_spin));
+  };
+  constexpr double step = 1e-5;
+  for (int spin = 0; spin < n_spin; ++spin) {
+    plus[spin] = density[spin] + step * direction[spin];
+    minus[spin] = density[spin] - step * direction[spin];
+  }
+  const auto physical = evaluate(density), ep = evaluate(plus), em = evaluate(minus);
+  const auto hp = apply(direction), hq = apply(second);
+  double derivative = 0.0, reciprocity = 0.0;
+  for (int spin = 0; spin < n_spin; ++spin) {
+    derivative += (physical.fock[spin].array() * direction[spin].array()).sum();
+    require((hp[spin] - (ep.fock[spin] - em.fock[spin]) / (2 * step)).norm() < 2e-8,
+            "full KS response differs from finite-difference physical Fock");
+    reciprocity += (second[spin].array() * hp[spin].array()).sum() -
+        (direction[spin].array() * hq[spin].array()).sum();
+  }
+  require(std::abs(derivative - (ep.electronic_energy - em.electronic_energy) / (2 * step)) < 2e-9,
+          "full hybrid energy derivative differs from physical Fock");
+  require(std::abs(reciprocity) < 1e-11, "full hybrid response lost cross-spin reciprocity");
+}
+
 void check_zero_beta() {
   const auto input = make_two_s_basis();
   const auto grid = make_grid();
@@ -463,6 +520,8 @@ int main() {
   check_potential_response("LDA_X,LDA_C_VWN", true);
   check_potential_response("GGA_X_PBE,GGA_C_PBE", false);
   check_potential_response("GGA_X_PBE,GGA_C_PBE", true);
+    for (const char* name : {"PBE", "BLYP", "PBE0", "B3LYP", "B3LYP5", "HYB_LDA_XC_LDA0"})
+      for (int spin : {1, 2}) check_hybrid_model(name, spin);
   check_response_tiling_and_budget();
   check_residency();
   std::cout << "dft_xc=PASS\n";

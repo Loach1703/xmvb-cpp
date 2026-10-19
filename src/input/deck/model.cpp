@@ -273,8 +273,7 @@ void apply_ctrl_assignment(
     return;
   }
   if (key == "XC") {
-    metadata->xc_functional = value_upper == "PBE"
-        ? "GGA_X_PBE,GGA_C_PBE" : value_upper;
+    metadata->xc_functional = value_upper;
     return;
   }
   if (key == "KS") {

@@ -44,7 +44,7 @@ int run_dft(const Options& command_line, const vb::InputDeck& deck) {
       (metadata.ks_spin == vb::KohnShamSpin::Auto && twice_ms != 0);
   if (!options.unrestricted && twice_ms != 0)
     throw std::invalid_argument("RKS requires NMUL=1; use KS=UKS for open shells");
-  options.functional = metadata.xc_functional;
+  options.functional = dft::Functional::canonical_name(metadata.xc_functional);
   options.grid.radial_points = metadata.grid_radial_points;
   options.grid.angular_points = metadata.grid_angular_points;
   options.scf.density_tolerance = metadata.scf_tolerance;
@@ -54,7 +54,7 @@ int run_dft(const Options& command_line, const vb::InputDeck& deck) {
     options.scf.max_iterations = command_line.optimizer.max_iterations;
 
   std::cout << (options.unrestricted ? "Unrestricted" : "Restricted")
-            << " Kohn-Sham DFT (exact J, SCF/DIIS)\n"
+            << " Kohn-Sham DFT (exact J/K, SCF/DIIS)\n"
             << "Input: " << command_line.input_path << '\n'
             << "Basis: " << molecule.basis << '\n'
             << "AO functions: " << molecule.ao.n_basis_functions << '\n'
@@ -101,7 +101,8 @@ int run_dft(const Options& command_line, const vb::InputDeck& deck) {
               << "Converged: " << (state.converged ? "yes" : "no") << '\n';
     return state.converged;
   }, result.state);
-  std::cout << "XC energy: " << result.xc_energy << " Eh\n"
+  std::cout << "Exact exchange fraction: " << result.exact_exchange << '\n'
+            << "Semilocal XC energy: " << result.xc_energy << " Eh\n"
             << "Grid points: " << result.grid_points << '\n'
             << "Integrated electrons: " << result.integrated_electrons[0] +
                 result.integrated_electrons[1] << '\n';

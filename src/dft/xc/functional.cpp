@@ -3,11 +3,14 @@
 #include <xc.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace xmvb::dft {
@@ -107,6 +110,7 @@ void pack_inputs(const Eigen::Ref<const Eigen::MatrixXd>& rho,
 struct Component {
   xc_func_type function{};
   int family = 0;
+  double exact_exchange = 0.0;
   bool initialized = false;
 
   Component(const std::string& name, int identifier, int polarization) {
@@ -117,15 +121,24 @@ struct Component {
     const auto* info = xc_func_get_info(&function);
     const int flags = xc_func_info_get_flags(info);
     family = xc_func_info_get_family(info);
-    if ((family != XC_FAMILY_LDA && family != XC_FAMILY_GGA) ||
+    const bool hybrid = family == XC_FAMILY_HYB_LDA || family == XC_FAMILY_HYB_GGA;
+    const int required = XC_FLAGS_HAVE_EXC | XC_FLAGS_HAVE_VXC | XC_FLAGS_HAVE_FXC |
+        XC_FLAGS_3D;
+    const int unsupported = XC_FLAGS_HYB_CAM | XC_FLAGS_HYB_CAMY | XC_FLAGS_HYB_LC |
+        XC_FLAGS_HYB_LCY | XC_FLAGS_VV10;
+    if ((!hybrid && family != XC_FAMILY_LDA && family != XC_FAMILY_GGA) ||
         xc_func_info_get_kind(info) == XC_KINETIC ||
-        (flags & (XC_FLAGS_HAVE_EXC | XC_FLAGS_HAVE_VXC)) !=
-            (XC_FLAGS_HAVE_EXC | XC_FLAGS_HAVE_VXC)) {
+        (flags & required) != required || (flags & unsupported) != 0) {
       xc_func_end(&function);
       initialized = false;
       throw std::invalid_argument(
-          "XC component must be pure LDA/GGA with EXC and VXC: " + name);
+          "XC requires 3D LDA/GGA or a global hybrid with EXC/VXC/FXC; "
+          "meta-GGA, range separation and nonlocal correlation are unsupported: " + name);
     }
+    if (hybrid) exact_exchange = xc_hyb_exx_coef(&function);
+    // Global hybrids use the same semilocal Libxc evaluation routines.
+    if (family == XC_FAMILY_HYB_LDA) family = XC_FAMILY_LDA;
+    if (family == XC_FAMILY_HYB_GGA) family = XC_FAMILY_GGA;
   }
 
   ~Component() {
@@ -140,6 +153,7 @@ struct Component {
 struct Functional::Impl {
   int n_spin = 1;
   bool gga = false;
+  double exact_exchange = 0.0;
   std::vector<std::unique_ptr<Component>> components;
 };
 
@@ -150,10 +164,11 @@ Functional::Functional(const std::string& name, int n_spin)
   }
   impl_->n_spin = n_spin;
   const int polarization = n_spin == 1 ? XC_UNPOLARIZED : XC_POLARIZED;
+  const std::string resolved = canonical_name(name);
   std::size_t first = 0;
   for (;;) {
-    const auto comma = name.find(',', first);
-    const std::string token = trim(name.substr(first, comma - first));
+    const auto comma = resolved.find(',', first);
+    const std::string token = trim(resolved.substr(first, comma - first));
     if (token.empty()) {
       throw std::invalid_argument("empty Libxc XC component");
     }
@@ -163,6 +178,7 @@ Functional::Functional(const std::string& name, int n_spin)
     }
     auto component = std::make_unique<Component>(token, identifier, polarization);
     impl_->gga = impl_->gga || component->family == XC_FAMILY_GGA;
+    impl_->exact_exchange += component->exact_exchange;
     impl_->components.push_back(std::move(component));
     if (comma == std::string::npos) break;
     first = comma + 1;
@@ -172,6 +188,24 @@ Functional::Functional(const std::string& name, int n_spin)
 Functional::~Functional() = default;
 Functional::Functional(Functional&&) noexcept = default;
 Functional& Functional::operator=(Functional&&) noexcept = default;
+
+std::string Functional::canonical_name(const std::string& name) {
+  std::string resolved = trim(name);
+  std::transform(resolved.begin(), resolved.end(), resolved.begin(),
+      [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+  using Alias = std::pair<std::string_view, std::string_view>;
+  static constexpr Alias aliases[] = {
+      {"LDA", "LDA_X,LDA_C_VWN"}, {"SVWN", "LDA_X,LDA_C_VWN"},
+      {"SVWN5", "LDA_X,LDA_C_VWN"}, {"PBE", "GGA_X_PBE,GGA_C_PBE"},
+      {"BLYP", "GGA_X_B88,GGA_C_LYP"}, {"BP86", "GGA_X_B88,GGA_C_P86"},
+      {"PW91", "GGA_X_PW91,GGA_C_PW91"}, {"REVPBE", "GGA_X_PBE_R,GGA_C_PBE"},
+      {"PBESOL", "GGA_X_PBE_SOL,GGA_C_PBE_SOL"},
+      {"PBE0", "HYB_GGA_XC_PBEH"}, {"PBEH", "HYB_GGA_XC_PBEH"},
+      {"B3LYP", "HYB_GGA_XC_B3LYP"}, {"B3LYP5", "HYB_GGA_XC_B3LYP5"}};
+  for (const auto& [alias, component] : aliases)
+    if (resolved == alias) return std::string(component);
+  return resolved;
+}
 
 std::string Functional::library_version() {
   int major = 0, minor = 0, micro = 0;
@@ -188,6 +222,11 @@ int Functional::n_spin() const {
 bool Functional::is_gga() const {
   if (!impl_) throw std::invalid_argument("moved-from XC functional");
   return impl_->gga;
+}
+
+double Functional::exact_exchange() const {
+  if (!impl_) throw std::invalid_argument("moved-from XC functional");
+  return impl_->exact_exchange;
 }
 
 void Functional::evaluate(const Eigen::Ref<const Eigen::MatrixXd>& rho,

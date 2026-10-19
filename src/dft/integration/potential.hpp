@@ -23,7 +23,8 @@ struct XcResult {
   std::array<Eigen::MatrixXd, 2> potential;
 };
 
-/** Integrates restricted or spin-polarized LDA/GGA on an AO grid.
+/** Integrates the restricted/spin-polarized semilocal XC part on an AO grid.
+ * Global-hybrid exact exchange is added by KsPotential, not this integrator.
  * Input, grid, and functional must outlive the integrator and remain unmodified.
  * Owns one budgeted shared AO/reference workspace; calls are serialized by SCF.
  */

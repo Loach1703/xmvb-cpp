@@ -41,11 +41,22 @@ if (NOT orbitals MATCHES "# ORBITAL 1 NAO = [1-9]" OR
   message(FATAL_ERROR "RKS orbital output does not follow fixed-point GUS-body format")
 endif()
 file(READ "${RUN_DIR}/input.xmi" input)
-string(REPLACE "LDA_X,LDA_C_VWN" "HYB_GGA_XC_PBEH" unsupported "${input}")
+foreach(functional IN ITEMS PBE0 B3LYP)
+  string(REPLACE "LDA_X,LDA_C_VWN" "${functional}" hybrid "${input}")
+  file(WRITE "${RUN_DIR}/hybrid.xmi" "${hybrid}")
+  execute_process(COMMAND "${PROGRAM}" "${RUN_DIR}/hybrid.xmi"
+    WORKING_DIRECTORY "${RUN_DIR}"
+    RESULT_VARIABLE hybrid_status OUTPUT_VARIABLE hybrid_report ERROR_VARIABLE hybrid_errors)
+  if (NOT hybrid_status EQUAL 0 OR NOT hybrid_report MATCHES "Converged: yes" OR
+      NOT hybrid_report MATCHES "Exact exchange fraction: 0\\.[12]")
+    message(FATAL_ERROR "hybrid .xmi execution failed: ${hybrid_errors} ${hybrid_report}")
+  endif()
+endforeach()
+string(REPLACE "LDA_X,LDA_C_VWN" "HYB_GGA_XC_CAM_B3LYP" unsupported "${input}")
 file(WRITE "${RUN_DIR}/unsupported.xmi" "${unsupported}")
 execute_process(COMMAND "${PROGRAM}" "${RUN_DIR}/unsupported.xmi"
   WORKING_DIRECTORY "${RUN_DIR}"
   RESULT_VARIABLE unsupported_status OUTPUT_QUIET ERROR_VARIABLE unsupported_error)
 if (unsupported_status EQUAL 0 OR NOT unsupported_error MATCHES "LDA|GGA|hybrid|Hybrid")
-  message(FATAL_ERROR "unsupported hybrid was not rejected explicitly")
+  message(FATAL_ERROR "unsupported range-separated hybrid was not rejected explicitly")
 endif()

@@ -30,7 +30,10 @@ struct XcKernel {
              Eigen::MatrixXd* delta_vsigma) const;
 };
 
-/** A sum of pure Libxc LDA and GGA exchange/correlation components.
+/** A sum of Libxc LDA/GGA components, including global hybrids.
+ * evaluate/kernel return only the semilocal part; the SCF model must add the
+ * exact exchange reported by exact_exchange(). Range-separated and nonlocal
+ * functionals are rejected, never silently reduced to their semilocal part.
  * rho is N x n_spin: total density for n_spin=1, alpha/beta for n_spin=2.
  * For GGA, sigma is N x 1 or N x 3 (alpha-alpha, alpha-beta, beta-beta).
  * For LDA, sigma may have zero or the corresponding GGA number of columns;
@@ -52,8 +55,12 @@ class Functional {
   Functional& operator=(Functional&&) noexcept;
 
   static std::string library_version();
+  /** @brief Resolve common aliases to explicit Libxc component names. */
+  static std::string canonical_name(const std::string& name);
   int n_spin() const;
   bool is_gga() const;
+  /** @brief Global HF exchange fraction, summed over the selected components. */
+  double exact_exchange() const;
 
   void evaluate(const Eigen::Ref<const Eigen::MatrixXd>& rho,
                 const Eigen::Ref<const Eigen::MatrixXd>& sigma,

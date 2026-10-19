@@ -253,8 +253,13 @@ void check_response() {
   const Eigen::MatrixXd no_sigma(3, 0);
   check_response_fd(Functional("LDA_X,LDA_C_VWN"), rho, no_sigma,
                     delta_rho, no_sigma);
+  check_response_fd(Functional("HYB_LDA_XC_LDA0"), rho, no_sigma, delta_rho, no_sigma);
   check_response_fd(Functional("GGA_X_PBE,GGA_C_PBE"), rho, sigma,
                     delta_rho, delta_sigma);
+  for (const char* name : {"BLYP", "BP86", "PW91", "revPBE", "PBEsol", "PBE0", "B3LYP", "B3LYP5"}) {
+    check_derivatives(Functional(name), rho, sigma);
+    check_response_fd(Functional(name), rho, sigma, delta_rho, delta_sigma);
+  }
 
   Eigen::MatrixXd spin_rho(3, 2), spin_sigma(3, 3);
   Eigen::MatrixXd spin_direction(3, 2), sigma_direction(3, 3);
@@ -269,8 +274,14 @@ void check_response() {
   check_response_fd(Functional("LDA_X,LDA_C_VWN", 2), spin_rho,
                     Eigen::MatrixXd(3, 0), spin_direction,
                     Eigen::MatrixXd(3, 0));
+  check_response_fd(Functional("HYB_LDA_XC_LDA0", 2), spin_rho,
+                    Eigen::MatrixXd(3, 0), spin_direction, Eigen::MatrixXd(3, 0));
   check_response_fd(Functional("GGA_X_PBE,GGA_C_PBE", 2), spin_rho,
                     spin_sigma, spin_direction, sigma_direction);
+  for (const char* name : {"BLYP", "BP86", "PW91", "revPBE", "PBEsol", "PBE0", "B3LYP", "B3LYP5"}) {
+    check_derivatives(Functional(name, 2), spin_rho, spin_sigma);
+    check_response_fd(Functional(name, 2), spin_rho, spin_sigma, spin_direction, sigma_direction);
+  }
   check_response_fd(Functional("LDA_X,GGA_C_PBE", 2), spin_rho,
                     spin_sigma, spin_direction, sigma_direction);
 
@@ -323,13 +334,34 @@ void check_response() {
   }
 }
 
+void check_aliases() {
+  for (const char* name : {"LDA", "SVWN", "SVWN5", "PBE", "BLYP", "BP86", "PW91", "revPBE", "PBEsol", "PBE0", "B3LYP", "B3LYP5"}) {
+    const std::string resolved = Functional::canonical_name(name);
+    require(Functional::canonical_name(resolved) == resolved, "XC alias is not canonical");
+    for (int spin : {1, 2}) {
+      const Functional functional(name, spin);
+      const Functional explicit_name(resolved, spin);
+      require(functional.n_spin() == spin && functional.is_gga() == explicit_name.is_gga(),
+              "XC alias metadata differs from explicit components");
+      near(functional.exact_exchange(), explicit_name.exact_exchange(), 0.0,
+           "XC alias changed exact exchange");
+    }
+  }
+  near(Functional("PBE0").exact_exchange(), 0.25, 1e-15, "PBE0 exact exchange fraction");
+  near(Functional(" b3lyp ").exact_exchange(), 0.20, 1e-15, "B3LYP exact exchange fraction");
+  near(Functional("B3LYP5").exact_exchange(), 0.20, 1e-15, "B3LYP5 exact exchange fraction");
+  near(Functional("BLYP").exact_exchange(), 0.0, 0.0, "pure GGA has exact exchange");
+  require(Functional::canonical_name("B3LYP") != Functional::canonical_name("B3LYP5"),
+          "different B3LYP VWN definitions were conflated");
+}
+
 void check_rejections() {
   require_invalid([] { Functional bad("LDA_X", 0); }, "n_spin=0 accepted");
   require_invalid([] { Functional bad("LDA_X", 3); }, "n_spin=3 accepted");
   require_invalid([] { Functional bad("LDA_K_TF"); },
                   "kinetic component accepted");
-  require_invalid([] { Functional bad("HYB_GGA_XC_PBEH"); },
-                  "hybrid component accepted");
+  for (const char* name : {"HYB_GGA_XC_CAM_B3LYP", "HYB_GGA_XC_HSE06", "MGGA_X_SCAN", "GGA_XC_VV10"})
+    require_invalid([&] { Functional bad(name); }, "unsupported nonlocal/meta-GGA component accepted");
   require_invalid([] { Functional bad("MGGA_X_TPSS"); },
                   "meta-GGA component accepted");
   require_invalid([] { Functional bad("NOT_A_LIBXC_NAME"); },
@@ -400,6 +432,7 @@ int main() {
     check_composition();
     check_gga();
     check_response();
+    check_aliases();
     check_rejections();
   } catch (const std::exception& error) {
     std::cerr << "DFT functional test failed: " << error.what() << '\n';
