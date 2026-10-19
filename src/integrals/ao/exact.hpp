@@ -42,6 +42,12 @@ void apply_symmetric_ao_h1e_rows(
     const Eigen::Ref<const AoH1eBatchWorkspace::Channels>& sources,
     AoH1eBatchWorkspace::Channels* response);
 
+/** Weighted physical J/K for one symmetric AO density, using either ERI storage. */
+void apply_weighted_symmetric_ao_jk(
+    const Eigen::Ref<const Eigen::MatrixXd>& density,
+    const AoIntegralInput& ao, double coulomb_weight, double exchange_weight,
+    int n_threads, Eigen::MatrixXd* response);
+
 /** @brief Project exact K for all sources and J for the leading core sources.
  * Exchange and Coulomb rows share one immediate MO projection; neither full
  * AO image is retained. No core AO-pair transformation is required. Output

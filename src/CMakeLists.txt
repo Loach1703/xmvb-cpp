@@ -38,6 +38,7 @@ set(XMVB_INTEGRAL_SOURCES
   integrals/ao/exact_rows.cpp
   integrals/ao/ri_operator.cpp
   integrals/ao/ri_transform.cpp
+  integrals/jk/contraction.cpp
   integrals/active/one_electron.cpp
   integrals/active/exact.cpp
   integrals/active/ri.cpp
@@ -112,10 +113,13 @@ set(XMVB_LIBCINT_SOURCES
 
 set(XMVB_GUESS_SOURCES
   guess/block.cpp
-  guess/closed_shell_fock.cpp
   guess/initial.cpp
-  guess/restricted_hf.cpp
 )
+
+set(XMVB_SCF_SOURCES
+  scf/driver/solver.cpp
+  scf/mixing/diis.cpp
+  scf/hf/potential.cpp)
 
 set(XMVB_INPUT_SOURCES
   input/loading/generated_structures.cpp
@@ -142,6 +146,7 @@ file(
   CONFIGURE_DEPENDS
   RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/guess/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/scf/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/input/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/output/*.cpp"
@@ -153,6 +158,7 @@ set(_xmvb_declared_component_sources
   ${XMVB_INPUT_DECK_SOURCES}
   ${XMVB_LIBCINT_SOURCES}
   ${XMVB_GUESS_SOURCES}
+  ${XMVB_SCF_SOURCES}
   ${XMVB_INPUT_SOURCES}
   ${XMVB_OUTPUT_SOURCES}
   ${XMVB_LINALG_SOURCES}
@@ -230,6 +236,9 @@ xmvb_add_component(xmvb_integrals
   ${XMVB_INTEGRAL_SOURCES})
 target_link_libraries(xmvb_integrals PUBLIC xmvb_linalg ${CINT_LIB})
 
+xmvb_add_component(xmvb_scf ${XMVB_SCF_SOURCES})
+target_link_libraries(xmvb_scf PUBLIC xmvb_integrals)
+
 xmvb_add_component(xmvb_mcscf ${XMVB_MCSCF_SOURCES})
 target_link_libraries(xmvb_mcscf PUBLIC xmvb_linalg)
 target_link_libraries(xmvb_mcscf PUBLIC xmvb_integrals)
@@ -242,6 +251,7 @@ target_link_libraries(xmvb_casscf PUBLIC xmvb_mcscf)
 file(GLOB_RECURSE _xmvb_common_headers CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/linalg/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/parallel/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/scf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/scf/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/integrals/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/integrals/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/libcint/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.hpp" "${CMAKE_CURRENT_SOURCE_DIR}/mcscf/*.cpp"
@@ -252,7 +262,7 @@ foreach(_xmvb_common_file IN LISTS _xmvb_common_headers)
   if (_xmvb_vb_includes)
     message(FATAL_ERROR "Common/CASSCF source depends on VBSCF: ${_xmvb_common_file}")
   endif()
-  if (_xmvb_common_file MATCHES "/(linalg|parallel)/")
+  if (_xmvb_common_file MATCHES "/(linalg|parallel|scf)/")
     file(STRINGS "${_xmvb_common_file}" _xmvb_model_includes
       REGEX "^[ \t]*#[ \t]*include[ \t]*\"(mcscf|casscf)/")
     if (_xmvb_model_includes)
@@ -275,6 +285,17 @@ unset(_xmvb_model_includes)
 unset(_xmvb_integral_model_includes)
 
 if (XMVB_BUILD_DEV_TARGETS)
+  foreach(_xmvb_scf_test jk solver)
+    add_executable(test_scf_${_xmvb_scf_test}
+      ${CMAKE_SOURCE_DIR}/tests/scf/test_${_xmvb_scf_test}.cpp)
+    target_link_libraries(test_scf_${_xmvb_scf_test} PRIVATE xmvb_scf)
+    if (BUILD_TESTING)
+      add_test(NAME scf_${_xmvb_scf_test} COMMAND test_scf_${_xmvb_scf_test})
+      set_tests_properties(scf_${_xmvb_scf_test} PROPERTIES
+        ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1")
+    endif()
+  endforeach()
+  unset(_xmvb_scf_test)
   include(${CMAKE_SOURCE_DIR}/tests/linalg/targets.cmake)
   include(${CMAKE_SOURCE_DIR}/tests/mcscf/targets.cmake)
   add_executable(test_workspace ${CMAKE_SOURCE_DIR}/tests/core/test_workspace.cpp)
@@ -336,6 +357,7 @@ xmvb_add_component(xmvb_guess ${XMVB_GUESS_SOURCES})
 target_link_libraries(
   xmvb_guess
   PUBLIC
+    xmvb_scf
     xmvb_input_deck
     xmvb_libcint
     xmvb_vbscf)

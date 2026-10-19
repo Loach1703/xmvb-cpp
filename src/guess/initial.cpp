@@ -13,7 +13,8 @@
 #include <Eigen/Core>
 #include "lapacke.h"
 #include "guess/block.hpp"
-#include "guess/restricted_hf.hpp"
+#include "scf/driver/solver.hpp"
+#include "scf/hf/potential.hpp"
 #include "input/deck/keywords.hpp"
 #include "libcint/c_api.hpp"
 
@@ -394,7 +395,7 @@ void build_hcore_block_guess(
       orbital_value_table);
 }
 
-RestrictedHartreeFockResult solve_rhf_guess(
+scf::Result solve_rhf_guess(
     const xmvb::integrals::LibcintInput& libcint_input,
     const xmvb::integrals::AoIntegralInput& ao_integral_input,
     const xmvb::integrals::RiAoFactorization* ri_factorization,
@@ -497,20 +498,38 @@ RestrictedHartreeFockResult solve_rhf_guess(
     }
   }
 
-  RestrictedHartreeFockSolver solver;
+  const Eigen::Map<const Eigen::MatrixXd> spinless_density(
+      initial_density_projector.data(), n_basis_functions, n_basis_functions);
+  const Eigen::MatrixXd initial_total_density = 2.0 * spinless_density;
+  scf::Options options;
+  // The old guess solver measured D and [F,D S]; the public solver measures
+  // P=2D and [F,P S]. Convert units, retaining the original physical tolerance.
+  options.density_tolerance *= 2.0;
   if (ri_factorization != nullptr) {
-    return solver.solve(
+    const auto evaluate = [&](const Eigen::Ref<const Eigen::MatrixXd>& density) {
+      return scf::evaluate_hf(
+          density,
+          ao_integral_input.ao_core_hamiltonian_matrix,
+          *ri_factorization);
+    };
+    return scf::solve_restricted(
         orbital_preparation_input.n_total_electrons,
         orbital_preparation_input.ao_overlap_matrix,
         ao_integral_input.ao_core_hamiltonian_matrix,
-        *ri_factorization,
-        initial_density_projector);
+        evaluate,
+        options,
+        initial_total_density);
   }
-  return solver.solve(
+  const auto evaluate = [&](const Eigen::Ref<const Eigen::MatrixXd>& density) {
+    return scf::evaluate_hf(density, ao_integral_input);
+  };
+  return scf::solve_restricted(
       orbital_preparation_input.n_total_electrons,
       orbital_preparation_input.ao_overlap_matrix,
-      ao_integral_input,
-      initial_density_projector);
+      ao_integral_input.ao_core_hamiltonian_matrix,
+      evaluate,
+      options,
+      initial_total_density);
 }
 
 void build_rhf_block_guess(
@@ -543,7 +562,7 @@ void build_rhf_block_guess(
           : orbital_preparation_input.ao_overlap_matrix;
   build_block_matrix_guess(
       libcint_input,
-      rhf_result.fock_matrix,
+      rhf_result.fock,
       hf_overlap_matrix,
       orbital_preparation_input,
       orbital_value_table);
@@ -682,7 +701,7 @@ void build_rhf_mo_guess(
       ri_factorization,
       orbital_preparation_input);
   const auto ao_normalization = build_ao_normalization(orbital_preparation_input);
-  Eigen::MatrixXd orbital_matrix = rhf_result.molecular_orbital_matrix;
+  Eigen::MatrixXd orbital_matrix = rhf_result.orbitals;
   for (int basis_index = 0; basis_index < n_basis_functions; ++basis_index) {
     for (int mo_index = 0; mo_index < n_basis_functions; ++mo_index) {
       orbital_matrix(basis_index, mo_index) *=
