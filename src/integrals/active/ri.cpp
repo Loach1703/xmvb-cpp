@@ -69,10 +69,12 @@ ActiveSpaceTwoElectronResult transform_ri_active_integrals(
   if (scratch<per_aux)
     throw std::length_error("minimum RI active transform tile exceeds workspace");
   const int tile=std::min<std::size_t>(n_aux,scratch/per_aux);
+  Eigen::MatrixXd one_index;
   for (int first=0;first<n_aux;first+=tile) {
     const int count=std::min(tile,n_aux-first);
-    const Eigen::MatrixXd one_index=transform_ri_one_index(
-        ao_ri_result.metric_whitened_ao_pair_factors,dense_active_coefficients,first,count);
+    one_index.resize(static_cast<Eigen::Index>(count)*n_active_orbitals,n_basis_functions);
+    transform_ri_one_index(ao_ri_result.metric_whitened_ao_pair_factors,
+                          dense_active_coefficients,first,count,one_index);
     const Eigen::MatrixXd active=one_index*dense_active_coefficients;
     for (int a=0;a<n_active_orbitals;++a) {
       if (resident)

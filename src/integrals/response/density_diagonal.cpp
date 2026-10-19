@@ -81,10 +81,12 @@ DensityDiagonals contract_ri_density_diagonals(
   DensityDiagonals result{Eigen::MatrixXd::Zero(n_mo,n_core),
       2*active_coulomb*active_weights,{}};
   Eigen::MatrixXd charges(n_aux,n_core);
+  Eigen::MatrixXd one_index;
   for (int first = 0; first < n_aux; first += width) {
     const int count = std::min(width,n_aux-first);
-    const Eigen::MatrixXd one_index = transform_ri_one_index(
-        ri.metric_whitened_ao_pair_factors,orbitals.leftCols(n_occ),first,count);
+    one_index.resize(static_cast<Eigen::Index>(count)*n_occ,n_bf);
+    transform_ri_one_index(ri.metric_whitened_ao_pair_factors,
+                          orbitals.leftCols(n_occ),first,count,one_index);
     const int rows = count*n_occ;
     Eigen::MatrixXd projected(rows,n_mo);
 #pragma omp parallel num_threads(workers)

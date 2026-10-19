@@ -127,8 +127,9 @@ Eigen::MatrixXd apply_ri_active_density_response(
             active.accepted_one_index_factors->middleRows(a*n_aux+first,count);
       factors = &owned;
     } else {
-      owned = transform_ri_one_index(*active.metric_whitened_ao_pair_factors,
-                                     *active.accepted_active_coefficients,first,count);
+      owned.resize(static_cast<Eigen::Index>(count)*na,n);
+      transform_ri_one_index(*active.metric_whitened_ao_pair_factors,
+                            *active.accepted_active_coefficients,first,count,owned);
       factors = &owned;
     }
     Eigen::MatrixXd weighted(count*na,n);
@@ -300,9 +301,9 @@ std::vector<RiAoProjectedResponse> apply_ri_projected_ao_response_batch(
                 inactive.factors->middleRows(
                     inactive.orbitals[moving] * n_aux + first, count);
         } else {
-          workspace.accepted.topRows(moving_rows) = transform_ri_one_index(
+          transform_ri_one_index(
               *active.metric_whitened_ao_pair_factors,
-              moving_inactive_duals, first, count);
+              moving_inactive_duals,first,count,workspace.accepted.topRows(moving_rows));
         }
       }
       if (active.accepted_one_index_factors) {
@@ -311,8 +312,8 @@ std::vector<RiAoProjectedResponse> apply_ri_projected_ao_response_batch(
               active.accepted_one_index_factors->middleRows(
                   orbital * n_aux + first, count);
       } else {
-        workspace.accepted.bottomRows(count * na) = transform_ri_one_index(
-            *active.metric_whitened_ao_pair_factors, c, first, count);
+        transform_ri_one_index(*active.metric_whitened_ao_pair_factors,
+                              c,first,count,workspace.accepted.bottomRows(count*na));
       }
     }
     Eigen::MatrixXd accepted_factor_adjoint;
@@ -330,10 +331,9 @@ std::vector<RiAoProjectedResponse> apply_ri_projected_ao_response_batch(
       else u.rightCols(na) = request.weighted_active;
       {
         profiling::ScopedPhase phase(profiling::Phase::RiAoDirection);
-        workspace.direction.resize(0, 0);
-        auto next_direction = transform_ri_one_index(
-            *active.metric_whitened_ao_pair_factors, u, first, count);
-        workspace.direction.swap(next_direction);
+        workspace.direction.resize(leading,n);
+        transform_ri_one_index(*active.metric_whitened_ao_pair_factors,
+                              u,first,count,workspace.direction);
       }
       if (fixed_hvp != nullptr) {
         const Eigen::Ref<const Eigen::MatrixXd> active_factors(

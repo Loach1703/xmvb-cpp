@@ -84,6 +84,31 @@ Matrix explicit_ri_action(const Matrix& packed, const Matrix& density) {
   return result;
 }
 
+/** @brief Reused, strided destinations are fully overwritten, not accumulated. */
+void check_transform_destination() {
+  constexpr int n = 5, n_aux = 7, orbitals = 3, first = 2, count = 4;
+  const Matrix packed = Matrix::Random(n_aux, n * (n + 1) / 2);
+  Matrix c = Matrix::Random(n, orbitals);
+  constexpr double sentinel = 17.0;
+  Matrix storage = Matrix::Constant(count * orbitals + 4, n + 2, sentinel);
+  for (int trial = 0; trial < 2; ++trial) {
+    if (trial) c *= -0.37;
+    auto destination = storage.block(2, 1, count * orbitals, n);
+    xmvb::integrals::transform_ri_one_index(packed, c, first, count, destination);
+    Matrix expected(count * orbitals, n);
+    for (int auxiliary = 0; auxiliary < count; ++auxiliary) {
+      const Matrix image = explicit_factor(packed, first + auxiliary, n) * c;
+      for (int a = 0; a < orbitals; ++a)
+        expected.row(a * count + auxiliary) = image.col(a).transpose();
+    }
+    require_close(destination, expected, "strided RI transform destination");
+    Matrix guard = storage;
+    guard.block(2, 1, count * orbitals, n).setConstant(sentinel);
+    require_close(guard, Matrix::Constant(guard.rows(), guard.cols(), sentinel),
+                  "RI transform destination guards");
+  }
+}
+
 Matrix values(int rows, int cols, double phase) {
   Matrix result(rows, cols);
   for (Eigen::Index i = 0; i < result.size(); ++i) {
@@ -412,6 +437,7 @@ int main() {
 #else
       (void)threads;
 #endif
+      check_transform_destination();
       for (std::size_t budget : {std::size_t{8} * 1024,
                                  std::size_t{64} * 1024 * 1024}) {
         for (bool cached : {false, true}) {

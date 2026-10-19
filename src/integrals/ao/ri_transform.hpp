@@ -8,12 +8,13 @@ namespace xmvb::integrals {
 
 /** @brief Contract symmetric packed AO factors with one orbital index.
  * Output rows are (orbital, auxiliary), with auxiliary contiguous; columns
- * are AO functions. Workers own only one auxiliary-tile AO row slice.
+ * are AO functions. The caller owns/reuses the destination, including a view
+ * into a larger slab. Workers own only one auxiliary-tile AO row slice.
  */
-Eigen::MatrixXd transform_ri_one_index(
+void transform_ri_one_index(
     const Eigen::Ref<const Eigen::MatrixXd>& packed_factors,
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
-    int first_aux,int count);
+    int first_aux,int count, Eigen::Ref<Eigen::MatrixXd> result);
 
 /** @brief Fill a resident image with bounded transform scratch.
  * The caller admits the destination to its accepted-point storage budget.

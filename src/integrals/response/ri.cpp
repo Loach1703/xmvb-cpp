@@ -101,10 +101,13 @@ void visit_accepted_factors(
     return;
   }
   const int width = std::min(cache.auxiliary_tile_size,planned_auxiliary_tile_width(cache));
+  Eigen::MatrixXd factors;
   for (int first = 0; first < cache.n_auxiliary_functions; first += width) {
     const int count = std::min(width, cache.n_auxiliary_functions - first);
-    const Eigen::MatrixXd factors = transform_ri_one_index(
-        *cache.metric_whitened_ao_pair_factors, *cache.accepted_active_coefficients, first, count);
+    factors.resize(static_cast<Eigen::Index>(count)*cache.n_active_orbitals,
+                   cache.n_basis_functions);
+    transform_ri_one_index(*cache.metric_whitened_ao_pair_factors,
+                          *cache.accepted_active_coefficients, first, count, factors);
     consume(factors, first, count);
   }
 }
@@ -130,8 +133,9 @@ Eigen::MatrixXd contract_factor_adjoint(
     for (int offset = 0; offset < count; offset += width) {
       const int tile_count = std::min(width, count - offset);
       if (direction != nullptr) {
-        directional_factors = transform_ri_one_index(
-            *cache.metric_whitened_ao_pair_factors, *direction, first_aux + offset, tile_count);
+        directional_factors.resize(static_cast<Eigen::Index>(tile_count)*n_active,n_bf);
+        transform_ri_one_index(*cache.metric_whitened_ao_pair_factors,
+                              *direction,first_aux+offset,tile_count,directional_factors);
       }
       if (direction == nullptr) {
         detail::accumulate_ri_factor_tile(cache, factors, count, offset,
@@ -619,9 +623,10 @@ std::vector<Eigen::MatrixXd> backpropagate_ri_packed_active_two_electron_gradien
     Eigen::MatrixXd owned_factors;
     const Eigen::MatrixXd* factors=accepted_cache.accepted_one_index_factors.get();
     if (!factors) {
-      owned_factors=transform_ri_one_index(
+      owned_factors.resize(static_cast<Eigen::Index>(count)*na,n);
+      transform_ri_one_index(
           *accepted_cache.metric_whitened_ao_pair_factors,
-          *accepted_cache.accepted_active_coefficients,first,count);
+          *accepted_cache.accepted_active_coefficients,first,count,owned_factors);
       factors=&owned_factors;
     }
     const int stride=resident ? n_aux:count;
