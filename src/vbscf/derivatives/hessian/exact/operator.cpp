@@ -128,22 +128,12 @@ ExactHvpOperator::State::State(
             .auxiliary_orbital_matrix.data(),
         n_basis_functions,
         n_basis_functions);
-    const Eigen::Map<const Eigen::MatrixXd> accepted_ao_effective_h1e(
-        accepted_point_context_->prepared_active_space
-            .ao_effective_one_electron_result.ao_effective_h1e.data(),
-        n_basis_functions,
-        n_basis_functions);
     accepted_active_auxiliary_orbitals_ =
         accepted_auxiliary_matrix.middleCols(
             n_inactive_doubly_occupied_orbitals,
             n_active_orbitals);
     accepted_basis_overlap_times_active_auxiliary_orbitals_ =
         basis_overlap * accepted_active_auxiliary_orbitals_;
-    accepted_ao_effective_one_electron_times_active_auxiliary_orbitals_ =
-        accepted_ao_effective_h1e * accepted_active_auxiliary_orbitals_;
-    accepted_ao_effective_one_electron_transpose_times_active_auxiliary_orbitals_ =
-        accepted_ao_effective_h1e.transpose() *
-        accepted_active_auxiliary_orbitals_;
     const Eigen::Map<const Eigen::MatrixXd> accepted_sso_gradient(
         accepted_point_context_->active_orbital_overlap_gradient.data(),
         n_active_orbitals,
@@ -156,6 +146,11 @@ ExactHvpOperator::State::State(
         n_active_orbitals);
     accepted_hho_gradient_symmetric_ =
         accepted_hho_gradient + accepted_hho_gradient.transpose();
+    const auto& integral_frame = accepted_point_context_->prepared_active_space
+        .active_space_two_electron_result.orbital_transform;
+    accepted_hho_projection_weight_ = integral_frame.size()
+        ? Eigen::MatrixXd(integral_frame * accepted_hho_gradient_symmetric_)
+        : accepted_hho_gradient_symmetric_;
     zero_core_hamiltonian_ =
         Eigen::MatrixXd::Zero(n_basis_functions, n_basis_functions);
     if (current_input_->standard_two_electron_mode ==

@@ -1,0 +1,31 @@
+H4 single covalent VB structure: incomplete spin-string carrier regression
+$CTRL
+VBSCF
+NAO=4 NAE=4 ISCF=9
+EIGENSOLVER=DAVIDSON
+ORBTYP=HAO FRGTYP=SAO
+INT=LIBCINT BASIS=CC-PVDZ
+$END
+$STR
+1 2 3 4
+$END
+$FRAG
+1*4
+S 1
+S 2
+S 3
+S 4
+$END
+$ORB
+1*4
+1
+2
+3
+4
+$END
+$GEO
+H 0.0 0.0 0.0
+H 0.0 0.0 0.9
+H 1.2 0.0 0.0
+H 1.2 0.0 0.9
+$END

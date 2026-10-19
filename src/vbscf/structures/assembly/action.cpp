@@ -15,6 +15,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
+#include "integrals/active/raw.hpp"
 #include "mcscf/ci/planner.hpp"
 #include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma.hpp"
@@ -452,8 +453,11 @@ struct StructureAction::TiledPairData {
         alpha_strings(cache.alpha_reuse_table.unique_determinants),
         beta_strings(cache.beta_reuse_table.unique_determinants),
         active_overlap(overlap),
-        one_electron(h1e),
-        two_electron(active_two_electron),
+        one_electron(xmvb::integrals::materialize_raw_one_electron(
+            h1e, active_two_electron.orbital_transform)),
+        two_electron(active_two_electron.orbital_transform.size() != 0
+            ? xmvb::integrals::materialize_raw_active_integrals(active_two_electron)
+            : active_two_electron),
         n_active(n_active_orbitals) {
     if (!alpha_provider || !beta_provider) {
       throw std::invalid_argument(

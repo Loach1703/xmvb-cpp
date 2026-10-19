@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "vbscf/integrals/active/space.hpp"
 #include "integrals/active/two_electron.hpp"
 #include "integrals/active/frame.hpp"
+#include "integrals/active/raw.hpp"
 #include "core/pair_index.hpp"
 #include "vbscf/integrals/ao/one_electron/backpropagator.hpp"
 
@@ -187,8 +189,25 @@ SelectedStateResponseTiming add_selected_state_response_to_active_space_gradient
   }
 
   SelectedStateResponseTiming timing;
+  const auto& prepared_active_space =
+      accepted_point_context.prepared_active_space;
+  const auto& framed_two_electron =
+      prepared_active_space.active_space_two_electron_result;
+  std::optional<xmvb::integrals::ActiveSpaceTwoElectronResult>
+      raw_two_electron_storage;
+  const xmvb::integrals::ActiveSpaceTwoElectronResult* raw_two_electron =
+      &framed_two_electron;
+  if (framed_two_electron.orbital_transform.size() != 0) {
+    raw_two_electron_storage.emplace(
+        xmvb::integrals::materialize_raw_active_integrals(
+            framed_two_electron));
+    raw_two_electron = &*raw_two_electron_storage;
+  }
+  const Eigen::MatrixXd raw_h1e = xmvb::integrals::materialize_raw_one_electron(
+      prepared_active_space.active_space_one_electron_result.h1e_act,
+      framed_two_electron.orbital_transform);
   const auto same_spin_start = std::chrono::steady_clock::now();
-  const SameSpinMatrixBackwardContribution matrix_form_same_spin_direction =
+  SameSpinMatrixBackwardContribution matrix_form_same_spin_direction =
       build_directional_same_spin_matrix_backward_contribution(
           accepted_point_context.same_spin_pair_cache,
           accepted_point_context.selected_state_matrices,
@@ -198,10 +217,8 @@ SelectedStateResponseTiming add_selected_state_response_to_active_space_gradient
           input.orbital_preparation_input.n_active_orbitals,
           accepted_point_context.prepared_active_space.orbital_result
               .active_orbital_overlap_matrix,
-          accepted_point_context.prepared_active_space
-              .active_space_one_electron_result.h1e_act,
-          accepted_point_context.prepared_active_space
-              .active_space_two_electron_result);
+          raw_h1e,
+          *raw_two_electron);
   validate_same_spin_matrix_backward_contribution(
       matrix_form_same_spin_direction,
       "exact outer-response directional same-spin backward contribution");
@@ -216,10 +233,8 @@ SelectedStateResponseTiming add_selected_state_response_to_active_space_gradient
           input.orbital_preparation_input.n_active_orbitals,
           accepted_point_context.prepared_active_space.orbital_result
               .active_orbital_overlap_matrix,
-          accepted_point_context.prepared_active_space
-              .active_space_one_electron_result.h1e_act,
-          accepted_point_context.prepared_active_space
-              .active_space_two_electron_result);
+          raw_h1e,
+          *raw_two_electron);
   validate_opposite_spin_matrix_backward_contribution(
       opposite_spin_direction,
       "exact outer-response directional opposite-spin backward contribution");
@@ -231,6 +246,15 @@ SelectedStateResponseTiming add_selected_state_response_to_active_space_gradient
       opposite_spin_direction.timing.alpha_overlap_seconds;
   timing.opposite_spin_beta_overlap_seconds =
       opposite_spin_direction.timing.beta_overlap_seconds;
+  std::vector<double> raw_pair_gradient =
+      matrix_form_same_spin_direction.packed_active_two_electron_gradient;
+  accumulate_scaled_vector(
+      opposite_spin_direction.packed_active_two_electron_gradient,
+      1.0,
+      &raw_pair_gradient);
+  matrix_form_same_spin_direction.packed_active_two_electron_gradient =
+      xmvb::integrals::materialize_framed_pair_kernel_adjoint(
+          raw_pair_gradient, framed_two_electron.orbital_transform);
   accumulate_scaled_same_spin_contribution(
       matrix_form_same_spin_direction,
       1.0,
@@ -239,10 +263,6 @@ SelectedStateResponseTiming add_selected_state_response_to_active_space_gradient
       opposite_spin_direction.active_orbital_overlap_gradient,
       1.0,
       &active_space_gradient->active_orbital_overlap_gradient);
-  accumulate_scaled_vector(
-      opposite_spin_direction.packed_active_two_electron_gradient,
-      1.0,
-      &active_space_gradient->packed_active_two_electron_gradient);
   return timing;
 }
 
@@ -332,7 +352,24 @@ add_selected_subspace_response_to_active_space_gradient(
   }
 
   const auto multiplier_start = std::chrono::steady_clock::now();
-  const SameSpinMatrixBackwardContribution multiplier_contribution =
+  const auto& prepared_active_space =
+      accepted_point_context.prepared_active_space;
+  const auto& framed_two_electron =
+      prepared_active_space.active_space_two_electron_result;
+  std::optional<xmvb::integrals::ActiveSpaceTwoElectronResult>
+      raw_two_electron_storage;
+  const xmvb::integrals::ActiveSpaceTwoElectronResult* raw_two_electron =
+      &framed_two_electron;
+  if (framed_two_electron.orbital_transform.size() != 0) {
+    raw_two_electron_storage.emplace(
+        xmvb::integrals::materialize_raw_active_integrals(
+            framed_two_electron));
+    raw_two_electron = &*raw_two_electron_storage;
+  }
+  const Eigen::MatrixXd raw_h1e = xmvb::integrals::materialize_raw_one_electron(
+      prepared_active_space.active_space_one_electron_result.h1e_act,
+      framed_two_electron.orbital_transform);
+  SameSpinMatrixBackwardContribution multiplier_contribution =
       build_directional_same_spin_matrix_backward_contribution(
           accepted_point_context.same_spin_pair_cache,
           rotated_selected_states,
@@ -342,13 +379,15 @@ add_selected_subspace_response_to_active_space_gradient(
           input.orbital_preparation_input.n_active_orbitals,
           accepted_point_context.prepared_active_space.orbital_result
               .active_orbital_overlap_matrix,
-          accepted_point_context.prepared_active_space
-              .active_space_one_electron_result.h1e_act,
-          accepted_point_context.prepared_active_space
-              .active_space_two_electron_result);
+          raw_h1e,
+          *raw_two_electron);
   validate_same_spin_matrix_backward_contribution(
       multiplier_contribution,
       "selected-subspace full-multiplier backward contribution");
+  multiplier_contribution.packed_active_two_electron_gradient =
+      xmvb::integrals::materialize_framed_pair_kernel_adjoint(
+          multiplier_contribution.packed_active_two_electron_gradient,
+          framed_two_electron.orbital_transform);
   timing.same_spin_seconds += std::chrono::duration<double>(
       std::chrono::steady_clock::now() - multiplier_start).count();
   accumulate_scaled_same_spin_contribution(
@@ -421,17 +460,19 @@ std::vector<double> build_orbital_value_gradient_from_active_space_gradient_dire
       n_active_orbitals,
       &symmetric_active_one_electron_gradient);
 
-  xmvb::integrals::ActiveSpaceMatrixBackpropagator matrix_backpropagator;
   const auto active_space_matrix_backpropagation_result =
-      matrix_backpropagator.backpropagate(
+      integrals::pullback_active_matrices(
           symmetric_active_overlap_gradient,
           symmetric_active_one_electron_gradient,
           input.orbital_preparation_input.ao_overlap_matrix,
-          ao_effective_one_electron_result.ao_effective_h1e,
-          orbital_result.auxiliary_orbital_matrix,
-          input.orbital_preparation_input.n_basis_functions,
-          n_inactive_doubly_occupied_orbitals,
-          n_active_orbitals);
+          orbital_result.auxiliary_orbital_matrix.middleCols(
+              n_inactive_doubly_occupied_orbitals,n_active_orbitals),
+          prepared_active_space.active_space_two_electron_result.dense_active_coefficients,
+          prepared_active_space.active_space_one_electron_result,
+          prepared_active_space.active_space_two_electron_result.orbital_transform,
+          ri_two_electron_cache == nullptr &&
+              !(exact_two_electron_cache != nullptr &&
+                exact_two_electron_cache->exchange_integrals.size() != 0));
 
   Eigen::MatrixXd active_two_electron_auxiliary_gradient;
   if ((exact_two_electron_cache == nullptr) ==

@@ -1,6 +1,7 @@
 #include "vbscf/derivatives/hessian/exact/apply_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/active_space/local_tile_accumulator_internal.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
+#include "integrals/active/raw.hpp"
 #include "core/pair_index.hpp"
 #include "core/timing.hpp"
 
@@ -169,6 +170,15 @@ ActiveSpaceGradientDirection ExactHvpOperator::State::active_response_gradient(
         .outer_response_local_active_gradient_wall_time_seconds +=
         detail::exact_hvp_elapsed_seconds(
             local_active_gradient_start_time);
+
+    if (components.local_active_response) {
+      directional_active_space_gradient.packed_active_two_electron_gradient =
+          xmvb::integrals::materialize_framed_pair_kernel_adjoint(
+              directional_active_space_gradient
+                  .packed_active_two_electron_gradient,
+              accepted_point_context_->prepared_active_space
+                  .active_space_two_electron_result.orbital_transform);
+    }
 
     const auto structure_active_gradient_start_time =
         std::chrono::steady_clock::now();

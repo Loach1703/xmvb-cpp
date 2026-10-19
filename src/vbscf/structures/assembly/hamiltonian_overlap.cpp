@@ -27,10 +27,10 @@
 #include "vbscf/determinants/pairs/storage.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
+#include "integrals/active/raw.hpp"
 #include "vbscf/structures/assembly/block_kernels.hpp"
 #include "vbscf/structures/assembly/coefficient_blocks.hpp"
 #include "core/pair_index.hpp"
-#include "integrals/active/raw.hpp"
 #include "integrals/active/two_electron.hpp"
 
 namespace xmvb::vb {
@@ -1843,6 +1843,8 @@ FullDeterminantStructureHamiltonianOverlapBuilder::build_diagonal(
   }
   std::optional<xmvb::integrals::ActiveSpaceTwoElectronResult> raw_integrals;
   const auto* diagonal_integrals = &active_space_two_electron_result;
+  const Eigen::MatrixXd raw_h1e = xmvb::integrals::materialize_raw_one_electron(
+      h1e_act, active_space_two_electron_result.orbital_transform);
   if (active_space_two_electron_result.orbital_transform.size() != 0) {
     raw_integrals.emplace(xmvb::integrals::materialize_raw_active_integrals(
         active_space_two_electron_result));
@@ -1854,7 +1856,7 @@ FullDeterminantStructureHamiltonianOverlapBuilder::build_diagonal(
       same_spin_pair_cache.alpha_reuse_table,
       same_spin_pair_cache.beta_reuse_table,
       ovlp_act,
-      h1e_act,
+      raw_h1e,
       n_orbitals,
       *diagonal_integrals,
       make_pair_evaluator(),
@@ -1893,6 +1895,8 @@ build_davidson_jacobi_preconditioner(
   }
   std::optional<xmvb::integrals::ActiveSpaceTwoElectronResult> raw_integrals;
   const auto* jacobi_integrals = &active_space_two_electron_result;
+  const Eigen::MatrixXd raw_h1e = xmvb::integrals::materialize_raw_one_electron(
+      h1e_act, active_space_two_electron_result.orbital_transform);
   if (active_space_two_electron_result.orbital_transform.size() != 0) {
     raw_integrals.emplace(xmvb::integrals::materialize_raw_active_integrals(
         active_space_two_electron_result));
@@ -1904,7 +1908,7 @@ build_davidson_jacobi_preconditioner(
       same_spin_pair_cache.alpha_reuse_table,
       same_spin_pair_cache.beta_reuse_table,
       ovlp_act,
-      h1e_act,
+      raw_h1e,
       n_orbitals,
       *jacobi_integrals,
       make_pair_evaluator());
@@ -2072,6 +2076,8 @@ FullDeterminantStructureHamiltonianOverlapBuilder::build_impl(
 
   std::optional<xmvb::integrals::ActiveSpaceTwoElectronResult> raw_integrals;
   const auto* assembly_integrals = &active_space_two_electron_result;
+  const Eigen::MatrixXd raw_h1e = xmvb::integrals::materialize_raw_one_electron(
+      h1e_act, active_space_two_electron_result.orbital_transform);
   if (active_space_two_electron_result.orbital_transform.size() != 0) {
     raw_integrals.emplace(xmvb::integrals::materialize_raw_active_integrals(
         active_space_two_electron_result));
@@ -2112,7 +2118,7 @@ FullDeterminantStructureHamiltonianOverlapBuilder::build_impl(
           alpha_reuse_table,
           beta_reuse_table,
           ovlp_act,
-          h1e_act,
+          raw_h1e,
           n_orbitals,
           *assembly_integrals,
           pair_evaluator,
@@ -2138,7 +2144,7 @@ FullDeterminantStructureHamiltonianOverlapBuilder::build_impl(
         beta_det,
         pair_evaluator,
         ovlp_act,
-        h1e_act,
+        raw_h1e,
         n_orbitals,
         *assembly_integrals,
         SameSpinPairCacheBuildOptions{});
@@ -2150,7 +2156,7 @@ FullDeterminantStructureHamiltonianOverlapBuilder::build_impl(
       alpha_det,
       beta_det,
       ovlp_act,
-      h1e_act,
+      raw_h1e,
       n_orbitals,
       *assembly_integrals,
       &build_result.pair_evaluations);

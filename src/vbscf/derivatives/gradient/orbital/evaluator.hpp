@@ -173,7 +173,6 @@ public:
 private:
   ActiveSpaceGradientEvaluator active_space_gradient_evaluator_;
   AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator_;
-  xmvb::integrals::ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator_;
 
   ActiveSpaceOrbitalBackpropagator active_space_orbital_backpropagator_;
   OrbitalGradientResult evaluate_from_active_space_gradient_result(

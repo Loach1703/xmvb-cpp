@@ -185,7 +185,9 @@ void record_accepted_iteration_snapshot(
     snapshot.active_orbital_overlap_matrix =
         gradient_result.active_orbital_overlap_matrix;
     snapshot.active_one_electron_integrals =
-        gradient_result.active_one_electron_integrals;
+        integrals::materialize_raw_one_electron(
+            gradient_result.active_one_electron_integrals,
+            gradient_result.two_electron_frame);
     snapshot.packed_active_two_electron_integrals =
         integrals::materialize_raw_pair_kernel(
             gradient_result.packed_active_two_electron_integrals,

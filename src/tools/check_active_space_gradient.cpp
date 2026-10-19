@@ -242,6 +242,10 @@ int main(int argc, char** argv) {
     const std::vector<double> baseline_raw_two =
         xmvb::integrals::materialize_raw_pair_kernel(
             baseline_framed_two, two_electron_frame);
+    const Eigen::MatrixXd baseline_raw_one =
+        xmvb::integrals::materialize_raw_one_electron(
+            result.active_space_one_electron_result.h1e_act,
+            two_electron_frame);
 
     std::vector<std::pair<double, int>> ranked_entries;
     ranked_entries.reserve(gradient.size());
@@ -286,8 +290,8 @@ int main(int argc, char** argv) {
       const int entry_index = ranked_entries[report_index].second;
       std::vector<double> plus_overlap = result.active_orbital_overlap_matrix;
       std::vector<double> minus_overlap = result.active_orbital_overlap_matrix;
-      Eigen::MatrixXd plus_one = result.active_space_one_electron_result.h1e_act;
-      Eigen::MatrixXd minus_one = result.active_space_one_electron_result.h1e_act;
+      Eigen::MatrixXd plus_one = baseline_raw_one;
+      Eigen::MatrixXd minus_one = baseline_raw_one;
       std::vector<double> plus_two = baseline_raw_two;
       std::vector<double> minus_two = baseline_raw_two;
 

@@ -110,7 +110,7 @@ struct OrbitalGradientResult {
   std::vector<double> active_orbital_overlap_matrix;
 
   /**
-   * @brief Column-major active-space effective one-electron matrix `HHO`.
+   * @brief Active h in the same frame as packed G, specified by two_electron_frame.
    */
   Eigen::MatrixXd active_one_electron_integrals;
 

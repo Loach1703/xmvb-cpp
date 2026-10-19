@@ -462,8 +462,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       delta_ao_effective_h1e_times_active_auxiliary_orbitals =
           Eigen::Map<const Eigen::MatrixXd>(projection.data(), n_basis_functions,
                                          accepted_active_auxiliary_orbitals_.cols());
-      if (frame.size()) delta_ao_effective_h1e_times_active_auxiliary_orbitals=
-          (delta_ao_effective_h1e_times_active_auxiliary_orbitals*frame).eval();
     }
     apply_timing_totals_.ao_effective_one_electron_fused_wall_time_seconds +=
         detail::exact_hvp_elapsed_seconds(ao_effective_one_electron_fused_start_time);
@@ -844,7 +842,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
         accepted_sso_gradient_symmetric_;
     delta_auxiliary_active_gradient.noalias() +=
         delta_ao_effective_h1e_times_active_auxiliary_orbitals *
-        accepted_hho_gradient_symmetric_;
+        accepted_hho_projection_weight_;
     delta_auxiliary_active_gradient.noalias() +=
         ao_effective_h1e *
         delta_active_times_hho_symmetric;

@@ -275,13 +275,6 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
         &ao_h1e_batch_workspace_,
         &combined_ao_columns,
         &active_projection_columns);
-    if (frame.size()) {
-      for (Eigen::Index column=0;column<n_directions;++column) {
-        Eigen::Map<Eigen::MatrixXd> projection(active_projection_columns.col(column).data(),
-            n_basis_functions,n_active_orbitals);
-        projection=(projection*frame).eval();
-      }
-    }
   }
   const double batch_h1e_seconds =
       detail::exact_hvp_elapsed_seconds(batch_h1e_start_time);

@@ -77,6 +77,16 @@ if (BUILD_TESTING)
   add_test(NAME ri_integral_transform COMMAND test_ri_integral_transform)
   add_test(NAME orthogonal_ri_transform COMMAND test_orthogonal_ri_transform)
   add_test(NAME fused_integral_frame COMMAND test_fused_integral_frame)
+  foreach(_frame_backend IN ITEMS exact ri)
+    add_test(NAME integral_frame_pair_${_frame_backend}
+      COMMAND check_exact_ctx_hvp
+        ${CMAKE_SOURCE_DIR}/tests/vbscf/fixtures/response/h4_pair.xmi
+        --standard-two-electron-mode ${_frame_backend}
+        --eigensolver davidson --step 1e-4 --probe full --max-rel-error 1e-7)
+    set_tests_properties(integral_frame_pair_${_frame_backend} PROPERTIES
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+      ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;MKL_NUM_THREADS=1")
+  endforeach()
   add_test(NAME two_electron_jet COMMAND test_two_electron_jet)
   add_test(NAME orbital_pair_direction COMMAND test_orbital_pair_direction)
   add_test(NAME raw_integral_frame COMMAND test_raw_integral_frame)

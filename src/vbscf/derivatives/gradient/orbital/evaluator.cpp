@@ -330,15 +330,17 @@ OrbitalGradientResult OrbitalGradientEvaluator::evaluate_from_active_space_gradi
 
   stage_start_time = std::chrono::steady_clock::now();
   const auto active_space_matrix_backpropagation_result =
-      active_space_matrix_backpropagator_.backpropagate(
+      integrals::pullback_active_matrices(
           active_space_gradient_result.active_orbital_overlap_gradient,
           active_space_gradient_result.active_one_electron_gradient,
           input.orbital_preparation_input.ao_overlap_matrix,
-          ao_effective_one_electron_result.ao_effective_h1e,
-          orbital_result.auxiliary_orbital_matrix,
-          input.orbital_preparation_input.n_basis_functions,
-          n_inactive_doubly_occupied_orbitals,
-          input.orbital_preparation_input.n_active_orbitals);
+          orbital_result.auxiliary_orbital_matrix.middleCols(
+              n_inactive_doubly_occupied_orbitals,
+              input.orbital_preparation_input.n_active_orbitals),
+          active_space_gradient_result.active_space_two_electron_result.dense_active_coefficients,
+          active_space_gradient_result.active_space_one_electron_result,
+          active_space_gradient_result.active_space_two_electron_result.orbital_transform,
+          !use_standard_ri_ao_effective_one_electron_path(input));
   result.active_space_matrix_backpropagation_wall_time_seconds =
       std::chrono::duration<double>(std::chrono::steady_clock::now() - stage_start_time).count();
   stage_start_time = std::chrono::steady_clock::now();
@@ -521,15 +523,17 @@ OrbitalGradientEvaluator::evaluate_sparse_orbital_gradient_with_fixed_active_spa
   }
 
   const auto active_space_matrix_backpropagation_result =
-      active_space_matrix_backpropagator_.backpropagate(
+      integrals::pullback_active_matrices(
           accepted_point_context.active_orbital_overlap_gradient,
           accepted_point_context.active_one_electron_gradient,
           input.orbital_preparation_input.ao_overlap_matrix,
-          ao_effective_one_electron_result.ao_effective_h1e,
-          orbital_result.auxiliary_orbital_matrix,
-          input.orbital_preparation_input.n_basis_functions,
-          n_inactive_doubly_occupied_orbitals,
-          input.orbital_preparation_input.n_active_orbitals);
+          orbital_result.auxiliary_orbital_matrix.middleCols(
+              n_inactive_doubly_occupied_orbitals,
+              input.orbital_preparation_input.n_active_orbitals),
+          active_space_two_electron_result.dense_active_coefficients,
+          prepared_active_space.active_space_one_electron_result,
+          active_space_two_electron_result.orbital_transform,
+          !use_standard_ri_ao_effective_one_electron_path(input));
   const Eigen::MatrixXd active_two_electron_gradient =
       pullback_active_integrals(input, active_space_two_electron_result,
           accepted_point_context.packed_active_two_electron_gradient);

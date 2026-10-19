@@ -56,16 +56,12 @@ ActiveSpaceIntegralDirectionView build_active_space_integral_direction(
   delta_overlap.noalias() += delta_overlap_left.transpose();
 
   const Eigen::MatrixXd delta_one_electron_left =
-      tangent.active_auxiliary_orbitals.transpose() *
-      context.effective_h1e_times_active_auxiliary_orbitals;
+      tangent.dense_active_coefficients.transpose() * context.effective_h1e_image;
   delta_one_electron.noalias() = delta_one_electron_left;
   delta_one_electron.noalias() +=
-      context.active_auxiliary_orbitals.transpose() *
+      context.dense_active_coefficients.transpose() *
       tangent.delta_effective_h1e_times_active_auxiliary_orbitals;
-  delta_one_electron.noalias() +=
-      context.effective_h1e_transpose_times_active_auxiliary_orbitals
-          .transpose() *
-      tangent.active_auxiliary_orbitals;
+  delta_one_electron.noalias() += delta_one_electron_left.transpose();
 
   if (context.dense_active_coefficients.rows() != n_basis_functions ||
       context.dense_active_coefficients.cols() != n_active_orbitals ||

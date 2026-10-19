@@ -66,6 +66,47 @@ ActiveSpaceMatrixBackpropagationResult backpropagate_active_space_matrix_impl(
 
 }  // namespace
 
+ActiveSpaceMatrixBackpropagationResult pullback_active_matrices(
+    const std::vector<double>& overlap_gradient,
+    const std::vector<double>& one_electron_gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap,
+    const Eigen::Ref<const Eigen::MatrixXd>& raw_active_coefficients,
+    const Eigen::Ref<const Eigen::MatrixXd>& integral_coefficients,
+    const ActiveSpaceOneElectronResult& one_electron,
+    const Eigen::MatrixXd& frame,
+    bool ao_adjoint_required) {
+  const Eigen::Index n = raw_active_coefficients.rows();
+  const Eigen::Index a = raw_active_coefficients.cols();
+  if (overlap_gradient.size() != static_cast<std::size_t>(a*a) ||
+      one_electron_gradient.size() != static_cast<std::size_t>(a*a) ||
+      one_electron.ao_image.rows() != n || one_electron.ao_image.cols() != a) {
+    throw std::invalid_argument("active matrix pullback image size mismatch");
+  }
+  const Eigen::Map<const Eigen::MatrixXd> gs(overlap_gradient.data(),a,a);
+  const Eigen::Map<const Eigen::MatrixXd> gh(one_electron_gradient.data(),a,a);
+  const Eigen::MatrixXd symmetric_overlap = gs + gs.transpose();
+  const Eigen::MatrixXd symmetric_h = gh + gh.transpose();
+  // Contract R on the small cotangent, not on every AO response image.
+  const Eigen::MatrixXd right_weight = frame.size()
+      ? Eigen::MatrixXd(frame * symmetric_h) : symmetric_h;
+  ActiveSpaceMatrixBackpropagationResult result;
+  result.active_auxiliary_orbital_gradient.noalias() =
+      (ao_overlap * raw_active_coefficients) * symmetric_overlap;
+  result.active_auxiliary_orbital_gradient.noalias() +=
+      one_electron.ao_image * right_weight;
+  if (ao_adjoint_required) {
+    const Eigen::MatrixXd weight = frame.size()
+        ? Eigen::MatrixXd(frame * gh.transpose() * frame.transpose())
+        : Eigen::MatrixXd(gh.transpose());
+    result.ao_effective_one_electron_gradient.resize(n*n);
+    Eigen::Map<Eigen::MatrixXd> ao_gradient(
+        result.ao_effective_one_electron_gradient.data(),n,n);
+    ao_gradient.noalias() = (integral_coefficients * weight) *
+        integral_coefficients.transpose();
+  }
+  return result;
+}
+
 ActiveSpaceMatrixBackpropagationResult ActiveSpaceMatrixBackpropagator::backpropagate(
     const std::vector<double>& active_orbital_overlap_gradient,
     const std::vector<double>& active_one_electron_gradient,

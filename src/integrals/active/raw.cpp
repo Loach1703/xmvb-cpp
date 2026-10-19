@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/pair_index.hpp"
 #include "integrals/active/ri_transform.hpp"
 #include "integrals/active/transform.hpp"
 
@@ -36,6 +37,17 @@ std::vector<double> pack_kernel(const Eigen::MatrixXd& kernel) {
 
 }  // namespace
 
+Eigen::MatrixXd materialize_raw_one_electron(
+    const Eigen::Ref<const Eigen::MatrixXd>& one_electron,
+    const Eigen::MatrixXd& upper) {
+  if (upper.size() == 0) return one_electron;
+  if (upper.rows() != one_electron.rows() ||
+      upper.cols() != one_electron.cols()) {
+    throw std::invalid_argument("raw one-electron frame size mismatch");
+  }
+  return upper.transpose() * one_electron * upper;
+}
+
 std::vector<double> materialize_raw_pair_kernel(
     const std::vector<double>& packed,
     const Eigen::MatrixXd& upper) {
@@ -51,6 +63,47 @@ std::vector<double> materialize_raw_pair_kernel(
     throw std::invalid_argument("raw pair-kernel tensor size is inconsistent");
   }
   return pack_kernel(transform_pair_kernel(unpack_kernel(packed, pairs), upper));
+}
+
+std::vector<double> materialize_framed_pair_kernel_adjoint(
+    const std::vector<double>& raw_packed_gradient,
+    const Eigen::MatrixXd& upper) {
+  if (upper.size() == 0) {
+    return raw_packed_gradient;
+  }
+  const Eigen::Index n = upper.rows();
+  if (n <= 0 || upper.cols() != n) {
+    throw std::invalid_argument("pair-kernel adjoint frame must be square");
+  }
+  const Eigen::Index pairs = n * (n + 1) / 2;
+  const std::size_t packed_size =
+      static_cast<std::size_t>(pairs * (pairs + 1) / 2);
+  if (raw_packed_gradient.size() != packed_size) {
+    throw std::invalid_argument(
+        "raw packed pair-kernel gradient size is inconsistent");
+  }
+
+  Eigen::MatrixXd raw_gradient = Eigen::MatrixXd::Zero(pairs, pairs);
+  for (Eigen::Index column = 0; column < pairs; ++column) {
+    for (Eigen::Index row = 0; row <= column; ++row) {
+      const double value = raw_packed_gradient[
+          xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)];
+      raw_gradient(row, column) = row == column ? value : 0.5 * value;
+      raw_gradient(column, row) = raw_gradient(row, column);
+    }
+  }
+  const Eigen::MatrixXd framed_gradient =
+      pullback_pair_kernel(raw_gradient, upper);
+  std::vector<double> result(packed_size);
+  for (Eigen::Index column = 0; column < pairs; ++column) {
+    for (Eigen::Index row = 0; row <= column; ++row) {
+      result[xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)] =
+          row == column
+              ? framed_gradient(row, column)
+              : framed_gradient(row, column) + framed_gradient(column, row);
+    }
+  }
+  return result;
 }
 
 ActiveSpaceTwoElectronResult materialize_raw_active_integrals(

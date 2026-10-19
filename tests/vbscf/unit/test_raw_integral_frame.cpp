@@ -81,11 +81,21 @@ void check_raw_consumers(
   prepared.orbital_result.active_orbital_overlap_matrix =
       std::vector<double>(overlap.data(), overlap.data() + overlap.size());
   const Eigen::MatrixXd one = fixture(n, n, 0.91);
+  const Eigen::MatrixXd raw_one = (one + one.transpose()).eval();
+  const Eigen::MatrixXd inverse = framed.orbital_transform
+      .triangularView<Eigen::Upper>().solve(Eigen::MatrixXd::Identity(n, n));
   prepared.active_space_one_electron_result.h1e_act =
-      (one + one.transpose()).eval();
+      inverse.transpose() * raw_one * inverse;
   prepared.active_space_two_electron_result = framed;
   xmvb::vb::PreparedActiveSpaceContext raw_prepared = prepared;
+  raw_prepared.active_space_one_electron_result.h1e_act = raw_one;
   raw_prepared.active_space_two_electron_result = raw;
+  const Eigen::MatrixXd reconstructed_raw_one =
+      xmvb::integrals::materialize_raw_one_electron(
+          prepared.active_space_one_electron_result.h1e_act,
+          framed.orbital_transform);
+  require_close(reconstructed_raw_one, raw_one,
+                "framed one-electron input did not recover the raw matrix");
 
   const xmvb::vb::StructureMatrixEvaluator evaluator;
   const auto framed_matrices = evaluator.evaluate(input, prepared);
@@ -117,31 +127,37 @@ void check_raw_consumers(
   const auto topology = xmvb::vb::build_same_spin_pair_topology(
       input.structure_data.alpha_det, input.structure_data.beta_det, n);
   const xmvb::vb::FullDeterminantStructureHamiltonianOverlapBuilder builder;
-  const auto diagonal = [&](const xmvb::integrals::ActiveSpaceTwoElectronResult& integrals) {
+  const auto diagonal = [&](
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& integrals,
+      const Eigen::MatrixXd& one_electron) {
     return builder.build_diagonal(input.structure_data.alpha_det,
         input.structure_data.beta_det,
         input.structure_data.determinant_to_structure_terms,
         prepared.orbital_result.active_orbital_overlap_matrix,
-        prepared.active_space_one_electron_result.h1e_act,
+        one_electron,
         n, integrals, 1, topology);
   };
-  const auto framed_diagonal = diagonal(framed);
-  const auto raw_diagonal = diagonal(raw);
+  const auto framed_diagonal = diagonal(
+      framed, prepared.active_space_one_electron_result.h1e_act);
+  const auto raw_diagonal = diagonal(raw, raw_one);
   require_close(framed_diagonal.hamiltonian, raw_diagonal.hamiltonian,
                 "raw structure diagonal adapter changed the Hamiltonian");
   require_close(framed_diagonal.overlap, raw_diagonal.overlap,
                 "raw structure diagonal adapter changed the overlap");
-  const auto jacobi = [&](const xmvb::integrals::ActiveSpaceTwoElectronResult& integrals) {
+  const auto jacobi = [&](
+      const xmvb::integrals::ActiveSpaceTwoElectronResult& integrals,
+      const Eigen::MatrixXd& one_electron) {
     return builder.build_davidson_jacobi_preconditioner(
         input.structure_data.alpha_det,
         input.structure_data.beta_det,
         input.structure_data.determinant_to_structure_terms,
         prepared.orbital_result.active_orbital_overlap_matrix,
-        prepared.active_space_one_electron_result.h1e_act,
+        one_electron,
         n, integrals, 1, topology);
   };
-  const auto framed_jacobi = jacobi(framed);
-  const auto raw_jacobi = jacobi(raw);
+  const auto framed_jacobi = jacobi(
+      framed, prepared.active_space_one_electron_result.h1e_act);
+  const auto raw_jacobi = jacobi(raw, raw_one);
   require(std::abs(framed_jacobi.hamiltonian[0] - raw_jacobi.hamiltonian[0]) < 3e-11 &&
               std::abs(framed_jacobi.overlap[0] - raw_jacobi.overlap[0]) < 3e-11,
           "raw Davidson Jacobi adapter changed the determinant-diagonal model");

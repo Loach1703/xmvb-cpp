@@ -36,10 +36,9 @@ struct ActiveSpaceIntegralDirectionContext {
    * and therefore do not carry an exact AO-pair cache.
    */
   const xmvb::integrals::ExactPackedActiveTwoElectronAdjointCache* exact_two_electron_cache = nullptr;
-  const Eigen::MatrixXd& active_auxiliary_orbitals;
   const Eigen::MatrixXd& overlap_times_active_auxiliary_orbitals;
-  const Eigen::MatrixXd& effective_h1e_times_active_auxiliary_orbitals;
-  const Eigen::MatrixXd& effective_h1e_transpose_times_active_auxiliary_orbitals;
+  /** Accepted F Cbar; the physical AO builder produces symmetric F. */
+  const Eigen::MatrixXd& effective_h1e_image;
   const Eigen::MatrixXd& dense_active_coefficients;
 };
 
@@ -49,6 +48,7 @@ struct ActiveSpaceIntegralDirectionContext {
 struct ActiveSpaceIntegralTangent {
   const Eigen::MatrixXd& active_auxiliary_orbitals;
   const Eigen::MatrixXd& dense_active_coefficients;
+  /** AO response projection delta F Cbar, in the accepted integral frame. */
   const Eigen::MatrixXd& delta_effective_h1e_times_active_auxiliary_orbitals;
   const Eigen::VectorXd* precomputed_packed_two_electron = nullptr;
   /** Skip the packed 2e tangent when all consumers operate on RI factors. */

@@ -97,8 +97,8 @@ OrthogonalActiveIntegrals orthogonalize_active_integrals(
       n_active_orbitals,
       n_active_orbitals);
   OrthogonalActiveIntegrals result;
-  result.two_electron_pretransformed = two_electron.orbital_transform.size() != 0;
-  if (result.two_electron_pretransformed) {
+  result.input_pretransformed = two_electron.orbital_transform.size() != 0;
+  if (result.input_pretransformed) {
     if (two_electron.orbital_transform.rows() != n_active_orbitals ||
         two_electron.orbital_transform.cols() != n_active_orbitals ||
         !two_electron.orbital_transform.allFinite()) {
@@ -119,19 +119,20 @@ OrthogonalActiveIntegrals orthogonalize_active_integrals(
           .solve(Eigen::MatrixXd::Identity(
               n_active_orbitals,
               n_active_orbitals));
-  result.one_electron =
-      inverse_transform.transpose() * one_electron * inverse_transform;
+  result.one_electron = result.input_pretransformed
+      ? Eigen::MatrixXd(one_electron)
+      : Eigen::MatrixXd(inverse_transform.transpose() * one_electron * inverse_transform);
 
   if (two_electron.representation ==
       xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
-    result.ri_pair_factors = result.two_electron_pretransformed
+    result.ri_pair_factors = result.input_pretransformed
         ? two_electron.ri_active_pair_factors
         : xmvb::integrals::transform_ri_pair_factors(
               two_electron.ri_active_pair_factors, inverse_transform);
   }
   Eigen::MatrixXd original_kernel=unpack_two_electron_kernel(
       two_electron.packed_active_two_electron_integrals,n_active_orbitals);
-  result.pair_kernel = result.two_electron_pretransformed
+  result.pair_kernel = result.input_pretransformed
       ? std::move(original_kernel)
       : xmvb::integrals::transform_pair_kernel(original_kernel,inverse_transform);
   return result;
@@ -187,16 +188,18 @@ OrthogonalActiveIntegrals orthogonalize_active_integral_direction(
   OrthogonalActiveIntegrals result;
   result.orbital_transform =
       relative_transform * accepted.orbital_transform;
-  result.two_electron_pretransformed = accepted.two_electron_pretransformed;
-  result.one_electron =
-      inverse_transform.transpose() * one_electron_direction *
-          inverse_transform -
-      relative_transform.transpose() * accepted.one_electron -
+  result.input_pretransformed = accepted.input_pretransformed;
+  result.one_electron = accepted.input_pretransformed
+      ? Eigen::MatrixXd(one_electron_direction)
+      : Eigen::MatrixXd(inverse_transform.transpose() * one_electron_direction *
+                        inverse_transform);
+  result.one_electron.noalias() -=
+      relative_transform.transpose() * accepted.one_electron +
       accepted.one_electron * relative_transform;
 
   if (ri_factor_direction) {
     Eigen::MatrixXd delta_factors;
-    if (accepted.two_electron_pretransformed) {
+    if (accepted.input_pretransformed) {
       if (ri_factor_direction->rows() != accepted.ri_pair_factors.rows() ||
           ri_factor_direction->cols() != accepted.ri_pair_factors.cols()) {
         throw std::invalid_argument("pretransformed RI factor direction has incompatible dimensions");
@@ -216,7 +219,7 @@ OrthogonalActiveIntegrals orthogonalize_active_integral_direction(
   } else {
     const Eigen::MatrixXd delta_original_kernel =
         unpack_two_electron_kernel(packed_two_electron_direction, n_active_orbitals);
-    result.pair_kernel = accepted.two_electron_pretransformed
+    result.pair_kernel = accepted.input_pretransformed
         ? delta_original_kernel
         : xmvb::integrals::transform_pair_kernel(
               delta_original_kernel, inverse_transform);
@@ -264,7 +267,7 @@ backpropagate_orthogonal_active_integral_adjoint(
       inverse_transform.transpose();
   result.one_electron =
       (0.5 * (result.one_electron + result.one_electron.transpose())).eval();
-  result.pair_kernel = accepted.two_electron_pretransformed
+  result.pair_kernel = accepted.input_pretransformed
       ? Eigen::MatrixXd(orthogonal_pair_kernel_gradient)
       : xmvb::integrals::pullback_pair_kernel(
             orthogonal_pair_kernel_gradient, inverse_transform);
@@ -347,7 +350,7 @@ backpropagate_orthogonal_active_integral_adjoint_direction(
           inverse_transform_direction.transpose();
   result.one_electron =
       (0.5 * (result.one_electron + result.one_electron.transpose())).eval();
-  if (accepted.two_electron_pretransformed) {
+  if (accepted.input_pretransformed) {
     result.pair_kernel = orthogonal_pair_kernel_gradient_direction +
         xmvb::integrals::pullback_pair_generator(
             orthogonal_pair_kernel_gradient, -relative_direction);

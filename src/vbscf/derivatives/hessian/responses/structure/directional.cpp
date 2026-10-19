@@ -1,6 +1,7 @@
 #include "vbscf/derivatives/hessian/responses/structure/directional.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -11,6 +12,7 @@
 #include "vbscf/core/contracts/input.hpp"
 #include "mcscf/optimization/trace.hpp"
 #include "integrals/active/two_electron.hpp"
+#include "integrals/active/raw.hpp"
 #include "vbscf/structures/assembly/selected_coefficients.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_tile_stream_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
@@ -236,6 +238,19 @@ build_selected_structure_direction_from_pair_tiles(
       prepared.active_space_one_electron_result.h1e_act;
   const auto& accepted_two_electron =
       prepared.active_space_two_electron_result;
+  const Eigen::MatrixXd raw_accepted_h1e =
+      xmvb::integrals::materialize_raw_one_electron(
+          accepted_h1e, accepted_two_electron.orbital_transform);
+  std::optional<xmvb::integrals::ActiveSpaceTwoElectronResult>
+      raw_accepted_two_electron_storage;
+  const xmvb::integrals::ActiveSpaceTwoElectronResult*
+      raw_accepted_two_electron = &accepted_two_electron;
+  if (accepted_two_electron.orbital_transform.size() != 0) {
+    raw_accepted_two_electron_storage.emplace(
+        xmvb::integrals::materialize_raw_active_integrals(
+            accepted_two_electron));
+    raw_accepted_two_electron = &*raw_accepted_two_electron_storage;
+  }
   const detail::PairTileExtents tile_extents =
       detail::plan_local_response_tiles(
           same_spin,
@@ -293,8 +308,8 @@ build_selected_structure_direction_from_pair_tiles(
                       beta_right,
                       beta_right_end,
                       accepted_overlap,
-                      accepted_h1e,
-                      accepted_two_electron,
+                      raw_accepted_h1e,
+                      *raw_accepted_two_electron,
                       AcceptedPairTileBuildOptions{
                           .materialize_projected_pair_values = false,
                           .populate_response_payload = false});
@@ -373,8 +388,8 @@ build_selected_structure_direction_from_pair_tiles(
                       alpha_right,
                       alpha_right_end,
                       accepted_overlap,
-                      accepted_h1e,
-                      accepted_two_electron,
+                      raw_accepted_h1e,
+                      *raw_accepted_two_electron,
                       AcceptedPairTileBuildOptions{
                           .materialize_projected_pair_values = false,
                           .populate_response_payload = false});

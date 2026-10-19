@@ -42,7 +42,7 @@ double compute_one_electron_reference_energy(
 
 TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
     const VbScfInput& input,
-    const Eigen::MatrixXd* fixed_two_electron_frame) {
+    const Eigen::MatrixXd* fixed_integral_frame) {
   TimedPreparedActiveSpaceContext timed_context;
   auto& context = timed_context.prepared_active_space;
   const bool use_ri_active_space =
@@ -85,62 +85,63 @@ TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
       std::chrono::duration<double>(std::chrono::steady_clock::now() - stage_start_time).count();
 
   stage_start_time = std::chrono::steady_clock::now();
-  context.active_space_one_electron_result =
-      integrals::ActiveSpaceOneElectronBuilder{}.build(
-          context.ao_effective_one_electron_result.ao_effective_h1e,
-          context.orbital_result.auxiliary_orbital_matrix,
-          input.ao_integral_input.n_basis_functions,
-          context.n_inactive_doubly_occupied_orbitals,
-          input.orbital_preparation_input.n_active_orbitals);
-  timed_context.timings.active_one_electron_wall_time_seconds =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - stage_start_time).count();
-
-  stage_start_time = std::chrono::steady_clock::now();
   const int n_active_orbitals = input.orbital_preparation_input.n_active_orbitals;
   const int n_basis_functions = input.orbital_preparation_input.n_basis_functions;
-  Eigen::MatrixXd two_electron_frame;
-  if (fixed_two_electron_frame != nullptr) {
-    two_electron_frame = *fixed_two_electron_frame;
+  Eigen::MatrixXd integral_frame;
+  if (fixed_integral_frame != nullptr) {
+    integral_frame = *fixed_integral_frame;
   } else {
     const auto& overlap_storage =
         context.orbital_result.active_orbital_overlap_matrix;
     if (n_active_orbitals <= 0 ||
         overlap_storage.size() !=
             static_cast<std::size_t>(n_active_orbitals) * n_active_orbitals) {
-      throw std::invalid_argument("active two-electron frame overlap size mismatch");
+      throw std::invalid_argument("active integral frame overlap size mismatch");
     }
     const Eigen::Map<const Eigen::MatrixXd> active_overlap(
         overlap_storage.data(), n_active_orbitals, n_active_orbitals);
     Eigen::LLT<Eigen::MatrixXd> cholesky(active_overlap);
     if (cholesky.info() != Eigen::Success) {
-      throw std::runtime_error("active two-electron frame overlap is not positive definite");
+      throw std::runtime_error("active integral frame overlap is not positive definite");
     }
-    two_electron_frame = cholesky.matrixU();
+    integral_frame = cholesky.matrixU();
   }
 
   const auto raw_active_coefficients =
       context.orbital_result.auxiliary_orbital_matrix.middleCols(
           context.n_inactive_doubly_occupied_orbitals, n_active_orbitals);
   Eigen::MatrixXd framed_active_coefficients;
-  if (two_electron_frame.size() != 0) {
-    if (two_electron_frame.rows() != n_active_orbitals ||
-        two_electron_frame.cols() != n_active_orbitals ||
-        !two_electron_frame.allFinite()) {
-      throw std::invalid_argument("fixed active two-electron frame is invalid");
+  if (integral_frame.size() != 0) {
+    if (integral_frame.rows() != n_active_orbitals ||
+        integral_frame.cols() != n_active_orbitals ||
+        !integral_frame.allFinite()) {
+      throw std::invalid_argument("fixed active integral frame is invalid");
     }
-    const Eigen::MatrixXd inverse_frame = two_electron_frame
+    const Eigen::MatrixXd inverse_frame = integral_frame
         .triangularView<Eigen::Upper>().solve(
             Eigen::MatrixXd::Identity(n_active_orbitals, n_active_orbitals));
     framed_active_coefficients = raw_active_coefficients * inverse_frame;
   }
+  // Keep the shared frame preparation in the existing 2e timing bucket.
+  const double frame_wall_time = std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - stage_start_time).count();
+  const auto one_electron_start = std::chrono::steady_clock::now();
+  context.active_space_one_electron_result =
+      integrals::ActiveSpaceOneElectronBuilder{}.build(
+          context.ao_effective_one_electron_result.ao_effective_h1e,
+          integral_frame.size() ? framed_active_coefficients
+                                : Eigen::MatrixXd(raw_active_coefficients));
+  timed_context.timings.active_one_electron_wall_time_seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - one_electron_start).count();
+  stage_start_time = std::chrono::steady_clock::now();
   if (use_ri_active_space) {
-    context.active_space_two_electron_result = two_electron_frame.size() != 0
+    context.active_space_two_electron_result = integral_frame.size() != 0
         ? integrals::transform_ri_active_integrals(
               *ao_ri_result, framed_active_coefficients)
         : integrals::transform_ri_active_integrals(
               *ao_ri_result, raw_active_coefficients);
   } else {
-    if (two_electron_frame.size() != 0) {
+    if (integral_frame.size() != 0) {
       std::vector<int> row_offsets(n_basis_functions + 1, 0);
       std::vector<int> orbital_indices;
       std::vector<double> values;
@@ -169,9 +170,10 @@ TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
     }
   }
   context.active_space_two_electron_result.orbital_transform =
-      std::move(two_electron_frame);
+      std::move(integral_frame);
   timed_context.timings.active_two_electron_wall_time_seconds =
-      std::chrono::duration<double>(std::chrono::steady_clock::now() - stage_start_time).count();
+      frame_wall_time + std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - stage_start_time).count();
   context.one_electron_reference_energy =
       compute_one_electron_reference_energy(
           context.orbital_result.inactive_density_matrix,

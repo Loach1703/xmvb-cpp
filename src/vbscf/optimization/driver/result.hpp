@@ -172,7 +172,7 @@ struct VbScfAcceptedIterationSnapshot {
   std::vector<double> active_orbital_overlap_matrix;
 
   /**
-   * @brief Column-major active-space effective one-electron matrix `HHO`.
+   * @brief Raw active h, matching the raw orbital and overlap snapshot.
    */
   Eigen::MatrixXd active_one_electron_integrals;
 

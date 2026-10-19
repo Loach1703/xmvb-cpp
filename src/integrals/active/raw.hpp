@@ -6,6 +6,11 @@
 
 namespace xmvb::integrals {
 
+/** @brief Recover raw active h as R^T hbar R, without AO contractions. */
+Eigen::MatrixXd materialize_raw_one_electron(
+    const Eigen::Ref<const Eigen::MatrixXd>& one_electron,
+    const Eigen::MatrixXd& upper);
+
 /**
  * @brief Transform one packed pair-of-pairs tensor to the raw orbital frame.
  *
@@ -15,6 +20,17 @@ namespace xmvb::integrals {
  */
 std::vector<double> materialize_raw_pair_kernel(
     const std::vector<double>& packed,
+    const Eigen::MatrixXd& upper);
+
+/**
+ * @brief Express a raw packed-kernel cotangent in the fixed accepted frame.
+ *
+ * This is the adjoint of `materialize_raw_pair_kernel`: raw input entries
+ * represent a symmetric packed kernel, and the returned cotangent is packed
+ * in the frame described by `upper`. Empty `upper` returns a copy.
+ */
+std::vector<double> materialize_framed_pair_kernel_adjoint(
+    const std::vector<double>& raw_packed_gradient,
     const Eigen::MatrixXd& upper);
 
 /**

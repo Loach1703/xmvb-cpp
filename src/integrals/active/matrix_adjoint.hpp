@@ -5,8 +5,27 @@
 #include <vector>
 
 #include "integrals/active/matrix_result.hpp"
+#include "integrals/active/one_electron_result.hpp"
 
 namespace xmvb::integrals {
+
+/**
+ * @brief Pull back raw active-matrix cotangents using the shared F Cbar image.
+ *
+ * F and the AO overlap are symmetric. The overlap cotangent remains in raw C
+ * coordinates; h and its accepted AO image share the fixed integral frame R.
+ * No F C or F^T C is regenerated. RI consumers can omit the unused dense AO
+ * adjoint; exact consumers receive C W^T C^T for their AO integral pullback.
+ */
+ActiveSpaceMatrixBackpropagationResult pullback_active_matrices(
+    const std::vector<double>& overlap_gradient,
+    const std::vector<double>& one_electron_gradient,
+    const Eigen::Ref<const Eigen::MatrixXd>& ao_overlap,
+    const Eigen::Ref<const Eigen::MatrixXd>& raw_active_coefficients,
+    const Eigen::Ref<const Eigen::MatrixXd>& integral_coefficients,
+    const ActiveSpaceOneElectronResult& one_electron,
+    const Eigen::MatrixXd& frame,
+    bool ao_adjoint_required);
 
 /**
  * @brief Reverse-mode backpropagator for `SSO = T^T S T` and `HHO = T^T F11 T`.

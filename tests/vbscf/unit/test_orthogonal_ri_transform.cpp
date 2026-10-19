@@ -77,7 +77,8 @@ void check(int n) {
   close(accepted.pair_kernel,exact.pair_kernel);
   const Matrix overlap=c.transpose()*c;
   Eigen::LLT<Matrix> chol(overlap);
-  const Matrix q=chol.matrixU().solve(Matrix::Identity(n,n));
+  const Matrix r=chol.matrixU();
+  const Matrix q=r.triangularView<Eigen::Upper>().solve(Matrix::Identity(n,n));
   const Matrix independent=factors(c*q);
   close(accepted.ri_pair_factors,independent);
   close(accepted.pair_kernel,independent.transpose()*independent);
@@ -91,6 +92,11 @@ void check(int n) {
   }
   const Matrix ds=dc.transpose()*c+c.transpose()*dc;
   const Matrix dh=dc.transpose()*h*c+c.transpose()*h*dc;
+  const Matrix orthogonal=c*q, physical_direction=dc*q;
+  const Matrix framed_h=orthogonal.transpose()*h*orthogonal;
+  const Matrix framed_dh=physical_direction.transpose()*h*orthogonal+
+      orthogonal.transpose()*h*physical_direction;
+  close(framed_dh,q.transpose()*dh*q);
   const Matrix dv=db.transpose()*b+b.transpose()*db;
   const auto direction=xmvb::vb::orthogonalize_active_integral_direction(
       accepted,values(ds),dh,{},n,&db);
@@ -99,11 +105,19 @@ void check(int n) {
   close(direction.pair_kernel,reference.pair_kernel);
   close(direction.one_electron,reference.one_electron);
 
-  // In the fused physical path only the active 2e frame is pretransformed.
-  // CI may consume its three-active image while the fixed jet still uses dB.
-  auto fused=accepted;
-  fused.two_electron_pretransformed=true;
-  const Matrix orthogonal=c*q, physical_direction=dc*q;
+  // The fused input carries both h1 and the RI factors in the accepted frame.
+  xmvb::integrals::ActiveSpaceTwoElectronResult fused_two;
+  fused_two.representation=
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
+  fused_two.n_auxiliary_functions=n_aux;
+  fused_two.ri_active_pair_factors=independent;
+  fused_two.packed_active_two_electron_integrals=pack(
+      independent.transpose()*independent);
+  fused_two.orbital_transform=r;
+  const auto fused=xmvb::vb::orthogonalize_active_integrals(
+      values(overlap),framed_h,fused_two,n);
+  close(fused.one_electron,accepted.one_electron);
+  close(fused.pair_kernel,accepted.pair_kernel);
   Matrix physical_db(n_aux,pairs);
   xmvb::integrals::OrbitalPairMatrix products(n_bf*n,pairs);
   products.setZero();
@@ -126,11 +140,11 @@ void check(int n) {
   const auto packed_values=pack(physical_kernel);
   close(packed_direction,Eigen::Map<const Eigen::VectorXd>(packed_values.data(),packed_values.size()));
   const auto factor_image=xmvb::vb::orthogonalize_active_integral_direction(
-      fused,values(ds),dh,{},n,&physical_db);
+      fused,values(ds),framed_dh,{},n,&physical_db);
   const auto image_values=std::vector<double>(packed_direction.data(),
       packed_direction.data()+packed_direction.size());
   const auto pair_image=xmvb::vb::orthogonalize_active_integral_direction(
-      fused,values(ds),dh,image_values,n);
+      fused,values(ds),framed_dh,image_values,n);
   close(pair_image.pair_kernel,factor_image.pair_kernel);
   close(pair_image.pair_kernel,direction.pair_kernel);
   close(pair_image.one_electron,direction.one_electron);

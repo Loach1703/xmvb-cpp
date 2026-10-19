@@ -162,11 +162,10 @@ private:
   const OrbitalChart* nonredundant_space_ = nullptr;
   Eigen::MatrixXd accepted_active_auxiliary_orbitals_;
   Eigen::MatrixXd accepted_basis_overlap_times_active_auxiliary_orbitals_;
-  Eigen::MatrixXd accepted_ao_effective_one_electron_times_active_auxiliary_orbitals_;
-  Eigen::MatrixXd
-      accepted_ao_effective_one_electron_transpose_times_active_auxiliary_orbitals_;
   Eigen::MatrixXd accepted_sso_gradient_symmetric_;
   Eigen::MatrixXd accepted_hho_gradient_symmetric_;
+  /** R (W + W^T), acting directly on delta F Cbar projections. */
+  Eigen::MatrixXd accepted_hho_projection_weight_;
   mutable Eigen::MatrixXd ao_h1e_symmetrized_gradient_workspace_;
   mutable xmvb::integrals::AoH1eBatchWorkspace ao_h1e_batch_workspace_;
   mutable integrals::RiAoResponseWorkspace ri_ao_response_workspace_;

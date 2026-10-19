@@ -109,8 +109,6 @@ ExactHvpOperator::State::ri_ao_responses(
       ri_ao_response_workspace_,workspace::limit(),
       {accepted_ri_inactive_one_index_factors_.get(),moving},
       fixed_two_electron ? &jet : nullptr);
-  if (frame.size())
-    for (auto& value : response) value.active=(value.active*frame).eval();
   return response;
 }
 
@@ -128,10 +126,8 @@ ExactHvpOperator::State::build_active_integral_direction(
       accepted_ri_two_electron_cache_.has_value()
           ? nullptr
           : &accepted_exact_two_electron_cache_,
-      accepted_active_auxiliary_orbitals_,
       accepted_basis_overlap_times_active_auxiliary_orbitals_,
-      accepted_ao_effective_one_electron_times_active_auxiliary_orbitals_,
-      accepted_ao_effective_one_electron_transpose_times_active_auxiliary_orbitals_,
+      accepted_point_context_->prepared_active_space.active_space_one_electron_result.ao_image,
       accepted_two_electron.dense_active_coefficients};
   return xmvb::vb::build_active_space_integral_direction(
       integral_context,

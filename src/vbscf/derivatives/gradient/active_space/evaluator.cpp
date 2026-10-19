@@ -19,6 +19,7 @@
 #include <Eigen/Eigenvalues>
 
 #include "vbscf/integrals/active/space.hpp"
+#include "integrals/active/raw.hpp"
 #include "vbscf/orbitals/preparation/cholesky.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "core/pair_index.hpp"
@@ -910,6 +911,23 @@ void accumulate_active_space_gradient(
     throw std::runtime_error(
         "active-space gradient requires pair providers or direct-CI action");
   }
+  const auto& prepared_active_space =
+      forward_context.timed_active_space_context.prepared_active_space;
+  const auto& framed_two_electron =
+      prepared_active_space.active_space_two_electron_result;
+  std::optional<xmvb::integrals::ActiveSpaceTwoElectronResult>
+      raw_two_electron_storage;
+  const xmvb::integrals::ActiveSpaceTwoElectronResult* raw_two_electron =
+      &framed_two_electron;
+  if (framed_two_electron.orbital_transform.size() != 0) {
+    raw_two_electron_storage.emplace(
+        xmvb::integrals::materialize_raw_active_integrals(
+            framed_two_electron));
+    raw_two_electron = &*raw_two_electron_storage;
+  }
+  const Eigen::MatrixXd raw_h1e = xmvb::integrals::materialize_raw_one_electron(
+      prepared_active_space.active_space_one_electron_result.h1e_act,
+      framed_two_electron.orbital_transform);
   const SameSpinMatrixBackwardContribution same_spin_contribution =
       build_same_spin_matrix_backward_contribution(
           same_spin_pair_cache,
@@ -918,10 +936,8 @@ void accumulate_active_space_gradient(
           n_active_orbitals,
           forward_context.timed_active_space_context.prepared_active_space
               .orbital_result.active_orbital_overlap_matrix,
-          forward_context.timed_active_space_context.prepared_active_space
-              .active_space_one_electron_result.h1e_act,
-          forward_context.timed_active_space_context.prepared_active_space
-              .active_space_two_electron_result);
+          raw_h1e,
+          *raw_two_electron);
   const OppositeSpinBackwardContribution opposite_spin_contribution =
       build_opposite_spin_backward_contribution(
           same_spin_pair_cache,
@@ -929,10 +945,8 @@ void accumulate_active_space_gradient(
           n_active_orbitals,
           forward_context.timed_active_space_context.prepared_active_space
               .orbital_result.active_orbital_overlap_matrix,
-          forward_context.timed_active_space_context.prepared_active_space
-              .active_space_one_electron_result.h1e_act,
-          forward_context.timed_active_space_context.prepared_active_space
-              .active_space_two_electron_result);
+          raw_h1e,
+          *raw_two_electron);
   accumulate_additive_vector(
       same_spin_contribution.active_orbital_overlap_gradient,
       &result->active_orbital_overlap_gradient);
@@ -940,13 +954,18 @@ void accumulate_active_space_gradient(
       same_spin_contribution.active_one_electron_gradient,
       &result->active_one_electron_gradient);
   accumulate_additive_vector(
-      same_spin_contribution.packed_active_two_electron_gradient,
-      &result->packed_active_two_electron_gradient);
-  accumulate_additive_vector(
       opposite_spin_contribution.active_orbital_overlap_gradient,
       &result->active_orbital_overlap_gradient);
+  std::vector<double> raw_pair_gradient =
+      same_spin_contribution.packed_active_two_electron_gradient;
   accumulate_additive_vector(
       opposite_spin_contribution.packed_active_two_electron_gradient,
+      &raw_pair_gradient);
+  const std::vector<double> framed_pair_gradient =
+      xmvb::integrals::materialize_framed_pair_kernel_adjoint(
+          raw_pair_gradient, framed_two_electron.orbital_transform);
+  accumulate_additive_vector(
+      framed_pair_gradient,
       &result->packed_active_two_electron_gradient);
 
   result->adjoint_wall_time_seconds =
