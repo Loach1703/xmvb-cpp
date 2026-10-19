@@ -122,37 +122,18 @@ OrthogonalActiveIntegrals orthogonalize_active_integrals(
   result.one_electron =
       inverse_transform.transpose() * one_electron * inverse_transform;
 
-  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
   if (two_electron.representation ==
       xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
     result.ri_pair_factors = result.two_electron_pretransformed
         ? two_electron.ri_active_pair_factors
         : xmvb::integrals::transform_ri_pair_factors(
               two_electron.ri_active_pair_factors, inverse_transform);
-    const auto& factors = result.ri_pair_factors;
-    if (result.two_electron_pretransformed &&
-        !two_electron.packed_active_two_electron_integrals.empty()) {
-      result.pair_kernel = unpack_two_electron_kernel(
-          two_electron.packed_active_two_electron_integrals, n_active_orbitals);
-    } else {
-      result.pair_kernel.noalias() = factors.transpose() * factors;
-    }
-  } else {
-    Eigen::MatrixXd original_kernel(n_pairs, n_pairs);
-    const xmvb::integrals::ActiveSpaceTwoElectronView view =
-        xmvb::integrals::make_active_space_two_electron_view(two_electron);
-    for (int column = 0; column < n_pairs; ++column) {
-      for (int row = 0; row < n_pairs; ++row) {
-        original_kernel(row, column) =
-            xmvb::integrals::lookup_active_space_two_electron_kernel_value(
-                view, row, column, n_active_orbitals);
-      }
-    }
-    result.pair_kernel = result.two_electron_pretransformed
-        ? std::move(original_kernel)
-        : xmvb::integrals::transform_pair_kernel(
-              original_kernel, inverse_transform);
   }
+  Eigen::MatrixXd original_kernel=unpack_two_electron_kernel(
+      two_electron.packed_active_two_electron_integrals,n_active_orbitals);
+  result.pair_kernel = result.two_electron_pretransformed
+      ? std::move(original_kernel)
+      : xmvb::integrals::transform_pair_kernel(original_kernel,inverse_transform);
   return result;
 }
 

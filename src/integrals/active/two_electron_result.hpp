@@ -17,12 +17,10 @@ enum class ActiveSpaceTwoElectronRepresentation {
  */
 struct ActiveSpaceTwoElectronResult {
   /**
-   * @brief Active-space two-electron representation carried by this result.
-   *
-   * `PackedExact` stores the materialized `GGO` tensor. The production
-   * RI path now carries `ResolutionOfIdentity` directly so downstream
-   * determinant kernels can consume `L_{A,P}` without reconstructing packed
-   * active ERIs first.
+   * @brief Integral origin selecting the AO derivative backend.
+   * Both values carry a packed four-index active kernel. ResolutionOfIdentity
+   * additionally retains factors for AO transformations and derivative pullbacks,
+   * not for repeated active-space Hamiltonian contractions.
    */
   ActiveSpaceTwoElectronRepresentation representation =
       ActiveSpaceTwoElectronRepresentation::PackedExact;
@@ -36,11 +34,8 @@ struct ActiveSpaceTwoElectronResult {
   /**
    * @brief Packed active-space two-electron integrals `GGO`.
    *
-   * The exact path always populates this buffer. The RI path fills it as a
-   * cache-friendly lookup tile only when the complete tile and its construction
-   * workspace are memory-dominated by the resident RI factor matrix. The
-   * representation remains `ResolutionOfIdentity`, so reverse-mode continues
-   * to backpropagate through the RI factors.
+   * Always populated by forward preparation, for both exact and RI AO integrals.
+   * The origin tag remains ResolutionOfIdentity for RI derivative pullbacks.
    */
   std::vector<double> packed_active_two_electron_integrals;
 

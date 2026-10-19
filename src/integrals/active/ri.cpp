@@ -9,39 +9,27 @@
 #include "parallel/openmp.hpp"
 
 namespace xmvb::integrals {
-namespace {
 
-std::vector<double> build_memory_dominated_pair_kernel(
+std::vector<double> pack_ri_active_integrals(
     const Eigen::Ref<const Eigen::MatrixXd>& active_pair_factors) {
-  const std::size_t n_pairs =
-      static_cast<std::size_t>(active_pair_factors.cols());
-  const std::size_t factor_elements =
-      static_cast<std::size_t>(active_pair_factors.size());
-  const std::size_t gram_elements = n_pairs * n_pairs;
-  const std::size_t packed_elements = n_pairs * (n_pairs + 1) / 2;
-
-  // A materialized pair kernel is useful only when its construction workspace
-  // plus persistent packed result does not exceed one additional copy of the
-  // already resident RI factor matrix. This dimension-only rule gives small
-  // and medium active spaces one cache-friendly GEMM while preventing an
-  // unconditional O(n_active^4) allocation for large active spaces.
-  if (gram_elements + packed_elements > factor_elements) {
-    return {};
-  }
-
-  const Eigen::MatrixXd gram =
-      active_pair_factors.transpose() * active_pair_factors;
-  std::vector<double> packed(packed_elements, 0.0);
-  for (int column = 0; column < active_pair_factors.cols(); ++column) {
-    for (int row = 0; row <= column; ++row) {
-      packed[xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)] =
-          gram(row, column);
+  if (active_pair_factors.rows() <= 0 || active_pair_factors.cols() <= 0)
+    throw std::invalid_argument("RI active kernel requires nonempty pair factors");
+  const int pairs = static_cast<int>(active_pair_factors.cols());
+  std::vector<double> packed(static_cast<std::size_t>(pairs)*(pairs+1)/2);
+  constexpr int panel_rows = 64;
+  for (int first=0;first<pairs;first+=panel_rows) {
+    const int count=std::min(panel_rows,pairs-first);
+    const Eigen::MatrixXd panel =
+        active_pair_factors.middleCols(first,count).transpose()*
+        active_pair_factors.leftCols(first+count);
+    for (int row=0;row<count;++row) {
+      const int p=first+row;
+      for (int q=0;q<=p;++q)
+        packed[static_cast<std::size_t>(p)*(p+1)/2+q]=panel(row,q);
     }
   }
   return packed;
 }
-
-}  // namespace
 
 ActiveSpaceTwoElectronResult transform_ri_active_integrals(
     const RiAoFactorization& ao_ri_result,
@@ -96,7 +84,7 @@ ActiveSpaceTwoElectronResult transform_ri_active_integrals(
   }
   result.ri_one_index_factors=std::move(resident);
   result.packed_active_two_electron_integrals =
-      build_memory_dominated_pair_kernel(result.ri_active_pair_factors);
+      pack_ri_active_integrals(result.ri_active_pair_factors);
   result.dense_active_coefficients = dense_active_coefficients;
 
   return result;

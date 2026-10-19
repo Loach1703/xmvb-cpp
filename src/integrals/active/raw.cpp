@@ -67,13 +67,9 @@ ActiveSpaceTwoElectronResult materialize_raw_active_integrals(
   }
   const Eigen::Index pairs = n * (n + 1) / 2;
   const auto& packed = framed.packed_active_two_electron_integrals;
-  if (!packed.empty() && packed.size() !=
+  if (packed.size() !=
           static_cast<std::size_t>(pairs * (pairs + 1) / 2)) {
     throw std::invalid_argument("framed active integral tensor size is inconsistent");
-  }
-  if (framed.representation == ActiveSpaceTwoElectronRepresentation::PackedExact &&
-      packed.empty()) {
-    throw std::invalid_argument("framed exact active integral tensor is missing");
   }
   if (framed.representation == ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity &&
       (framed.n_auxiliary_functions <= 0 ||
@@ -87,10 +83,7 @@ ActiveSpaceTwoElectronResult materialize_raw_active_integrals(
   ActiveSpaceTwoElectronResult raw;
   raw.representation = framed.representation;
   raw.n_auxiliary_functions = framed.n_auxiliary_functions;
-  if (!packed.empty()) {
-    raw.packed_active_two_electron_integrals =
-        materialize_raw_pair_kernel(packed, r);
-  }
+  raw.packed_active_two_electron_integrals = materialize_raw_pair_kernel(packed,r);
   if (framed.representation == ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
     raw.ri_active_pair_factors =
         transform_ri_pair_factors(framed.ri_active_pair_factors, r);

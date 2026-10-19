@@ -20,6 +20,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_response_internal.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/pair_tile_stream_internal.hpp"
 #include "integrals/active/two_electron.hpp"
+#include "integrals/active/ri.hpp"
 #include "core/pair_index.hpp"
 
 namespace {
@@ -60,10 +61,54 @@ void require_vector_close(
   }
 }
 
+void check_packed_kernel_contract() {
+  for (const int n : {1,5,12,14}) {
+    const int pairs=n*(n+1)/2;
+    for (const int auxiliary : {3,pairs+7}) {
+      Eigen::MatrixXd factors(auxiliary,pairs);
+      for (int p=0;p<pairs;++p) for (int a=0;a<auxiliary;++a)
+        factors(a,p)=std::sin(0.13*(a+1)*(p+2));
+      Eigen::MatrixXd reference=Eigen::MatrixXd::Zero(pairs,pairs);
+      for (int p=0;p<pairs;++p) for (int q=0;q<pairs;++q)
+        for (int a=0;a<auxiliary;++a)
+          reference(p,q)+=factors(a,p)*factors(a,q);
+      xmvb::integrals::ActiveSpaceTwoElectronResult integrals;
+      integrals.representation=
+          xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
+      integrals.packed_active_two_electron_integrals=
+          xmvb::integrals::pack_ri_active_integrals(factors);
+      const auto view=xmvb::integrals::make_active_space_two_electron_view(integrals);
+      // No RI factors in this consumer: every route must use the same packed G.
+      Eigen::MatrixXd vectors(pairs,3);
+      for (int j=0;j<3;++j) for (int p=0;p<pairs;++p)
+        vectors(p,j)=std::cos(0.17*(p+1)*(j+3));
+      require_matrix_close(
+          xmvb::integrals::apply_active_space_two_electron_kernel_block(integrals,n,vectors),
+          reference*vectors,2e-13,"RI-origin four-index block");
+      for (int p=0;p<pairs;++p) for (int q=0;q<pairs;++q)
+        require_close(xmvb::integrals::lookup_active_space_two_electron_kernel_value(view,p,q,n),
+            reference(p,q),2e-13,"RI-origin four-index lookup");
+      const std::vector<int> indices{0,pairs-1,0};
+      const std::vector<double> values{0.3,-0.7,0.2};
+      const Eigen::VectorXd expected=0.5*reference.col(0)-0.7*reference.col(pairs-1);
+      const auto sparse=xmvb::integrals::apply_active_space_two_electron_kernel_to_sparse_projection(
+          view,n,indices,values);
+      require_matrix_close(Eigen::Map<const Eigen::VectorXd>(sparse.data(),pairs),expected,
+          2e-13,"RI-origin sparse projection");
+      const std::vector<int> targets{pairs-1,0,pairs-1};
+      const auto subset=xmvb::integrals::apply_active_space_two_electron_kernel_to_sparse_projection_subset(
+          view,n,indices,values,targets);
+      for (int k=0;k<3;++k)
+        require_close(subset[k],expected[targets[k]],2e-13,"RI-origin target projection");
+    }
+  }
+}
+
 }  // namespace
 
 int main() {
   try {
+    check_packed_kernel_contract();
     constexpr int n_active = 5;
     constexpr int n_electrons = 3;
     constexpr int n_auxiliary = 7;
@@ -101,11 +146,18 @@ int main() {
       }
     }
 
-    xmvb::integrals::ActiveSpaceTwoElectronResult packed_ri = direct_ri;
-    packed_ri.packed_active_two_electron_integrals =
-        xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
-            xmvb::integrals::make_active_space_two_electron_view(direct_ri),
-            n_active);
+    direct_ri.packed_active_two_electron_integrals =
+        xmvb::integrals::pack_ri_active_integrals(direct_ri.ri_active_pair_factors);
+    xmvb::integrals::ActiveSpaceTwoElectronResult packed_ri;
+    packed_ri.packed_active_two_electron_integrals.resize(
+        xmvb::integrals::packed_active_two_electron_integral_count(n_active));
+    for (int p=0;p<direct_ri.ri_active_pair_factors.cols();++p)
+      for (int q=0;q<=p;++q) {
+        double value=0;
+        for (int a=0;a<n_auxiliary;++a)
+          value+=direct_ri.ri_active_pair_factors(a,p)*direct_ri.ri_active_pair_factors(a,q);
+        packed_ri.packed_active_two_electron_integrals[p*(p+1)/2+q]=value;
+      }
 
     xmvb::vb::DeterminantHamiltonianResolver hamiltonian_resolver;
     const auto direct_hamiltonian = hamiltonian_resolver.resolve(
@@ -208,6 +260,8 @@ int main() {
       xmvb::integrals::ActiveSpaceTwoElectronResult displaced_ri = direct_ri;
       displaced_ri.ri_active_pair_factors =
           direct_ri.ri_active_pair_factors + scale * delta_factors;
+      displaced_ri.packed_active_two_electron_integrals =
+          xmvb::integrals::pack_ri_active_integrals(displaced_ri.ri_active_pair_factors);
       Eigen::MatrixXd inverse_gradient;
       const auto phi = xmvb::vb::compute_same_spin_original_phi(
           occ_left,

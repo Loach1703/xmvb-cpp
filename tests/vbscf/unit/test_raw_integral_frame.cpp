@@ -228,11 +228,10 @@ void check_size(int n) {
           "raw RI result retained invalid metadata or products");
   if (n == 3) check_raw_consumers(n, ri, raw_ri);
   ri.packed_active_two_electron_integrals.clear();
-  const auto uncached_ri = xmvb::integrals::materialize_raw_active_integrals(ri);
-  require(uncached_ri.packed_active_two_electron_integrals.empty(),
-          "RI conversion materialized an absent tensor cache");
-  require_close(uncached_ri.ri_active_pair_factors, expected_factors,
-                "uncached RI raw factors differ");
+  bool missing_kernel_rejected=false;
+  try { (void)xmvb::integrals::materialize_raw_active_integrals(ri); }
+  catch (const std::invalid_argument&) { missing_kernel_rejected=true; }
+  require(missing_kernel_rejected,"RI raw conversion accepted a missing four-index kernel");
   const auto copied_raw =
       xmvb::integrals::materialize_raw_active_integrals(raw_exact);
   require_close(copied_raw.dense_active_coefficients,

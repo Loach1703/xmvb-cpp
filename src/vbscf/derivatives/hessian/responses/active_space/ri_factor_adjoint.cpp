@@ -9,6 +9,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/backward.hpp"
 #include "core/pair_index.hpp"
 #include "integrals/active/two_electron.hpp"
+#include "integrals/active/ri.hpp"
 
 namespace xmvb::vb {
 
@@ -28,10 +29,8 @@ Eigen::MatrixXd apply_regular_ri_pair_space_adjoint(
   }
 
   xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
-  two_electron.representation =
-      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity;
-  two_electron.n_auxiliary_functions = static_cast<int>(factors.rows());
-  two_electron.ri_active_pair_factors = factors;
+  two_electron.packed_active_two_electron_integrals =
+      xmvb::integrals::pack_ri_active_integrals(factors);
 
   const SameSpinMatrixBackwardContribution same_spin =
       build_same_spin_matrix_backward_contribution(

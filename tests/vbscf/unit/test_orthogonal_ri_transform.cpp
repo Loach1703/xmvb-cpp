@@ -67,7 +67,7 @@ void check(int n) {
     two.representation=ri
         ? xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity
         : xmvb::integrals::ActiveSpaceTwoElectronRepresentation::PackedExact;
-    if (!ri) two.packed_active_two_electron_integrals=pack(
+    two.packed_active_two_electron_integrals=pack(
         two.ri_active_pair_factors.transpose()*two.ri_active_pair_factors);
     return xmvb::vb::orthogonalize_active_integrals(
         values(coefficients.transpose()*coefficients),

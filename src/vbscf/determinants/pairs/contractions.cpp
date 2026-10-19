@@ -292,60 +292,6 @@ SameSpinPhiResult compute_same_spin_original_phi_impl(
   return result;
 }
 
-SameSpinPhiResult compute_ri_same_spin_original_phi(
-    const std::vector<int>& occ_L,
-    const std::vector<int>& occ_R,
-    const Eigen::Ref<const Eigen::MatrixXd>& h1e_act,
-    int n_active_orbitals,
-    const DeterminantOverlapResult& overlap,
-    const Eigen::Ref<const Eigen::MatrixXd>& ri_factors,
-    Eigen::MatrixXd* inverse_overlap_gradient) {
-  if (overlap.nullity != 0 || overlap.overlap_determinant == 0.0) {
-    throw std::invalid_argument("RI phi requires a regular determinant pair");
-  }
-  const int n_electrons = static_cast<int>(occ_L.size());
-  if (static_cast<int>(occ_R.size()) != n_electrons ||
-      ri_factors.cols() != xmvb::integrals::packed_active_pair_count(n_active_orbitals)) {
-    throw std::invalid_argument("invalid RI same-spin phi dimensions");
-  }
-
-  const Eigen::MatrixXd inverse_overlap =
-      build_inverse_overlap_submatrix_from_result(overlap);
-  const Eigen::MatrixXd one_electron =
-      build_spin_one_electron_block_matrix(occ_L, occ_R, h1e_act);
-  SameSpinPhiResult result;
-  result.one_electron_phi =
-      (one_electron.cwiseProduct(inverse_overlap.transpose())).sum();
-  result.total_phi = result.one_electron_phi;
-  if (inverse_overlap_gradient != nullptr) {
-    *inverse_overlap_gradient = one_electron.transpose();
-  }
-
-  Eigen::MatrixXd transition(n_electrons, n_electrons);
-  for (Eigen::Index auxiliary = 0; auxiliary < ri_factors.rows(); ++auxiliary) {
-    for (int left = 0; left < n_electrons; ++left) {
-      for (int right = 0; right < n_electrons; ++right) {
-        transition(right, left) = ri_factors(
-            auxiliary,
-            xmvb::core::PairIndex::packed_pair_index(
-                occ_R[right], occ_L[left]));
-      }
-    }
-    const Eigen::MatrixXd contracted = inverse_overlap * transition;
-    const double trace = contracted.trace();
-    result.total_phi +=
-        0.5 * (trace * trace - (contracted * contracted).trace());
-    if (inverse_overlap_gradient != nullptr) {
-      const Eigen::MatrixXd contraction_adjoint =
-          trace * Eigen::MatrixXd::Identity(n_electrons, n_electrons) -
-          contracted;
-      inverse_overlap_gradient->noalias() +=
-          contraction_adjoint.transpose() * transition.transpose();
-    }
-  }
-  return result;
-}
-
 Eigen::MatrixXd gather_ri_transition(
     const std::vector<int>& occ_L,
     const std::vector<int>& occ_R,
@@ -1293,18 +1239,6 @@ SameSpinPhiResult compute_same_spin_original_phi(
     const xmvb::integrals::ActiveSpaceTwoElectronResult& active_space_two_electron_result,
     const DeterminantOverlapResult& det_ovlp_result,
     Eigen::MatrixXd* inverse_overlap_gradient) {
-  if (active_space_two_electron_result.representation ==
-          xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity &&
-      active_space_two_electron_result.packed_active_two_electron_integrals.empty()) {
-    return compute_ri_same_spin_original_phi(
-        occ_L,
-        occ_R,
-        h1e_act,
-        n_active_orbitals,
-        det_ovlp_result,
-        active_space_two_electron_result.ri_active_pair_factors,
-        inverse_overlap_gradient);
-  }
   const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
       xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result);
   return compute_same_spin_original_phi_impl(
@@ -1419,15 +1353,9 @@ double compute_opposite_spin_original_phi(
         beta_pair_cache->inverse_overlap_projection.projected_pair_values);
   }
 
-  int n_active_orbitals = 0;
-  if (active_space_two_electron_result.representation ==
-      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
-    n_active_orbitals = xmvb::integrals::infer_active_orbital_count_from_packed_pair_count(
-        active_space_two_electron_result.ri_active_pair_factors.cols());
-  } else {
-    n_active_orbitals = xmvb::integrals::infer_active_orbital_count_from_packed_integral_count(
-        active_space_two_electron_result.packed_active_two_electron_integrals.size());
-  }
+  const int n_active_orbitals =
+      xmvb::integrals::infer_active_orbital_count_from_packed_integral_count(
+          active_space_two_electron_result.packed_active_two_electron_integrals.size());
   const xmvb::integrals::ActiveSpaceTwoElectronView two_electron_view =
       xmvb::integrals::make_active_space_two_electron_view(active_space_two_electron_result);
   return compute_opposite_spin_original_phi_impl(
