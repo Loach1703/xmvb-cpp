@@ -40,6 +40,7 @@ struct RiAoResponseDirection {
  * directional factor slabs are shared, with no per-thread integral copies.
  */
 struct RiAoResponseWorkspace {
+  workspace::Reservation residency;
   Eigen::MatrixXd direction, accepted;
   Eigen::MatrixXd direction_projection, accepted_projection, charges;
   Eigen::VectorXd coulomb;
@@ -78,7 +79,7 @@ std::vector<RiAoProjectedResponse> apply_ri_projected_ao_response_batch(
     std::span<const RiAoResponseDirection> directions,
     const Eigen::Ref<const Eigen::MatrixXd>& full_inactive_duals,
     RiAoResponseWorkspace& workspace,
-    std::size_t workspace_bytes = ri_response_workspace_bytes,
+    std::size_t workspace_bytes = workspace::limit(),
     RiInactiveFactorView inactive = {},
     const RiActiveHvpInput* fixed_hvp = nullptr);
 

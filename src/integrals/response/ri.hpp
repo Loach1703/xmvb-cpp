@@ -37,9 +37,9 @@ struct RiActiveTwoElectronResponseCache {
   std::shared_ptr<const Eigen::MatrixXd> accepted_one_index_factors;
   /** @brief Shared (AO active|active pair) image for repeated pullbacks.
    * Independent of the density adjoint and of the chosen VB structures.
-   * Admission accounts for this image and resident one-index factors together.
+   * Shared ownership avoids deep copies and charges the common budget once.
    */
-  OrbitalPairMatrix orbital_pair_products;
+  std::shared_ptr<const OrbitalPairMatrix> orbital_pair_products;
   /** @brief Resource-derived auxiliary tile width, unrelated to accuracy. */
   int auxiliary_tile_size = 0;
 };
@@ -131,7 +131,7 @@ Eigen::MatrixXd backpropagate_ri_packed_active_two_electron_gradient(
 std::vector<Eigen::MatrixXd> backpropagate_ri_packed_active_two_electron_gradient_batch(
     std::span<const std::vector<double>* const> packed_gradients,
     const RiActiveTwoElectronResponseCache& accepted_cache,
-    std::size_t workspace_bytes = ri_response_workspace_bytes);
+    std::size_t workspace_bytes = workspace::available());
 
 /**
  * @brief Applies the fixed-packed-adjoint RI orbital Hessian to one direction.

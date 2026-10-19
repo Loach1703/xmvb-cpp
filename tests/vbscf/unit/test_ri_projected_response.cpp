@@ -27,6 +27,12 @@ using xmvb::integrals::RiAoResponseDirection;
 using xmvb::integrals::RiAoResponseWorkspace;
 using xmvb::integrals::RiInactiveFactorView;
 
+Matrix one_index(const Matrix& factors,const Matrix& c) {
+  Matrix result(factors.rows()*c.cols(),c.rows());
+  xmvb::integrals::fill_ri_one_index_tiled(factors,c,result);
+  return result;
+}
+
 RiAoProjectedResponse project_one(
     const RiActiveTwoElectronResponseCache& cache, const Matrix& a,
     const Matrix& x, const Matrix& w, const Matrix& a0,
@@ -151,12 +157,12 @@ void check_case(int full_count, int moving_count, bool cached,
   cache.accepted_active_coefficients = &c;
   if (cached) {
     cache.accepted_one_index_factors = std::make_shared<Matrix>(
-        xmvb::integrals::transform_ri_one_index_tiled(packed, c));
+        one_index(packed, c));
   }
   Matrix full_factors;
   RiInactiveFactorView inactive;
   if (cached && full_count != 0) {
-    full_factors = xmvb::integrals::transform_ri_one_index_tiled(packed, a0);
+    full_factors = one_index(packed, a0);
     inactive.factors = &full_factors;
   }
   inactive.orbitals = std::span<const int>(map.data(), moving_count);
@@ -277,11 +283,11 @@ void check_block_case(int full_count, bool cached_active,
   cache.auxiliary_tile_size = 3;
   if (cached_active)
     cache.accepted_one_index_factors = std::make_shared<Matrix>(
-        xmvb::integrals::transform_ri_one_index_tiled(packed, c));
+        one_index(packed, c));
   Matrix inactive_factors;
   RiInactiveFactorView inactive;
   if (cached_inactive && full_count != 0) {
-    inactive_factors = xmvb::integrals::transform_ri_one_index_tiled(packed, a0);
+    inactive_factors = one_index(packed, a0);
     inactive.factors = &inactive_factors;
   }
   inactive.orbitals = std::span<const int>(map.data(), nm);

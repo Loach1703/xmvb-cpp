@@ -163,7 +163,7 @@ int main() {
     omp_set_num_threads(threads);
 #endif
     for (int ni:{0,2,5}) for (bool cached:{false,true})
-      for (std::size_t budget:{std::size_t{8192},xmvb::integrals::ri_response_workspace_bytes})
+      for (std::size_t budget:{std::size_t{8192},xmvb::workspace::available()})
         check(ni,cached,budget);
   }
   std::cout<<"ri_ao_response_exact_projection=PASS\n";

@@ -2,11 +2,9 @@
 
 #include <cstddef>
 #include <Eigen/Core>
+#include "core/workspace.hpp"
 
 namespace xmvb::integrals {
-
-/** @brief Numerical workspace allowance for tiled RI orbital transforms. */
-inline constexpr std::size_t ri_response_workspace_bytes=64ULL*1024*1024;
 
 /** @brief Contract symmetric packed AO factors with one orbital index.
  * Output rows are (orbital, auxiliary), with auxiliary contiguous; columns
@@ -17,11 +15,13 @@ Eigen::MatrixXd transform_ri_one_index(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
     int first_aux,int count);
 
-/** @brief Assemble a resident image with bounded transform scratch.
- * The caller admits the returned image to its accepted-point storage budget.
+/** @brief Fill a resident image with bounded transform scratch.
+ * The caller admits the destination to its accepted-point storage budget.
  */
-Eigen::MatrixXd transform_ri_one_index_tiled(
+void fill_ri_one_index_tiled(
     const Eigen::Ref<const Eigen::MatrixXd>& packed_factors,
-    const Eigen::Ref<const Eigen::MatrixXd>& coefficients);
+    const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
+    Eigen::Ref<Eigen::MatrixXd> result,
+    std::size_t workspace_bytes = workspace::available());
 
 } // namespace xmvb::integrals

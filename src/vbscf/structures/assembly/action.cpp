@@ -1185,7 +1185,7 @@ Eigen::MatrixXd StructureAction::apply_hamiltonian(
   if (!direct_ci_ || source_contraction_) return apply(vectors).hamiltonian;
   return contract_product_tiles(vectors,direct_ci_->alpha_transform,
       direct_ci_->beta_transform(),direct_ci_->sigma,false,
-      mcscf::ci_workspace_bytes(),false).images.hamiltonian;
+      workspace::available(),false).images.hamiltonian;
 }
 
 Eigen::MatrixXd StructureAction::apply_overlap(

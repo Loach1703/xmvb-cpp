@@ -324,7 +324,7 @@ Eigen::MatrixXd ExactHvpOperator::State::apply_reduced_batch_impl(
           pairs * (pairs + 1) / 2, n_directions);
       for (Eigen::Index column = 0; column < n_directions; ++column)
         delta_packed_active_two_electron_columns.col(column) =
-            integrals::packed_orbital_pair_direction(cache.orbital_pair_products,
+            integrals::packed_orbital_pair_direction(*cache.orbital_pair_products,
                 dense_active_directions[column], cache.active_pair_first_indices,
                 cache.active_pair_second_indices, cache.n_active_orbitals);
     }

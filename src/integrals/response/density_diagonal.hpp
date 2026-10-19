@@ -24,6 +24,6 @@ DensityDiagonals contract_ri_density_diagonals(
     int n_core, int n_active,
     const Eigen::Ref<const Eigen::MatrixXd>& active_weights,
     const Eigen::Ref<const OrbitalPairMatrix>& active_coulomb,
-    std::size_t workspace_bytes = ri_response_workspace_bytes);
+    std::size_t workspace_bytes = workspace::available());
 
 }  // namespace xmvb::integrals

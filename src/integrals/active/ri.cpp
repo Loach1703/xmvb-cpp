@@ -62,13 +62,13 @@ ActiveSpaceTwoElectronResult transform_ri_active_integrals(
   const int workers=std::min(effective_openmp_thread_count(),n_basis_functions);
   const std::size_t per_aux=static_cast<std::size_t>(n_basis_functions)*
       (n_active_orbitals+workers)+n_active_orbitals*n_active_orbitals;
-  const int tile=std::min<std::size_t>(n_aux,std::max<std::size_t>(1,
-      ri_response_workspace_bytes/sizeof(double)/per_aux));
-  std::shared_ptr<Eigen::MatrixXd> resident;
-  if (static_cast<std::size_t>(n_aux)*n_active_orbitals*n_basis_functions<=
-      ri_response_workspace_bytes/sizeof(double))
-    resident=std::make_shared<Eigen::MatrixXd>(
-        static_cast<Eigen::Index>(n_aux)*n_active_orbitals,n_basis_functions);
+  auto resident=workspace::make_matrix<Eigen::MatrixXd>(
+      static_cast<std::size_t>(n_aux)*n_active_orbitals,n_basis_functions,
+      per_aux*sizeof(double));
+  const auto scratch=workspace::available()/sizeof(double);
+  if (scratch<per_aux)
+    throw std::length_error("minimum RI active transform tile exceeds workspace");
+  const int tile=std::min<std::size_t>(n_aux,scratch/per_aux);
   for (int first=0;first<n_aux;first+=tile) {
     const int count=std::min(tile,n_aux-first);
     const Eigen::MatrixXd one_index=transform_ri_one_index(

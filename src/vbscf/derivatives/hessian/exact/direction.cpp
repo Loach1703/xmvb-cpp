@@ -106,9 +106,8 @@ ExactHvpOperator::State::ri_ao_responses(
   }
   auto response=integrals::apply_ri_projected_ao_response_batch(
       *accepted_ri_two_electron_cache_,duals,requests,geometry.inactive_auxiliary,
-      ri_ao_response_workspace_,integrals::ri_response_workspace_bytes,
-      {accepted_ri_inactive_one_index_factors_.size()
-          ? &accepted_ri_inactive_one_index_factors_ : nullptr,moving},
+      ri_ao_response_workspace_,workspace::limit(),
+      {accepted_ri_inactive_one_index_factors_.get(),moving},
       fixed_two_electron ? &jet : nullptr);
   if (frame.size())
     for (auto& value : response) value.active=(value.active*frame).eval();

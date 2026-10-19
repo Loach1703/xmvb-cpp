@@ -17,6 +17,7 @@
 
 #include "parallel/openmp.hpp"
 #include "core/timing.hpp"
+#include "core/workspace.hpp"
 
 namespace xmvb::integrals {
 
@@ -505,7 +506,7 @@ std::vector<double> apply_low_rank_ri_operator(
 
   // The auxiliary-major Z tile is shared. Workers own AO row slices and
   // disjoint output panels, never full exchange output replicas.
-  constexpr std::size_t workspace_bytes = 64ULL * 1024 * 1024;
+  const std::size_t workspace_bytes = workspace::available();
   const int n_threads = std::min(
       xmvb::effective_openmp_thread_count(), n_basis_functions);
   // At least one near-square lower-triangle block per worker; the number

@@ -19,7 +19,7 @@
 #include "output/trace/tnhvp.hpp"
 #include "input/loading/loader.hpp"
 #include "input/deck/model.hpp"
-#include "mcscf/ci/workspace.hpp"
+#include "core/workspace.hpp"
 #include "vbscf/optimization/driver/optimizer.hpp"
 
 namespace xmvb::cli {
@@ -27,7 +27,7 @@ namespace xmvb::cli {
 namespace fs = std::filesystem;
 
 int run(Options command_line) {
-  mcscf::set_ci_workspace_bytes(command_line.ci_workspace_bytes);
+  workspace::set_limit(command_line.ci_workspace_bytes);
   const std::string& input_path = command_line.input_path;
   const auto deck = vb::parse_input_deck_model(input_path);
   if (deck.metadata.electronic_method == vb::ElectronicMethod::Casscf) {

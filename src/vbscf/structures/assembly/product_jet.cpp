@@ -61,7 +61,10 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
   // allowance among input, output, sigma and reverse-transform scratch.
   // Small explicit panel caps are useful for bounded-residency regressions.
   // They never change physical support or the response being differentiated.
-  const auto total_bytes=mcscf::ci_workspace_bytes();
+  // Credit this context's own retained panels before partitioning the budget;
+  // all other accepted CI/RI data remain subtracted from available().
+  const auto total_bytes=workspace::available()+
+      (state.product_images ? state.product_images->residency.bytes():0);
   const auto retained_bytes=state.product_images ?
       std::min(state.product_images->budget,total_bytes/4):0;
   const auto work_bytes=(total_bytes-retained_bytes)/4;
@@ -682,7 +685,9 @@ StructureResponseSweep StructureAction::product_jet(const StructureAdjointState&
       const auto retain_limit=std::min(retained_bytes,cache_bytes);
       if (!tangent && state.product_images && output.evictions==0 &&
           state.product_images->bytes<=retain_limit &&
-          accepted_bytes<=retain_limit-state.product_images->bytes) {
+          accepted_bytes<=retain_limit-state.product_images->bytes &&
+          state.product_images->residency.try_resize(
+              state.product_images->bytes+accepted_bytes)) {
         retain=true;
         state.product_images->states[state_id].resize(panels);
       }

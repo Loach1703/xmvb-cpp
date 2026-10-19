@@ -139,7 +139,8 @@ void print_usage() {
                " [--ciah-trace <path.tsv>]"
                " [--dump-final-orbital-value-table-bin <path>]\n"
                "input optimizer: ISCF=7 selects TNHVP; ISCF=8 selects P-LBFGS; ISCF=9 selects CIAH\n"
-               "input eigensolver: EIGENSOLVER=DAVIDSON|DENSE (default DAVIDSON)\n";
+               "input eigensolver: EIGENSOLVER=DAVIDSON|DENSE (default DAVIDSON)\n"
+               "--ci-workspace-mib sets the shared CI/RI payload allowance (not RSS).\n";
 }
 
 }  // namespace
@@ -176,7 +177,7 @@ std::optional<Options> parse_options(int argc, char** argv) {
   bool user_specified_structure_eigensolver = false;
   bool user_specified_max_iterations = false;
   std::size_t exchange_budget = 64 * 1024 * 1024;
-  std::size_t ci_budget = mcscf::kDefaultCiWorkspaceBytes;
+  std::size_t ci_budget = workspace::default_bytes;
   for (int argument_index = 2; argument_index < argc; argument_index += 2) {
     const std::string argument_name = argv[argument_index];
     const std::string argument_value = argv[argument_index + 1];

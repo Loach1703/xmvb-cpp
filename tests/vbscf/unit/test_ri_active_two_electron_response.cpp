@@ -293,7 +293,7 @@ void check_changing_adjoint_block() {
       "RI changing-adjoint fixture lacks resident one-index factors");
   auto three_active=cache;
   xmvb::integrals::prepare_ri_orbital_pair_products(three_active);
-  require(three_active.orbital_pair_products.size()!=0,
+  require(static_cast<bool>(three_active.orbital_pair_products),
       "RI changing-adjoint fixture lacks three-active image");
   auto streamed=cache;
   streamed.accepted_one_index_factors.reset();
@@ -495,12 +495,20 @@ int main() {
           cache);
   auto prepared = cache;
   xmvb::integrals::prepare_ri_orbital_pair_products(prepared);
-  require(prepared.orbital_pair_products.size() != 0,
+  require(static_cast<bool>(prepared.orbital_pair_products),
           "small RI orbital-pair image was not prepared");
-  const double* products = prepared.orbital_pair_products.data();
+  const double* products = prepared.orbital_pair_products->data();
   xmvb::integrals::prepare_ri_orbital_pair_products(prepared);
-  require(products == prepared.orbital_pair_products.data(),
+  require(products == prepared.orbital_pair_products->data(),
           "accepted RI orbital-pair image was needlessly rebuilt");
+  {
+    const auto bytes=xmvb::workspace::retained();
+    const auto shared=prepared;
+    require(shared.orbital_pair_products==prepared.orbital_pair_products &&
+        shared.accepted_one_index_factors==prepared.accepted_one_index_factors &&
+        bytes==xmvb::workspace::retained(),
+        "copying a response cache duplicated or double-charged accepted data");
+  }
   require(is_close(xmvb::integrals::backpropagate_ri_packed_active_two_electron_gradient(
       packed_adjoint, prepared), pullback, 1e-13),
       "shared RI orbital-pair pullback differs from explicit factor contraction");

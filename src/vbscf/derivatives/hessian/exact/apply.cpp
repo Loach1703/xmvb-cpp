@@ -490,7 +490,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     const auto start = std::chrono::steady_clock::now();
     const auto& cache = *accepted_ri_two_electron_cache_;
     local_packed_two_electron = integrals::packed_orbital_pair_direction(
-        cache.orbital_pair_products, delta_dense_active_coefficients,
+        *cache.orbital_pair_products, delta_dense_active_coefficients,
         cache.active_pair_first_indices, cache.active_pair_second_indices,
         cache.n_active_orbitals);
     packed_two_electron_direction = &local_packed_two_electron;

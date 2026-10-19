@@ -227,7 +227,11 @@ std::vector<RiAoProjectedResponse> apply_ri_projected_ao_response_batch(
   const Eigen::Index pairs = static_cast<Eigen::Index>(n) * (n + 1) / 2;
   const auto [inactive_rows,inactive_columns]=projection_grid(n,nf,workers);
   const auto [active_rows,active_columns]=projection_grid(n,na,workers);
-  const std::size_t limit = workspace_bytes / sizeof(double);
+  // Existing reusable slabs belong to this request, not to a second kernel.
+  // Credit them before replanning; all other accepted data stay charged.
+  const std::size_t allowance=std::min(workspace_bytes,
+      workspace::available()+workspace.residency.bytes());
+  const std::size_t limit = allowance / sizeof(double);
   const std::size_t fixed = static_cast<std::size_t>(n) * (rank + workers) +
       n_directions * static_cast<std::size_t>(n) * outputs +
       pairs + 2ULL * n_aux * n_directions + (fixed_hvp != nullptr
@@ -343,7 +347,8 @@ std::vector<RiAoProjectedResponse> apply_ri_projected_ao_response_batch(
             active, active_factors, count, 0,
             workspace.direction.bottomRows(count * na), count, 0,
             accepted_factor_adjoint, directional_factor_adjoint,
-            0, count, workspace_bytes, result.fixed_two_electron);
+            0, count, sizeof(double)*static_cast<std::size_t>(na)*na*count,
+            result.fixed_two_electron);
         // Each AO column stores a [auxiliary,active] slab. The fixed jet has
         // consumed L D, so this in-place small-matrix action now supplies L Wbar.
 #pragma omp parallel for schedule(static) num_threads(workers)
@@ -521,6 +526,12 @@ std::vector<RiAoProjectedResponse> apply_ri_projected_ao_response_batch(
       }
     }
   }
+  const auto retained=sizeof(double)*static_cast<std::size_t>(
+      workspace.direction.size()+workspace.accepted.size()+
+      workspace.direction_projection.size()+workspace.accepted_projection.size()+
+      workspace.charges.size()+workspace.coulomb.size());
+  if (!workspace.residency.try_resize(retained))
+    throw std::length_error("retained RI AO workspace exceeds shared allowance");
   return results;
 }
 

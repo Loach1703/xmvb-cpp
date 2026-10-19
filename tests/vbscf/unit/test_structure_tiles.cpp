@@ -3556,11 +3556,11 @@ int main(int argc, char** argv) {
       {
         // The complete derivative chain, not only bare sigma: force multiple
         // generated tiles while the narrow-panel cases also force evictions.
-        const auto previous=xmvb::mcscf::ci_workspace_bytes();
-        xmvb::mcscf::set_ci_workspace_bytes(32*1024);
+        const auto previous=xmvb::workspace::limit();
+        xmvb::workspace::set_limit(32*1024);
         for (int parity:{0,1,-1}) check_product_response(parity,false);
         check_product_response(0,true);
-        xmvb::mcscf::set_ci_workspace_bytes(previous);
+        xmvb::workspace::set_limit(previous);
       }
       check_broad_product_projection(false);
       check_broad_product_projection(true);

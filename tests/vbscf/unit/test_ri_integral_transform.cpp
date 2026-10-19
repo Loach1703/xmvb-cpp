@@ -186,7 +186,7 @@ void test_invalid_dimensions_and_budget() {
 int main() {
   // 384 bytes permits exactly one auxiliary row in the three-buffer path.
   test_transforms(4, 11, 384);
-  test_transforms(4, 11, xmvb::integrals::ri_response_workspace_bytes);
+  test_transforms(4, 11, xmvb::workspace::available());
 #ifdef _OPENMP
   const int original_threads = omp_get_max_threads();
   omp_set_num_threads(1);

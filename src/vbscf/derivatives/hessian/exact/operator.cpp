@@ -8,6 +8,7 @@
 
 #include <Eigen/Core>
 #include "core/timing.hpp"
+#include "parallel/openmp.hpp"
 
 #include "vbscf/structures/assembly/coefficient_blocks.hpp"
 #include "integrals/response/adjoint.hpp"
@@ -197,25 +198,30 @@ ExactHvpOperator::State::State(
     if (accepted_ri_two_electron_cache_ && n_inactive_doubly_occupied_orbitals > 0) {
       xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::RiInactiveBuild);
       const auto& cache = *accepted_ri_two_electron_cache_;
-      const std::size_t resident = cache.orbital_pair_products.size() +
-          (cache.accepted_one_index_factors ? cache.accepted_one_index_factors->size() : 0);
-      const std::size_t needed = static_cast<std::size_t>(n_basis_functions) *
-          n_inactive_doubly_occupied_orbitals * cache.n_auxiliary_functions;
-      const std::size_t allowance = integrals::ri_response_workspace_bytes / sizeof(double);
-      if (resident <= allowance && needed <= allowance - resident)
-        accepted_ri_inactive_one_index_factors_ = integrals::transform_ri_one_index_tiled(
+      const auto scratch=sizeof(double)*static_cast<std::size_t>(n_basis_functions)*
+          (n_inactive_doubly_occupied_orbitals+effective_openmp_thread_count());
+      auto factors=workspace::make_matrix<Eigen::MatrixXd>(
+          static_cast<std::size_t>(n_inactive_doubly_occupied_orbitals)*cache.n_auxiliary_functions,
+          n_basis_functions,scratch);
+      if (factors) {
+        integrals::fill_ri_one_index_tiled(
             *cache.metric_whitened_ao_pair_factors,
-            accepted_orbital_preparation_cache_->inactive_auxiliary);
+            accepted_orbital_preparation_cache_->inactive_auxiliary,*factors);
+        accepted_ri_inactive_one_index_factors_=std::move(factors);
+      }
     }
     if (accepted_ri_two_electron_cache_ && profiling::phase_totals().enabled) {
       const auto& cache = *accepted_ri_two_electron_cache_;
       std::fprintf(stderr,
           "XMVB_RI_CONTRACTION,basis=%d,active=%d,auxiliary=%d,"
-          "three_active_bytes=%zu,direct_pair_plan=%d,inactive_bytes=%zu\n",
+          "three_active_bytes=%zu,direct_pair_plan=%d,inactive_bytes=%zu,"
+          "workspace_limit=%zu,workspace_retained=%zu\n",
           cache.n_basis_functions, cache.n_active_orbitals, cache.n_auxiliary_functions,
-          static_cast<std::size_t>(cache.orbital_pair_products.size()) * sizeof(double),
+          cache.orbital_pair_products ? static_cast<std::size_t>(cache.orbital_pair_products->size()) * sizeof(double):0,
           static_cast<int>(integrals::ri_uses_orbital_pairs(cache)),
-          static_cast<std::size_t>(accepted_ri_inactive_one_index_factors_.size()) * sizeof(double));
+          accepted_ri_inactive_one_index_factors_ ?
+              static_cast<std::size_t>(accepted_ri_inactive_one_index_factors_->size()) * sizeof(double):0,
+          workspace::limit(),workspace::retained());
     }
   }
 }

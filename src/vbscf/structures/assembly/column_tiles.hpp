@@ -12,7 +12,7 @@
 
 #include "parallel/openmp.hpp"
 #include "core/timing.hpp"
-#include "mcscf/ci/workspace.hpp"
+#include "core/workspace.hpp"
 
 namespace xmvb::vb::detail {
 
@@ -109,7 +109,8 @@ inline void project_exchange(std::vector<ColumnTile*>& panels,int extent,int par
 struct ProductImages {
   int extent=0;
   std::size_t bytes=0;
-  std::size_t budget=mcscf::ci_workspace_bytes()/4;
+  std::size_t budget=workspace::available()/4;
+  workspace::Reservation residency;
   std::vector<std::vector<ColumnTile>> states;
   /** Single-root density already contracted for the energy-multiplier term. */
   Eigen::MatrixXd density;

@@ -47,7 +47,7 @@ Eigen::MatrixXd apply_ri_factor_generator(
   const std::size_t elements_per_aux = 2ULL * n * n;
   const int tile_size = static_cast<int>(std::min<std::size_t>(n_aux,
       std::max<std::size_t>(1,
-          xmvb::integrals::ri_response_workspace_bytes / sizeof(double) /
+          xmvb::workspace::available() / sizeof(double) /
               elements_per_aux)));
   for (int first = 0; first < n_aux; first += tile_size) {
     const int count = std::min(tile_size, n_aux - first);

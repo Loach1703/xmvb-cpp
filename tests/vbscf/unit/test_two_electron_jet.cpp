@@ -151,7 +151,7 @@ void check_ri(int auxiliary, bool expect_resident_plan) {
   auto resident = xmvb::integrals::build_ri_active_two_electron_response_cache(
       factorization, accepted, active);
   xmvb::integrals::prepare_ri_orbital_pair_products(resident);
-  if (resident.orbital_pair_products.size() == 0 ||
+  if (!resident.orbital_pair_products ||
       xmvb::integrals::ri_uses_orbital_pairs(resident) != expect_resident_plan)
     throw std::runtime_error("RI resident contraction selected the wrong plan");
 
@@ -184,7 +184,7 @@ void check_ri(int auxiliary, bool expect_resident_plan) {
     auto cache = resident;
     if (streamed) {
       cache.accepted_one_index_factors.reset();
-      cache.orbital_pair_products.resize(0, 0);
+      cache.orbital_pair_products.reset();
       cache.auxiliary_tile_size = 1;
     }
     if (xmvb::integrals::ri_uses_orbital_pairs(cache) !=

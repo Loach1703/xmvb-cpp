@@ -77,9 +77,6 @@ void validate_cache(
   }
 }
 
-/** @brief Shared factor/workspace budget; independent of numerical accuracy. */
-constexpr std::size_t response_workspace_bytes = ri_response_workspace_bytes;
-
 /** @brief Auxiliary tile width accounting for shared transforms and AO slices. */
 int planned_auxiliary_tile_width(const RiActiveTwoElectronResponseCache& cache) {
   const std::size_t n_bf = cache.n_basis_functions;
@@ -91,7 +88,7 @@ int planned_auxiliary_tile_width(const RiActiveTwoElectronResponseCache& cache) 
   return static_cast<int>(std::min<std::size_t>(
       cache.n_auxiliary_functions,
       std::max<std::size_t>(
-          1, response_workspace_bytes / sizeof(double) / elements_per_aux)));
+          1, workspace::available() / sizeof(double) / elements_per_aux)));
 }
 
 /** @brief Visits shared accepted factors, or generates the same tiled factors. */
@@ -103,7 +100,7 @@ void visit_accepted_factors(
     consume(*cache.accepted_one_index_factors, 0, cache.n_auxiliary_functions);
     return;
   }
-  const int width = cache.auxiliary_tile_size;
+  const int width = std::min(cache.auxiliary_tile_size,planned_auxiliary_tile_width(cache));
   for (int first = 0; first < cache.n_auxiliary_functions; first += width) {
     const int count = std::min(width, cache.n_auxiliary_functions - first);
     const Eigen::MatrixXd factors = transform_ri_one_index(
@@ -129,7 +126,7 @@ Eigen::MatrixXd contract_factor_adjoint(
                                   int first_aux, int count) {
     // Repack only the one-index directional factors, never AO-pair adjoints.
     Eigen::MatrixXd directional_factors;
-    const int width = cache.auxiliary_tile_size;
+    const int width = std::min(cache.auxiliary_tile_size,planned_auxiliary_tile_width(cache));
     for (int offset = 0; offset < count; offset += width) {
       const int tile_count = std::min(width, count - offset);
       if (direction != nullptr) {
@@ -139,12 +136,12 @@ Eigen::MatrixXd contract_factor_adjoint(
       if (direction == nullptr) {
         detail::accumulate_ri_factor_tile(cache, factors, count, offset,
             adjoint, first_aux + offset, tile_count,
-            response_workspace_bytes, result);
+            workspace::available(), result);
       } else {
         detail::accumulate_ri_fixed_factor_tile(
             cache, factors, count, offset, directional_factors, tile_count, 0,
             adjoint, *directional_adjoint, first_aux + offset, tile_count,
-            response_workspace_bytes,
+            workspace::available(),
             result);
       }
     }
@@ -338,16 +335,19 @@ RiActiveTwoElectronResponseCache build_ri_active_two_electron_response_cache(
       cache.active_pair_second_indices.push_back(second);
     }
   }
-  const std::size_t factor_elements =
-      static_cast<std::size_t>(cache.n_auxiliary_functions) * n_bf *
-      n_active_orbitals;
-  cache.auxiliary_tile_size = planned_auxiliary_tile_width(cache);
   cache.accepted_one_index_factors=accepted_active_space_result.ri_one_index_factors;
-  if (!cache.accepted_one_index_factors && factor_elements <= response_workspace_bytes / sizeof(double)) {
-    cache.accepted_one_index_factors = std::make_shared<Eigen::MatrixXd>(
-        transform_ri_one_index_tiled(*cache.metric_whitened_ao_pair_factors,
-                                     *cache.accepted_active_coefficients));
+  if (!cache.accepted_one_index_factors) {
+    const auto scratch=sizeof(double)*static_cast<std::size_t>(n_bf)*
+        (2*n_active_orbitals+std::min(effective_openmp_thread_count(),n_bf));
+    auto factors=workspace::make_matrix<Eigen::MatrixXd>(
+        static_cast<std::size_t>(cache.n_auxiliary_functions)*n_active_orbitals,n_bf,scratch);
+    if (factors) {
+      fill_ri_one_index_tiled(*cache.metric_whitened_ao_pair_factors,
+          *cache.accepted_active_coefficients,*factors);
+      cache.accepted_one_index_factors=std::move(factors);
+    }
   }
+  cache.auxiliary_tile_size = planned_auxiliary_tile_width(cache);
   validate_cache(cache, "RI active-2e response cache");
   return cache;
 }
@@ -355,16 +355,15 @@ RiActiveTwoElectronResponseCache build_ri_active_two_electron_response_cache(
 void prepare_ri_orbital_pair_products(RiActiveTwoElectronResponseCache& cache) {
   profiling::ScopedPhase phase(profiling::Phase::RiOrbitalPairBuild);
   validate_cache(cache, "RI orbital-pair transform");
-  if (cache.orbital_pair_products.size() != 0) return;
+  if (cache.orbital_pair_products) return;
   const Eigen::Index rows = static_cast<Eigen::Index>(cache.n_basis_functions) *
       cache.n_active_orbitals;
   const Eigen::Index pairs = cache.active_pair_first_indices.size();
-  const std::size_t resident = cache.accepted_one_index_factors
-      ? static_cast<std::size_t>(cache.accepted_one_index_factors->size()) : 0;
-  const std::size_t elements = static_cast<std::size_t>(rows) * pairs;
-  const std::size_t allowance = response_workspace_bytes / sizeof(double);
-  if (resident > allowance || elements > allowance - resident) return;
-  cache.orbital_pair_products.setZero(rows, pairs);
+  const auto scratch=sizeof(double)*static_cast<std::size_t>(cache.n_basis_functions)*
+      (2*cache.n_active_orbitals+std::min(effective_openmp_thread_count(),cache.n_basis_functions));
+  auto products=workspace::make_matrix<OrbitalPairMatrix>(rows,pairs,scratch);
+  if (!products) return;
+  products->setZero();
   const int workers = std::min<Eigen::Index>(
       xmvb::effective_openmp_thread_count(), rows);
   visit_accepted_factors(cache, [&](const Eigen::MatrixXd& factors,
@@ -375,23 +374,26 @@ void prepare_ri_orbital_pair_products(RiActiveTwoElectronResponseCache& cache) {
 #pragma omp parallel num_threads(workers)
     {
       int worker = 0;
+      int team = 1;
 #ifdef _OPENMP
       worker = omp_get_thread_num();
+      team = omp_get_num_threads();
 #endif
-      const Eigen::Index begin = rows * worker / workers;
-      const Eigen::Index end = rows * (worker + 1) / workers;
-      cache.orbital_pair_products.middleRows(begin, end - begin).noalias() +=
+      const Eigen::Index begin = rows * worker / team;
+      const Eigen::Index end = rows * (worker + 1) / team;
+      products->middleRows(begin, end - begin).noalias() +=
           image.middleRows(begin, end - begin) * pair_factors;
     }
   });
+  cache.orbital_pair_products=std::move(products);
 }
 
 bool ri_uses_orbital_pairs(
     const RiActiveTwoElectronResponseCache& cache) noexcept {
-  if (cache.orbital_pair_products.rows() !=
+  if (!cache.orbital_pair_products || cache.orbital_pair_products->rows() !=
           static_cast<Eigen::Index>(cache.n_basis_functions) *
               cache.n_active_orbitals ||
-      cache.orbital_pair_products.cols() !=
+      cache.orbital_pair_products->cols() !=
           static_cast<Eigen::Index>(cache.active_pair_first_indices.size()))
     return false;
   const long double pairs =
@@ -557,12 +559,12 @@ std::vector<Eigen::MatrixXd> backpropagate_ri_packed_active_two_electron_gradien
   for (std::size_t r=0;r<packed_gradients.size();++r)
     result.emplace_back(Eigen::MatrixXd::Zero(n,na));
 
-  if (accepted_cache.orbital_pair_products.size()!=0) {
+  if (accepted_cache.orbital_pair_products) {
     profiling::ScopedPhase phase(profiling::Phase::OrbitalPairPullback);
     // Reinterpret the accepted (AO,active)-by-pair image as AO-by-(active,pair).
     // One bounded weight panel makes the accepted image a multi-RHS GEMM;
     // no pair-square matrix or per-request copy of that image is retained.
-    const auto& products=accepted_cache.orbital_pair_products;
+    const auto& products=*accepted_cache.orbital_pair_products;
     if (products.rows()!=static_cast<Eigen::Index>(n)*na ||
         products.cols()!=pairs)
       throw std::invalid_argument("RI orbital-pair pullback image has an invalid shape");
@@ -719,7 +721,7 @@ Eigen::MatrixXd apply_ri_active_two_electron_jet_impl(
   if (use_orbital_pairs) {
     const OrbitalPairMatrix pair_adjoint = directional_pair_adjoint;
     result += pullback_orbital_pairs(
-        accepted_cache.orbital_pair_products, pair_adjoint,
+        *accepted_cache.orbital_pair_products, pair_adjoint,
         accepted_cache.active_pair_first_indices,
         accepted_cache.active_pair_second_indices,
         accepted_cache.n_active_orbitals);
