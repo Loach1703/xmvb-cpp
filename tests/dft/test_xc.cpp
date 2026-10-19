@@ -7,6 +7,7 @@
 #include <Eigen/Core>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -18,6 +19,10 @@ extern "C" {
 }
 
 namespace {
+
+using Matrix = Eigen::MatrixXd;
+using MatrixRef = Eigen::Ref<const Matrix>;
+using xmvb::dft::XcResult;
 
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
@@ -76,86 +81,176 @@ xmvb::dft::Grid make_grid() {
   return grid;
 }
 
-void check_dirac_exchange() {
-  xmvb::dft::LdaFunctional exchange("LDA_X");
-  Eigen::VectorXd rho(3);
+XcResult integrate(const xmvb::dft::XcIntegrator& integrator,
+                   const Matrix& density) {
+  const std::array<MatrixRef, 1> refs{density};
+  return integrator.evaluate(refs);
+}
+
+XcResult integrate(const xmvb::dft::XcIntegrator& integrator,
+                   const Matrix& alpha, const Matrix& beta) {
+  const std::array<MatrixRef, 2> refs{alpha, beta};
+  return integrator.evaluate(refs);
+}
+
+double contraction(const Matrix& potential, const Matrix& direction) {
+  return (potential.array() * direction.array()).sum();
+}
+
+void check_functional() {
+  Matrix rho(3, 1);
   rho << 0.01, 0.5, 2.0;
-  Eigen::VectorXd exc, vrho;
-  exchange.evaluate(rho, &exc, &vrho);
+  Matrix no_sigma(3, 0);
+  xmvb::dft::XcValues exchange_values;
+  xmvb::dft::Functional exchange("LDA_X");
+  exchange.evaluate(rho, no_sigma, &exchange_values);
+  require(exchange.n_spin() == 1 && !exchange.is_gga() &&
+              exchange_values.vsigma.rows() == 3 &&
+              exchange_values.vsigma.cols() == 0,
+          "restricted LDA functional shape mismatch");
   const double coefficient = std::cbrt(3.0 / std::acos(-1.0));
-  for (Eigen::Index i = 0; i < rho.size(); ++i) {
-    const double scale = coefficient * std::cbrt(rho[i]);
-    require(std::abs(exc[i] + 0.75 * scale) < 2.0e-12,
+  for (Eigen::Index i = 0; i < rho.rows(); ++i) {
+    const double scale = coefficient * std::cbrt(rho(i, 0));
+    require(std::abs(exchange_values.exc[i] + 0.75 * scale) < 2.0e-12,
             "Dirac exchange energy per particle mismatch");
-    require(std::abs(vrho[i] + scale) < 2.0e-12,
+    require(std::abs(exchange_values.vrho(i, 0) + scale) < 2.0e-12,
             "Dirac exchange potential mismatch");
   }
-  const Eigen::VectorXd exchange_exc = exc;
-  const Eigen::VectorXd exchange_vrho = vrho;
-  xmvb::dft::LdaFunctional correlation("LDA_C_VWN");
-  Eigen::VectorXd correlation_exc, correlation_vrho;
-  correlation.evaluate(rho, &correlation_exc, &correlation_vrho);
-  xmvb::dft::LdaFunctional default_functional;
-  default_functional.evaluate(rho, &exc, &vrho);
-  require((exc - exchange_exc - correlation_exc).norm() < 1.0e-13 &&
-              (vrho - exchange_vrho - correlation_vrho).norm() < 1.0e-13,
+  xmvb::dft::XcValues correlation_values, combined_values;
+  xmvb::dft::Functional correlation("LDA_C_VWN");
+  correlation.evaluate(rho, no_sigma, &correlation_values);
+  xmvb::dft::Functional combined;
+  combined.evaluate(rho, no_sigma, &combined_values);
+  require((combined_values.exc - exchange_values.exc -
+           correlation_values.exc).norm() < 1.0e-13 &&
+              (combined_values.vrho - exchange_values.vrho -
+               correlation_values.vrho).norm() < 1.0e-13,
           "default LDA composition mismatch");
 
-  require_invalid([] { xmvb::dft::LdaFunctional bad("GGA_X_PBE"); },
-                  "GGA accepted as LDA");
-  require_invalid([] { xmvb::dft::LdaFunctional bad("LDA_K_TF"); },
+  xmvb::dft::Functional pbe("GGA_X_PBE,GGA_C_PBE", 2);
+  Matrix spin_rho(3, 2);
+  spin_rho << 0.8, 0.3, 0.6, 0.2, 0.4, 0.1;
+  Matrix sigma(3, 3);
+  sigma << 0.20, 0.04, 0.10,
+           0.12, 0.02, 0.08,
+           0.07, 0.01, 0.03;
+  xmvb::dft::XcValues pbe_values;
+  pbe.evaluate(spin_rho, sigma, &pbe_values);
+  require(pbe.n_spin() == 2 && pbe.is_gga() &&
+              pbe_values.vrho.rows() == 3 &&
+              pbe_values.vrho.cols() == 2 &&
+              pbe_values.vsigma.rows() == 3 &&
+              pbe_values.vsigma.cols() == 3 &&
+              pbe_values.vsigma.col(1).cwiseAbs().maxCoeff() > 1.0e-10,
+          "polarized PBE mixed-gradient derivative is missing");
+
+  require_invalid([] { xmvb::dft::Functional bad("LDA_K_TF"); },
                   "kinetic functional accepted as XC");
-  require_invalid([] { xmvb::dft::LdaFunctional bad("LDA_X,"); },
+  require_invalid([] { xmvb::dft::Functional bad("LDA_X,"); },
                   "empty XC component accepted");
-  require_invalid([] { xmvb::dft::LdaFunctional bad("NOT_A_LIBXC_NAME"); },
+  require_invalid([] { xmvb::dft::Functional bad("NOT_A_LIBXC_NAME"); },
                   "unknown XC functional accepted");
-  rho[0] = -1.0e-5;
-  require_invalid([&] { exchange.evaluate(rho, &exc, &vrho); },
+  rho(0, 0) = -1.0e-5;
+  require_invalid([&] { exchange.evaluate(rho, no_sigma, &exchange_values); },
                   "negative density accepted");
-  rho[0] = std::numeric_limits<double>::quiet_NaN();
-  require_invalid([&] { exchange.evaluate(rho, &exc, &vrho); },
+  rho(0, 0) = std::numeric_limits<double>::quiet_NaN();
+  require_invalid([&] { exchange.evaluate(rho, no_sigma, &exchange_values); },
                   "nonfinite density accepted");
 }
 
-void check_grid_derivative_and_tiling() {
+void check_directional_derivative(const char* name, bool polarized) {
+  const auto input = make_two_s_basis();
+  const auto grid = make_grid();
+  const xmvb::dft::Functional functional(name, polarized ? 2 : 1);
+  const xmvb::dft::XcIntegrator integrator(input, grid, functional);
+  Matrix alpha(2, 2), beta(2, 2), direction_alpha(2, 2),
+      direction_beta(2, 2);
+  alpha << 0.9, 0.1, 0.1, 0.5;
+  beta << 0.25, 0.03, 0.03, 0.35;
+  direction_alpha << 0.02, -0.01, -0.01, -0.015;
+  direction_beta << -0.008, 0.006, 0.006, 0.013;
+
+  const XcResult base = polarized ? integrate(integrator, alpha, beta)
+                                  : integrate(integrator, alpha);
+  const double step = 1.0e-5;
+  const Matrix alpha_plus = alpha + step * direction_alpha;
+  const Matrix alpha_minus = alpha - step * direction_alpha;
+  const double plus_alpha = polarized
+      ? integrate(integrator, alpha_plus, beta).energy
+      : integrate(integrator, alpha_plus).energy;
+  const double minus_alpha = polarized
+      ? integrate(integrator, alpha_minus, beta).energy
+      : integrate(integrator, alpha_minus).energy;
+  const double derivative_alpha = (plus_alpha - minus_alpha) / (2.0 * step);
+  const double expected_alpha = contraction(base.potential[0], direction_alpha);
+  require(std::abs(derivative_alpha - expected_alpha) <
+              3.0e-7 * std::max(1.0, std::abs(expected_alpha)),
+          "alpha XC potential is not the energy derivative");
+  if (polarized) {
+    const Matrix beta_plus = beta + step * direction_beta;
+    const Matrix beta_minus = beta - step * direction_beta;
+    const double plus_beta = integrate(integrator, alpha, beta_plus).energy;
+    const double minus_beta = integrate(integrator, alpha, beta_minus).energy;
+    const double derivative_beta = (plus_beta - minus_beta) / (2.0 * step);
+    const double expected_beta = contraction(base.potential[1], direction_beta);
+    require(std::abs(derivative_beta - expected_beta) <
+                3.0e-7 * std::max(1.0, std::abs(expected_beta)),
+            "beta XC potential is not the energy derivative");
+    require(base.electron_count[1] > 0.0,
+            "missing beta electron count");
+  }
+  require(base.electron_count[0] > 0.0 && std::isfinite(base.energy) &&
+              base.potential[0].allFinite(),
+          "invalid XC grid result");
+}
+
+void check_unpolarized_equivalence(const char* name) {
+  const auto input = make_two_s_basis();
+  const auto grid = make_grid();
+  const xmvb::dft::Functional restricted(name, 1);
+  const xmvb::dft::Functional polarized(name, 2);
+  const xmvb::dft::XcIntegrator rks(input, grid, restricted);
+  const xmvb::dft::XcIntegrator uks(input, grid, polarized);
+  Matrix density(2, 2);
+  density << 0.9, 0.1, 0.1, 0.5;
+  const Matrix half = 0.5 * density;
+  const auto r = integrate(rks, density);
+  const auto u = integrate(uks, half, half);
+  require(std::abs(r.energy - u.energy) < 1.0e-11 &&
+              std::abs(r.electron_count[0] -
+                       u.electron_count[0] - u.electron_count[1]) < 1.0e-12 &&
+              (r.potential[0] - u.potential[0]).norm() < 1.0e-10 &&
+              (r.potential[0] - u.potential[1]).norm() < 1.0e-10,
+          "unpolarized UKS does not equal restricted XC");
+}
+
+void check_tiling_and_budget() {
   RestoreWorkspace restore;
   const auto input = make_two_s_basis();
   const auto grid = make_grid();
-  const xmvb::dft::LdaFunctional exchange("LDA_X");
-  const xmvb::dft::LdaIntegrator integrator(input, grid, exchange);
-  Eigen::Matrix2d density;
-  density << 0.9, 0.1, 0.1, 0.5;
-  Eigen::Matrix2d direction;
-  direction << 0.02, -0.01, -0.01, -0.015;
-
-  xmvb::workspace::set_limit(4096);
-  const auto full = integrator.evaluate(density);
-  const double step = 1.0e-5;
-  const double plus = integrator.evaluate(density + step * direction).energy;
-  const double minus = integrator.evaluate(density - step * direction).energy;
-  const double finite_difference = (plus - minus) / (2.0 * step);
-  const double contraction =
-      (full.potential.array() * direction.array()).sum();
-  require(std::abs(finite_difference - contraction) <
-              2.0e-7 * std::max(1.0, std::abs(contraction)),
-          "XC potential is not the energy derivative");
-  require(full.electron_count > 0.0 && full.energy < 0.0,
-          "unexpected grid density or exchange energy");
-
-  // nbf=2: output=32 bytes and one grid row needs (2*2+6)*8=80 bytes.
-  xmvb::workspace::set_limit(192);
-  const auto tiled = integrator.evaluate(density);
-  require(std::abs(full.energy - tiled.energy) < 1.0e-13,
-          "XC energy depends on tile size");
-  require(std::abs(full.electron_count - tiled.electron_count) < 1.0e-13,
-          "electron count depends on tile size");
-  require((full.potential - tiled.potential).norm() < 1.0e-12,
-          "XC potential depends on tile size");
-
-  xmvb::workspace::set_limit(111);
+  const xmvb::dft::Functional functional("GGA_X_PBE,GGA_C_PBE", 2);
+  const xmvb::dft::XcIntegrator integrator(input, grid, functional);
+  Matrix alpha(2, 2), beta(2, 2);
+  alpha << 0.9, 0.1, 0.1, 0.5;
+  beta << 0.25, 0.03, 0.03, 0.35;
+  xmvb::workspace::set_limit(10000);
+  const auto full = integrate(integrator, alpha, beta);
+  // nbf=2, spin=2: 2*2*2*8=64 output bytes; one GGA row uses
+  // (5*2 + 2 + 7*2 + 4*3)*8=304 scratch bytes.
+  xmvb::workspace::set_limit(368);
+  const auto tiled = integrate(integrator, alpha, beta);
+  require(std::abs(full.energy - tiled.energy) < 1.0e-12 &&
+              std::abs(full.electron_count[0] -
+                       tiled.electron_count[0]) < 1.0e-12 &&
+              std::abs(full.electron_count[1] -
+                       tiled.electron_count[1]) < 1.0e-12 &&
+              (full.potential[0] - tiled.potential[0]).norm() < 1.0e-11 &&
+              (full.potential[1] - tiled.potential[1]).norm() < 1.0e-11,
+          "XC integral depends on tile size");
+  xmvb::workspace::set_limit(367);
   bool exhausted = false;
   try {
-    (void)integrator.evaluate(density);
+    (void)integrate(integrator, alpha, beta);
   } catch (const std::runtime_error& error) {
     exhausted = std::string(error.what()).find("resource_limit") !=
                 std::string::npos;
@@ -163,10 +258,36 @@ void check_grid_derivative_and_tiling() {
   require(exhausted, "insufficient XC workspace was not reported");
 }
 
+void check_zero_beta() {
+  const auto input = make_two_s_basis();
+  const auto grid = make_grid();
+  Matrix alpha(2, 2);
+  alpha << 0.9, 0.1, 0.1, 0.5;
+  const Matrix beta = Matrix::Zero(2, 2);
+  for (const char* name : {"LDA_X,LDA_C_VWN", "GGA_X_PBE,GGA_C_PBE"}) {
+    const xmvb::dft::Functional functional(name, 2);
+    const xmvb::dft::XcIntegrator integrator(input, grid, functional);
+    const auto result = integrate(integrator, alpha, beta);
+    require(result.electron_count[1] == 0.0 &&
+                std::isfinite(result.energy) &&
+                result.potential[0].allFinite() &&
+                result.potential[1].allFinite(),
+            "zero-beta XC result is invalid");
+  }
+}
+
 }  // namespace
 
 int main() {
-  check_dirac_exchange();
-  check_grid_derivative_and_tiling();
+  check_functional();
+  check_directional_derivative("LDA_X,LDA_C_VWN", false);
+  check_directional_derivative("LDA_X,LDA_C_VWN", true);
+  check_directional_derivative("GGA_X_PBE,GGA_C_PBE", false);
+  check_directional_derivative("GGA_X_PBE,GGA_C_PBE", true);
+  check_directional_derivative("GGA_C_PBE", true);
+  check_unpolarized_equivalence("LDA_X,LDA_C_VWN");
+  check_unpolarized_equivalence("GGA_X_PBE,GGA_C_PBE");
+  check_tiling_and_budget();
+  check_zero_beta();
   std::cout << "dft_xc=PASS\n";
 }

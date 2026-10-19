@@ -1,0 +1,11 @@
+Planar methyl radical PBE, unrestricted KS, Cartesian cc-pVDZ
+$CTRL
+DFT NMUL=2 BASIS=CC-PVDZ INT=LIBCINT XC=PBE
+NRAD=80 NANG=590 SCF_TOL=1.0D-9
+$END
+$GEO
+C 0.0 0.0 0.0
+H 1.08 0.0 0.0
+H -0.54 0.935307436 0.0
+H -0.54 -0.935307436 0.0
+$END

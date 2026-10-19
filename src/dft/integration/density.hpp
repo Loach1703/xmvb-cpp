@@ -2,15 +2,23 @@
 
 #include <Eigen/Core>
 
+#include <array>
+
+namespace xmvb::integrals {
+struct BasisValues;
+}
+
 namespace xmvb::dft {
 
-/** Compute the restricted total density on one AO tile.
- * `projected` is reusable scratch with the same shape as `values`.
- */
+// Evaluate one spin channel on a shared AO tile. `projected` is reusable
+// scratch and may be overwritten once all channels have been evaluated.
 void evaluate_density_tile(
-    const Eigen::Ref<const Eigen::MatrixXd>& values,
+    const integrals::BasisValues& basis,
     const Eigen::Ref<const Eigen::MatrixXd>& density_matrix,
+    bool with_gradient,
+    Eigen::Index spin,
     Eigen::MatrixXd* projected,
-    Eigen::VectorXd* density);
+    Eigen::MatrixXd* rho,
+    std::array<Eigen::MatrixXd, 3>* density_gradient);
 
 }  // namespace xmvb::dft

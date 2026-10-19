@@ -12,7 +12,7 @@ Eigen::MatrixXd commutator_error(
     const Eigen::Ref<const Eigen::MatrixXd>& density,
     const Eigen::Ref<const Eigen::MatrixXd>& overlap);
 
-/** Bounded commutator DIIS history; extrapolation changes orbital Fock only. */
+/** Bounded DIIS history; Fock and residual storage may be rectangular. */
 class Diis {
 public:
   explicit Diis(int max_history);

@@ -273,7 +273,17 @@ void apply_ctrl_assignment(
     return;
   }
   if (key == "XC") {
-    metadata->xc_functional = value_upper;
+    metadata->xc_functional = value_upper == "PBE"
+        ? "GGA_X_PBE,GGA_C_PBE" : value_upper;
+    return;
+  }
+  if (key == "KS") {
+    if (value_upper == "RKS")
+      metadata->ks_spin = KohnShamSpin::Restricted;
+    else if (value_upper == "UKS")
+      metadata->ks_spin = KohnShamSpin::Unrestricted;
+    else
+      throw std::invalid_argument("KS must be RKS or UKS");
     return;
   }
   if (key == "NRAD") {

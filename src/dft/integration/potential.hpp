@@ -1,7 +1,10 @@
 #pragma once
 
 #include <Eigen/Core>
+
+#include <array>
 #include <memory>
+#include <span>
 
 namespace xmvb::integrals {
 struct LibcintInput;
@@ -10,32 +13,32 @@ class BasisEvaluator;
 
 namespace xmvb::dft {
 struct Grid;
-class LdaFunctional;
+class Functional;
 
 struct XcResult {
   double energy = 0.0;
-  double electron_count = 0.0;
-  Eigen::MatrixXd potential;
+  std::array<double, 2> electron_count{};
+  std::array<Eigen::MatrixXd, 2> potential;
 };
 
-/** Integrates an unpolarized LDA using the total restricted AO density.
+/** Integrates restricted or spin-polarized LDA/GGA on an AO grid.
  * Input, grid, and functional must outlive the integrator and remain unmodified.
  */
-class LdaIntegrator {
+class XcIntegrator {
  public:
-  LdaIntegrator(const integrals::LibcintInput& input,
-                const Grid& grid,
-                const LdaFunctional& functional);
-  ~LdaIntegrator();
-  LdaIntegrator(const LdaIntegrator&) = delete;
-  LdaIntegrator& operator=(const LdaIntegrator&) = delete;
+  XcIntegrator(const integrals::LibcintInput& input,
+               const Grid& grid,
+               const Functional& functional);
+  ~XcIntegrator();
+  XcIntegrator(const XcIntegrator&) = delete;
+  XcIntegrator& operator=(const XcIntegrator&) = delete;
 
   XcResult evaluate(
-      const Eigen::Ref<const Eigen::MatrixXd>& density) const;
+      std::span<const Eigen::Ref<const Eigen::MatrixXd>> density) const;
 
  private:
   const Grid& grid_;
-  const LdaFunctional& functional_;
+  const Functional& functional_;
   std::unique_ptr<integrals::BasisEvaluator> basis_;
 };
 

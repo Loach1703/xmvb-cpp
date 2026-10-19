@@ -33,8 +33,11 @@ void Diis::push(
   if (max_history_ == 0) {
     return;
   }
-  if (fock.rows() != fock.cols() ||
-      error.rows() != fock.rows() || error.cols() != fock.cols()) {
+  if (fock.rows() <= 0 || fock.cols() <= 0 ||
+      error.rows() != fock.rows() || error.cols() != fock.cols() ||
+      (!history_.empty() &&
+       (fock.rows() != history_.front().fock.rows() ||
+        fock.cols() != history_.front().fock.cols()))) {
     throw std::invalid_argument("SCF DIIS matrix dimensions do not match");
   }
   if (static_cast<int>(history_.size()) == max_history_) {

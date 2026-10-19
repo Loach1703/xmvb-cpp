@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <functional>
 
 #include <Eigen/Core>
@@ -24,6 +25,17 @@ struct Evaluation {
 using Evaluate = std::function<Evaluation(
     const Eigen::Ref<const Eigen::MatrixXd>&)>;
 
+using SpinMatrices = std::array<Eigen::MatrixXd, 2>;
+
+/** Physical spin Fock matrices and electronic energy at the same densities. */
+struct UnrestrictedEvaluation {
+  SpinMatrices fock;
+  double electronic_energy = 0.0;
+};
+
+using EvaluateUnrestricted =
+    std::function<UnrestrictedEvaluation(const SpinMatrices&)>;
+
 struct Result {
   bool converged = false;
   int iterations = 0;
@@ -37,6 +49,17 @@ struct Result {
   Eigen::MatrixXd fock;
 };
 
+struct UnrestrictedResult {
+  bool converged = false;
+  int iterations = 0;
+  double electronic_energy = 0.0;
+  SpinMatrices orbitals;
+  std::array<Eigen::VectorXd, 2> orbital_energies;
+  SpinMatrices density;
+  /** Physical spin Fock matrices evaluated at the returned densities. */
+  SpinMatrices fock;
+};
+
 /**
  * Solve a restricted closed-shell SCF problem. Density is total AO density
  * P = 2 C_occ C_occ^T, with Tr(P S) = n_electrons.
@@ -48,5 +71,15 @@ Result solve_restricted(
     const Evaluate& evaluate,
     const Options& options = {},
     const Eigen::MatrixXd& initial_density = {});
+
+/** Solve an unrestricted SCF problem with Tr(P_sigma S) = n_sigma. */
+UnrestrictedResult solve_unrestricted(
+    int n_alpha,
+    int n_beta,
+    const Eigen::Ref<const Eigen::MatrixXd>& overlap,
+    const Eigen::Ref<const Eigen::MatrixXd>& core,
+    const EvaluateUnrestricted& evaluate,
+    const Options& options = {},
+    const SpinMatrices& initial_density = {});
 
 }  // namespace xmvb::scf

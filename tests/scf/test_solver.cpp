@@ -1,3 +1,4 @@
+#include <array>
 #include <cmath>
 #include <functional>
 #include <iostream>
@@ -23,6 +24,9 @@ using xmvb::integrals::RiAoFactorization;
 using xmvb::scf::Evaluation;
 using xmvb::scf::Options;
 using xmvb::scf::Result;
+using xmvb::scf::SpinMatrices;
+using xmvb::scf::UnrestrictedEvaluation;
+using xmvb::scf::UnrestrictedResult;
 
 void require(bool condition, const std::string& message) {
   if (!condition) throw std::runtime_error(message);
@@ -268,6 +272,162 @@ void check_diis_scaling() {
           "zero-error DIIS history did not retain the latest Fock");
 }
 
+xmvb::scf::EvaluateUnrestricted make_spin_model(const Matrix& core) {
+  return [core](const SpinMatrices& density) {
+    constexpr double charge_strength = 0.05;
+    constexpr double exchange_strength = 0.025;
+    const Matrix total = density[0] + density[1];
+    UnrestrictedEvaluation evaluation;
+    for (int spin = 0; spin < 2; ++spin) {
+      evaluation.fock[spin] = core + charge_strength * total -
+                              exchange_strength * density[spin];
+      evaluation.electronic_energy +=
+          (core.array() * density[spin].array()).sum() -
+          0.5 * exchange_strength * density[spin].squaredNorm();
+    }
+    evaluation.electronic_energy +=
+        0.5 * charge_strength * total.squaredNorm();
+    return evaluation;
+  };
+}
+
+void check_unrestricted_result(
+    const UnrestrictedResult& result, const std::array<int, 2>& occupations,
+    const Matrix& overlap,
+    const xmvb::scf::EvaluateUnrestricted& evaluate,
+    const std::string& label) {
+  constexpr double tolerance = 2e-8;
+  require(result.converged && result.iterations > 0,
+          label + ": expected convergence");
+  const auto physical = evaluate(result.density);
+  require(std::abs(result.electronic_energy -
+                   physical.electronic_energy) < tolerance,
+          label + ": returned energy is not evaluated at returned densities");
+  for (int spin = 0; spin < 2; ++spin) {
+    const Matrix& density = result.density[spin];
+    const Matrix& orbitals = result.orbitals[spin];
+    const Matrix& fock = result.fock[spin];
+    require(density.rows() == overlap.rows() &&
+                fock.rows() == overlap.rows() &&
+                orbitals.rows() == overlap.rows(),
+            label + ": result dimensions are inconsistent");
+    require(std::abs((density * overlap).trace() -
+                     occupations[spin]) < tolerance,
+            label + ": spin electron count is wrong");
+    require((density * overlap * density - density).norm() < tolerance,
+            label + ": spin density is not idempotent");
+    require((density -
+             orbitals.leftCols(occupations[spin]) *
+                 orbitals.leftCols(occupations[spin]).transpose()).norm() <
+                tolerance,
+            label + ": density does not match occupied orbitals");
+    require((fock - physical.fock[spin]).norm() < tolerance,
+            label + ": returned Fock is not physical at returned density");
+    require(xmvb::scf::commutator_error(fock, density, overlap).norm() <
+                10.0 * tolerance,
+            label + ": spin commutator residual is nonzero");
+  }
+}
+
+void check_unpolarized_limit(const Matrix& overlap, const Matrix& core) {
+  const auto spin_model = make_spin_model(core);
+  const xmvb::scf::Evaluate restricted = [&spin_model](
+      const Eigen::Ref<const Matrix>& total) {
+    SpinMatrices spin_density;
+    spin_density[0] = 0.5 * total;
+    spin_density[1] = 0.5 * total;
+    const auto physical = spin_model(spin_density);
+    return Evaluation{physical.fock[0], physical.electronic_energy};
+  };
+  Options options;
+  options.density_tolerance = 1e-10;
+  const Result rhf = xmvb::scf::solve_restricted(
+      2, overlap, core, restricted, options);
+  const UnrestrictedResult uhf = xmvb::scf::solve_unrestricted(
+      1, 1, overlap, core, spin_model, options);
+  check_unrestricted_result(uhf, {1, 1}, overlap, spin_model,
+                            "unpolarized limit");
+  require(rhf.converged &&
+              (rhf.density - uhf.density[0] - uhf.density[1]).norm() < 1e-8 &&
+              (rhf.fock - uhf.fock[0]).norm() < 1e-8 &&
+              std::abs(rhf.electronic_energy -
+                       uhf.electronic_energy) < 1e-8,
+          "unpolarized restricted and unrestricted solutions disagree");
+}
+
+void check_spin_models(const Matrix& overlap, const Matrix& core) {
+  const auto model = make_spin_model(core);
+  Options options;
+  options.density_tolerance = 1e-10;
+  const UnrestrictedResult open_shell = xmvb::scf::solve_unrestricted(
+      2, 1, overlap, core, model, options);
+  check_unrestricted_result(open_shell, {2, 1}, overlap, model,
+                            "two-spin open shell");
+  require((open_shell.density[0] - open_shell.density[1]).norm() > 0.1,
+          "open-shell spin densities unexpectedly coincide");
+
+  const UnrestrictedResult beta_empty = xmvb::scf::solve_unrestricted(
+      1, 0, overlap, core, model, options);
+  check_unrestricted_result(beta_empty, {1, 0}, overlap, model,
+                            "zero beta occupation");
+  require(beta_empty.density[1].norm() == 0.0,
+          "zero beta occupation produced a nonzero density");
+
+  SpinMatrices sample, direction;
+  sample[0] = Matrix::Identity(3, 3) * 0.4;
+  sample[1] = Matrix::Identity(3, 3) * 0.2;
+  direction[0] = Matrix::Zero(3, 3);
+  direction[1] = Matrix::Zero(3, 3);
+  direction[0](0, 1) = direction[0](1, 0) = 0.12;
+  direction[0](2, 2) = -0.08;
+  direction[1](0, 0) = 0.09;
+  direction[1](1, 2) = direction[1](2, 1) = -0.11;
+  constexpr double step = 1e-5;
+  SpinMatrices plus = sample, minus = sample;
+  for (int spin = 0; spin < 2; ++spin) {
+    plus[spin] += step * direction[spin];
+    minus[spin] -= step * direction[spin];
+  }
+  const double derivative =
+      (model(plus).electronic_energy -
+       model(minus).electronic_energy) / (2 * step);
+  const auto physical = model(sample);
+  double fock_contraction = 0.0;
+  for (int spin = 0; spin < 2; ++spin) {
+    fock_contraction +=
+        (physical.fock[spin].array() * direction[spin].array()).sum();
+  }
+  require(std::abs(derivative - fock_contraction) < 1e-10,
+          "two-spin energy derivative disagrees with spin Fock contraction");
+
+  for (const std::array<int, 2> occupation :
+       {std::array<int, 2>{-1, 1}, {1, -1}, {4, 0}, {0, 4}}) {
+    require(throws_invalid_argument([&] {
+      xmvb::scf::solve_unrestricted(
+          occupation[0], occupation[1], overlap, core, model);
+    }), "invalid unrestricted spin occupation was accepted");
+  }
+}
+
+void check_coupled_diis() {
+  Matrix first = Matrix::Zero(2, 4);
+  Matrix second = Matrix::Ones(2, 4);
+  Matrix first_error = Matrix::Zero(2, 4);
+  Matrix second_error = Matrix::Zero(2, 4);
+  first_error(0, 0) = 1.0;
+  second_error(0, 2) = 2.0;
+  xmvb::scf::Diis diis(2);
+  diis.push(first, first_error);
+  diis.push(second, second_error);
+  Matrix mixed;
+  require(diis.extrapolate(&mixed) &&
+              (mixed - 0.2 * second).norm() < 1e-12,
+          "two-spin DIIS did not use one coefficient set for both channels");
+  require(throws_invalid_argument([&] {
+    diis.push(Matrix::Zero(2, 3), Matrix::Zero(2, 3));
+  }), "DIIS accepted inconsistent rectangular history dimensions");
+}
+
 }  // namespace
 
 int main() {
@@ -278,7 +438,10 @@ int main() {
     check_nonlinear_models(overlap, core);
     check_invalid_inputs(overlap, core);
     check_diis_scaling();
-    std::cout << "restricted SCF invariants and exact/RI nonlinear models: PASS\n";
+    check_unpolarized_limit(overlap, core);
+    check_spin_models(overlap, core);
+    check_coupled_diis();
+    std::cout << "restricted and unrestricted SCF invariants: PASS\n";
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return 1;

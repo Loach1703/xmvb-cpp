@@ -1,0 +1,9 @@
+Oxygen triplet PBE, unrestricted KS, Cartesian cc-pVDZ
+$CTRL
+DFT NMUL=3 BASIS=CC-PVDZ INT=LIBCINT XC=PBE
+NRAD=80 NANG=590 SCF_TOL=1.0D-9
+$END
+$GEO
+O 0.0 0.0 0.0
+O 0.0 0.0 1.2074
+$END

@@ -18,6 +18,9 @@ enum class InputScfOptimizer {
 /** Electronic wavefunction selected by a bare `$CTRL` method flag. */
 enum class ElectronicMethod { Vbscf, Casscf, Dft };
 
+/** KS spin channels; Auto selects UKS when NMUL is greater than one. */
+enum class KohnShamSpin { Auto, Restricted, Unrestricted };
+
 /**
  * @brief Pure C++ summary of the `$CTRL` metadata needed by the standalone loader.
  *
@@ -31,6 +34,7 @@ struct InputDeckMetadata {
   ElectronicMethod electronic_method = ElectronicMethod::Vbscf;
   bool electronic_method_explicit = false;
   std::string xc_functional = "LDA_X,LDA_C_VWN";
+  KohnShamSpin ks_spin = KohnShamSpin::Auto;
   int grid_radial_points = 80;
   int grid_angular_points = 590;
   double scf_tolerance = 1.0e-8;

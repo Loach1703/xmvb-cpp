@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include "input/deck/model.hpp"
 #include "input/loading/molecule.hpp"
 #include "integrals/basis/values.hpp"
+#include "integrals/jk/contraction.hpp"
 #include "linalg/eigensolver.hpp"
 
 namespace {
@@ -61,11 +63,21 @@ int main(int argc, char** argv) {
         std::span<const double>(core.data(), core.size()),
         std::span<const double>(input.overlap.data(), input.overlap.size()), n_bf);
     const Eigen::Map<const Eigen::MatrixXd> orbitals(eigen.eigenvector_matrix.data(), n_bf, n_bf);
-    const Eigen::MatrixXd density = 2 * orbitals.leftCols(input.n_electrons / 2) *
-        orbitals.leftCols(input.n_electrons / 2).transpose();
-    const xmvb::dft::LdaFunctional functional(deck.metadata.xc_functional);
-    const xmvb::dft::LdaIntegrator integrator(input.libcint_input, grid, functional);
-    const auto xc = integrator.evaluate(density);
+    const int twice_ms = deck.metadata.declared_spin_multiplicity - 1;
+    const int n_alpha = (input.n_electrons + twice_ms) / 2;
+    const int n_beta = input.n_electrons - n_alpha;
+    const bool unrestricted = deck.metadata.ks_spin == xmvb::vb::KohnShamSpin::Unrestricted ||
+        (deck.metadata.ks_spin == xmvb::vb::KohnShamSpin::Auto && twice_ms != 0);
+    const int n_spin = unrestricted ? 2 : 1;
+    const xmvb::dft::Functional functional(deck.metadata.xc_functional, n_spin);
+    const xmvb::dft::XcIntegrator integrator(input.libcint_input, grid, functional);
+    std::array<Eigen::MatrixXd, 2> density;
+    density[0] = (unrestricted ? 1.0 : 2.0) * orbitals.leftCols(n_alpha) *
+        orbitals.leftCols(n_alpha).transpose();
+    if (unrestricted)
+      density[1] = orbitals.leftCols(n_beta) * orbitals.leftCols(n_beta).transpose();
+    const std::array<Eigen::Ref<const Eigen::MatrixXd>, 2> channels{density[0], density[1]};
+    const auto xc = integrator.evaluate(std::span(channels).first(n_spin));
     Eigen::MatrixXd probes(31, 3);
     for (int row = 0; row < probes.rows(); ++row)
       for (int axis = 0; axis < 3; ++axis)
@@ -79,13 +91,22 @@ int main(int argc, char** argv) {
     write_matrix(out / "weights.bin", grid.weights);
     write_matrix(out / "overlap.bin", input.overlap);
     write_matrix(out / "core.bin", core);
-    write_matrix(out / "density.bin", density);
-    write_matrix(out / "vxc.bin", xc.potential);
+    for (int spin = 0; spin < n_spin; ++spin) {
+      const std::string suffix = unrestricted ? (spin == 0 ? "-a" : "-b") : "";
+      write_matrix(out / ("density" + suffix + ".bin"), density[spin]);
+      write_matrix(out / ("vxc" + suffix + ".bin"), xc.potential[spin]);
+    }
+    Eigen::MatrixXd total = density[0];
+    if (unrestricted) total += density[1];
+    write_matrix(out / "coulomb.bin", xmvb::integrals::contract_jk(total, input.ao));
     std::ofstream summary(out / "summary.txt");
     summary << std::setprecision(17)
             << "overlap_error=" << overlap_error << '\n'
             << "xc_energy=" << xc.energy << '\n'
-            << "grid_electrons=" << xc.electron_count << '\n'
+            << "grid_electrons=" << xc.electron_count[0] + xc.electron_count[1] << '\n'
+            << "grid_alpha=" << xc.electron_count[0] << '\n'
+            << "grid_beta=" << xc.electron_count[1] << '\n'
+            << "n_spin=" << n_spin << '\n'
             << "nuclear_energy=" << input.nuclear_energy << '\n';
     if (overlap_error > 1e-6)
       throw std::runtime_error("DFT quadrature does not reproduce AO overlap");

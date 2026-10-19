@@ -128,7 +128,7 @@ set(XMVB_DFT_SOURCES
   dft/xc/functional.cpp
   dft/integration/density.cpp
   dft/integration/potential.cpp
-  dft/driver/rks.cpp)
+  dft/driver/ks.cpp)
 
 set(XMVB_INPUT_SOURCES
   input/loading/generated_structures.cpp
@@ -302,7 +302,7 @@ unset(_xmvb_model_includes)
 unset(_xmvb_integral_model_includes)
 
 if (XMVB_BUILD_DEV_TARGETS)
-  foreach(_xmvb_dft_test basis grid xc)
+  foreach(_xmvb_dft_test basis grid functional xc)
     add_executable(test_dft_${_xmvb_dft_test}
       ${CMAKE_SOURCE_DIR}/tests/dft/test_${_xmvb_dft_test}.cpp)
     target_link_libraries(test_dft_${_xmvb_dft_test} PRIVATE xmvb_dft)
@@ -471,6 +471,7 @@ if (BUILD_TESTING)
     COMMAND ${CMAKE_COMMAND}
       -DPROGRAM=$<TARGET_FILE:xmvb>
       -DINPUT=${CMAKE_SOURCE_DIR}/testdata/dft/He.xmi
+      -DUKS_INPUT=${CMAKE_SOURCE_DIR}/testdata/dft/H_PBE.xmi
       -DBASIS=${CMAKE_SOURCE_DIR}/basis/cc-pvdz.gbs
       -DRUN_DIR=${CMAKE_CURRENT_BINARY_DIR}/dft-xmi-test
       -P ${CMAKE_SOURCE_DIR}/tests/dft/check_xmi.cmake)

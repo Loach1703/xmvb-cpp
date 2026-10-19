@@ -26,7 +26,7 @@ src/
   libcint/         Method-independent libcint providers (no VB dependency)
   guess/           Initial orbitals and restricted-HF construction
   scf/             Common restricted SCF/DIIS and Hartree-Fock evaluation
-  dft/             Molecular grids, Libxc LDA, and restricted Kohn-Sham model
+  dft/             Molecular grids, Libxc LDA/GGA, and RKS/UKS models
   output/          Molden and accepted-iteration output
   cli/             Command-line entry point and reporting
   tools/           Benchmarking and diagnostic tools
@@ -107,8 +107,8 @@ runs retain the complete matrices, spectrum, and all four weight definitions.
 
 ### Molecular DFT
 
-Closed-shell molecular RKS currently supports Libxc LDA functionals and exact
-AO Coulomb integrals, using the same SCF/DIIS driver as restricted HF.
+Molecular RKS and collinear UKS support pure Libxc LDA/GGA functionals and exact
+AO Coulomb integrals, using the same SCF/DIIS iteration core as restricted HF.
 Select `DFT` rather than `VBSCF` in `$CTRL`:
 
 ```text
@@ -124,13 +124,26 @@ $END
 The defaults are LDA exchange plus VWN correlation and an unpruned 80-by-590
 atom-centered grid with Becke partitioning. `SCF_TOL` applies to the maximum
 AO density change and commutator residual; `ITMAX` sets the iteration limit.
-Angular grids of 302 or 590 points are supported. See `testdata/dft/` for
-He, H2, water, and F2 examples. Converged MO coefficients are written to
-`<input>.orb` in fixed-point GUS-body format.
+Angular grids of 302 or 590 points are supported. `XC=PBE` selects
+`GGA_X_PBE,GGA_C_PBE`. Other pure LDA/GGA components can be composed with their
+Libxc names. GGA density gradients and AO potentials are evaluated analytically
+within the same shared grid tiles as LDA.
 
-This first DFT implementation uses a core-Hamiltonian initial guess. Open-shell
-KS, GGA, hybrids, RI, supplied guesses, nuclear derivatives, and periodic DFT
-are not implemented and are not silently substituted by LDA or HF.
+`NMUL` fixes the alpha/beta populations: its default of 1 selects RKS, while
+values greater than 1 select UKS. `KS=UKS` also allows an equal-population UKS
+calculation; `KS=RKS` explicitly requires equal populations. For example, OH
+uses `DFT NMUL=2 XC=PBE`. UKS fixes the spin projection, not a pure total-spin
+eigenfunction; the output reports the determinant spin-square expectation.
+Both spins share one Coulomb matrix and one coupled DIIS extrapolation.
+
+See `testdata/dft/` for closed- and open-shell examples. Converged restricted
+MO coefficients are written to `<input>.orb`; UKS writes `<input>.alpha.orb`
+and `<input>.beta.orb`, all in fixed-point GUS-body format.
+
+The initial guess diagonalizes the core Hamiltonian with the requested spin
+occupations. Hybrids, meta-GGA, RI DFT, supplied guesses, nuclear derivatives,
+and periodic DFT are not implemented and are not silently substituted by
+another functional or HF.
 
 ## License
 

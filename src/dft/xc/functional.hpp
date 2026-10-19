@@ -1,28 +1,46 @@
 #pragma once
 
 #include <Eigen/Core>
+
 #include <memory>
 #include <string>
 
 namespace xmvb::dft {
 
-/** Unpolarized LDA components named by Libxc, separated by commas.
- * `exc` is energy per electron; `vrho` is d(rho * exc)/d(rho).
- * Libxc's own per-functional low-density thresholds remain in effect.
+struct XcValues {
+  Eigen::VectorXd exc;     // Energy per electron.
+  Eigen::MatrixXd vrho;    // Derivative of rho * exc with respect to spin density.
+  Eigen::MatrixXd vsigma;  // Derivative with respect to gradient dot products.
+};
+
+/** A sum of pure Libxc LDA and GGA exchange/correlation components.
+ * rho is N x n_spin: total density for n_spin=1, alpha/beta for n_spin=2.
+ * For GGA, sigma is N x 1 or N x 3 (alpha-alpha, alpha-beta, beta-beta).
+ * For LDA, sigma may have zero or the corresponding GGA number of columns;
+ * its values are ignored. Libxc's own low-density thresholds remain in effect.
+ *
+ * evaluate allocates, in addition to the XcValues results, bulk Libxc buffers
+ * of N * (1 + 2*n_spin) doubles for LDA or
+ * N * (1 + 2*n_spin + 2*n_sigma) doubles for GGA. It allocates no storage
+ * per point or per component. n_sigma is 1 or 3 according to n_spin.
  */
-class LdaFunctional {
+class Functional {
  public:
-  explicit LdaFunctional(const std::string& name = "LDA_X,LDA_C_VWN");
-  ~LdaFunctional();
-  LdaFunctional(const LdaFunctional&) = delete;
-  LdaFunctional& operator=(const LdaFunctional&) = delete;
-  LdaFunctional(LdaFunctional&&) noexcept;
-  LdaFunctional& operator=(LdaFunctional&&) noexcept;
+  explicit Functional(const std::string& name = "LDA_X,LDA_C_VWN",
+                      int n_spin = 1);
+  ~Functional();
+  Functional(const Functional&) = delete;
+  Functional& operator=(const Functional&) = delete;
+  Functional(Functional&&) noexcept;
+  Functional& operator=(Functional&&) noexcept;
 
   static std::string library_version();
+  int n_spin() const;
+  bool is_gga() const;
 
-  void evaluate(const Eigen::Ref<const Eigen::VectorXd>& density,
-                Eigen::VectorXd* exc, Eigen::VectorXd* vrho) const;
+  void evaluate(const Eigen::Ref<const Eigen::MatrixXd>& rho,
+                const Eigen::Ref<const Eigen::MatrixXd>& sigma,
+                XcValues* out) const;
 
  private:
   struct Impl;
