@@ -20,6 +20,18 @@ void fill_ri_factor_direction_tile(
     const Eigen::Ref<const Eigen::MatrixXd>& direction,
     int first_aux, int count, Eigen::MatrixXd& result);
 
+/** @brief Shared rectangular factor pullback, with disjoint AO output rows.
+ * Packs only a bounded auxiliary-by-active cotangent, never copies the
+ * one-index factors or allocates per-thread AO-by-active partial results.
+ */
+void accumulate_ri_factor_tile(
+    const RiActiveTwoElectronResponseCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& factors,
+    int auxiliary_stride, int auxiliary_offset,
+    const Eigen::Ref<const Eigen::MatrixXd>& adjoint,
+    int adjoint_offset, int count, std::size_t workspace_bytes,
+    Eigen::MatrixXd& result);
+
 // The two fixed-jet terms are (L D)(B G) and (L C)(delta B G).
 // Strides/offsets permit a full resident accepted slab and a narrow direction
 // slab to share this contraction without repacking either AO-by-active image.

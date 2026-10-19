@@ -5,8 +5,13 @@
 
 #include <Eigen/Core>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #include "core/pair_index.hpp"
 #include "integrals/response/ri.hpp"
+#include "integrals/response/ri_internal.hpp"
 #include "integrals/active/pair_map.hpp"
 #include "integrals/active/ri.hpp"
 
@@ -169,9 +174,82 @@ void check_direct_factor_direction() {
       "direct RI active-pair batch changed its second direction");
 }
 
+/** @brief Independent scalar oracle for shared and strided factor pullbacks. */
+void check_rectangular_pullback() {
+  constexpr int n_bf = 17, n_active = 5, count = 5, pairs = 15;
+  xmvb::integrals::RiActiveTwoElectronResponseCache cache;
+  cache.n_basis_functions = n_bf;
+  cache.n_active_orbitals = n_active;
+  for (int a = 0; a < n_active; ++a)
+    for (int b = 0; b <= a; ++b) {
+      cache.active_pair_first_indices.push_back(a);
+      cache.active_pair_second_indices.push_back(b);
+    }
+  const auto values = [](int rows, int cols) {
+    Eigen::MatrixXd matrix(rows, cols);
+    for (Eigen::Index i = 0; i < matrix.size(); ++i)
+      matrix.data()[i] = std::sin(0.19 * (i + 1));
+    return matrix;
+  };
+  const Eigen::MatrixXd adjoint = values(12, pairs);
+  const Eigen::MatrixXd delta_adjoint = -0.31 * adjoint;
+  const Eigen::MatrixXd initial = values(n_bf, n_active);
+#ifdef _OPENMP
+  const int saved = omp_get_max_threads();
+  const int saved_dynamic = omp_get_dynamic();
+#endif
+  for (int threads : {1, 2, 4, 16}) {
+#ifdef _OPENMP
+    omp_set_num_threads(threads);
+    omp_set_dynamic(threads == 16);
+#else
+    (void)threads;
+#endif
+    for (bool strided : {false, true}) {
+      const int stride = strided ? 9 : count, offset = strided ? 3 : 0;
+      const int delta_stride = strided ? 8 : count;
+      const int delta_offset = strided ? 1 : 0;
+      const auto image = values(stride * n_active, n_bf);
+      const auto delta_image = values(delta_stride * n_active, n_bf);
+      Eigen::MatrixXd expected = initial, fixed = initial;
+      for (int p = 0; p < pairs; ++p) {
+        const int a = cache.active_pair_first_indices[p];
+        const int b = cache.active_pair_second_indices[p];
+        for (int k = 0; k < count; ++k)
+          for (int mu = 0; mu < n_bf; ++mu) {
+            expected(mu, b) += image(a * stride + offset + k, mu) * adjoint(4 + k, p);
+            expected(mu, a) += image(b * stride + offset + k, mu) * adjoint(4 + k, p);
+            fixed(mu, b) += delta_image(a * delta_stride + delta_offset + k, mu) * adjoint(4 + k, p) +
+                image(a * stride + offset + k, mu) * delta_adjoint(4 + k, p);
+            fixed(mu, a) += delta_image(b * delta_stride + delta_offset + k, mu) * adjoint(4 + k, p) +
+                image(b * stride + offset + k, mu) * delta_adjoint(4 + k, p);
+          }
+      }
+      for (std::size_t budget : {sizeof(double) * n_active * n_active,
+                                 std::size_t{65536}}) {
+        auto actual = initial, actual_fixed = initial;
+        xmvb::integrals::detail::accumulate_ri_factor_tile(cache, image,
+            stride, offset, adjoint, 4, count, budget, actual);
+        xmvb::integrals::detail::accumulate_ri_fixed_factor_tile(cache, image,
+            stride, offset, delta_image, delta_stride, delta_offset,
+            adjoint, delta_adjoint, 4, count, budget, actual_fixed);
+        require(is_close(actual, expected, 3e-13),
+            "rectangular RI pullback changed a packed-pair multiplicity or stride");
+        require(is_close(actual_fixed, fixed, 3e-13),
+            "rectangular RI jet omitted a factor derivative or changed accumulation");
+      }
+    }
+  }
+#ifdef _OPENMP
+  omp_set_num_threads(saved);
+  omp_set_dynamic(saved_dynamic);
+#endif
+}
+
 }  // namespace
 
 int main() {
+  check_rectangular_pullback();
   check_direct_factor_direction();
   constexpr int n_bf = 3;
   constexpr int n_active = 2;

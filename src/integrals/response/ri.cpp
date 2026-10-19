@@ -111,24 +111,10 @@ void visit_accepted_factors(
   }
 }
 
-/** @brief Unpacks a factor adjoint with canonical diagonal multiplicity. */
-void unpack_factor_adjoint(
-    const RiActiveTwoElectronResponseCache& cache,
-    const Eigen::Ref<const Eigen::MatrixXd>& adjoint,
-    int auxiliary, Eigen::MatrixXd& weights) {
-  for (Eigen::Index pair = 0; pair < adjoint.cols(); ++pair) {
-    const int a = cache.active_pair_first_indices[pair];
-    const int b = cache.active_pair_second_indices[pair];
-    const double value = adjoint(auxiliary, pair);
-    weights(a, b) = a == b ? 2.0 * value : value;
-    weights(b, a) = weights(a, b);
-  }
-}
-
 /** @brief Contracts factor adjoints directly to AO-by-active orbital output.
  *
  * The optional directional term differentiates L_A C, not an AO-pair
- * adjoint. Per-worker storage is AO-by-active plus active-by-active only.
+ * adjoint. Factor images are shared; output rows have unique owners.
  */
 Eigen::MatrixXd contract_factor_adjoint(
     const RiActiveTwoElectronResponseCache& cache,
@@ -150,35 +136,9 @@ Eigen::MatrixXd contract_factor_adjoint(
             *cache.metric_whitened_ao_pair_factors, *direction, first_aux + offset, tile_count);
       }
       if (direction == nullptr) {
-        // The accepted-only pullback retains its one-sided contraction.
-        const std::size_t worker_elements =
-            3ULL * n_bf * n_active + 2ULL * n_active * n_active;
-        const int workers = xmvb::bounded_openmp_thread_count(
-            static_cast<int>(std::min<std::size_t>(
-                xmvb::effective_openmp_thread_count(),
-                std::max<std::size_t>(
-                    1, response_workspace_bytes / sizeof(double) /
-                           worker_elements))),
-            tile_count);
-        std::vector<Eigen::MatrixXd> partial(
-            workers, Eigen::MatrixXd::Zero(n_bf, n_active));
-#pragma omp parallel num_threads(workers)
-        {
-          int worker = 0;
-#ifdef _OPENMP
-          worker = omp_get_thread_num();
-#endif
-          Eigen::MatrixXd image(n_bf, n_active), weights(n_active, n_active);
-#pragma omp for schedule(static)
-          for (int auxiliary = 0; auxiliary < tile_count; ++auxiliary) {
-            for (int a = 0; a < n_active; ++a)
-              image.col(a) = factors.row(a * count + offset + auxiliary).transpose();
-            unpack_factor_adjoint(cache, adjoint,
-                                  first_aux + offset + auxiliary, weights);
-            partial[worker].noalias() += image * weights;
-          }
-        }
-        for (const auto& value : partial) result += value;
+        detail::accumulate_ri_factor_tile(cache, factors, count, offset,
+            adjoint, first_aux + offset, tile_count,
+            response_workspace_bytes, result);
       } else {
         detail::accumulate_ri_fixed_factor_tile(
             cache, factors, count, offset, directional_factors, tile_count, 0,
@@ -235,6 +195,67 @@ void fill_ri_factor_direction_tile(
   }
 }
 
+void accumulate_ri_factor_tile(
+    const RiActiveTwoElectronResponseCache& cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& factors,
+    int auxiliary_stride, int auxiliary_offset,
+    const Eigen::Ref<const Eigen::MatrixXd>& adjoint,
+    int adjoint_offset, int count, std::size_t workspace_bytes,
+    Eigen::MatrixXd& result) {
+  const int n_bf = cache.n_basis_functions;
+  const int n_active = cache.n_active_orbitals;
+  const std::size_t elements_per_aux =
+      static_cast<std::size_t>(n_active) * n_active;
+  const std::size_t capacity = workspace_bytes / sizeof(double) / elements_per_aux;
+  if (capacity == 0)
+    throw std::length_error("minimum RI factor cotangent exceeds workspace");
+  const int width = static_cast<int>(std::min<std::size_t>(count, capacity));
+  const int workers = std::min(effective_openmp_thread_count(), n_bf);
+  for (int first = 0; first < count; first += width) {
+    const int size = std::min(width, count - first);
+    // W[(a,P),b] is the symmetric factor cotangent. Its diagonal carries
+    // the same multiplicity as the packed-pair pullback, including a=b.
+    Eigen::MatrixXd weights(size * n_active, n_active);
+#pragma omp parallel num_threads(workers)
+    {
+#pragma omp for schedule(static)
+      for (Eigen::Index pair = 0; pair < adjoint.cols(); ++pair) {
+        const int a = cache.active_pair_first_indices[pair];
+        const int b = cache.active_pair_second_indices[pair];
+        weights.col(b).segment(a * size, size) =
+            (a == b ? 2.0 : 1.0) *
+            adjoint.col(pair).segment(adjoint_offset + first, size);
+        if (a != b)
+          weights.col(a).segment(b * size, size) =
+              weights.col(b).segment(a * size, size);
+      }
+      int worker = 0;
+      int team_size = 1;
+#ifdef _OPENMP
+      worker = omp_get_thread_num();
+      team_size = omp_get_num_threads();
+#endif
+      const int begin = n_bf * worker / team_size;
+      const int rows = n_bf * (worker + 1) / team_size - begin;
+      if (auxiliary_stride == size) {
+        // The resident/tile image is already [(a,P),mu]; consume it as
+        // one rectangular GEMM. No per-P image gather or reduction.
+        result.middleRows(begin, rows).noalias() +=
+            factors.block(auxiliary_offset + first, begin,
+                          size * n_active, rows).transpose() * weights;
+      } else {
+        // A narrow view of a resident slab has gaps between active blocks.
+        // Keep that view: factor copies would exceed the tile contract.
+        for (int a = 0; a < n_active; ++a)
+          result.middleRows(begin, rows).noalias() +=
+              factors.block(a * auxiliary_stride + auxiliary_offset + first,
+                            begin, size, rows).transpose() *
+              weights.middleRows(a * size, size);
+      }
+    }
+  }
+}
+
 void accumulate_ri_fixed_factor_tile(
     const RiActiveTwoElectronResponseCache& cache,
     const Eigen::Ref<const Eigen::MatrixXd>& accepted,
@@ -245,43 +266,12 @@ void accumulate_ri_fixed_factor_tile(
     const Eigen::Ref<const Eigen::MatrixXd>& directional_adjoint,
     int adjoint_offset, int count, std::size_t worker_budget_bytes,
     Eigen::MatrixXd& result) {
-  const int n_bf = cache.n_basis_functions;
-  const int n_active = cache.n_active_orbitals;
-  const std::size_t worker_elements =
-      3ULL * n_bf * n_active + 2ULL * n_active * n_active;
-  const int workers = xmvb::bounded_openmp_thread_count(
-      static_cast<int>(std::min<std::size_t>(
-          std::min(xmvb::effective_openmp_thread_count(), n_bf),
-          std::max<std::size_t>(
-              1, worker_budget_bytes / sizeof(double) / worker_elements))),
-      count);
-  std::vector<Eigen::MatrixXd> partial(
-      workers, Eigen::MatrixXd::Zero(n_bf, n_active));
-#pragma omp parallel num_threads(workers)
-  {
-    int worker = 0;
-#ifdef _OPENMP
-    worker = omp_get_thread_num();
-#endif
-    Eigen::MatrixXd image(n_bf, n_active), delta_image(n_bf, n_active);
-    Eigen::MatrixXd weights(n_active, n_active), delta_weights(n_active, n_active);
-#pragma omp for schedule(static)
-    for (int auxiliary = 0; auxiliary < count; ++auxiliary) {
-      for (int a = 0; a < n_active; ++a) {
-        image.col(a) = accepted.row(
-            a * accepted_aux_stride + accepted_aux_offset + auxiliary).transpose();
-        delta_image.col(a) = direction.row(
-            a * direction_aux_stride + direction_aux_offset + auxiliary).transpose();
-      }
-      unpack_factor_adjoint(cache, accepted_adjoint,
-                            adjoint_offset + auxiliary, weights);
-      unpack_factor_adjoint(cache, directional_adjoint,
-                            adjoint_offset + auxiliary, delta_weights);
-      partial[worker].noalias() += delta_image * weights;
-      partial[worker].noalias() += image * delta_weights;
-    }
-  }
-  for (const auto& value : partial) result += value;
+  accumulate_ri_factor_tile(cache, direction, direction_aux_stride,
+      direction_aux_offset, accepted_adjoint, adjoint_offset, count,
+      worker_budget_bytes, result);
+  accumulate_ri_factor_tile(cache, accepted, accepted_aux_stride,
+      accepted_aux_offset, directional_adjoint, adjoint_offset, count,
+      worker_budget_bytes, result);
 }
 
 }  // namespace detail
