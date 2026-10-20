@@ -26,6 +26,7 @@
 #include "vbscf/optimization/globalization/line_search.hpp"
 #include "mcscf/optimization/ciah/driver.hpp"
 #include "vbscf/optimization/coupled/ci_transport.hpp"
+#include "vbscf/optimization/coupled/affine.hpp"
 #include "mcscf/optimization/preconditioners/coarse.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 
@@ -90,6 +91,8 @@ bool build_ciah_macro_step(
   std::unique_ptr<CiTransport> transport;
   if (ns) transport = std::make_unique<CiTransport>(
       orbitals, layout, chart, *context, hessian.structure_action(), structure);
+  std::optional<AffineCoupling> affine;
+  if (ns) affine.emplace(*context, hessian, structure);
   mcscf::CiahOptions ciah_options;
   double energy_scale = 0.0;
   for (const double state_energy : context->selected_state_energies)
@@ -118,32 +121,19 @@ bool build_ciah_macro_step(
     if (ns == 0) {
       image = hessian.apply_orbital(x);
     } else {
-      const bool direct_ci = hessian.structure_action().supports_integral_direction();
-      const Eigen::MatrixXd raw_ci=direct_ci ?
-          structure.coefficient_response_coordinates(x.tail(ns)):Eigen::MatrixXd{};
-      StructureResponseRequest response_request{raw_ci};
-      const auto orbital = hessian.apply_orbital_coupling(x.head(no),
-          direct_ci ? &response_request:nullptr);
-      xmvb::profiling::ScopedPhase structure_phase(xmvb::profiling::Phase::CiahStructure, true);
-      const auto structure_start=std::chrono::steady_clock::now();
-      StructureActiveIntegralAdjoint active_adjoint;
-      const auto ci = direct_ci ? structure.finish_coupling_coordinates(raw_ci,
-          std::move(response_request.result),&active_adjoint):
-          structure.apply_coupling_coordinates(x.tail(ns));
-      const auto coupling_end=std::chrono::steady_clock::now();
-      const Eigen::VectorXd adjoint = direct_ci
-          ? hessian.apply_structure_coupling_adjoint(active_adjoint)
-          : hessian.apply_structure_coupling_adjoint(
-              ci.coefficient_response, ci.adjoint_multipliers);
-      const auto adjoint_end=std::chrono::steady_clock::now();
+      const auto blocks = affine->apply(x.head(no), x.tail(ns));
+      const auto& orbital = blocks.orbital;
+      const auto& ci = blocks.ci;
+      const auto& adjoint = blocks.adjoint;
       if (metric_image) metric_image->tail(ns) = ci.metric_coordinates;
-      const Eigen::VectorXd forcing = structure.project_coordinates(
-          orbital.scaled_structure_forcing);
+      const auto& forcing = blocks.forcing;
       if (orbital.connection.has_value()) {
         xmvb::profiling::ScopedPhase connection_phase(xmvb::profiling::Phase::CiahConnection, true);
         const auto& connection = *orbital.connection;
-        const Eigen::VectorXd representation = structure.project_coordinates(
+        Eigen::VectorXd representation = structure.project_coordinates(
             connection.representation_forcing);
+        representation += forcing -
+            structure.project_coordinates(orbital.scaled_structure_forcing);
         const Eigen::VectorXd integral = structure.project_coordinates(
             connection.integral_forcing);
         const Eigen::VectorXd rhs = structure.project_coordinates(connection.overlap);
@@ -178,11 +168,6 @@ bool build_ciah_macro_step(
       // The residual-balanced finite model has the physical affine Hessian
       // at this origin, even for a finite CI residual. Its coordinate second
       // jet is cancelled in the keyframe energy AND gradient, not discarded.
-      mcscf::diagnostics::ciah_trace("ciah_structure_cost",
-          "coupling=%.17g,orbital_adjoint=%.17g,projection=%.17g",
-          std::chrono::duration<double>(coupling_end-structure_start).count(),
-          std::chrono::duration<double>(adjoint_end-coupling_end).count(),
-          std::chrono::duration<double>(std::chrono::steady_clock::now()-adjoint_end).count());
       if (mcscf::diagnostics::ciah_event_trace_enabled()) {
         const double orbital_energy = x.head(no).dot(orbital.orbital_hessian);
         const double structure_energy = x.tail(ns).dot(ci.hessian_coordinates);

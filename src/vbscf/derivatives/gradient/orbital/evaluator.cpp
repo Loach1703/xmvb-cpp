@@ -262,7 +262,7 @@ OrbitalGradientEvaluator::evaluate_fixed_structure(
     const std::vector<double>& state_average_weights,
     double nuclear_repulsion_energy,
     const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
-    const SelectedMetric* metric) const {
+    const SelectedMetric* metric, bool retain_context) const {
   const auto total_start_time = std::chrono::steady_clock::now();
   ActiveSpaceFixedStructureGradient active =
       active_space_gradient_evaluator_.evaluate_fixed_structure(
@@ -270,7 +270,7 @@ OrbitalGradientEvaluator::evaluate_fixed_structure(
           selected_state_indices,
           state_average_weights,
           nuclear_repulsion_energy,
-          structure_coefficients, metric);
+          structure_coefficients, metric, retain_context);
   OrbitalFixedStructureGradient result;
   result.normalized_coefficients =
       std::move(active.normalized_coefficients);

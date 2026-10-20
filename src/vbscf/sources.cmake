@@ -121,6 +121,7 @@ set(XMVB_VBSCF_DIAGNOSTIC_SOURCES
 
 set(XMVB_VBSCF_OPTIMIZATION_SOURCES
   vbscf/optimization/coupled/ci_transport.cpp
+  vbscf/optimization/coupled/affine.cpp
   vbscf/optimization/backends/ciah_step.cpp
   vbscf/optimization/backends/plbfgs.cpp
   vbscf/optimization/backends/ciah.cpp

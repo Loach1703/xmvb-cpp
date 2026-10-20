@@ -318,6 +318,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
         "coupled orbital action cannot solve the structure response");
   }
   if (coupling_output != nullptr && horizontal_forcing) {
+    const auto n_states = accepted_point_context_->selected_state_eigenvectors.cols();
+    coupling_output->gauge_frame = Eigen::MatrixXd::Zero(n_states, n_states);
     coupling_output->scaled_structure_forcing = Eigen::MatrixXd::Zero(
         accepted_point_context_->n_structures,
         static_cast<int>(accepted_point_context_->selected_state_indices.size()));
@@ -608,6 +610,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           gauge_coupling = &*precomputed_outer_response->gauge_coupling;
           coupling_output->scaled_structure_forcing =
               gauge_coupling->horizontal_forcing.scaled_coefficients;
+          coupling_output->gauge_frame = gauge_coupling->gauge_frame;
         } else {
           directional_selected_state_response =
               &precomputed_outer_response->selected_state_response;
@@ -655,6 +658,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           gauge_coupling = &*local_gauge_coupling;
           coupling_output->scaled_structure_forcing =
               gauge_coupling->horizontal_forcing.scaled_coefficients;
+          coupling_output->gauge_frame = gauge_coupling->gauge_frame;
           if (local_direct_ci_direction.has_value() &&
               local_direct_ci_direction->connection.has_value()) {
             auto diagnostic = std::move(*local_direct_ci_direction->connection);

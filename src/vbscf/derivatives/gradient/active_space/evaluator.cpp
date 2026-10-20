@@ -1138,7 +1138,7 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
     const std::vector<double>& state_average_weights,
     double nuclear_repulsion_energy,
     const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
-    const SelectedMetric* metric) const {
+    const SelectedMetric* metric, bool retain_context) const {
   const auto total_start_time = std::chrono::steady_clock::now();
   validate_state_selection(
       selected_state_indices,
@@ -1166,6 +1166,16 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
   const auto structure_start_time = std::chrono::steady_clock::now();
   // Prescribed coefficients need H/S actions and adjoints, not a Davidson
   // diagonal, root solve, or a synthesized eigensystem for result packaging.
+  std::optional<StructureDiagonal> diagonal;
+  if (retain_context)
+    diagonal = structure_builder_.build_davidson_jacobi_preconditioner(
+        input.structure_data.alpha_det, input.structure_data.beta_det,
+        input.structure_data.determinant_to_structure_terms,
+        prepared.orbital_result.active_orbital_overlap_matrix,
+        prepared.active_space_one_electron_result.h1e_act,
+        input.orbital_preparation_input.n_active_orbitals,
+        prepared.active_space_two_electron_result,
+        input.structure_data.n_structures, context.same_spin_pair_cache);
   context.structure_action = std::make_unique<StructureAction>(
       input.structure_data.determinant_to_structure_terms,
       input.structure_data.n_structures,
@@ -1174,8 +1184,8 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
       prepared.active_space_one_electron_result.h1e_act,
       prepared.active_space_two_electron_result,
       input.orbital_preparation_input.n_active_orbitals,
-      nullptr,
-      StructureActionMode::ActionOnly);
+      diagonal ? &*diagonal : nullptr,
+      retain_context ? StructureActionMode::Davidson : StructureActionMode::ActionOnly);
   context.structure_matrix_wall_time_seconds = std::chrono::duration<double>(
       std::chrono::steady_clock::now() - structure_start_time).count();
 
@@ -1208,6 +1218,14 @@ ActiveSpaceGradientEvaluator::evaluate_fixed_structure(
   fixed.normalized_coefficients = context.selected_state_eigenvectors;
   fixed.structure_residuals = std::move(states.residuals);
   fixed.coefficient_gradient = std::move(states.coefficient_gradient);
+  if (retain_context) {
+    fixed.gradient.second_order_context = finalize_active_space_second_order_context(
+        input, selected_state_indices, normalized_weights, StructureSolveAccuracy{},
+        fixed.gradient, &context);
+    auto& accepted = *fixed.gradient.second_order_context;
+    accepted.selected_state_structure_images =
+        accepted.structure_action->apply(accepted.selected_state_eigenvectors);
+  }
   return fixed;
 }
 

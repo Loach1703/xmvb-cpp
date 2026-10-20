@@ -328,10 +328,12 @@ StructureTangentOperator::apply_coupling_coordinates(
 
 StructureCoordinateCouplingAction StructureTangentOperator::finish_coupling_coordinates(
     const Eigen::Ref<const Eigen::MatrixXd>& coefficients,StructureResponseSweep sweep,
-    StructureActiveIntegralAdjoint* adjoint) const {
+    StructureActiveIntegralAdjoint* adjoint,
+    const Eigen::MatrixXd* multiplier_correction) const {
   if (coefficients.rows()!=n_structures_ || coefficients.cols()!=n_states_)
     throw std::invalid_argument("joint structure response has incompatible coordinates");
-  const auto block=finish_coupling_block(coefficients,std::move(sweep.images),&sweep,adjoint);
+  const auto block=finish_coupling_block(coefficients,std::move(sweep.images),&sweep,adjoint,
+      multiplier_correction);
   return {block.hessian_coordinates.col(0),block.metric_coordinates.col(0),
       block.coefficient_responses.front(),block.adjoint_multipliers.front()};
 }
@@ -382,7 +384,8 @@ StructureTangentOperator::apply_coupling_coordinate_block(
 
 StructureCoordinateCouplingBlock StructureTangentOperator::finish_coupling_block(
     const Eigen::Ref<const Eigen::MatrixXd>& raw,StructureActionResult images,
-    StructureResponseSweep* sweep,StructureActiveIntegralAdjoint* adjoint) const {
+    StructureResponseSweep* sweep,StructureActiveIntegralAdjoint* adjoint,
+    const Eigen::MatrixXd* multiplier_correction) const {
   const Eigen::Index width=raw.cols()/n_states_;
   const Eigen::Index horizontal_rows=n_structures_-n_states_;
   Eigen::MatrixXd shifted = images.hamiltonian;
@@ -407,6 +410,8 @@ StructureCoordinateCouplingBlock StructureTangentOperator::finish_coupling_block
   }
 
   Eigen::MatrixXd scaled_shifted = std::move(shifted);
+  if (multiplier_correction)
+    result.adjoint_multipliers.front() += *multiplier_correction;
   if (adjoint)
     *adjoint = action_->finish_response(*accepted_point_->structure_adjoint_state,
         std::move(*sweep), result.adjoint_multipliers.front());

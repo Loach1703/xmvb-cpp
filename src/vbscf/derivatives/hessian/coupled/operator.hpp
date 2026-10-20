@@ -23,11 +23,12 @@ struct CoupledCoordinateDirection {
 };
 
 /**
- * @brief Matrix-free coupled VBSCF Hessian at one accepted point.
+ * @brief Coupled VBSCF action in the normalized eigenresponse convention.
  *
  * The borrowed orbital and structure operators must describe the same accepted
- * point and outlive this object. `apply` composes the four exact blocks without
- * forming a Hessian or solving a structure-response equation.
+ * point and outlive this object. `apply` forms no Hessian and solves no
+ * structure-response equation. At finite CI residual its mixed derivative
+ * differs from the fixed affine chart; CIAH uses AffineCoupling for that chart.
  */
 class CoupledHessianOperator {
 public:

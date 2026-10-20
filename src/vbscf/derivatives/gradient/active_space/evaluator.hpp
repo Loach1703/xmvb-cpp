@@ -136,7 +136,8 @@ public:
       const std::vector<double>& state_average_weights,
       double nuclear_repulsion_energy,
       const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
-      const SelectedMetric* metric = nullptr) const;
+      const SelectedMetric* metric = nullptr,
+      bool retain_context = false) const;
 
   /**
    * @brief Evaluates a state-averaged gradient reusing a prebuilt active-space context.
