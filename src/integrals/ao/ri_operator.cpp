@@ -310,12 +310,21 @@ SpectralFactorization build_prefactorized_spectral_factorization(
   return factorization;
 }
 
-int ri_auxiliary_thread_count(int n_auxiliary_functions) {
+int ri_auxiliary_thread_count(
+    int n_auxiliary_functions, int n_bf, int matrices_per_worker) {
   // RI application partitions by auxiliary factor. The reduction buffers are
   // full AO matrices, so launching more workers than factors, or launching an
   // inner team under an existing exact_ctx parallel region, only increases
-  // memory traffic without adding useful work.
-  int n_threads = xmvb::effective_openmp_thread_count();
+  // memory traffic without adding useful work. The aggregate worker budget
+  // accounts for outputs AND scratch, not merely the reduction matrices.
+  // One worker is indispensable even if its minimum storage exceeds budget.
+  const std::size_t workspace_bytes = workspace::available();
+  const std::size_t worker_elements =
+      static_cast<std::size_t>(n_bf) * n_bf * matrices_per_worker;
+  int n_threads = static_cast<int>(std::min<std::size_t>(
+      xmvb::effective_openmp_thread_count(),
+      std::max<std::size_t>(
+          1, workspace_bytes / sizeof(double) / worker_elements)));
   if (n_auxiliary_functions <= 1) {
     return 1;
   }
@@ -430,7 +439,7 @@ void apply_fused_dense_ri_operator(
     Eigen::MatrixXd* transpose) {
   const int n_basis_functions = ri_factorization.n_basis_functions;
   const int n_threads = ri_auxiliary_thread_count(
-      ri_factorization.n_auxiliary_functions);
+      ri_factorization.n_auxiliary_functions, n_basis_functions, 5);
   resize_fused_workspace(
       workspace,
       n_threads,
@@ -691,7 +700,8 @@ std::vector<double> apply_dense_ri_operator(
 
   int n_threads = 1;
   n_threads = ri_auxiliary_thread_count(
-      ri_factorization.n_auxiliary_functions);
+      ri_factorization.n_auxiliary_functions, n_basis_functions,
+      exchange_weight != 0.0 ? 4 : 1);
   std::vector<std::vector<double>> partial_outputs(
       n_threads,
       std::vector<double>(matrix_size, 0.0));

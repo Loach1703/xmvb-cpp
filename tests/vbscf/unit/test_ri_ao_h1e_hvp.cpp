@@ -230,6 +230,48 @@ void check_signed_factor_panels(int n_bf = 13, int n_aux = 7,
 #endif
 }
 
+/** @brief Exercises the aggregate dense worker budget with analytic factors. */
+void check_dense_workspace_budget() {
+  constexpr int n_bf = 256;
+  constexpr int n_aux = 32;
+  xmvb::integrals::RiAoFactorization ri;
+  ri.n_basis_functions = n_bf;
+  ri.n_auxiliary_functions = n_aux;
+  ri.n_packed_ao_pairs = n_bf * (n_bf + 1) / 2;
+  ri.metric_whitened_ao_pair_factors = Matrix::Zero(n_aux, ri.n_packed_ao_pairs);
+  Eigen::VectorXd diagonal(n_bf);
+  for (int mu = 0; mu < n_bf; ++mu) diagonal[mu] = std::cos(0.1 * (mu + 1));
+  double auxiliary_weight = 0.0;
+  for (int a = 0; a < n_aux; ++a) {
+    const double weight = std::sin(0.2 * (a + 1));
+    auxiliary_weight += weight * weight;
+    for (int mu = 0; mu < n_bf; ++mu) {
+      ri.metric_whitened_ao_pair_factors(a, mu * (mu + 1) / 2 + mu) =
+          weight * diagonal[mu];
+    }
+  }
+  const Matrix source = Matrix::Identity(n_bf, n_bf);
+  const Matrix adjoint = -0.5 * source;
+  Matrix reference = Matrix::Zero(n_bf, n_bf);
+  reference.diagonal() = auxiliary_weight *
+      (2.0 * diagonal.sum() * diagonal.array() - diagonal.array().square()).matrix();
+  xmvb::integrals::AoEffectiveOneElectronRiFusedWorkspace workspace;
+  Matrix forward, transpose;
+  xmvb::integrals::apply_ao_effective_one_electron_ri_operator_fused(
+      source, adjoint, ri, &workspace, &forward, &transpose);
+  require_close(forward, reference, 2.0e-12 * reference.cwiseAbs().maxCoeff(),
+                "bounded dense RI action changed the analytic operator");
+  require_close(transpose, -0.5 * reference,
+                2.0e-12 * reference.cwiseAbs().maxCoeff(),
+                "bounded dense RI transpose changed the analytic operator");
+  const std::size_t worker_bytes = workspace.partial_forward.size() *
+      5ULL * n_bf * n_bf * sizeof(double);
+  require(worker_bytes <= 64ULL * 1024 * 1024,
+          "dense RI workers exceed their aggregate workspace budget");
+  std::cout << "dense_ri_workspace_workers = " << workspace.partial_forward.size()
+            << "\ndense_ri_workspace_bytes = " << worker_bytes << '\n';
+}
+
 void check_ri_backpropagation_adjoint_identity() {
   const xmvb::integrals::RiAoFactorization ri = make_ri_factorization();
   Matrix direction(3, 3);
@@ -482,6 +524,7 @@ int main() {
     // At 32 workers the signed full-width transform crosses the 64 MiB
     // auxiliary workspace boundary. Other team widths exercise one tile.
     check_signed_factor_panels(64, 1600, 32, 32);
+    check_dense_workspace_budget();
     check_ri_builder_and_directional_action();
     check_ri_backpropagation_adjoint_identity();
     check_exact_builder_triangular_regression();
