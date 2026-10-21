@@ -5,6 +5,8 @@
 
 #include <Eigen/Core>
 
+#include "vbscf/structures/overlap/spin_metric.hpp"
+
 namespace xmvb::vb {
 
 class StructureAction;
@@ -65,9 +67,9 @@ public:
    * inverse and retain the original spin-string/structure indexing.
    */
   void rebind(const StructureAction& action);
-  std::size_t factor_bytes() const noexcept { return factor_bytes_; }
-  std::size_t block_count() const noexcept { return blocks_.size(); }
-  int max_block_size() const noexcept { return max_block_size_; }
+  std::size_t factor_bytes() const noexcept { return spin_.factor_bytes(); }
+  std::size_t block_count() const noexcept { return spin_.block_count(); }
+  int max_block_size() const noexcept { return spin_.max_block_size(); }
 
   /** @brief Plans factor/workspace admission without allocating dense blocks. */
   static bool fits(
@@ -78,23 +80,8 @@ public:
       std::size_t workspace_byte_limit);
 
 private:
-  struct Block {
-    std::vector<int> indices;
-    Eigen::MatrixXd lower;
-  };
-
-  static std::vector<std::vector<int>> occupation_groups(
-      const StructureAction& action,
-      const std::vector<std::vector<int>>& alpha_strings,
-      const std::vector<std::vector<int>>& beta_strings);
-
-  enum class SpinFactor { Gram, Lower, Upper };
-  Eigen::MatrixXd solve_spin(const Eigen::Ref<const Eigen::MatrixXd>& rhs,
-      SpinFactor factor = SpinFactor::Gram) const;
   const StructureAction* action_;
-  std::vector<Block> blocks_;
-  std::size_t factor_bytes_ = 0;
-  int max_block_size_ = 0;
+  SpinMetric spin_;
   int chunk_width_ = 0;
 };
 

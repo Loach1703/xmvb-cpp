@@ -19,6 +19,7 @@ namespace {
 using xmvb::mcscf::CiahOptions;
 using xmvb::mcscf::CiahOriginRay;
 using xmvb::mcscf::CiahResult;
+using xmvb::mcscf::CiahStepPath;
 using xmvb::mcscf::CiahWorkspace;
 using xmvb::mcscf::QuadraticProblem;
 
@@ -622,6 +623,152 @@ void check_accumulated_microstep_images() {
           "macro residual diagnostics repeated a cached Hessian action");
 }
 
+/** @brief Component-limited microsteps can consume one cached AH image exactly. */
+void check_clipped_ah_step_path() {
+  Eigen::Matrix3d hessian;
+  hessian << 2.0, 0.6, 0.0,
+             0.6, 4.0, 0.3,
+             0.0, 0.3, 6.0;
+  const Eigen::Matrix3d metric = Eigen::Vector3d(2.0, 0.7, 3.0).asDiagonal();
+  const Eigen::Vector3d gradient(1.0, 0.0, 0.0);
+  int actions = 0;
+  const auto problem = dense_problem(hessian, metric, gradient, &actions);
+  CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(3, 0));
+  const CiahResult proposal = workspace.next(gradient);
+  require(actions == 1 && proposal.basis_size == 1 && !proposal.converged,
+          "AH path test needs one unresolved physical Hessian image");
+
+  CiahStepPath path;
+  path.set(proposal);
+  require(path.pending() && path.remaining_fraction() == 1.0,
+          "new AH path is not pending in full");
+  require_close(path.direction(), proposal.step, 0.0,
+                "AH path changed its cached direction");
+  Eigen::VectorXd displacement = Eigen::VectorXd::Zero(3);
+  Eigen::VectorXd image = Eigen::VectorXd::Zero(3);
+  const double cap = 0.03;
+  const double largest = proposal.step.cwiseAbs().maxCoeff();
+  require(largest > 3.0 * cap,
+          "AH path fixture does not exercise repeated component clipping");
+  int segments = 0;
+  while (path.pending()) {
+    const double fraction = std::min(1.0,
+        cap / (path.remaining_fraction() * largest));
+    const auto [part, hessian_part] = path.take(fraction);
+    require(part.cwiseAbs().maxCoeff() <= cap * (1.0 + 2.0e-14),
+            "AH path segment exceeded the component cap");
+    require_close(hessian_part, hessian * part, 2.0e-14,
+                  "AH path segment lost its matching Hessian image");
+    displacement += part;
+    image += hessian_part;
+    ++segments;
+    require(segments < 100, "AH path did not finish bounded segmentation");
+  }
+  require(segments >= 4 && path.remaining_fraction() == 0.0,
+          "AH path did not retain and finish the clipped remainder");
+  require_close(displacement, proposal.step, 2.0e-14,
+                "clipped AH segments did not reconstruct the proposal");
+  require_close(image, proposal.hessian_step, 2.0e-14,
+                "clipped AH image segments did not reconstruct H times proposal");
+  require(actions == 1 && workspace.basis_size() == 1,
+          "advancing a cached AH path repeated a physical Hessian action");
+
+  path.set(proposal);
+  const auto [whole, whole_image] = path.take(1.0);
+  require((whole.array() == proposal.step.array()).all() &&
+              (whole_image.array() == proposal.hessian_step.array()).all() &&
+              !path.pending(),
+          "unclipped AH path did not return the exact cached proposal and image");
+  require(actions == 1, "unclipped AH path evaluated the operator again");
+}
+
+/** @brief An exact old AH root need not resolve the current unused path. */
+void check_clipped_path_current_residual() {
+  Eigen::MatrixXd hessian=2.0*Eigen::MatrixXd::Identity(1,1);
+  const Eigen::MatrixXd metric=1.7*Eigen::MatrixXd::Identity(1,1);
+  for (const double magnitude:{10.0,1.0e-4}) {
+    const Eigen::VectorXd gradient=Eigen::VectorXd::Constant(1,magnitude);
+    int actions=0;
+    const auto problem=dense_problem(hessian,metric,gradient,&actions);
+    CiahWorkspace workspace(problem);
+    const CiahResult proposal=workspace.next(gradient);
+    require(proposal.resolved(gradient.norm(),1.0/3.0),
+        "current-RHS fixture does not have an exact source Ritz root");
+    CiahStepPath path;
+    path.set(proposal);
+    const auto [prefix,image]=path.take(0.4);
+    const Eigen::VectorXd current=gradient+image;
+    const Eigen::VectorXd remaining=0.6*proposal.step;
+    Eigen::Matrix2d augmented,augmented_metric;
+    augmented << 0.0,current[0],current[0],hessian(0,0);
+    augmented_metric << 1.0,0.0,0.0,metric(0,0);
+    Eigen::Vector2d vector; vector << 1.0,remaining[0];
+    const double omega=current.dot(remaining);
+    const Eigen::Vector2d full=augmented*vector-omega*augmented_metric*vector;
+    const Eigen::VectorXd residual=path.residual_at(current);
+    require(std::abs(full[0])<1e-14,"current AH reference row is inconsistent");
+    require_close(residual,full.tail(1),2e-14,
+        "cached unused-step residual omits an AH or metric term");
+    require((residual.norm()<=current.norm()/3.0)==(magnitude<1.0),
+        "clipped path admits a stale AH root or rejects a near-Newton remainder");
+    require(actions==1,"current-RHS path check evaluated a new Hessian action");
+  }
+}
+
+/** @brief A true keyframe replaces the path; its unused residual remains expandable. */
+void check_ah_step_path_keyframe_refresh() {
+  Eigen::Matrix3d hessian;
+  hessian << 2.0, 0.8, 0.0,
+             0.8, 3.0, 0.4,
+             0.0, 0.4, 5.0;
+  const Eigen::Matrix3d metric = Eigen::Matrix3d::Identity();
+  const Eigen::Vector3d gradient(1.0, 0.0, 0.0);
+  int actions = 0;
+  const auto problem = dense_problem(hessian, metric, gradient, &actions);
+  CiahWorkspace workspace(problem, Eigen::VectorXd::Unit(3, 0));
+  const CiahResult original = workspace.next(gradient);
+  require(!original.converged && original.residual_norm > 1.0e-3,
+          "keyframe test needs a full residual outside the first AH direction");
+  CiahStepPath path;
+  path.set(original);
+  const auto [prefix, prefix_image] = path.take(0.25);
+  require(path.pending() && std::abs(path.remaining_fraction() - 0.75) < 1.0e-15,
+          "partial AH step did not retain its unused fraction");
+  require_close(prefix_image, hessian * prefix, 2.0e-14,
+                "keyframe prefix has an inconsistent frozen Hessian image");
+
+  // The frozen model predicts gradient + H*prefix; a true keyframe can add
+  // nonlinear correction. Neither gradient is a convergence certificate for
+  // the original AH Ritz solve.
+  const Eigen::Vector3d keyframe_gradient =
+      gradient + prefix_image + Eigen::Vector3d(0.0, 0.3, 0.0);
+  workspace.reset_rhs();
+  const CiahResult refreshed = workspace.next(keyframe_gradient);
+  require(refreshed.new_hvp_actions == 0 && actions == 1 &&
+              refreshed.basis_size == 1 && !refreshed.converged &&
+              refreshed.residual_norm > 1.0e-3,
+          "intermediate keyframe RHS was falsely converged or repeated an HVP");
+  require((refreshed.step - original.step).norm() > 1.0e-3,
+          "changed keyframe RHS did not alter the cached AH proposal");
+  path.clear();
+  require(!path.pending() && path.remaining_fraction() == 0.0,
+          "true keyframe did not invalidate the old path remainder");
+  path.set(refreshed);
+  require_close(path.direction(), refreshed.step, 0.0,
+                "keyframe restart retained the obsolete AH direction");
+  const auto [replacement, replacement_image] = path.take(1.0);
+  require((replacement.array() == refreshed.step.array()).all() &&
+              (replacement_image.array() == refreshed.hessian_step.array()).all(),
+          "keyframe replacement did not return the refreshed cached images");
+  require(actions == 1, "keyframe replacement alone evaluated the operator");
+
+  const CiahResult expanded = workspace.next(keyframe_gradient);
+  require(expanded.new_hvp_actions == 1 && actions == 2 &&
+              expanded.basis_size == 2,
+          "finishing a path suppressed needed out-of-span residual enrichment");
+  check_images_and_residual(hessian, metric, keyframe_gradient, expanded);
+}
+
 /** @brief Energy anchoring must follow the same keyframe as the refreshed RHS. */
 void check_keyframe_energy_model() {
   using xmvb::mcscf::CiahEnergyModel;
@@ -754,6 +901,37 @@ void check_coarse_balancing_inverse() {
   }
 }
 
+/** @brief Full-length projection roundoff is not a coarse-size tolerance. */
+void check_coarse_projection_roundoff() {
+  constexpr int n=4096;
+  Eigen::VectorXd first(n);
+  for (int i=0; i<n; ++i) first[i]=(i%2 ? -1.0 : 1.0)/64.0;
+  const Eigen::VectorXd second=Eigen::VectorXd::Constant(n,1.0/64.0);
+  for (const double skew : {1e-12,1e-5}) {
+    xmvb::mcscf::CoarsePreconditioner coarse(n,2,1e-14);
+    coarse.observe(first,2*first,first);
+    const Eigen::VectorXd source_image=3*second+skew*first;
+    coarse.observe(second,source_image,second);
+    require(coarse.size()==(skew>1e-6 ? 1 : 2),
+        "coarse admission rejects certified roundoff or admits physical asymmetry");
+    const auto first_inverse=coarse.apply(first,0,
+        [](const Eigen::VectorXd& r) -> Eigen::VectorXd { return r; });
+    require((first_inverse-0.5*first).norm()<2e-12,
+        "coarse rejection damaged its retained certified sample");
+    require(std::abs(first.dot(source_image)-second.dot(2*first)-skew)<1e-13,
+        "coarse admission changed the source operator reciprocity defect");
+    if (skew>1e-6) {
+      coarse.observe(second,3*second,second);
+      require(coarse.size()==2,
+          "coarse rejected a valid sample after an uncertifiable image");
+    }
+    const auto second_inverse=coarse.apply(second,0,
+        [](const Eigen::VectorXd& r) -> Eigen::VectorXd { return r; });
+    require((second_inverse-second/3.0).norm()<2e-12,
+        "coarse certified second sample lost its inverse action");
+  }
+}
+
 /** @brief Cached-image rank tests use Gram eigenvalues, not singular values. */
 void check_coarse_sample_rank() {
   xmvb::mcscf::CoarsePreconditioner coarse(3,3,1.0e-14);
@@ -765,6 +943,9 @@ void check_coarse_sample_rank() {
   require(coarse.size()==1,
       "coarse inverse admitted a sample with an unresolved Gram eigenvalue");
   const Eigen::Vector3d resolved=first+1.0e-3*Eigen::Vector3d::Unit(1);
+  coarse.observe(resolved,h*resolved+1e-5*first,resolved);
+  require(coarse.size()==1,
+      "coarse admitted an image rejected after a rank-deficient sample");
   coarse.observe(resolved,h*resolved,resolved);
   require(coarse.size()==2,"coarse inverse rejected a resolved independent sample");
   xmvb::mcscf::CoarsePreconditioner chained(3,3,1.0e-14);
@@ -777,6 +958,16 @@ void check_coarse_sample_rank() {
   chained.observe(third,h*third,third);
   require(chained.size()==2,
       "coarse inverse certified local rank but missed global sample dependence");
+  xmvb::mcscf::CoarsePreconditioner metric_rejected(3,2,1.0e-14);
+  const Eigen::Vector3d second_direction=Eigen::Vector3d::Unit(1);
+  metric_rejected.observe(first,h*first,first);
+  metric_rejected.observe(second_direction,h*second_direction,
+      second_direction+1e-5*first);
+  require(metric_rejected.size()==1,
+      "coarse admitted an uncertifiable metric image");
+  metric_rejected.observe(second_direction,h*second_direction,second_direction);
+  require(metric_rejected.size()==2,
+      "coarse metric rejection damaged a later valid sample");
 }
 
 void check_projected_dual_norm() {
@@ -904,11 +1095,32 @@ void check_coordinate_norms() {
   require(norms == 0, "Ritz or keyframe RHS update evaluated the physical dual norm");
 }
 
+/** @brief A small residual is a direction, not an absolute rank deficiency. */
+void check_small_gradient_expansion() {
+  Eigen::Matrix3d h;
+  h << 1.0,0.3,0.0, 0.3,2.0,0.2, 0.0,0.2,3.0;
+  const Eigen::Matrix3d metric=Eigen::Matrix3d::Identity();
+  Eigen::Vector3d g; g << 1e-16,0.5e-16,-0.7e-16;
+  auto problem=dense_problem(h,metric,g);
+  CiahOptions options;
+  options.tolerance=1e-36;
+  options.max_cycle=3;
+  CiahWorkspace workspace(problem,options);
+  const auto first=workspace.next(g);
+  require(first.basis_size==1 && first.residual_norm>1e-18 &&
+      first.residual_norm<options.lindep,
+      "small-gradient fixture does not expose amplitude-based rank rejection");
+  const auto second=workspace.next(g);
+  require(second.basis_size==2 && second.new_hvp_actions==1,
+      "nonzero small AH residual failed to extend the normalized subspace");
+}
+
 }  // namespace
 
 int main() {
   try {
     check_anisotropic_spd();
+    check_small_gradient_expansion();
     check_indefinite_root_selection();
     check_cached_origin_ray();
     check_origin_ray_macro_energy();
@@ -918,9 +1130,13 @@ int main() {
     check_incremental_projection();
     check_metric_validation();
     check_accumulated_microstep_images();
+    check_clipped_ah_step_path();
+    check_clipped_path_current_residual();
+    check_ah_step_path_keyframe_refresh();
     check_keyframe_energy_model();
     check_converged_root_reuse();
     check_coarse_balancing_inverse();
+    check_coarse_projection_roundoff();
     check_keyframe_checkpoint();
     check_coarse_sample_rank();
     check_projected_dual_norm();

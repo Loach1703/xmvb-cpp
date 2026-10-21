@@ -74,13 +74,6 @@ bool admit_structure_response(
       response_work <= core_pair_work;
 }
 
-struct AcceptedCiahKeyframe {
-  VbScfObjective::TrialEvaluation trial;
-  Eigen::VectorXd parameters;
-  Eigen::VectorXd next_orbital_guess_packed;
-  Eigen::MatrixXd next_structure_guess;
-};
-
 bool build_accepted_ciah_keyframe(
     VbScfObjective* objective,
     const SparseParameterLayout& parameter_view,
@@ -93,7 +86,7 @@ bool build_accepted_ciah_keyframe(
     double* trust_radius,
     CiahIterationRecord* record,
     VbScfOptimizerResult* result,
-    AcceptedCiahKeyframe* accepted) {
+    CiahMacroStep* accepted) {
   const OrbitalPreparationInput accepted_orbitals =
       objective->input().orbital_preparation_input;
   NonredundantRetractionMetric orbital_metric(
@@ -118,16 +111,10 @@ bool build_accepted_ciah_keyframe(
           chart.reduced_size());
   mcscf::diagnostics::ciah_trace_context =
       {record->accepted_iteration_index, 0, "ciah"};
-  CiahMacroStep macro;
-  if (!build_ciah_macro_step(objective, parameter_view, options, chart,
+  return build_ciah_macro_step(objective, parameter_view, options, chart,
           orbital_metric, orbital_hessian, structure_hessian,
           reduced_gradient, physical_gradient_norm, orbital_guess_packed, structure_guess, use_structure_response,
-          energy, trust_radius, record, result, &macro)) return false;
-  accepted->trial = std::move(macro.trial);
-  accepted->parameters = std::move(macro.parameters);
-  accepted->next_orbital_guess_packed = std::move(macro.next_orbital_guess_packed);
-  accepted->next_structure_guess = std::move(macro.next_structure_guess);
-  return true;
+          energy, trust_radius, record, result, accepted);
 }
 
 }  // namespace
@@ -164,7 +151,7 @@ BackendRunResult run_ciah_backend(
     }
     final_gradient_l2 = chart.coordinate_dual_norm(projected.reduced_gradient);
     if (run_result.n_iterations == 0 &&
-        orbital_gradient_converged(*objective, parameter_view, chart,
+        orbital_gradient_converged(objective->input().orbital_preparation_input, parameter_view, chart,
             projected.reduced_gradient, options.gradient_tolerance)) {
       result->converged = true;
       result->termination_reason = "ciah_initial_tolerance";
@@ -176,7 +163,7 @@ BackendRunResult run_ciah_backend(
     CiahIterationRecord iteration_record;
     iteration_record.accepted_iteration_index = run_result.n_iterations + 1;
     iteration_record.initial_trust_radius = trust_radius;
-    AcceptedCiahKeyframe accepted;
+    CiahMacroStep accepted;
     if (!build_accepted_ciah_keyframe(
             objective,
             parameter_view,
@@ -211,8 +198,10 @@ BackendRunResult run_ciah_backend(
     // progress output; grouping such points obscures the actual work.
     // Preconditioning changes only curvature surrogates, not the quotient
     // maps. Use one chart for stationarity, reporting, and the next solve.
-    OrbitalChart next_geometry = build_orbital_geometry(
-        *objective, parameter_view, OrbitalChart::Coordinates::Unwhitened);
+    const bool terminal_checked = accepted.converged_geometry.has_value();
+    OrbitalChart next_geometry = terminal_checked
+        ? std::move(*accepted.converged_geometry)
+        : build_orbital_geometry(*objective, parameter_view, OrbitalChart::Coordinates::Unwhitened);
     auto next_projected = next_geometry.project_gradient(gradient);
     final_gradient_l2 = next_geometry.coordinate_dual_norm(next_projected.reduced_gradient);
     if (options.ciah_iteration_callback) {
@@ -225,8 +214,9 @@ BackendRunResult run_ciah_backend(
     const double energy_change = energy - previous_energy;
     previous_energy = energy;
     if (std::abs(energy_change) < options.energy_tolerance &&
-        orbital_gradient_converged(*objective, parameter_view, next_geometry,
-            next_projected.reduced_gradient, options.gradient_tolerance)) {
+        (terminal_checked || orbital_gradient_converged(
+            objective->input().orbital_preparation_input, parameter_view, next_geometry,
+            next_projected.reduced_gradient, options.gradient_tolerance))) {
       result->converged = true;
       result->termination_reason = "ciah_projected_gradient_tolerance";
     }

@@ -10,6 +10,8 @@
 #include <Eigen/QR>
 #include <Eigen/Eigenvalues>
 
+#include "core/timing.hpp"
+
 #include "vbscf/derivatives/hessian/context/accepted_point.hpp"
 #include "vbscf/derivatives/hessian/coupled/structure.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
@@ -96,12 +98,26 @@ std::shared_ptr<const SelectedMetric> selected_factor(
   return metric.selected_metric();
 }
 
-void check_horizontal_inverse(const StructureTangentOperator& structure) {
+void check_horizontal_inverse(const StructureTangentOperator& structure,
+    const Eigen::MatrixXd& ambient_metric) {
   const int dimension = structure.tangent_size();
   Eigen::MatrixXd metric(dimension, dimension);
-  for (int column = 0; column < dimension; ++column)
-    metric.col(column) = structure.apply_metric_coordinates(
-        Eigen::VectorXd::Unit(dimension, column));
+  auto& phases=xmvb::profiling::phase_totals();
+  const bool enabled=phases.enabled;
+  phases.enabled=true;
+  const auto phase=static_cast<std::size_t>(xmvb::profiling::Phase::CiProductGenerate);
+  const auto before=phases.calls[phase].load();
+  for (int column = 0; column < dimension; ++column) {
+    const Eigen::VectorXd axis=Eigen::VectorXd::Unit(dimension,column);
+    metric.col(column)=structure.apply_metric_coordinates(axis);
+    const auto raw=structure.expand(axis).scaled_coefficients;
+    require(relative_error(metric.col(column),
+        structure.project_coordinates(ambient_metric*raw))<2e-11,
+        "shared Gram changed the physical horizontal metric");
+  }
+  const auto after=phases.calls[phase].load();
+  phases.enabled=enabled;
+  require(before==after,"shared metric replayed a product transform");
   const Eigen::VectorXd rhs = Eigen::VectorXd::LinSpaced(
       dimension, 0.27, -0.41);
   const Eigen::VectorXd actual = structure.apply_inverse_metric_model(rhs);
@@ -275,7 +291,7 @@ void check_selected_transport(bool stationary) {
   const StructureTangentOperator structure(accepted, action);
   require(structure.tangent_size() == 2,
           "selected three-structure tangent dimension is wrong");
-  check_horizontal_inverse(structure);
+  check_horizontal_inverse(structure,m0);
   const CiTransport transport(input, layout, chart, *accepted, action, structure);
 
   // Cache an independent five-point derivative of the explicit carrier map.
@@ -350,6 +366,14 @@ void check_selected_transport(bool stationary) {
               trial_factor != accepted->selected_metric &&
               (trial_factor->overlap - accepted->selected_metric->overlap).norm() > 1e-5,
           "changed trial chart reused the accepted metric factor");
+  require(point.selected_metric && point.selected_metric!=accepted->selected_metric &&
+      relative_error(point.selected_metric->overlap,trial_factor->overlap)<2e-12,
+      "transport did not retain the exact trial-chart Gram for its keyframe");
+  const auto retained_metric=point.selected_metric;
+  const auto next_point=transport.retract(0.7*p,0.5*q);
+  require(next_point.selected_metric && next_point.selected_metric!=retained_metric &&
+      relative_error(retained_metric->overlap,trial_factor->overlap)<2e-12,
+      "a later retraction invalidated an earlier trial's shared Gram");
   const Eigen::Vector3d reference_c = independent_coefficient(p, q);
   require(relative_error(point.coefficients.col(0), reference_c) < 2e-9,
           "finite selected transport differs from explicit least squares");
@@ -462,7 +486,7 @@ void check_multistate_transport(bool stationary) {
   accepted->selected_state_structure_images = StructureActionResult{k * c0, m0 * c0};
   accepted->selected_metric = selected_factor(action, topology, prepared);
   const StructureTangentOperator structure(accepted, action);
-  check_horizontal_inverse(structure);
+  check_horizontal_inverse(structure,m0);
   const CiTransport transport(input, layout, chart, *accepted, action, structure);
   const auto energy = [&](const OrbitalPreparationInput& trial, const Eigen::MatrixXd& c) {
     const Eigen::MatrixXd f = explicit_carrier(trial, w);

@@ -1,0 +1,38 @@
+key,value
+decision,Reject all three projected-output prototypes and retain production source 1fb2c921
+scope,Selected structure CI and gradient/HVP output channel compression shared by exact and RI
+cluster,Hanhai25 CPU-256C768GB
+threads,32 physical cores with OMP_PLACES=cores and OMP_PROC_BIND=close
+blas_threads,1
+workspace,4096 MiB single process budget unchanged
+ri_native_node,anode003
+ri_native_cpu_mask,160-191
+exact_native_node,anode060
+exact_native_cpu_mask,224-255
+phase_node,anode014
+phase_cpu_mask,224-255
+baseline_jobs,RI 293883; exact 293884; phase 293885
+projected_jobs,RI 293899; exact 293900; phase 293901
+address_jobs,qualification 293903; RI 293904; exact 293905; phase 293906
+spans_jobs,initial qualification 293910; source-audited requalification 293916; RI 293911; exact 293912; phase 293913
+baseline_rerun,No historical baseline workload was rerun
+numerical_changes,None to physical space coordinates HVP optimizer strategy or tolerances
+precision,All native cases converged with unchanged steps HVP and CI action counts; within-mode final energies agree within 5.1e-12 Eh
+qualification,28 of 28 tests plus full gradient/HVP checks for F2 FeCl2 and 241 in exact and RI; maximum full HVP relative error 5.87e-9
+support_tests,Independent nonsymmetric dense channel oracle; directional forcing; adjoints; temporal requests; multiple RHS; parity; unequal spins; arbitrary product subsets
+phase_interpretation,Phase-enabled tile timers are attribution only; native process time and GNU time peak RSS are authoritative
+phase_result,C12 projected output entries reduced 51.95 percent but scatter/gather and index preparation offset the smaller GEMM
+spans_result,Average 22.72 target rows per span; segment searches increased gather overhead
+historical_best_c12_ri,9.97 seconds in benchmarks/orthogonal-jet-20261018/ri.csv; the prototypes do not beat it
+ri_exact_energy,Existing RI fitting differences are not fusion errors; approximately 0.370 and 0.555 mEh for C12 and C14
+cancelled_checks,293891 dense C12 reference preparation and 293898 broad relaxed C12 response audit stopped; not counted as passed qualification
+cancelled_builds,293908 and 293909 superseded during preflight budget review before numerical validation
+raw_artifacts,results/diagnostics/ri-projected-channels-20261019; results/diagnostics/ri-channel-address-20261019; results/diagnostics/ri-channel-spans-20261019
+rejected_patch,results/diagnostics/ri-channel-spans-20261019/rejected-output-projection.patch retained locally only
+prototype_manifests,benchmarks/ri-projected-channels-20261019/source.sha256; benchmarks/ri-channel-address-20261019/source.sha256; benchmarks/ri-channel-spans-20261019/source.sha256 retained locally only
+manifest_repair,Spans manifest was accidentally overwritten by its own generation pipeline and contained only the stdin hash; the report parser now rejects it; requalification uses an independently generated complete 660-file manifest
+binary_requalification,Qualification 293916 verified all 660 files and reproduced exactly the same binary hash as 293910 and native jobs 293911/293912
+execution_mirror,/home/guqqgroup/taoxia/work/xmvb-ciah-subspace-20261017
+unrelated_changes,Existing .gitignore and RI AO operator and its unit-test edits excluded from snapshots and left untouched
+retained_source,The restored complete 660-file source manifest matches saved qualification 293882 for production 1fb2c921 exactly
+retained_build,293918 rebuilds only the retained production executable on a Slurm compute node; no old numerical workload is rerun

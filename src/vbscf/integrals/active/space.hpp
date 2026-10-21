@@ -37,7 +37,12 @@ double compute_one_electron_reference_energy(
     const Eigen::Ref<const Eigen::MatrixXd>& ao_core_hamiltonian_matrix,
     int n_basis_functions);
 
-TimedPreparedActiveSpaceContext prepare_timed_active_space_context(const VbScfInput& input);
+/** Build both h and G in `C R^{-1}`. A supplied frame stays fixed at a
+ * trial point; an explicitly empty supplied frame requests raw `C` instead.
+ */
+TimedPreparedActiveSpaceContext prepare_timed_active_space_context(
+    const VbScfInput& input,
+    const Eigen::MatrixXd* fixed_integral_frame = nullptr);
 
 /** @brief Map the active ERI adjoint to AO-by-active orbital coefficients.
  * Selects the integral representation; numerical contractions belong to the

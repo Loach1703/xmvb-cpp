@@ -15,14 +15,17 @@ namespace xmvb::integrals {
  * The accepted AO-by-active coefficients and their accepted AO-pair images are
  * already materialized inside `accepted_cache`. Reusing them here avoids
  * rebuilding the accepted pair map and re-copying the accepted dense-active
- * buffers on every directional `\delta GGO` apply.
+ * buffers on every directional `\delta GGO` apply. Set
+ * `compute_fixed_adjoint=false` when a later combined orbital jet will
+ * compute the fixed-adjoint image; the packed integral direction is unchanged.
  */
 void compute_exact_packed_active_two_electron_integral_directional_derivative(
     const ExactPackedActiveTwoElectronAdjointCache& accepted_cache,
     const Eigen::Ref<const Eigen::MatrixXd>& dense_active_direction,
     const AoIntegralInput& ao_integral_input,
     ExactPackedActiveTwoElectronDirectionalDerivativeWorkspace* workspace,
-    std::vector<double>* delta_packed_active_two_electron_integrals);
+    std::vector<double>* delta_packed_active_two_electron_integrals,
+    bool compute_fixed_adjoint = true);
 
 /**
  * @brief Computes several exact `delta GGO` directions with bounded workspace.

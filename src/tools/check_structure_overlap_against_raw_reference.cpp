@@ -152,8 +152,9 @@ int main(int argc, char** argv) {
         xmvb::vb::load_vbscf_input_with_timings(options.input_path, load_options);
 
     xmvb::vb::StructureMatrixEvaluator evaluator;
+    const Eigen::MatrixXd raw_two_electron_frame;
     const auto prepared_active_space = xmvb::vb::prepare_timed_active_space_context(
-        load_result.input).prepared_active_space;
+        load_result.input, &raw_two_electron_frame).prepared_active_space;
     const auto structure_matrices =
         evaluator.evaluate(load_result.input, prepared_active_space);
     const auto raw_reference_overlap =

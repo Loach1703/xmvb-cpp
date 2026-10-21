@@ -112,3 +112,9 @@ docs/*
 !docs/tnvb_acceptance_report.md
 !docs/tnvb_usage.md
 !docs/tnvb_iscf8_integration.md
+# Local manuscripts, derivations and benchmark reports; keep these off GitHub.
+/doc/
+/benchmarks/**/*.md
+!/benchmarks/README.md
+skill/
+results/

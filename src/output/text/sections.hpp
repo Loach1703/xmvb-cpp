@@ -22,7 +22,8 @@ void print_input_sections(
     const char* optimizer_name,
     int max_iterations);
 
-void print_final_state_sections(
+/** @brief Prints requested final analyses; returns the exact mean structure overlap. */
+double print_final_state_sections(
     std::ostream& output,
     const vb::VbScfInputLoadResult& load_result,
     const vb::VbScfOptimizerResult& result);

@@ -314,9 +314,10 @@ void write_mo_section(
 
 fs::path write_molden_file(
     const fs::path& input_file_path,
-    const VbScfInput& input) {
-  validate_libcint_input(input.libcint_input);
-  validate_orbital_input(input.orbital_preparation_input);
+    const integrals::LibcintInput& libcint_input,
+    const OrbitalPreparationInput& orbitals) {
+  validate_libcint_input(libcint_input);
+  validate_orbital_input(orbitals);
 
   fs::path output_path = input_file_path;
   output_path.replace_extension(".molden");
@@ -333,10 +334,10 @@ fs::path write_molden_file(
 
   // Keep the Molden sections close to the historical XMVB layout so existing
   // visualization workflows continue to recognize the file without new knobs.
-  write_atoms_section(output, input.libcint_input);
-  write_charge_section(output, input.libcint_input.n_atoms);
-  write_gto_section(output, input.libcint_input);
-  write_mo_section(output, input.libcint_input, input.orbital_preparation_input);
+  write_atoms_section(output, libcint_input);
+  write_charge_section(output, libcint_input.n_atoms);
+  write_gto_section(output, libcint_input);
+  write_mo_section(output, libcint_input, orbitals);
   if (!output) {
     throw std::runtime_error(
         "failed while writing Molden output file: " + output_path.string());

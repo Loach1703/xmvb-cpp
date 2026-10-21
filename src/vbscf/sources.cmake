@@ -38,8 +38,10 @@ set(XMVB_VBSCF_STRUCTURE_SOURCES
   vbscf/structures/evaluation/evaluator.cpp
   vbscf/structures/expansion/expander.cpp
   vbscf/structures/orthogonal_ci/exterior_transform.cpp
+  vbscf/structures/orthogonal_ci/exterior_rows.cpp
   vbscf/structures/orthogonal_ci/metric.cpp
   vbscf/structures/overlap/representation.cpp
+  vbscf/structures/overlap/spin_metric.cpp
   vbscf/structures/orthogonal_ci/integrals.cpp
   vbscf/structures/selection/subspace/selector.cpp
   vbscf/structures/selection/union_graph/rank_predictor.cpp
@@ -84,6 +86,7 @@ set(XMVB_VBSCF_DERIVATIVE_SOURCES
   vbscf/derivatives/hessian/coupled/operator.cpp
   vbscf/derivatives/hessian/coupled/structure.cpp
   vbscf/derivatives/hessian/exact/apply.cpp
+  vbscf/derivatives/hessian/exact/active_gradient.cpp
   vbscf/derivatives/hessian/exact/batch.cpp
   vbscf/derivatives/hessian/exact/direction.cpp
   vbscf/derivatives/hessian/exact/structure_response_schur.cpp
@@ -120,6 +123,7 @@ set(XMVB_VBSCF_DIAGNOSTIC_SOURCES
 
 set(XMVB_VBSCF_OPTIMIZATION_SOURCES
   vbscf/optimization/coupled/ci_transport.cpp
+  vbscf/optimization/coupled/affine.cpp
   vbscf/optimization/backends/ciah_step.cpp
   vbscf/optimization/backends/plbfgs.cpp
   vbscf/optimization/backends/ciah.cpp

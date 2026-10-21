@@ -11,6 +11,7 @@
 
 #include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
+#include "integrals/active/raw.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "integrals/active/two_electron.hpp"
 #include "vbscf/derivatives/gradient/active_space/evaluator.hpp"
@@ -198,6 +199,21 @@ int count_nonzero_off_diagonal_entries(
   return count;
 }
 
+void perturb_symmetric_entry(
+    double* plus, double* minus,
+    int entry_index, int dimension, double step) {
+  const int row = entry_index % dimension;
+  const int column = entry_index / dimension;
+  const double entry_step = row == column ? step : 0.5 * step;
+  plus[entry_index] += entry_step;
+  minus[entry_index] -= entry_step;
+  if (row != column) {
+    const int transpose_index = row * dimension + column;
+    plus[transpose_index] += entry_step;
+    minus[transpose_index] -= entry_step;
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -210,13 +226,26 @@ int main(int argc, char** argv) {
     xmvb::vb::ActiveSpaceGradientEvaluator evaluator;
     const auto result = evaluator.evaluate(load_result.input, load_result.nuclear_repulsion_energy);
     const auto& gradient = component_gradient(result, options.component);
-    const std::vector<double> baseline_packed_two =
+    const int n_active_orbitals =
+        load_result.input.orbital_preparation_input.n_active_orbitals;
+    const std::vector<double> baseline_framed_two =
         result.active_space_two_electron_result.packed_active_two_electron_integrals.empty()
             ? xmvb::integrals::reconstruct_packed_active_two_electron_integrals(
                   xmvb::integrals::make_active_space_two_electron_view(
                       result.active_space_two_electron_result),
                   load_result.input.orbital_preparation_input.n_active_orbitals)
             : result.active_space_two_electron_result.packed_active_two_electron_integrals;
+    const auto& two_electron_frame =
+        result.active_space_two_electron_result.orbital_transform;
+    // The dense reference contracts raw S/h/G. Hold G_raw fixed for S/h
+    // probes, but perturb G_bar and map it through the accepted R for 2e.
+    const std::vector<double> baseline_raw_two =
+        xmvb::integrals::materialize_raw_pair_kernel(
+            baseline_framed_two, two_electron_frame);
+    const Eigen::MatrixXd baseline_raw_one =
+        xmvb::integrals::materialize_raw_one_electron(
+            result.active_space_one_electron_result.h1e_act,
+            two_electron_frame);
 
     std::vector<std::pair<double, int>> ranked_entries;
     ranked_entries.reserve(gradient.size());
@@ -261,23 +290,33 @@ int main(int argc, char** argv) {
       const int entry_index = ranked_entries[report_index].second;
       std::vector<double> plus_overlap = result.active_orbital_overlap_matrix;
       std::vector<double> minus_overlap = result.active_orbital_overlap_matrix;
-      Eigen::MatrixXd plus_one = result.active_space_one_electron_result.h1e_act;
-      Eigen::MatrixXd minus_one = result.active_space_one_electron_result.h1e_act;
-      std::vector<double> plus_two = baseline_packed_two;
-      std::vector<double> minus_two = baseline_packed_two;
+      Eigen::MatrixXd plus_one = baseline_raw_one;
+      Eigen::MatrixXd minus_one = baseline_raw_one;
+      std::vector<double> plus_two = baseline_raw_two;
+      std::vector<double> minus_two = baseline_raw_two;
 
       switch (options.component) {
         case Component::Overlap:
-          plus_overlap[entry_index] += options.step;
-          minus_overlap[entry_index] -= options.step;
+          perturb_symmetric_entry(
+              plus_overlap.data(), minus_overlap.data(),
+              entry_index, n_active_orbitals, options.step);
           break;
         case Component::OneElectron:
-          plus_one.data()[entry_index] += options.step;
-          minus_one.data()[entry_index] -= options.step;
+          perturb_symmetric_entry(
+              plus_one.data(), minus_one.data(),
+              entry_index, n_active_orbitals, options.step);
           break;
         case Component::TwoElectron:
-          plus_two[entry_index] += options.step;
-          minus_two[entry_index] -= options.step;
+          {
+            std::vector<double> plus_framed = baseline_framed_two;
+            std::vector<double> minus_framed = baseline_framed_two;
+            plus_framed[entry_index] += options.step;
+            minus_framed[entry_index] -= options.step;
+            plus_two = xmvb::integrals::materialize_raw_pair_kernel(
+                plus_framed, two_electron_frame);
+            minus_two = xmvb::integrals::materialize_raw_pair_kernel(
+                minus_framed, two_electron_frame);
+          }
           break;
       }
 

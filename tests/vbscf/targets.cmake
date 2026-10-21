@@ -8,6 +8,15 @@ set(_xmvb_vbscf_unit_targets
   test_spinor_strings
   test_spinor_projection
   test_active_two_electron_sparse
+  test_integral_transform
+  test_ri_integral_transform
+  test_orthogonal_ri_transform
+  test_fused_integral_frame
+  test_two_electron_jet
+  test_orbital_pair_direction
+  test_raw_integral_frame
+  test_projected_orbital_pullback
+  test_ri_projected_response
   test_accepted_pair_tile
   test_hessian_diagonal
   test_keyframe
@@ -64,6 +73,27 @@ if (BUILD_TESTING)
   set_tests_properties(spinor_strings spinor_projection PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
   add_test(NAME active_two_electron_sparse COMMAND test_active_two_electron_sparse)
+  add_test(NAME integral_transform COMMAND test_integral_transform)
+  add_test(NAME ri_integral_transform COMMAND test_ri_integral_transform)
+  add_test(NAME orthogonal_ri_transform COMMAND test_orthogonal_ri_transform)
+  add_test(NAME fused_integral_frame COMMAND test_fused_integral_frame)
+  foreach(_frame_backend IN ITEMS exact ri)
+    add_test(NAME integral_frame_pair_${_frame_backend}
+      COMMAND check_exact_ctx_hvp
+        ${CMAKE_SOURCE_DIR}/tests/vbscf/fixtures/response/h4_pair.xmi
+        --standard-two-electron-mode ${_frame_backend}
+        --eigensolver davidson --step 1e-4 --probe full --max-rel-error 1e-7)
+    set_tests_properties(integral_frame_pair_${_frame_backend} PROPERTIES
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+      ENVIRONMENT "OMP_NUM_THREADS=4;OPENBLAS_NUM_THREADS=1;MKL_NUM_THREADS=1")
+  endforeach()
+  add_test(NAME two_electron_jet COMMAND test_two_electron_jet)
+  add_test(NAME orbital_pair_direction COMMAND test_orbital_pair_direction)
+  add_test(NAME raw_integral_frame COMMAND test_raw_integral_frame)
+  set_tests_properties(fused_integral_frame two_electron_jet orbital_pair_direction raw_integral_frame PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+  add_test(NAME projected_orbital_pullback COMMAND test_projected_orbital_pullback)
+  add_test(NAME ri_projected_response COMMAND test_ri_projected_response)
   add_test(NAME accepted_pair_tile COMMAND test_accepted_pair_tile)
   add_test(NAME hessian_diagonal COMMAND test_hessian_diagonal)
   add_test(NAME keyframe COMMAND test_keyframe)

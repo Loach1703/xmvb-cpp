@@ -51,7 +51,10 @@ int main(int argc, char** argv) {
     const auto load_result =
         xmvb::vb::load_vbscf_input_with_timings(input_path, load_options);
     const fs::path molden_path =
-        xmvb::vb::write_molden_file(output_stem_path, load_result.input);
+        xmvb::vb::write_molden_file(
+            output_stem_path,
+            load_result.input.libcint_input,
+            load_result.input.orbital_preparation_input);
     std::cout << molden_path.string() << '\n';
     return 0;
   } catch (const std::exception& error) {

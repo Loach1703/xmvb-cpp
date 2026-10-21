@@ -23,6 +23,8 @@ struct CiTransportPoint {
   Eigen::MatrixXd origin_direction;
   Eigen::MatrixXd base_coefficients;
   Eigen::MatrixXd coefficients;
+  /** Exact Gram at this trial chart, shared with its keyframe when resident. */
+  std::shared_ptr<const SelectedMetric> selected_metric;
 };
 
 /** @brief Consistent energy/gradient of the residual-balanced CIAH model.

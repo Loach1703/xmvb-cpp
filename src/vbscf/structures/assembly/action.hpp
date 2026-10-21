@@ -8,6 +8,7 @@
 
 #include <Eigen/Core>
 #include "mcscf/ci/product_index.hpp"
+#include "core/workspace.hpp"
 
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "integrals/active/two_electron.hpp"
@@ -31,6 +32,7 @@ struct ExteriorTransformDirection;
 struct OrthogonalActiveIntegrals;
 
 class StructureMetricInverse;
+class SpinMetric;
 struct SpinSources;
 
 /** @brief Davidson needs a diagonal model; fixed-state actions and adjoints do not. */
@@ -194,7 +196,7 @@ public:
    */
   StructureActionResult apply_streamed(
       const Eigen::Ref<const Eigen::MatrixXd>& vectors,
-      std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
+      std::size_t workspace_bytes = workspace::available()) const;
 
   /** @brief Exact H/M through minimum row/column source factors and channel tiles.
    * Arbitrary selected structures need no closure. This explicit contraction
@@ -218,19 +220,23 @@ public:
       const std::vector<double>& one_electron_direction,
       const std::vector<double>& packed_two_electron_direction,
       StructureIntegralDirection* direct_ci_direction,
-      StructureResponseRequest* ci_response=nullptr) const;
+      StructureResponseRequest* ci_response=nullptr,
+      const Eigen::MatrixXd* ri_factor_direction=nullptr) const;
 
   /** @brief Whether exact orthogonal direct-CI directional actions are available. */
   bool supports_integral_direction() const noexcept;
 
   /** @brief Precomputes direction-independent selected-state adjoint data.
    * Optional H/M images are consumed from the same sigma sweep, not replayed.
+   * A supplied overlap_image is the exact M*C for these input columns and
+   * avoids projecting the same overlap again; it is not a CI residual estimate.
    */
   StructureAdjointState prepare_active_adjoint(
       const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
       const std::vector<double>& state_weights,
       const std::vector<double>& state_energies,
-      StructureActionResult* images = nullptr) const;
+      StructureActionResult* images = nullptr,
+      const Eigen::MatrixXd* overlap_image = nullptr) const;
 
   /** @brief Pulls a prepared direct-CI adjoint back to active integrals. */
   StructureActiveIntegralAdjoint active_integral_adjoint(
@@ -255,7 +261,8 @@ public:
       const std::vector<double>& one_electron_direction,
       const std::vector<double>& packed_two_electron_direction,
       const StructureIntegralDirection* direct_ci_direction,
-      bool include_integral_response) const;
+      bool include_integral_response,
+      const Eigen::MatrixXd* ri_factor_direction=nullptr) const;
 
   /**
    * @brief Applies the selected-subspace coupling adjoint to active integrals.
@@ -432,7 +439,7 @@ private:
       const ExteriorOrbitalTransform& beta_transform,
       const mcscf::DirectCiSigmaAction& sigma,
       bool overlap_only = false,
-      std::size_t workspace_bytes = 256ULL * 1024ULL * 1024ULL) const;
+      std::size_t workspace_bytes = workspace::available()) const;
   /** @brief Generated accepted/tangent jet with immediate shared consumers. */
   StructureResponseSweep product_jet(const StructureAdjointState& state,
       const Eigen::MatrixXd* response, const Eigen::MatrixXd* delta_upper,
@@ -440,7 +447,8 @@ private:
       const ExteriorOrbitalTransform& alpha,const ExteriorOrbitalTransform& beta,
       const mcscf::DirectCiSigmaAction& sigma,bool collect_images,
       StructureIntegralDirection* diagnostic=nullptr,
-      StructureResponseSweep* ci_sweep=nullptr) const;
+      StructureResponseSweep* ci_sweep=nullptr,
+      const Eigen::MatrixXd* overlap_image=nullptr) const;
 
   /** @brief Shared generated product graph for structure H/M actions. */
   StructureResponseSweep contract_product_tiles(
@@ -495,6 +503,12 @@ private:
       Eigen::Ref<Eigen::MatrixXd> generator) const;
   /** @brief Includes both residual-generator contractions and the H/M images. */
   bool prefer_factor_response(const mcscf::DirectCiSigmaAction& sigma) const;
+  /** @brief Exact overlap order from shear/dot work and shared-image storage.
+   * Zero extension to the product workspace does not require selected closure.
+   */
+  bool use_product_overlap(const ExteriorOrbitalTransform& alpha,
+      const ExteriorOrbitalTransform& beta, std::size_t workspace_bytes,
+      int images) const;
   /** @brief Coupled coefficient response directly from structure-space columns. */
   StructureResponseSweep source_response(const StructureAdjointState& state,
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
@@ -509,6 +523,7 @@ private:
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
       bool collect_images) const;
   friend class StructureMetricInverse;
+  friend class SpinMetric;
   /** @brief Sigma in the orthogonal carrier; inner contraction remains tiled. */
   Eigen::MatrixXd apply_carrier_hamiltonian(const Eigen::Ref<const Eigen::MatrixXd>& carrier) const;
   void adjoint_orbital_transform(Eigen::MatrixXd* carrier) const;

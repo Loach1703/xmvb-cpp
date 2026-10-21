@@ -2,6 +2,7 @@
 
 #include <Eigen/Core>
 
+#include <memory>
 #include <vector>
 
 namespace xmvb::integrals {
@@ -16,24 +17,25 @@ enum class ActiveSpaceTwoElectronRepresentation {
  */
 struct ActiveSpaceTwoElectronResult {
   /**
-   * @brief Active-space two-electron representation carried by this result.
-   *
-   * `PackedExact` stores the materialized `GGO` tensor. The production
-   * RI path now carries `ResolutionOfIdentity` directly so downstream
-   * determinant kernels can consume `L_{A,P}` without reconstructing packed
-   * active ERIs first.
+   * @brief Integral origin selecting the AO derivative backend.
+   * Both values carry a packed four-index active kernel. ResolutionOfIdentity
+   * additionally retains factors for AO transformations and derivative pullbacks,
+   * not for repeated active-space Hamiltonian contractions.
    */
   ActiveSpaceTwoElectronRepresentation representation =
       ActiveSpaceTwoElectronRepresentation::PackedExact;
 
+  /** Upper `R` with `S_active = R^T R` when the two-electron data and
+   * `dense_active_coefficients` use `Cbar = C R^{-1}`. The associated active
+   * one-electron integrals use this same frame. Empty means raw frame C.
+   */
+  Eigen::MatrixXd orbital_transform;
+
   /**
    * @brief Packed active-space two-electron integrals `GGO`.
    *
-   * The exact path always populates this buffer. The RI path fills it as a
-   * cache-friendly lookup tile only when the complete tile and its construction
-   * workspace are memory-dominated by the resident RI factor matrix. The
-   * representation remains `ResolutionOfIdentity`, so reverse-mode continues
-   * to backpropagate through the RI factors.
+   * Always populated by forward preparation, for both exact and RI AO integrals.
+   * The origin tag remains ResolutionOfIdentity for RI derivative pullbacks.
    */
   std::vector<double> packed_active_two_electron_integrals;
 
@@ -51,6 +53,12 @@ struct ActiveSpaceTwoElectronResult {
    * The matrix uses the project-standard column-major Eigen storage.
    */
   Eigen::MatrixXd ri_active_pair_factors;
+
+  /** @brief Budgeted accepted L_A C, shared by gradient and HVP consumers.
+   * Rows (active orbital, auxiliary), columns AO. An absent resident image
+   * uses the same exact auxiliary-tile transform, not a different operator.
+   */
+  std::shared_ptr<const Eigen::MatrixXd> ri_one_index_factors;
 
   /**
    * @brief Dense active-orbital coefficient table on AO rows.

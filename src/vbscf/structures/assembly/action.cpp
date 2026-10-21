@@ -15,6 +15,7 @@
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
+#include "integrals/active/raw.hpp"
 #include "mcscf/ci/planner.hpp"
 #include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma.hpp"
@@ -420,9 +421,7 @@ struct StructureAction::OrthogonalDirectCiData {
                integrals.orbital_transform.size() +
                integrals.one_electron.size() +
                integrals.pair_kernel.size() +
-               integrals.two_electron.ri_active_pair_factors.size()) *
-            sizeof(double) +
-        integrals.two_electron.packed_active_two_electron_integrals.capacity() *
+               integrals.ri_pair_factors.size()) *
             sizeof(double) +
         alpha_transform.dynamic_bytes() +
         (distinct_beta_transform
@@ -455,8 +454,11 @@ struct StructureAction::TiledPairData {
         alpha_strings(cache.alpha_reuse_table.unique_determinants),
         beta_strings(cache.beta_reuse_table.unique_determinants),
         active_overlap(overlap),
-        one_electron(h1e),
-        two_electron(active_two_electron),
+        one_electron(xmvb::integrals::materialize_raw_one_electron(
+            h1e, active_two_electron.orbital_transform)),
+        two_electron(active_two_electron.orbital_transform.size() != 0
+            ? xmvb::integrals::materialize_raw_active_integrals(active_two_electron)
+            : active_two_electron),
         n_active(n_active_orbitals) {
     if (!alpha_provider || !beta_provider) {
       throw std::invalid_argument(
@@ -1188,7 +1190,7 @@ Eigen::MatrixXd StructureAction::apply_hamiltonian(
   if (!direct_ci_ || source_contraction_) return apply(vectors).hamiltonian;
   return contract_product_tiles(vectors,direct_ci_->alpha_transform,
       direct_ci_->beta_transform(),direct_ci_->sigma,false,
-      detail::kStructureTileWorkspaceBytes,false).images.hamiltonian;
+      workspace::available(),false).images.hamiltonian;
 }
 
 Eigen::MatrixXd StructureAction::apply_overlap(
@@ -1300,7 +1302,8 @@ StructureActionResult StructureAction::apply_integral_direction(
     const std::vector<double>& one_electron_direction,
     const std::vector<double>& packed_two_electron_direction,
     StructureIntegralDirection* direct_ci_direction,
-    StructureResponseRequest* ci_response) const {
+    StructureResponseRequest* ci_response,
+    const Eigen::MatrixXd* ri_factor_direction) const {
   xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::CiIntegralDirection);
   if (!direct_ci_) {
     throw std::logic_error(
@@ -1323,7 +1326,8 @@ StructureActionResult StructureAction::apply_integral_direction(
           overlap_direction,
           delta_one_electron,
           packed_two_electron_direction,
-          n_active_orbitals));
+          n_active_orbitals,
+          ri_factor_direction));
   const auto& integral_direction=*prepared_direction;
   if (direct_ci_direction) direct_ci_direction->integrals=prepared_direction;
   const xmvb::mcscf::DirectCiSigmaAction sigma_direction(
@@ -1376,7 +1380,8 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
     const std::vector<double>& state_weights,
     const std::vector<double>& state_energies,
-    StructureActionResult* images) const {
+    StructureActionResult* images,
+    const Eigen::MatrixXd* overlap_image) const {
   if (!direct_ci_) {
     throw std::logic_error(
         "active-integral adjoint requires orthogonal direct CI");
@@ -1407,13 +1412,15 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
       n_orbitals, n_orbitals);
   if (images) {
     images->hamiltonian = Eigen::MatrixXd::Zero(n_structures_, n_states);
-    images->overlap = Eigen::MatrixXd::Zero(n_structures_, n_states);
+    images->overlap = overlap_image ? *overlap_image:
+        Eigen::MatrixXd::Zero(n_structures_, n_states);
   }
 
   if (!result.source_factors) {
     result.product_images=std::make_shared<detail::ProductImages>();
     auto sweep=product_jet(result,nullptr,nullptr,nullptr,direct_ci_->alpha_transform,
-        direct_ci_->beta_transform(),direct_ci_->sigma,images != nullptr);
+        direct_ci_->beta_transform(),direct_ci_->sigma,images != nullptr,
+        nullptr,nullptr,overlap_image);
     result.one_electron_gradient=sweep.one_electron;
     result.pair_kernel_gradient=sweep.pair_kernel;
     result.generator_gradient=sweep.generator;
@@ -1441,7 +1448,7 @@ StructureAdjointState StructureAction::prepare_active_adjoint(
           direct_ci_->beta_transform(),direct_ci_->sigma,nullptr,true,state_energies[state]);
       result.generator_gradient.noalias() += 2*state_weight*image.generator;
       images->hamiltonian.col(state) = image.images.hamiltonian.col(0);
-      images->overlap.col(state) = image.images.overlap.col(0);
+      if (!overlap_image) images->overlap.col(state) = image.images.overlap.col(0);
     } else {
       result.generator_gradient.noalias() += 2*state_weight*mcscf::factor_residual_generator_adjoint(
           direct_ci_->sigma,physical,y,state_energies[state]);
@@ -1486,7 +1493,8 @@ StructureAction::active_integral_adjoint_direction(
     const std::vector<double>& one_electron_direction,
     const std::vector<double>& packed_two_electron_direction,
     const StructureIntegralDirection* direct_ci_direction,
-    bool include_integral_response) const {
+    bool include_integral_response,
+    const Eigen::MatrixXd* ri_factor_direction) const {
   if (!direct_ci_) {
     throw std::logic_error(
         "active-integral adjoint direction requires orthogonal direct CI");
@@ -1529,7 +1537,8 @@ StructureAction::active_integral_adjoint_direction(
         overlap_direction,
         delta_one_electron,
         packed_two_electron_direction,
-        n_orbitals);
+        n_orbitals,
+        ri_factor_direction);
   } else if (!include_integral_response) {
     computed_direction.orbital_transform = Eigen::MatrixXd::Zero(
         n_orbitals, n_orbitals);

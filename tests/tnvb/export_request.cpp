@@ -20,7 +20,8 @@ int main(int argc,char** argv) {
     if (!input.tnvb.enabled || loaded.structure_expansion_seconds!=0 || !input.structure_data.alpha_det.empty()) {
       throw std::invalid_argument("requires unexpanded TNVB input");
     }
-    const auto timed=xmvb::vb::prepare_timed_active_space_context(input);
+    const Eigen::MatrixXd raw_integral_frame;
+    const auto timed=xmvb::vb::prepare_timed_active_space_context(input, &raw_integral_frame);
     const auto& prepared=timed.prepared_active_space;
     const auto& raw=input.raw_structure_data;
     const int k=input.orbital_preparation_input.n_active_orbitals;

@@ -161,10 +161,13 @@ public:
   /** @brief Finish a coupling from images/cotangents already formed with HVP.
    * Raw coefficients use coefficient_response_coordinates(); no second sigma
    * or exterior transform is needed to obtain the structure Hessian or metric.
+   * An optional chart correction is added to the overlap multiplier before
+   * the fused adjoint is finalized; it does not change the CI Hessian/metric.
    */
   StructureCoordinateCouplingAction finish_coupling_coordinates(
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,StructureResponseSweep sweep,
-      StructureActiveIntegralAdjoint* adjoint) const;
+      StructureActiveIntegralAdjoint* adjoint,
+      const Eigen::MatrixXd* multiplier_correction = nullptr) const;
 
   /** @brief Applies several coordinate directions in one H/S block action. */
   StructureCoordinateCouplingBlock apply_coupling_coordinate_block(
@@ -243,7 +246,8 @@ public:
 private:
   StructureCoordinateCouplingBlock finish_coupling_block(
       const Eigen::Ref<const Eigen::MatrixXd>& coefficients,StructureActionResult images,
-      StructureResponseSweep* sweep,StructureActiveIntegralAdjoint* adjoint) const;
+      StructureResponseSweep* sweep,StructureActiveIntegralAdjoint* adjoint,
+      const Eigen::MatrixXd* multiplier_correction = nullptr) const;
   void validate_shape(const Eigen::MatrixXd& coefficients) const;
   void project_in_place(Eigen::MatrixXd* coefficients) const;
 

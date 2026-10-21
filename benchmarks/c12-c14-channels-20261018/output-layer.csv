@@ -1,0 +1,3 @@
+case,job,steps,hvp,final_Eh,process_s,scf_s,application_s,rss_GiB,printed_coefficients_max_difference,printed_cc_max_difference,printed_renormalized_max_difference
+c12-cov,293330_0,4,33,-399.106646267316,17.85,15.915058,17.590320,3.371715545654297,0,0,0
+c12-full,293330_2,4,40,-399.417495587054,46.23,41.262053,45.898987,4.597423553466797,0,0,0

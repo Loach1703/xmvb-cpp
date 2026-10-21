@@ -2,16 +2,20 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <iterator>
 #include <list>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <numeric>
 #include <stdexcept>
 #include <unordered_map>
 
 #include "parallel/openmp.hpp"
 #include "core/timing.hpp"
+#include "vbscf/structures/orthogonal_ci/exterior_rows.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -54,6 +58,43 @@ struct ExteriorOrbitalTransform::RowCache {
   std::list<Entry> entries;
   std::unordered_map<std::uint64_t, std::list<Entry>::iterator> index;
   std::atomic<std::size_t> cached_bytes{0};
+
+  static std::uint64_t key(int begin,int count) noexcept {
+    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(begin))<<32) |
+        static_cast<std::uint32_t>(count);
+  }
+  std::shared_ptr<const Eigen::MatrixXd> find(std::uint64_t key) {
+    std::lock_guard lock(mutex);
+    const auto found=index.find(key);
+    if (found==index.end()) return {};
+    entries.splice(entries.begin(),entries,found->second);
+    return found->second->rows;
+  }
+  std::shared_ptr<const Eigen::MatrixXd> retain(std::uint64_t key,
+      std::shared_ptr<const Eigen::MatrixXd> rows) {
+    constexpr std::size_t budget=64ULL*1024*1024;
+    const std::size_t bytes=sizeof(double)*rows->size();
+    if (bytes>budget) return rows;
+    std::lock_guard lock(mutex);
+    const auto found=index.find(key);
+    if (found!=index.end()) {
+      entries.splice(entries.begin(),entries,found->second);
+      return found->second->rows;
+    }
+    std::size_t resident=cached_bytes.load(std::memory_order_relaxed);
+    while (resident>budget-bytes) {
+      auto last=std::prev(entries.end());
+      resident-=last->bytes;
+      index.erase(last->key);
+      entries.erase(last);
+    }
+    cached_bytes.store(resident,std::memory_order_relaxed);
+    entries.push_front({key,rows,bytes});
+    try { index.emplace(key,entries.begin()); }
+    catch (...) { entries.pop_front(); throw; }
+    cached_bytes.store(resident+bytes,std::memory_order_relaxed);
+    return rows;
+  }
 };
 
 ExteriorOrbitalTransform::ExteriorOrbitalTransform(
@@ -112,6 +153,7 @@ ExteriorOrbitalTransform::ExteriorOrbitalTransform(
     masks_.push_back(mask);
   }
 
+  row_plan_=std::make_shared<ExteriorRowPlan>(n_orbitals_,n_electrons_,masks_);
   determinant_scales_.resize(static_cast<int>(masks_.size()));
   for (int determinant = 0;
        determinant < static_cast<int>(masks_.size());
@@ -177,6 +219,13 @@ ExteriorOrbitalTransform::ExteriorOrbitalTransform(
               operation.removed,
               operation.inserted)});
     }
+    const std::size_t words=(masks_.size()+63)/64;
+    shear.source_words.assign(words,0);
+    for (const auto& pair:shear.pairs)
+      shear.source_words[pair.source/64]|=std::uint64_t{1}<<(pair.source%64);
+    shear.word_offsets.resize(words+1,0);
+    for (std::size_t w=0;w<words;++w)
+      shear.word_offsets[w+1]=shear.word_offsets[w]+std::popcount(shear.source_words[w]);
     shears_.push_back(std::move(shear));
   }
 }
@@ -315,31 +364,55 @@ void ExteriorOrbitalTransform::apply_supported_left(
   const int n_shears = static_cast<int>(shears_.size());
   cooperative_openmp_for(workers,workers,[&](std::ptrdiff_t part) {
     std::vector<std::uint8_t> allowed(dimension());
+    std::vector<std::uint64_t> words((dimension()+63)/64);
     const int first=beta_count*part/workers;
     const int last=beta_count*(part+1)/workers;
     for (int beta=first;beta<last;++beta) {
       std::fill(allowed.begin(), allowed.end(), 0);
-      for (int index=offsets[beta];index<offsets[beta+1];++index)
+      std::fill(words.begin(),words.end(),0);
+      for (int index=offsets[beta];index<offsets[beta+1];++index) {
         allowed[rows[index]]=1;
+        words[rows[index]/64]|=std::uint64_t{1}<<(rows[index]%64);
+      }
       for (Eigen::Index column=beta;column<coefficients->cols();column+=beta_count) {
         auto values = coefficients->col(column);
         for (int alpha = 0; alpha < dimension(); ++alpha) {
           if (!allowed[alpha]) values[alpha] = 0.0;
           else if (!adjoint) values[alpha] *= determinant_scales_[alpha];
         }
-        for (int index = 0; index < n_shears; ++index) {
-          const Shear& shear = shears_[adjoint ? n_shears - 1 - index : index];
-          if (shear.coefficient==0.0) continue;
-          for (const auto& pair : shear.pairs) {
-            if (!allowed[pair.source] || !allowed[pair.target]) continue;
-            const int target = adjoint ? pair.source : pair.target;
-            const int source = adjoint ? pair.target : pair.source;
-            values[target] += shear.coefficient * pair.sign * values[source];
+      }
+      // The graph belongs to beta's symbolic support, not to an RHS. Visit
+      // its intersection once and update the independent RHS lanes together.
+      const bool full=offsets[beta+1]-offsets[beta]==dimension();
+      for (int index = 0; index < n_shears; ++index) {
+        const Shear& shear = shears_[adjoint ? n_shears - 1 - index : index];
+        if (shear.coefficient==0.0) continue;
+        const auto update=[&](const DeterminantPair& pair) {
+          const int target = adjoint ? pair.source : pair.target;
+          const int source = adjoint ? pair.target : pair.source;
+          const double factor=shear.coefficient*pair.sign;
+          for (Eigen::Index column=beta;column<coefficients->cols();column+=beta_count)
+            (*coefficients)(target,column)+=factor*(*coefficients)(source,column);
+        };
+        if (full) {
+          for (const auto& pair:shear.pairs) update(pair);
+        } else for (std::size_t w=0;w<words.size();++w) {
+          const auto sources=shear.source_words[w];
+          auto live=sources & words[w];
+          while (live) {
+            const int bit=std::countr_zero(live);
+            const int edge=shear.word_offsets[w]+
+                std::popcount(sources & ((std::uint64_t{1}<<bit)-1));
+            const auto& pair=shear.pairs[edge];
+            if (allowed[pair.target]) update(pair);
+            live&=live-1;
           }
         }
-        if (adjoint)
-          for (int alpha = 0; alpha < dimension(); ++alpha)
-            if (allowed[alpha]) values[alpha] *= determinant_scales_[alpha];
+      }
+      if (adjoint) for (Eigen::Index column=beta;column<coefficients->cols();column+=beta_count) {
+        auto values=coefficients->col(column);
+        for (int alpha = 0; alpha < dimension(); ++alpha)
+          if (allowed[alpha]) values[alpha] *= determinant_scales_[alpha];
       }
     }
   });
@@ -367,58 +440,64 @@ std::shared_ptr<const Eigen::MatrixXd> ExteriorOrbitalTransform::row_block(
   if (begin < 0 || count <= 0 || begin > dimension() - count) {
     throw std::invalid_argument("exterior row block is out of range");
   }
-  constexpr std::size_t kCacheBytes = 64ULL * 1024ULL * 1024ULL;
-  const std::uint64_t key =
-      (static_cast<std::uint64_t>(static_cast<std::uint32_t>(begin)) << 32) |
-      static_cast<std::uint32_t>(count);
-  {
-    std::lock_guard<std::mutex> lock(row_cache_->mutex);
-    const auto found = row_cache_->index.find(key);
-    if (found != row_cache_->index.end()) {
-      row_cache_->entries.splice(row_cache_->entries.begin(),
-                                 row_cache_->entries, found->second);
-      return found->second->rows;
-    }
-  }
-
+  const auto key=RowCache::key(begin,count);
+  if (auto rows=row_cache_->find(key)) return rows;
   // Generate outside the mutex; other readers may use cached rows meanwhile.
-  auto rows = std::make_shared<Eigen::MatrixXd>(count, dimension());
-  rows->setZero();
-  rows->middleCols(begin, count).setIdentity();
-  apply_adjoint_right_block(*rows);
+  std::vector<int> selected(count);
+  std::iota(selected.begin(),selected.end(),begin);
   const std::size_t width = static_cast<std::size_t>(dimension());
   if (static_cast<std::size_t>(count) >
       std::numeric_limits<std::size_t>::max() / width / sizeof(double)) {
     throw std::length_error("exterior row block byte count overflows");
   }
-  const std::size_t bytes =
-      static_cast<std::size_t>(count) * width * sizeof(double);
-  if (bytes > kCacheBytes) return rows;
+  return row_cache_->retain(key,std::make_shared<Eigen::MatrixXd>(
+      row_plan_->apply(orbital_transform_,masks_,selected)));
+}
 
-  std::lock_guard<std::mutex> lock(row_cache_->mutex);
-  const auto found = row_cache_->index.find(key);
-  if (found != row_cache_->index.end()) {
-    row_cache_->entries.splice(row_cache_->entries.begin(),
-                               row_cache_->entries, found->second);
-    return found->second->rows;
+Eigen::SparseMatrix<double> ExteriorOrbitalTransform::generate_rows(std::span<const int> rows) const {
+  for (const int row:rows)
+    if (row<0 || row>=dimension())
+      throw std::invalid_argument("exterior row index is out of range");
+  // A cached factor is contiguous by row. Assemble it in the same ordering;
+  // converting the complete panel once avoids per-row scattered stores.
+  ExteriorRowPlan::Rows result(rows.size(),dimension());
+  std::vector<int> missing,positions;
+  for (int i=0;i<static_cast<int>(rows.size());++i) {
+    if (auto value=row_cache_->find(RowCache::key(rows[i],1))) result.row(i)=value->row(0);
+    else { missing.push_back(rows[i]); positions.push_back(i); }
   }
-  std::size_t resident = row_cache_->cached_bytes.load(std::memory_order_relaxed);
-  while (resident > kCacheBytes - bytes) {
-    auto last = std::prev(row_cache_->entries.end());
-    resident -= last->bytes;
-    row_cache_->index.erase(last->key);
-    row_cache_->entries.erase(last);
+  if (!missing.empty()) {
+    const auto values=row_plan_->apply(orbital_transform_,masks_,missing);
+    for (int i=0;i<static_cast<int>(missing.size());++i) {
+      result.row(positions[i])=values.row(i);
+      // Cache immutable orbital factors, not state-dependent CI columns.
+      // Input generation and output projection share the existing row budget.
+      row_cache_->retain(RowCache::key(missing[i],1),
+          std::make_shared<Eigen::MatrixXd>(values.row(i)));
+    }
   }
-  row_cache_->cached_bytes.store(resident, std::memory_order_relaxed);
-  row_cache_->entries.push_front(RowCache::Entry{key, rows, bytes});
-  try {
-    row_cache_->index.emplace(key, row_cache_->entries.begin());
-  } catch (...) {
-    row_cache_->entries.pop_front();
-    throw;
-  }
-  row_cache_->cached_bytes.store(resident + bytes, std::memory_order_relaxed);
-  return rows;
+  // Convert the assembled panel once, then count/pack independent CSC
+  // columns in parallel. No per-spin-product allocation or serial sparse scan.
+  const Eigen::MatrixXd dense=result;
+  Eigen::SparseMatrix<double> factors(dense.rows(),dense.cols());
+  int* offsets=factors.outerIndexPtr();
+  offsets[0]=0;
+  const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),dense.size());
+  cooperative_openmp_for(dense.cols(),workers,[&](std::ptrdiff_t column) {
+    offsets[column+1]=(dense.col(column).array()!=0.0).count();
+  });
+  for (int column=0;column<dense.cols();++column) offsets[column+1]+=offsets[column];
+  factors.resizeNonZeros(offsets[dense.cols()]);
+  cooperative_openmp_for(dense.cols(),workers,[&](std::ptrdiff_t column) {
+    int slot=offsets[column];
+    for (int row=0;row<dense.rows();++row) {
+      const double value=dense(row,column);
+      if (value==0.0) continue;
+      factors.innerIndexPtr()[slot]=row;
+      factors.valuePtr()[slot++]=value;
+    }
+  });
+  return factors;
 }
 
 void ExteriorOrbitalTransform::validate_inverse() const {
@@ -830,9 +909,12 @@ std::size_t ExteriorOrbitalTransform::dynamic_bytes() const noexcept {
       shears_.capacity() * sizeof(Shear);
   for (const Shear& shear : shears_) {
     bytes += shear.pairs.capacity() * sizeof(DeterminantPair);
+    bytes += shear.source_words.capacity()*sizeof(std::uint64_t)+
+        shear.word_offsets.capacity()*sizeof(int);
   }
   if (row_cache_)
     bytes += row_cache_->cached_bytes.load(std::memory_order_relaxed);
+  bytes+=row_plan_->dynamic_bytes();
   return bytes;
 }
 

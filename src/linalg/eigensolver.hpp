@@ -74,9 +74,9 @@ struct DavidsonOptions {
   /** @brief Optional per-iteration observation after all root residuals are
    * evaluated, including the final converged iteration. The arguments are
    * iteration number, active subspace size, lowest Ritz energy, and largest
-   * algebraic relative residual among the requested roots.
+   * algebraic relative residual, and largest stationarity residual among roots.
    */
-  std::function<void(int, int, double, double)> observe_iteration = {};
+  std::function<void(int, int, double, double, double)> observe_iteration = {};
   /** @brief Exact identity metric: the action returns an empty overlap image.
    * Shares the generalized solver but omits the redundant S-basis storage,
    * products and reorthogonalization updates. Subspace/accuracy budgets stay

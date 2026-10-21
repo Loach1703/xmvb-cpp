@@ -72,6 +72,23 @@ build_exact_packed_active_two_electron_adjoint_cache(
     int n_active_orbitals,
     const ActiveSpaceTwoElectronResult& accepted_active_space_two_electron_result);
 
+/** @brief Combined fixed-adjoint and changing-adjoint exact orbital jet.
+ *
+ * The cached accepted adjoint, `packed_gradient_direction`, accepted active
+ * coefficients, and `dense_active_direction` must all use the same active
+ * orbital frame. An optional directional pair product is the forward
+ * `K * delta T(C)` in that frame; supplying it avoids a second AO action.
+ * The result is AO-by-active and does not include any frame pullback.
+ */
+void apply_exact_active_two_electron_jet(
+    const ExactPackedActiveTwoElectronAdjointCache& accepted_cache,
+    const Eigen::Ref<const Eigen::MatrixXd>& dense_active_direction,
+    const std::vector<double>& packed_gradient_direction,
+    const AoIntegralInput& ao_integral_input,
+    ExactPackedActiveTwoElectronApplyWorkspace* workspace,
+    Eigen::MatrixXd* dense_active_gradient_direction,
+    const ExactCtxPairMatrix* directional_pair_products = nullptr);
+
 /**
  * @brief Applies the exact fixed-adjoint 2e Hessian using one accepted-point cache.
  *

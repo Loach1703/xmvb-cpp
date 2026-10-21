@@ -30,7 +30,8 @@ void compute_exact_packed_active_two_electron_integral_directional_derivative(
     const Eigen::Ref<const Eigen::MatrixXd>& dense_active_direction,
     const AoIntegralInput& ao_integral_input,
     ExactPackedActiveTwoElectronDirectionalDerivativeWorkspace* workspace,
-    std::vector<double>* delta_packed_active_two_electron_integrals) {
+    std::vector<double>* delta_packed_active_two_electron_integrals,
+    bool compute_fixed_adjoint) {
   if (workspace == nullptr) {
     throw std::invalid_argument("exact packed delta GGO workspace must not be null");
   }
@@ -76,11 +77,15 @@ void compute_exact_packed_active_two_electron_integral_directional_derivative(
         "cached active-pair adjoint size mismatch in delta GGO");
   }
   if (accepted_cache.accepted_pair_products == nullptr) {
-    workspace->dense_active_direction = dense_active_direction;
+    if (compute_fixed_adjoint)
+      workspace->dense_active_direction = dense_active_direction;
     workspace->active_pair_contraction.setZero(
         static_cast<Eigen::Index>(n_active_pairs),
         static_cast<Eigen::Index>(n_active_pairs));
-    workspace->dense_fixed_adjoint_direction.setZero(n_bf, n_ao);
+    if (compute_fixed_adjoint)
+      workspace->dense_fixed_adjoint_direction.setZero(n_bf, n_ao);
+    else
+      workspace->dense_fixed_adjoint_direction.resize(0, 0);
     const Eigen::Index tile_rows = n_bf;
     for (Eigen::Index row_begin = 0;
          row_begin < static_cast<Eigen::Index>(n_bf_pairs);
@@ -98,35 +103,37 @@ void compute_exact_packed_active_two_electron_integral_directional_derivative(
       apply_generated_pair_rows(
           ao_integral_input,
           *accepted_cache.accepted_active_coefficients,
-          &workspace->dense_active_direction,
+          compute_fixed_adjoint ? &workspace->dense_active_direction : nullptr,
           accepted_cache,
           row_begin,
           row_count,
           &workspace->accepted_pair_products_tile,
-          &workspace->directional_pair_products);
+          compute_fixed_adjoint ? &workspace->directional_pair_products : nullptr);
       workspace->active_pair_contraction.noalias() +=
           workspace->directional_pair_coefficients.transpose() *
           workspace->accepted_pair_products_tile;
 
-      workspace->pair_gradients_tile.noalias() =
-          workspace->accepted_pair_products_tile *
-          accepted_cache.active_pair_gradient_matrix;
-      accumulate_pair_gradient_rows(
-          workspace->pair_gradients_tile,
-          row_begin,
-          dense_active_direction,
-          accepted_cache,
-          &workspace->dense_fixed_adjoint_direction);
+      if (compute_fixed_adjoint) {
+        workspace->pair_gradients_tile.noalias() =
+            workspace->accepted_pair_products_tile *
+            accepted_cache.active_pair_gradient_matrix;
+        accumulate_pair_gradient_rows(
+            workspace->pair_gradients_tile,
+            row_begin,
+            dense_active_direction,
+            accepted_cache,
+            &workspace->dense_fixed_adjoint_direction);
 
-      workspace->pair_gradients_tile.noalias() =
-          workspace->directional_pair_products *
-          accepted_cache.active_pair_gradient_matrix;
-      accumulate_pair_gradient_rows(
-          workspace->pair_gradients_tile,
-          row_begin,
-          *accepted_cache.accepted_active_coefficients,
-          accepted_cache,
-          &workspace->dense_fixed_adjoint_direction);
+        workspace->pair_gradients_tile.noalias() =
+            workspace->directional_pair_products *
+            accepted_cache.active_pair_gradient_matrix;
+        accumulate_pair_gradient_rows(
+            workspace->pair_gradients_tile,
+            row_begin,
+            *accepted_cache.accepted_active_coefficients,
+            accepted_cache,
+            &workspace->dense_fixed_adjoint_direction);
+      }
     }
     workspace->directional_pair_products.resize(0, 0);
   } else {
@@ -320,7 +327,8 @@ compute_exact_packed_active_two_electron_integral_directional_derivative_batch(
       for (Eigen::Index direction = 0; direction < n_directions; ++direction) {
         compute_exact_packed_active_two_electron_integral_directional_derivative(
             accepted_cache, dense_active_directions[direction],
-            ao_integral_input, &workspace, &packed_direction);
+            ao_integral_input, &workspace, &packed_direction,
+            fixed_adjoint_directions != nullptr);
         packed_directions.col(direction) = Eigen::Map<const Eigen::VectorXd>(
             packed_direction.data(), packed_direction.size());
         if (directional_pair_products != nullptr)

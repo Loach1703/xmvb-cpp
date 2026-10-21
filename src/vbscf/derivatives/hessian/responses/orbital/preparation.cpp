@@ -693,6 +693,75 @@ std::vector<double> backpropagate_active_space_orbital_gradient(
       cache);
 }
 
+std::vector<double> backpropagate_active_space_orbital_gradient(
+    const Eigen::Ref<const Eigen::MatrixXd>& active_auxiliary_gradient,
+    InactiveDensityProjection inactive_density_projection,
+    const OrbitalPreparationInput& input,
+    const OrbitalPreparationResult& /*orbital_preparation_result*/,
+    const AcceptedOrbitalPreparationCache& cache) {
+  if (input.n_basis_functions <= 0 || input.n_orbitals <= 0 ||
+      input.n_active_orbitals <= 0) {
+    throw std::invalid_argument(
+        "cached orbital backprop input dimensions must be positive");
+  }
+  const int n_inactive_doubly_occupied_orbitals =
+      (input.n_total_electrons - input.n_active_electrons) / 2;
+  const int n_basis_functions = input.n_basis_functions;
+  if (active_auxiliary_gradient.rows() != n_basis_functions ||
+      active_auxiliary_gradient.cols() != input.n_active_orbitals ||
+      inactive_density_projection.symmetric_times_duals.rows() !=
+          n_basis_functions ||
+      inactive_density_projection.symmetric_times_duals.cols() !=
+          n_inactive_doubly_occupied_orbitals ||
+      cache.normalized_orbitals.rows() != n_basis_functions ||
+      cache.normalized_orbitals.cols() != input.n_orbitals ||
+      cache.basis_overlap_times_normalized.rows() != n_basis_functions ||
+      cache.basis_overlap_times_normalized.cols() != input.n_orbitals ||
+      (n_inactive_doubly_occupied_orbitals > 0 &&
+       (cache.inactive_auxiliary.rows() != n_basis_functions ||
+        cache.inactive_auxiliary.cols() !=
+            n_inactive_doubly_occupied_orbitals))) {
+    throw std::invalid_argument(
+        "cached orbital backprop projected dimensions are inconsistent");
+  }
+  Eigen::MatrixXd original_orbital_gradient =
+      Eigen::MatrixXd::Zero(input.n_basis_functions, input.n_orbitals);
+  if (n_inactive_doubly_occupied_orbitals == 0) {
+    original_orbital_gradient.middleCols(0, input.n_active_orbitals) =
+        active_auxiliary_gradient;
+  } else {
+    const Eigen::MatrixXd basis_overlap_times_inactive =
+        cache.basis_overlap_times_normalized.leftCols(
+            n_inactive_doubly_occupied_orbitals);
+    const Eigen::MatrixXd basis_overlap_times_active =
+        cache.basis_overlap_times_normalized.middleCols(
+            n_inactive_doubly_occupied_orbitals,
+            input.n_active_orbitals);
+
+    const auto& duals = cache.inactive_auxiliary;
+    Eigen::MatrixXd inactive_source =
+        inactive_density_projection.symmetric_times_duals;
+    inactive_source.noalias() -= active_auxiliary_gradient *
+        (basis_overlap_times_active.transpose() * duals);
+    inactive_source.noalias() -= basis_overlap_times_active *
+        (active_auxiliary_gradient.transpose() * duals);
+
+    original_orbital_gradient.leftCols(n_inactive_doubly_occupied_orbitals) =
+        inactive_source - basis_overlap_times_inactive *
+            (duals.transpose() * inactive_source);
+    original_orbital_gradient.middleCols(
+        n_inactive_doubly_occupied_orbitals,
+        input.n_active_orbitals) = active_auxiliary_gradient -
+        basis_overlap_times_inactive *
+            (duals.transpose() * active_auxiliary_gradient);
+  }
+
+  return backpropagate_normalization_to_raw_slots(
+      original_orbital_gradient,
+      input,
+      cache);
+}
+
 DenseOrbitalTangentContext build_dense_orbital_tangent_context(
     const OrbitalPreparationInput& input,
     const SparseParameterLayout& parameter_view,

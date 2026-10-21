@@ -6,8 +6,11 @@
 #include <vector>
 
 #include <Eigen/Core>
+#include <Eigen/SparseCore>
 
 namespace xmvb::vb {
+
+class ExteriorRowPlan;
 
 /** @brief First derivative of one retained exterior-power transform. */
 struct ExteriorTransformDirection {
@@ -81,6 +84,11 @@ public:
    * after eviction through the returned shared ownership.
    */
   std::shared_ptr<const Eigen::MatrixXd> row_block(int begin, int count) const;
+
+  /** @brief Requested rows in exact CSC format, sharing the bounded factor LRU.
+   * Only exact zeros are omitted. No unrequested beta columns are generated.
+   */
+  Eigen::SparseMatrix<double> generate_rows(std::span<const int> rows) const;
 
   /** @brief Applies the inverse exterior transform to rows in place. */
   void apply_inverse_left(Eigen::MatrixXd* coefficients) const;
@@ -157,6 +165,9 @@ private:
   struct Shear {
     double coefficient = 0.0;
     std::vector<DeterminantPair> pairs;
+    /** Source-bit rank maps a support intersection back to the shared edges. */
+    std::vector<std::uint64_t> source_words;
+    std::vector<int> word_offsets;
   };
 
   void validate_left(const Eigen::MatrixXd& coefficients) const;
@@ -178,6 +189,7 @@ private:
   Eigen::VectorXd determinant_scales_;
   std::vector<Shear> shears_;
   std::shared_ptr<RowCache> row_cache_;
+  std::shared_ptr<const ExteriorRowPlan> row_plan_;
 };
 
 }  // namespace xmvb::vb

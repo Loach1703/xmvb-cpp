@@ -1,12 +1,17 @@
 #include "vbscf/structures/assembly/action.hpp"
 
 #include <algorithm>
+#include <array>
+#include <numeric>
+
+#include <Eigen/SparseCore>
 
 #include "parallel/openmp.hpp"
 #include "core/timing.hpp"
 #include "mcscf/ci/product_support.hpp"
 #include "mcscf/ci/sigma.hpp"
 #include "vbscf/structures/assembly/column_tiles.hpp"
+#include "vbscf/structures/assembly/input_columns.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 
 namespace xmvb::vb {
@@ -48,8 +53,10 @@ StructureActionResult StructureAction::apply_orthogonal_tiled(
     bool overlap_only,
     std::size_t workspace_bytes) const {
   if (source_contraction_)
+    // Source order has no product-column caches or separate sigma slab;
+    // its factor workspace receives the unsplit action budget.
     return apply_source_tiles(vectors, alpha_transform, beta_transform, sigma,
-        overlap_only, 64ULL * 1024ULL * 1024ULL);
+        overlap_only,workspace_bytes);
   return contract_product_tiles(vectors,alpha_transform,beta_transform,sigma,
       overlap_only,workspace_bytes).images;
 }
@@ -60,6 +67,15 @@ StructureResponseSweep StructureAction::contract_product_tiles(
     const mcscf::DirectCiSigmaAction& sigma,bool overlap_only,std::size_t workspace_bytes,
     bool collect_overlap) const {
   constexpr bool collect_images=true;
+  // Opt-in deltas survive an externally bounded diagnostic. Nested phase
+  // totals describe call paths; they are not additive stage wall times.
+  auto& phases=profiling::phase_totals();
+  constexpr std::array measured{profiling::Phase::CiTransformLeft,
+      profiling::Phase::CiTransformRight,profiling::Phase::CiProductGenerate,
+      profiling::Phase::CiProductProjection,profiling::Phase::CiProductPattern};
+  std::array<unsigned long long,measured.size()> phase_begin{};
+  if (phases.enabled) for (std::size_t i=0;i<measured.size();++i)
+    phase_begin[i]=phases.nanoseconds[static_cast<std::size_t>(measured[i])].load(std::memory_order_relaxed);
   StructureResponseSweep sweep{{Eigen::MatrixXd::Zero(collect_images ? n_structures_:0,vectors.cols()),
       Eigen::MatrixXd::Zero(collect_images && collect_overlap ? n_structures_:0,vectors.cols())},
       Eigen::MatrixXd{},
@@ -73,12 +89,12 @@ StructureResponseSweep StructureAction::contract_product_tiles(
   const std::size_t sigma_vector_bytes = sizeof(double) *
       static_cast<std::size_t>(n_unique_alpha_) * (2 * pairs + 4);
   // Keep a small carrier's RHS panels resident across the sigma halo sweeps.
-  // A larger carrier still runs with one RHS and eviction; this never acts
-  // as an admission test for the physical representation.
+  // A larger carrier evicts columns; RHS batching only needs the sigma
+  // workspace, not full-product residency. This never gates representation.
   const std::size_t resident_rhs = cache_bytes / sizeof(double) /
       static_cast<std::size_t>(n_unique_alpha_) / n_unique_beta_;
   const int batch_width = static_cast<int>(std::min<std::size_t>(vectors.cols(),
-      std::max<std::size_t>(1, std::min(resident_rhs, cache_bytes / sigma_vector_bytes))));
+      std::max<std::size_t>(1,cache_bytes/sigma_vector_bytes)));
   const std::size_t row_bytes = sizeof(double) *
       (static_cast<std::size_t>(n_unique_alpha_) * batch_width + n_unique_beta_);
   // Each worker gets at least a cache-line span in the right-transform
@@ -88,96 +104,123 @@ StructureResponseSweep StructureAction::contract_product_tiles(
   const int extent = static_cast<int>(std::min<std::size_t>(
       n_unique_beta_, std::max<std::size_t>(1,
           std::min(parallel_extent, cache_bytes / std::max<std::size_t>(1, 4 * row_bytes)))));
-  const int count = (n_unique_beta_ + extent - 1) / extent;
-
-  // Immutable accepted-point rows are shared across H/S and RHS batches.
-  // Borrowed tiles remain valid even if the bounded transform cache evicts.
-  const auto beta_rows = [&](int panel) {
-    const int first = panel * extent;
-    return beta_transform.row_block(first, std::min(extent, n_unique_beta_ - first));
-  };
-
   const auto* support=product_support_.get();
-  std::vector<std::uint8_t> panel_support(count,0);
-  std::vector<int> reachable_panels;
-  const auto include_panel=[&](int panel) {
-    if (!panel_support[panel]) { panel_support[panel]=1; reachable_panels.push_back(panel); }
-  };
+  std::vector<std::uint8_t> column_support(n_unique_beta_,support ? 0:1);
+  std::vector<int> reachable_columns;
   if (support && !support->full()) {
-    auto columns=support->cursor(0);
-    int beta;
-    while (columns.next_column(beta)) include_panel(beta/extent);
-    std::sort(reachable_panels.begin(),reachable_panels.end());
-  } else for (int panel=0;panel<count;++panel) include_panel(panel);
+    reachable_columns=support->columns();
+    for (const int beta:reachable_columns) column_support[beta]=1;
+  } else {
+    std::fill(column_support.begin(),column_support.end(),1);
+    reachable_columns.resize(n_unique_beta_);
+    std::iota(reachable_columns.begin(),reachable_columns.end(),0);
+  }
+  const bool ordered_beta=detail::prefer_ordered_beta(spin_products_.size(),
+      n_unique_alpha_,n_unique_beta_,beta_transform.shear_pair_count(),reachable_columns.size());
   // Weak references share input/output patterns without an unbounded support
   // table. Their strong lifetime and byte charge belong to the bounded LRUs.
-  std::vector<std::weak_ptr<const ColumnPattern>> patterns(count);
-  const auto pattern_at=[&](int panel)->std::shared_ptr<const ColumnPattern> {
-    if (auto pattern=patterns[panel].lock()) return pattern;
+  std::vector<std::weak_ptr<const ColumnPattern>> patterns(n_unique_beta_);
+  const auto pattern_at=[&](int beta)->std::shared_ptr<const ColumnPattern> {
+    if (auto pattern=patterns[beta].lock()) return pattern;
     profiling::ScopedPhase phase(profiling::Phase::CiProductPattern);
     auto pattern=std::make_shared<ColumnPattern>();
-    const int cols=std::min(extent,n_unique_beta_-panel*extent);
-    pattern->offsets.resize(cols+1);
+    pattern->offsets.resize(2);
     pattern->offsets[0]=0;
     pattern->full=!support || support->full();
-    if (pattern->full)
-      for (int b=0;b<cols;++b) pattern->offsets[b+1]=(b+1)*n_unique_alpha_;
+    if (pattern->full) pattern->offsets[1]=n_unique_alpha_;
     else {
-      std::vector<std::vector<int>> rows(cols);
-      const int workers=bounded_openmp_thread_count(cooperative_openmp_thread_count(),cols);
-      cooperative_openmp_for(cols,workers,[&](std::ptrdiff_t b) {
-        auto cursor=support->column(panel*extent+b,0);
-        int a,beta; bool label;
-        while (cursor.next(a,beta,label)) rows[b].push_back(a);
-        if (!std::is_sorted(rows[b].begin(),rows[b].end())) std::sort(rows[b].begin(),rows[b].end());
-      });
-      for (int b=0;b<cols;++b) pattern->offsets[b+1]=pattern->offsets[b]+rows[b].size();
-      pattern->rows.resize(pattern->offsets[cols]);
-      for (int b=0;b<cols;++b)
-        std::copy(rows[b].begin(),rows[b].end(),pattern->rows.data()+pattern->offsets[b]);
+      std::vector<int> rows;
+      support->append_column_rows(beta,rows);
+      pattern->offsets[1]=rows.size();
+      pattern->rows=Eigen::Map<const Eigen::VectorXi>(rows.data(),rows.size());
     }
-    patterns[panel]=pattern;
+    patterns[beta]=pattern;
     return pattern;
   };
-  std::vector<int> alpha_position(n_unique_alpha_,-1);
-
+  const auto merge_patterns=[](const std::vector<std::shared_ptr<const ColumnPattern>>& columns) {
+    ColumnPattern result;
+    result.full=columns.front()->full;
+    result.offsets.resize(columns.size()+1); result.offsets[0]=0;
+    for (std::size_t b=0;b<columns.size();++b)
+      result.offsets[b+1]=result.offsets[b]+columns[b]->offsets[1];
+    if (!result.full) {
+      result.rows.resize(result.offsets[columns.size()]);
+      for (std::size_t b=0;b<columns.size();++b)
+        result.rows.segment(result.offsets[b],columns[b]->rows.size())=columns[b]->rows;
+    }
+    return result;
+  };
   for (int vector_begin = 0; vector_begin < vectors.cols(); vector_begin += batch_width) {
     ++result.tiles.expansions;
     const int width = std::min<int>(batch_width, vectors.cols() - vector_begin);
+    const bool ordered=ordered_beta && resident_rhs>=static_cast<std::size_t>(width);
+    // Replace the input/output LRU payloads within the same workspace quarters.
+    // Zero-scattering a selected raw support does not assume CAS completeness.
+    Eigen::MatrixXd input_image,h_image;
+    if (ordered) {
+      profiling::ScopedPhase phase(profiling::Phase::CiProductGenerate);
+      input_image=expand_structure_block(vectors.middleCols(vector_begin,width));
+      alpha_transform.apply_left(&input_image);
+      for (int v=0;v<width;++v)
+        beta_transform.apply_right_block(input_image.middleCols(v*n_unique_beta_,n_unique_beta_));
+      if (!overlap_only) h_image=Eigen::MatrixXd::Zero(input_image.rows(),input_image.cols());
+    }
     // Expand once per RHS, not once per beta panel. For a covalent space
     // these groups are exactly (A, complement(A)): only O(U) coefficients.
-    Eigen::MatrixXd coefficients = Eigen::MatrixXd::Zero(spin_products_.size(), width);
+    Eigen::MatrixXd coefficients = Eigen::MatrixXd::Zero(ordered ? 0:spin_products_.size(), width);
 #pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
-    for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group)
+    for (int group = 0; group < coefficients.rows(); ++group)
       for (int vector = 0; vector < width; ++vector)
         for (std::size_t term = spin_term_offsets_[group];
              term < spin_term_offsets_[group + 1]; ++term)
           coefficients(group, vector) += spin_terms_[term].coefficient *
               vectors(spin_terms_[term].structure, vector_begin + vector);
-    Eigen::MatrixXd h_products = Eigen::MatrixXd::Zero(collect_images ? spin_products_.size():0, width);
-    Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(collect_images && collect_overlap ? spin_products_.size():0, width);
-    const auto project = [&](int panel, const Eigen::MatrixXd& rows,
+    Eigen::MatrixXd h_products = Eigen::MatrixXd::Zero(!ordered ? spin_products_.size():0, width);
+    Eigen::MatrixXd m_products = Eigen::MatrixXd::Zero(!ordered && collect_overlap ? spin_products_.size():0, width);
+    const auto project_pattern = [&](const ColumnPattern& pattern, const Eigen::SparseMatrix<double>& rows,
                              Eigen::MatrixXd& image, Eigen::MatrixXd& target) {
       profiling::ScopedPhase phase(profiling::Phase::CiProductProjection);
       // C^T (T_alpha^T image T_beta): only touched original spin products
       // are sampled. This is exact for any selected structure subspace.
-      const auto pattern=pattern_at(panel);
-      if (pattern->full) alpha_transform.apply_adjoint_left(&image);
+      if (pattern.full) alpha_transform.apply_adjoint_left(&image);
       else alpha_transform.apply_supported_left(&image,
-          {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
-          {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())},true);
-#pragma omp parallel for schedule(static) if(spin_products_.size() > 32)
-      for (int group = 0; group < static_cast<int>(spin_products_.size()); ++group) {
+          {pattern.offsets.data(),static_cast<std::size_t>(pattern.offsets.size())},
+          {pattern.rows.data(),static_cast<std::size_t>(pattern.rows.size())},true);
+      const int workers=coarse_openmp_thread_count(cooperative_openmp_thread_count(),spin_products_.size());
+      cooperative_openmp_for(spin_products_.size(),workers,[&](std::ptrdiff_t group) {
         const int alpha = spin_products_[group] / n_unique_beta_;
         const int beta = spin_products_[group] % n_unique_beta_;
-        for (int vector = 0; vector < width; ++vector)
-          target(group, vector) += image.row(alpha)
-              .segment(vector * rows.rows(), rows.rows()).dot(rows.col(beta));
-      }
+        for (int vector = 0; vector < width; ++vector) {
+          double sum=0.0;
+          for (Eigen::SparseMatrix<double>::InnerIterator entry(rows,beta);entry;++entry)
+            sum+=image(alpha,vector*rows.rows()+entry.row())*entry.value();
+          target(group,vector)+=sum;
+        }
+      });
     };
     const auto contract = [&]() {
       if (!collect_images) return;
       ++result.tiles.structure_projections;
+      if (ordered) {
+        profiling::ScopedPhase phase(profiling::Phase::CiProductProjection);
+        // Sigma has finished reading Y. Its storage becomes the overlap
+        // pullback; a third full carrier is unnecessary.
+        const auto pullback=[&](Eigen::MatrixXd& image) {
+          alpha_transform.apply_adjoint_left(&image);
+          for (int v=0;v<width;++v)
+            beta_transform.apply_adjoint_right_block(image.middleCols(v*n_unique_beta_,n_unique_beta_));
+          return contract_spin_product_block(image);
+        };
+        if (!overlap_only) {
+          ++result.tiles.hamiltonian_projections;
+          result.hamiltonian.middleCols(vector_begin,width)=pullback(h_image);
+        }
+        if (collect_overlap) {
+          ++result.tiles.overlap_projections;
+          result.overlap.middleCols(vector_begin,width)=pullback(input_image);
+        }
+        return;
+      }
       // Apply P^T only after all panels have contributed to each spin pair.
 #pragma omp parallel for schedule(static) if(n_structures_ > 32)
       for (int structure = 0; structure < n_structures_; ++structure) {
@@ -195,68 +238,109 @@ StructureResponseSweep StructureAction::contract_product_tiles(
       }
     };
 
-    std::vector<bool> overlap_consumed(count, !collect_overlap);
-    ColumnPanels input(cache_bytes, [&](int panel) -> ColumnTile {
+    std::vector<bool> overlap_consumed(n_unique_beta_, !collect_overlap);
+    std::size_t factor_entries=0,factor_slots=0;
+    const auto sample_factors=[&](std::span<const int> betas) {
+      // Exact zero only: no amplitude threshold and no selected-space closure.
+      auto factors=beta_transform.generate_rows(betas);
+      factor_entries+=factors.nonZeros();
+      factor_slots+=static_cast<std::size_t>(factors.rows())*factors.cols();
+      return factors;
+    };
+    detail::InputColumns input(n_unique_alpha_,width,extent,cache_bytes,column_support,
+        [&](std::span<const int> betas) -> std::vector<ColumnTile> {
       profiling::ScopedPhase phase(profiling::Phase::CiProductGenerate);
       ++result.tiles.input_panels;
-      const auto pattern=pattern_at(panel);
-      const auto row_tile = beta_rows(panel);
-      const Eigen::MatrixXd& rows = *row_tile;
+      // One batch contains only requested missing columns, not their entire
+      // enclosing beta panels. Support and numerical maps have one lifetime.
+      const int cols=betas.size();
+      const int workers=cooperative_openmp_thread_count();
+      std::vector<std::shared_ptr<const ColumnPattern>> column_patterns(cols);
+      cooperative_openmp_for(cols,workers,[&](std::ptrdiff_t b) {
+        column_patterns[b]=pattern_at(betas[b]);
+      });
+      const auto pattern=merge_patterns(column_patterns);
+      const auto rows=sample_factors(betas);
       Eigen::MatrixXd values = Eigen::MatrixXd::Zero(n_unique_alpha_, width * rows.rows());
       // Each alpha owns its row. CSR maps structures straight to strings;
       // no determinant vector or full raw spin-product grid is formed.
-#pragma omp parallel for schedule(static) if(n_unique_alpha_ > 32)
-      for (int alpha = 0; alpha < n_unique_alpha_; ++alpha) {
+      cooperative_openmp_for(n_unique_alpha_,workers,[&](std::ptrdiff_t alpha) {
         const auto first = mcscf::product_index(alpha,0,n_unique_beta_);
         auto group = std::lower_bound(spin_products_.begin(), spin_products_.end(), first);
         for (; group != spin_products_.end() && *group < first + n_unique_beta_; ++group) {
           const auto id = static_cast<std::size_t>(group - spin_products_.begin());
-          for (int vector = 0; vector < width; ++vector) {
-            values.row(alpha).segment(vector * rows.rows(), rows.rows()).noalias() +=
-                coefficients(id, vector) * rows.col(*group - first).transpose();
-          }
+          for (Eigen::SparseMatrix<double>::InnerIterator entry(rows,*group-first);entry;++entry)
+            for (int vector=0;vector<width;++vector)
+              values(alpha,vector*rows.rows()+entry.row())+=coefficients(id,vector)*entry.value();
         }
-      }
-      if (pattern->full) alpha_transform.apply_left(&values);
+      });
+      if (pattern.full) alpha_transform.apply_left(&values);
       else alpha_transform.apply_supported_left(&values,
-          {pattern->offsets.data(),static_cast<std::size_t>(pattern->offsets.size())},
-          {pattern->rows.data(),static_cast<std::size_t>(pattern->rows.size())});
-      if (!overlap_consumed[panel]) {
+          {pattern.offsets.data(),static_cast<std::size_t>(pattern.offsets.size())},
+          {pattern.rows.data(),static_cast<std::size_t>(pattern.rows.size())});
+      const bool need_overlap=std::any_of(betas.begin(),betas.end(),
+          [&](int beta) { return !overlap_consumed[beta]; });
+      if (need_overlap) {
         ++result.tiles.overlap_projections;
-        if (collect_images) {
-          Eigen::MatrixXd overlap = values;
-          project(panel, rows, overlap, m_products);
-        }
-        overlap_consumed[panel] = true;
+        Eigen::MatrixXd overlap=values;
+        for (int b=0;b<cols;++b)
+          if (overlap_consumed[betas[b]])
+            for (int v=0;v<width;++v) overlap.col(v*cols+b).setZero();
+        project_pattern(pattern,rows,overlap,m_products);
+        for (const int beta:betas) overlap_consumed[beta]=true;
       }
-      return detail::pack_columns(std::move(values),pattern);
+      std::vector<ColumnTile> tiles(cols);
+      cooperative_openmp_for(cols,workers,[&](std::ptrdiff_t b) {
+        const int size=column_patterns[b]->offsets[1];
+        tiles[b]={column_patterns[b],Eigen::MatrixXd(size,width)};
+        for (int v=0;v<width;++v)
+          for (int a=0;a<size;++a)
+            tiles[b].values(a,v)=values(tiles[b].pattern->full ? a:tiles[b].pattern->rows[a],v*cols+b);
+      });
+      return tiles;
     });
     if (overlap_only) {
-      for (const int panel:reachable_panels) input.get(panel);
-      result.tiles.input_evictions += input.evictions;
-      result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes, input.peak_bytes);
+      if (!ordered) input.prepare(reachable_columns);
+      result.tiles.input_evictions += input.cache().evictions;
+      result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes,
+          ordered ? sizeof(double)*input_image.size():input.cache().peak_bytes);
       contract();
       continue;
     }
     // Prepare resident panels while outside the persistent sigma team, so
     // exterior transforms and overlap projection retain their own parallelism.
     // Larger carriers simply generate panels on demand; their space is unchanged.
-    if (resident_rhs >= static_cast<std::size_t>(width))
-      for (const int panel:reachable_panels) input.get(panel);
-    ColumnPanels output(cache_bytes,
-        [&](int panel) -> ColumnTile {
-          auto pattern=pattern_at(panel);
-          return {pattern,Eigen::MatrixXd::Zero(pattern->offsets[pattern->columns()],width)};
-        },
-        [&](int panel,ColumnTile& tile) {
-          ++result.tiles.hamiltonian_projections;
-          Eigen::MatrixXd image=tile.unpack(n_unique_alpha_);
-          const int cols=tile.pattern->columns();
-          if (collect_images) {
-            const auto rows=beta_rows(panel);
-            project(panel,*rows,image,h_products);
-          }
-        });
+    if (!ordered && resident_rhs >= static_cast<std::size_t>(width))
+      input.prepare(reachable_columns);
+    std::vector<int> completed_betas;
+    std::vector<ColumnTile> completed_images;
+    const auto flush_output=[&] {
+      if (completed_betas.empty()) return;
+      ++result.tiles.hamiltonian_projections;
+      const int cols=completed_betas.size();
+      std::vector<std::shared_ptr<const ColumnPattern>> column_patterns;
+      for (const auto& image:completed_images) column_patterns.push_back(image.pattern);
+      const auto pattern=merge_patterns(column_patterns);
+      Eigen::MatrixXd image=Eigen::MatrixXd::Zero(n_unique_alpha_,width*cols);
+      cooperative_openmp_for(cols*width,cooperative_openmp_thread_count(),[&](std::ptrdiff_t packed) {
+        const int b=packed%cols,v=packed/cols;
+        const auto& tile=completed_images[b];
+        if (tile.pattern->full) image.col(packed)=tile.values.col(v);
+        else for (int a=0;a<tile.values.rows();++a)
+          image(tile.pattern->rows[a],packed)=tile.values(a,v);
+      });
+      const auto rows=sample_factors(completed_betas);
+      project_pattern(pattern,rows,image,h_products);
+      completed_images.clear(); completed_betas.clear();
+    };
+    ColumnPanels output(cache_bytes,[&](int beta) -> ColumnTile {
+      const auto pattern=pattern_at(beta);
+      return {pattern,Eigen::MatrixXd::Zero(pattern->offsets[1],width)};
+    },[&](int beta,ColumnTile& tile) {
+      completed_betas.push_back(beta);
+      completed_images.push_back(std::move(tile));
+      if (completed_betas.size()==static_cast<std::size_t>(extent)) flush_output();
+    });
     const mcscf::DirectCiTileReader read =
         [&](const std::vector<int>& betas, const std::vector<int>& alpha_rows,
             Eigen::Ref<Eigen::MatrixXd> columns) {
@@ -264,45 +348,16 @@ StructureResponseSweep StructureAction::contract_product_tiles(
 #ifdef _OPENMP
           team = omp_get_num_threads();
 #endif
-          for (int i=0;i<static_cast<int>(alpha_rows.size());++i) alpha_position[alpha_rows[i]]=i;
-          for (int first = 0; first < static_cast<int>(betas.size());) {
-            const int panel_id = betas[first] / extent;
-            int last = first + 1;
-            while (last < static_cast<int>(betas.size()) && betas[last] / extent == panel_id) ++last;
-            if (!panel_support[panel_id]) {
-              columns.middleCols(first*width,(last-first)*width).setZero();
-              first=last;
-              continue;
+          if (ordered) {
+#pragma omp taskloop num_tasks(team) shared(betas, alpha_rows, input_image, columns)
+            for (int packed=0;packed<static_cast<int>(betas.size())*width;++packed) {
+              const int j=packed/width,v=packed%width;
+              for (int row=0;row<static_cast<int>(alpha_rows.size());++row)
+                columns(row,packed)=input_image(alpha_rows[row],v*n_unique_beta_+betas[j]);
             }
-            const ColumnTile& panel = input.get(panel_id);
-            const auto* offsets=panel.pattern->offsets.data();
-            const auto* indices=panel.pattern->rows.data();
-            const bool full=panel.pattern->full;
-            const double* source = panel.values.data();
-            double* target = columns.data();
-            const Eigen::Index source_stride = panel.values.outerStride(), target_stride = columns.outerStride();
-            // Implicit taskgroup completion pins this panel until all reads
-            // finish; only then may the next get() mutate or evict the LRU.
-#pragma omp taskloop num_tasks(team) shared(betas, alpha_rows)
-            for (int packed = 0; packed < (last - first) * width; ++packed) {
-              const int j = first + packed / width, v = packed % width;
-              const int beta=betas[j]%extent;
-              const double* from=source+v*source_stride;
-              double* to = target + (j * width + v) * target_stride;
-              if (full)
-                for (int row=0;row<static_cast<int>(alpha_rows.size());++row)
-                  to[row]=from[offsets[beta]+alpha_rows[row]];
-              else {
-                std::fill_n(to,alpha_rows.size(),0.0);
-                for (int i=offsets[beta];i<offsets[beta+1];++i) {
-                  const int row=alpha_position[indices[i]];
-                  if (row>=0) to[row]=from[i];
-                }
-              }
-            }
-            first = last;
+            return;
           }
-          for (const int a:alpha_rows) alpha_position[a]=-1;
+          input.read(betas,alpha_rows,columns);
         };
     const mcscf::DirectCiTileWriter add =
         [&](const std::vector<int>& betas, const std::vector<int>& alpha_rows,
@@ -311,57 +366,101 @@ StructureResponseSweep StructureAction::contract_product_tiles(
 #ifdef _OPENMP
           team = omp_get_num_threads();
 #endif
-          for (int first = 0; first < static_cast<int>(betas.size());) {
-            const int panel_id = betas[first] / extent;
-            int last = first + 1;
-            while (last < static_cast<int>(betas.size()) && betas[last] / extent == panel_id) ++last;
-            if (!panel_support[panel_id]) { first=last; continue; }
-            ColumnTile& panel = output.get(panel_id);
-            const auto* offsets=panel.pattern->offsets.data();
-            const auto* indices=panel.pattern->rows.data();
-            const bool full=panel.pattern->full;
-            double* target = panel.values.data();
-            const Eigen::Index target_stride = panel.values.outerStride();
+          if (ordered) {
+            const int chunks=std::min<int>(team,alpha_rows.size());
+            const int column_count=betas.size()*width;
+#pragma omp taskloop num_tasks(team) shared(betas, alpha_rows, accumulate, h_image)
+            for (int packed=0;packed<column_count*chunks;++packed) {
+              const int column=packed%column_count,chunk=packed/column_count;
+              const int j=column/width,v=column%width;
+              accumulate(j,v,alpha_rows.size()*chunk/chunks,
+                  alpha_rows.size()*(chunk+1)/chunks,
+                  h_image.col(v*n_unique_beta_+betas[j]).data(),nullptr,0);
+            }
+            return;
+          }
+          struct BorrowedColumn { ColumnTile* tile; int source; };
+          std::vector<BorrowedColumn> borrowed;
+          for (int first=0;first<static_cast<int>(betas.size());) {
+            borrowed.clear();
+            std::size_t bytes=0;
+            while (first<static_cast<int>(betas.size())) {
+              const int beta=betas[first];
+              if (!column_support[beta]) { ++first; continue; }
+              const auto pattern=pattern_at(beta);
+              const std::size_t payload=pattern->bytes()+
+                  sizeof(double)*pattern->offsets[1]*width;
+              if (!borrowed.empty() && (payload>cache_bytes || bytes>cache_bytes-payload)) break;
+              // Previously borrowed columns are the most recently touched
+              // owners. Their sum fits, so this get cannot evict one of them.
+              borrowed.push_back({&output.get(beta),first});
+              bytes+=payload;
+              ++first;
+            }
             // Split alpha ranges as well as columns: the alpha-adjoint work
             // is concentrated in target beta columns. Tasks add directly to
             // disjoint destination ranges, without an image slab or atomics.
             const int chunks = std::min<int>(team, alpha_rows.size());
-            const int column_count = (last - first) * width;
-#pragma omp taskloop num_tasks(team) shared(betas, alpha_rows, accumulate)
+            const int column_count = borrowed.size()*width;
+#pragma omp taskloop num_tasks(team) shared(betas, alpha_rows, accumulate, borrowed)
             for (int packed = 0; packed < column_count * chunks; ++packed) {
               // Every task sees all beta columns over its alpha stripe.
               // Column-major task order would concentrate the expensive
               // alpha adjoint (target columns only) on a few workers.
               const int column = packed % column_count;
               const int chunk = packed / column_count;
-              const int j = first + column / width, v = column % width;
-              const int beta=betas[j]%extent,offset=offsets[beta],length=offsets[beta+1]-offset;
-              if (length==0) continue;
-              double* to=target+v*target_stride+offset;
+              const int v=column%width;
+              const auto& item=borrowed[column/width];
+              const auto& panel=*item.tile;
+              const int length=panel.values.rows();
+              if (!length) continue;
+              double* to=item.tile->values.col(v).data();
               const int begin = alpha_rows.size() * chunk / chunks;
               const int end = alpha_rows.size() * (chunk + 1) / chunks;
-              accumulate(j,v,begin,end,to,full ? nullptr:indices+offset,full ? 0:length);
+              accumulate(item.source,v,begin,end,to,panel.pattern->full ? nullptr:panel.pattern->rows.data(),
+                  panel.pattern->full ? 0:length);
             }
-            first = last;
           }
         };
-    sigma.apply_tiled(width,read,add,support,spin_exchange_parity_);
+    sigma.apply_tiled(width,read,add,support,spin_exchange_parity_,
+        [&](std::span<const int> betas) {
+      if (ordered) return;
+      for (const int beta:betas) {
+        input.release(beta);
+        output.release(beta);
+      }
+    },std::max<std::size_t>(1,workspace_bytes/4));
     output.finish();
+    flush_output();
     // Exchange quotienting may never request some input columns. The overlap
     // is still the complete Gram action, independent of the Hamiltonian sweep.
-    for (const int panel:reachable_panels)
-      if (!overlap_consumed[panel]) input.get(panel);
-    result.tiles.input_evictions += input.evictions;
+    if (!ordered) {
+      std::vector<int> missing;
+      for (const int beta:reachable_columns)
+        if (!overlap_consumed[beta]) missing.push_back(beta);
+      input.prepare(missing);
+    }
+    if (profiling::phase_totals().enabled)
+      std::fprintf(stderr,"XMVB_COLUMN_RELEASE,input=%zu,output=%zu,factor_entries=%zu,factor_slots=%zu\n",
+          input.cache().releases,output.releases,factor_entries,factor_slots);
+    result.tiles.input_evictions += input.cache().evictions;
     result.tiles.output_evictions += output.evictions;
-    result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes, input.peak_bytes);
-    result.tiles.output_resident_bytes = std::max(result.tiles.output_resident_bytes, output.peak_bytes);
+    result.tiles.input_resident_bytes = std::max(result.tiles.input_resident_bytes,
+        ordered ? sizeof(double)*input_image.size():input.cache().peak_bytes);
+    result.tiles.output_resident_bytes = std::max(result.tiles.output_resident_bytes,
+        ordered ? sizeof(double)*h_image.size():output.peak_bytes);
     contract();
   }
   if (profiling::phase_totals().enabled)
-    std::fprintf(stderr,"XMVB_PRODUCT_ACTION,rhs=%ld,overlap=%d,batches=%zu,input=%zu,output=%zu,input_evictions=%zu,output_evictions=%zu\n",
+    std::fprintf(stderr,"XMVB_PRODUCT_ACTION,rhs=%ld,overlap=%d,batches=%zu,input=%zu,output=%zu,input_evictions=%zu,output_evictions=%zu,ordered_beta=%d,resident_rhs=%zu\n",
         static_cast<long>(vectors.cols()),overlap_only,result.tiles.expansions,
         result.tiles.input_panels,result.tiles.hamiltonian_projections,
-        result.tiles.input_evictions,result.tiles.output_evictions);
+        result.tiles.input_evictions,result.tiles.output_evictions,ordered_beta,resident_rhs);
+  if (phases.enabled) for (std::size_t i=0;i<measured.size();++i)
+    std::fprintf(stderr,"XMVB_PRODUCT_PHASE,stage=%s,wall=%.9f\n",
+        profiling::PhaseTotals::name(measured[i]),
+        (phases.nanoseconds[static_cast<std::size_t>(measured[i])].load(std::memory_order_relaxed)-
+          phase_begin[i])*1e-9);
   return sweep;
 }
 

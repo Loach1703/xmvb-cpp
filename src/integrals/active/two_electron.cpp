@@ -3,440 +3,133 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
-#include <vector>
-
-#include <Eigen/Core>
 
 #include "core/pair_index.hpp"
 
 namespace xmvb::integrals {
-
 namespace {
 
-const std::vector<double>* find_packed_integrals(
-    const ActiveSpaceTwoElectronView& two_electron_view,
-    int n_active_orbitals) {
-  if (two_electron_view.packed_active_two_electron_integrals == nullptr) {
-    return nullptr;
-  }
-  const auto& packed_active_two_electron_integrals =
-      *two_electron_view.packed_active_two_electron_integrals;
-  const std::size_t expected_size =
-      packed_active_two_electron_integral_count(n_active_orbitals);
-  if (packed_active_two_electron_integrals.size() != expected_size) {
-    return nullptr;
-  }
-  return &packed_active_two_electron_integrals;
-}
-
 const std::vector<double>& require_packed_integrals(
-    const ActiveSpaceTwoElectronView& two_electron_view,
-    int n_active_orbitals) {
-  const std::vector<double>* packed_active_two_electron_integrals =
-      find_packed_integrals(two_electron_view, n_active_orbitals);
-  if (packed_active_two_electron_integrals == nullptr) {
+    const ActiveSpaceTwoElectronView& view, int n_active) {
+  if (!view.packed_active_two_electron_integrals ||
+      view.packed_active_two_electron_integrals->size() !=
+          packed_active_two_electron_integral_count(n_active))
     throw std::invalid_argument("packed active-space two-electron buffer is unavailable");
-  }
-  return *packed_active_two_electron_integrals;
+  return *view.packed_active_two_electron_integrals;
 }
 
-const Eigen::MatrixXd& require_ri_active_pair_factors(
-    const ActiveSpaceTwoElectronView& two_electron_view,
-    int n_active_orbitals) {
-  if (two_electron_view.ri_active_pair_factors == nullptr) {
-    throw std::invalid_argument("RI active-pair-factor buffer is unavailable");
-  }
-  const auto& ri_active_pair_factors = *two_electron_view.ri_active_pair_factors;
-  const std::size_t expected_size =
-      two_electron_view.n_auxiliary_functions *
-      packed_active_pair_count(n_active_orbitals);
-  if (two_electron_view.n_auxiliary_functions <= 0 ||
-      ri_active_pair_factors.rows() != two_electron_view.n_auxiliary_functions ||
-      ri_active_pair_factors.cols() != packed_active_pair_count(n_active_orbitals) ||
-      ri_active_pair_factors.size() != expected_size) {
-    throw std::invalid_argument("RI active-pair-factor buffer size mismatch");
-  }
-  return ri_active_pair_factors;
-}
-
-double lookup_ri_active_space_two_electron_kernel_value(
-    const Eigen::MatrixXd& ri_active_pair_factors,
-    int row_packed_pair_index,
-    int column_packed_pair_index) {
-  double kernel_value = 0.0;
-  for (int auxiliary_function_index = 0;
-       auxiliary_function_index < ri_active_pair_factors.rows();
-       ++auxiliary_function_index) {
-    kernel_value +=
-        ri_active_pair_factors(auxiliary_function_index, row_packed_pair_index) *
-        ri_active_pair_factors(auxiliary_function_index, column_packed_pair_index);
-  }
-  return kernel_value;
-}
-
-std::vector<double> apply_ri_active_space_two_electron_kernel_to_sparse_projection(
-    const Eigen::MatrixXd& ri_active_pair_factors,
-    const std::vector<int>& packed_pair_indices,
-    const std::vector<double>& packed_pair_values) {
-  const int n_auxiliary_functions = static_cast<int>(ri_active_pair_factors.rows());
-  const int n_packed_active_pairs = static_cast<int>(ri_active_pair_factors.cols());
-  std::vector<double> auxiliary_projection(
-      n_auxiliary_functions,
-      0.0);
-  for (std::size_t entry_index = 0;
-       entry_index < packed_pair_indices.size();
-       ++entry_index) {
-    const int packed_pair_index = packed_pair_indices[entry_index];
-    const double packed_pair_value = packed_pair_values[entry_index];
-    if (packed_pair_index < 0 || packed_pair_index >= n_packed_active_pairs) {
-      throw std::invalid_argument("packed active-pair index out of range");
-    }
-    for (int auxiliary_function_index = 0;
-         auxiliary_function_index < n_auxiliary_functions;
-         ++auxiliary_function_index) {
-      auxiliary_projection[auxiliary_function_index] +=
-          ri_active_pair_factors(auxiliary_function_index, packed_pair_index) *
-          packed_pair_value;
-    }
-  }
-
-  std::vector<double> projected_pair_values(
-      n_packed_active_pairs,
-      0.0);
-  for (int packed_pair_index = 0;
-       packed_pair_index < n_packed_active_pairs;
-       ++packed_pair_index) {
-    double projected_value = 0.0;
-    for (int auxiliary_function_index = 0;
-         auxiliary_function_index < n_auxiliary_functions;
-         ++auxiliary_function_index) {
-      projected_value +=
-          ri_active_pair_factors(auxiliary_function_index, packed_pair_index) *
-          auxiliary_projection[auxiliary_function_index];
-    }
-    projected_pair_values[packed_pair_index] = projected_value;
-  }
-
-  return projected_pair_values;
+void check_pair(int pair,int pairs) {
+  if (pair<0 || pair>=pairs)
+    throw std::invalid_argument("packed active-pair index out of range");
 }
 
 }  // namespace
 
 ActiveSpaceTwoElectronView make_active_space_two_electron_view(
-    const std::vector<double>& packed_active_two_electron_integrals) {
-  ActiveSpaceTwoElectronView view;
-  view.representation = ActiveSpaceTwoElectronRepresentation::PackedExact;
-  view.packed_active_two_electron_integrals = &packed_active_two_electron_integrals;
-  return view;
+    const std::vector<double>& packed) {
+  return {&packed};
 }
 
 ActiveSpaceTwoElectronView make_active_space_two_electron_view(
-    const ActiveSpaceTwoElectronResult& active_space_two_electron_result) {
-  ActiveSpaceTwoElectronView view;
-  view.representation = active_space_two_electron_result.representation;
-  view.packed_active_two_electron_integrals =
-      &active_space_two_electron_result.packed_active_two_electron_integrals;
-  view.n_auxiliary_functions = active_space_two_electron_result.n_auxiliary_functions;
-  view.ri_active_pair_factors = &active_space_two_electron_result.ri_active_pair_factors;
-  return view;
+    const ActiveSpaceTwoElectronResult& result) {
+  return {&result.packed_active_two_electron_integrals};
 }
 
 int packed_active_pair_count(int n_active_orbitals) {
-  if (n_active_orbitals <= 0) {
+  if (n_active_orbitals <= 0)
     throw std::invalid_argument("n_active_orbitals must be positive");
-  }
-  return n_active_orbitals * (n_active_orbitals + 1) / 2;
+  return n_active_orbitals*(n_active_orbitals+1)/2;
 }
 
 std::size_t packed_active_two_electron_integral_count(int n_active_orbitals) {
-  const std::size_t n_packed_active_pairs =
-      packed_active_pair_count(n_active_orbitals);
-  return n_packed_active_pairs * (n_packed_active_pairs + 1) / 2;
+  const std::size_t pairs=packed_active_pair_count(n_active_orbitals);
+  return pairs*(pairs+1)/2;
 }
 
-int infer_active_orbital_count_from_packed_pair_count(int n_packed_active_pairs) {
-  if (n_packed_active_pairs <= 0) {
-    throw std::invalid_argument("n_packed_active_pairs must be positive");
-  }
-  const double discriminant = 1.0 + 8.0 * static_cast<double>(n_packed_active_pairs);
-  const int n_active_orbitals =
-      static_cast<int>((std::sqrt(discriminant) - 1.0) / 2.0 + 0.5);
-  if (n_active_orbitals * (n_active_orbitals + 1) / 2 != n_packed_active_pairs) {
+int infer_active_orbital_count_from_packed_pair_count(int pairs) {
+  if (pairs<=0)
     throw std::invalid_argument("packed active-pair count is not triangular");
-  }
-  return n_active_orbitals;
+  const int n=static_cast<int>((std::sqrt(1.0+8.0*pairs)-1.0)/2.0+0.5);
+  if (n*(n+1)/2!=pairs)
+    throw std::invalid_argument("packed active-pair count is not triangular");
+  return n;
 }
 
-int infer_active_orbital_count_from_packed_integral_count(std::size_t packed_integral_count) {
-  if (packed_integral_count == 0) {
+int infer_active_orbital_count_from_packed_integral_count(std::size_t count) {
+  if (!count)
     throw std::invalid_argument("packed_integral_count must be positive");
-  }
-  const double discriminant = 1.0 + 8.0 * static_cast<double>(packed_integral_count);
-  const int n_packed_active_pairs =
-      static_cast<int>((std::sqrt(discriminant) - 1.0) / 2.0 + 0.5);
-  if (n_packed_active_pairs *
-          (n_packed_active_pairs + 1) / 2 !=
-      packed_integral_count) {
+  const std::size_t pairs=static_cast<std::size_t>((std::sqrt(1.0+8.0*count)-1.0)/2.0+0.5);
+  if (pairs*(pairs+1)/2!=count)
     throw std::invalid_argument("packed active-space two-electron count is not triangular");
-  }
-  return infer_active_orbital_count_from_packed_pair_count(n_packed_active_pairs);
+  return infer_active_orbital_count_from_packed_pair_count(static_cast<int>(pairs));
 }
 
 double lookup_active_space_two_electron_kernel_value(
-    const ActiveSpaceTwoElectronView& two_electron_view,
-    int row_packed_pair_index,
-    int column_packed_pair_index,
-    int n_active_orbitals) {
-  const int n_packed_active_pairs = packed_active_pair_count(n_active_orbitals);
-  if (row_packed_pair_index < 0 || row_packed_pair_index >= n_packed_active_pairs ||
-      column_packed_pair_index < 0 || column_packed_pair_index >= n_packed_active_pairs) {
-    throw std::invalid_argument("packed active-pair index out of range");
-  }
-
-  if (const std::vector<double>* packed_active_two_electron_integrals =
-          find_packed_integrals(two_electron_view, n_active_orbitals);
-      packed_active_two_electron_integrals != nullptr) {
-    // A prebuilt packed `GGO` buffer turns the determinant-pair hot path back
-    // into a direct table lookup, avoiding an auxiliary-length RI dot product
-    // for every requested pair-of-pairs kernel value.
-    const int packed_pair_of_pairs_index =
-        xmvb::core::PairIndex::packed_pair_of_pairs_index(
-            row_packed_pair_index,
-            column_packed_pair_index);
-    return (*packed_active_two_electron_integrals)[
-        packed_pair_of_pairs_index];
-  }
-
-  switch (two_electron_view.representation) {
-    case ActiveSpaceTwoElectronRepresentation::PackedExact: {
-      throw std::invalid_argument("packed active-space two-electron buffer is unavailable");
-    }
-    case ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity: {
-      const auto& ri_active_pair_factors =
-          require_ri_active_pair_factors(two_electron_view, n_active_orbitals);
-      return lookup_ri_active_space_two_electron_kernel_value(
-          ri_active_pair_factors,
-          row_packed_pair_index,
-          column_packed_pair_index);
-    }
-  }
-  throw std::invalid_argument("unknown active-space two-electron representation");
+    const ActiveSpaceTwoElectronView& view,int row,int column,int n_active) {
+  const int pairs=packed_active_pair_count(n_active);
+  check_pair(row,pairs);
+  check_pair(column,pairs);
+  return require_packed_integrals(view,n_active)[
+      core::PairIndex::packed_pair_of_pairs_index(row,column)];
 }
 
 std::vector<double> apply_active_space_two_electron_kernel_to_sparse_projection(
-    const ActiveSpaceTwoElectronView& two_electron_view,
-    int n_active_orbitals,
-    const std::vector<int>& packed_pair_indices,
-    const std::vector<double>& packed_pair_values) {
-  if (packed_pair_indices.size() != packed_pair_values.size()) {
+    const ActiveSpaceTwoElectronView& view,int n_active,
+    const std::vector<int>& indices,const std::vector<double>& values) {
+  if (indices.size()!=values.size())
     throw std::invalid_argument("packed active-pair projection sizes are inconsistent");
+  const int pairs=packed_active_pair_count(n_active);
+  const auto& packed=require_packed_integrals(view,n_active);
+  std::vector<double> result(pairs,0.0);
+  for (std::size_t k=0;k<indices.size();++k) {
+    check_pair(indices[k],pairs);
+    for (int row=0;row<pairs;++row)
+      result[row]+=packed[core::PairIndex::packed_pair_of_pairs_index(row,indices[k])]*values[k];
   }
-
-  const int n_packed_active_pairs = packed_active_pair_count(n_active_orbitals);
-  if (const std::vector<double>* packed_active_two_electron_integrals =
-          find_packed_integrals(two_electron_view, n_active_orbitals);
-      packed_active_two_electron_integrals != nullptr) {
-    std::vector<double> projected_pair_values(
-        n_packed_active_pairs,
-        0.0);
-    for (std::size_t entry_index = 0;
-         entry_index < packed_pair_indices.size();
-         ++entry_index) {
-      const int packed_pair_index = packed_pair_indices[entry_index];
-      const double packed_pair_value = packed_pair_values[entry_index];
-      if (packed_pair_index < 0 || packed_pair_index >= n_packed_active_pairs) {
-        throw std::invalid_argument("packed active-pair index out of range");
-      }
-      for (int row_packed_pair_index = 0;
-           row_packed_pair_index < n_packed_active_pairs;
-           ++row_packed_pair_index) {
-        const int packed_pair_of_pairs_index =
-            xmvb::core::PairIndex::packed_pair_of_pairs_index(
-                row_packed_pair_index,
-                packed_pair_index);
-        projected_pair_values[row_packed_pair_index] +=
-            (*packed_active_two_electron_integrals)[
-                packed_pair_of_pairs_index] *
-            packed_pair_value;
-      }
-    }
-    return projected_pair_values;
-  }
-
-  switch (two_electron_view.representation) {
-    case ActiveSpaceTwoElectronRepresentation::PackedExact: {
-      throw std::invalid_argument("packed active-space two-electron buffer is unavailable");
-    }
-    case ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity: {
-      const auto& ri_active_pair_factors =
-          require_ri_active_pair_factors(two_electron_view, n_active_orbitals);
-      return apply_ri_active_space_two_electron_kernel_to_sparse_projection(
-          ri_active_pair_factors,
-          packed_pair_indices,
-          packed_pair_values);
-    }
-  }
-  throw std::invalid_argument("unknown active-space two-electron representation");
+  return result;
 }
 
 Eigen::VectorXd apply_active_space_two_electron_kernel_to_sparse_projection_subset(
-    const ActiveSpaceTwoElectronView& two_electron_view,
-    int n_active_orbitals,
-    const std::vector<int>& packed_pair_indices,
-    const std::vector<double>& packed_pair_values,
-    const std::vector<int>& target_packed_pair_indices) {
-  if (packed_pair_indices.size() != packed_pair_values.size()) {
+    const ActiveSpaceTwoElectronView& view,int n_active,
+    const std::vector<int>& indices,const std::vector<double>& values,
+    const std::vector<int>& targets) {
+  if (indices.size()!=values.size())
     throw std::invalid_argument("packed active-pair projection sizes are inconsistent");
+  const int pairs=packed_active_pair_count(n_active);
+  const auto& packed=require_packed_integrals(view,n_active);
+  for (const int pair:indices) check_pair(pair,pairs);
+  Eigen::VectorXd result=Eigen::VectorXd::Zero(targets.size());
+  for (std::size_t row=0;row<targets.size();++row) {
+    check_pair(targets[row],pairs);
+    for (std::size_t k=0;k<indices.size();++k)
+      result[row]+=packed[core::PairIndex::packed_pair_of_pairs_index(targets[row],indices[k])]*values[k];
   }
-
-  Eigen::VectorXd projected_pair_values =
-      Eigen::VectorXd::Zero(static_cast<int>(target_packed_pair_indices.size()));
-  if (target_packed_pair_indices.empty()) {
-    return projected_pair_values;
-  }
-
-  const int n_packed_active_pairs = packed_active_pair_count(n_active_orbitals);
-  if (const std::vector<double>* packed_active_two_electron_integrals =
-          find_packed_integrals(two_electron_view, n_active_orbitals);
-      packed_active_two_electron_integrals != nullptr) {
-    for (std::size_t target_index = 0;
-         target_index < target_packed_pair_indices.size();
-         ++target_index) {
-      const int row_packed_pair_index =
-          target_packed_pair_indices[target_index];
-      if (row_packed_pair_index < 0 || row_packed_pair_index >= n_packed_active_pairs) {
-        throw std::invalid_argument("packed active-pair index out of range");
-      }
-      double projected_value = 0.0;
-      for (std::size_t entry_index = 0;
-           entry_index < packed_pair_indices.size();
-           ++entry_index) {
-        const int packed_pair_index = packed_pair_indices[entry_index];
-        if (packed_pair_index < 0 || packed_pair_index >= n_packed_active_pairs) {
-          throw std::invalid_argument("packed active-pair index out of range");
-        }
-        const int packed_pair_of_pairs_index =
-            xmvb::core::PairIndex::packed_pair_of_pairs_index(
-                row_packed_pair_index,
-                packed_pair_index);
-        projected_value +=
-            (*packed_active_two_electron_integrals)[
-                packed_pair_of_pairs_index] *
-            packed_pair_values[entry_index];
-      }
-      projected_pair_values(static_cast<int>(target_index)) = projected_value;
-    }
-    return projected_pair_values;
-  }
-
-  switch (two_electron_view.representation) {
-    case ActiveSpaceTwoElectronRepresentation::PackedExact: {
-      throw std::invalid_argument("packed active-space two-electron buffer is unavailable");
-    }
-    case ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity: {
-      const auto& ri_active_pair_factors =
-          require_ri_active_pair_factors(two_electron_view, n_active_orbitals);
-      Eigen::VectorXd auxiliary_projection =
-          Eigen::VectorXd::Zero(ri_active_pair_factors.rows());
-      for (std::size_t entry_index = 0;
-           entry_index < packed_pair_indices.size();
-           ++entry_index) {
-        const int packed_pair_index = packed_pair_indices[entry_index];
-        if (packed_pair_index < 0 || packed_pair_index >= n_packed_active_pairs) {
-          throw std::invalid_argument("packed active-pair index out of range");
-        }
-        auxiliary_projection.noalias() +=
-            packed_pair_values[entry_index] *
-            ri_active_pair_factors.col(packed_pair_index);
-      }
-
-      for (std::size_t target_index = 0;
-           target_index < target_packed_pair_indices.size();
-           ++target_index) {
-        const int row_packed_pair_index =
-            target_packed_pair_indices[target_index];
-        if (row_packed_pair_index < 0 || row_packed_pair_index >= n_packed_active_pairs) {
-          throw std::invalid_argument("packed active-pair index out of range");
-        }
-        projected_pair_values(static_cast<int>(target_index)) =
-            ri_active_pair_factors.col(row_packed_pair_index).dot(auxiliary_projection);
-      }
-      return projected_pair_values;
-    }
-  }
-  throw std::invalid_argument("unknown active-space two-electron representation");
+  return result;
 }
 
 Eigen::MatrixXd apply_active_space_two_electron_kernel_block(
-    const ActiveSpaceTwoElectronResult& two_electron,
-    int n_active_orbitals,
+    const ActiveSpaceTwoElectronResult& integrals,int n_active,
     const Eigen::Ref<const Eigen::MatrixXd>& vectors) {
-  const int n_pairs = packed_active_pair_count(n_active_orbitals);
-  if (vectors.rows() != n_pairs || vectors.cols() <= 0) {
-    throw std::invalid_argument(
-        "active pair-kernel block has incompatible dimensions");
-  }
-  if (two_electron.representation ==
-      ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity &&
-      two_electron.ri_active_pair_factors.cols() == n_pairs) {
-    const Eigen::MatrixXd auxiliary =
-        two_electron.ri_active_pair_factors * vectors;
-    return two_electron.ri_active_pair_factors.transpose() * auxiliary;
-  }
-
-  const ActiveSpaceTwoElectronView view =
-      make_active_space_two_electron_view(two_electron);
-  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_pairs, vectors.cols());
-  constexpr int kRowBlock = 64;
-  for (int row_begin = 0; row_begin < n_pairs; row_begin += kRowBlock) {
-    const int row_end = std::min(n_pairs, row_begin + kRowBlock);
-    Eigen::MatrixXd kernel(row_end - row_begin, n_pairs);
-    for (int row = row_begin; row < row_end; ++row) {
-      for (int column = 0; column < n_pairs; ++column) {
-        kernel(row - row_begin, column) =
-            lookup_active_space_two_electron_kernel_value(
-                view, row, column, n_active_orbitals);
-      }
-    }
-    result.middleRows(row_begin, row_end - row_begin).noalias() =
-        kernel * vectors;
+  const int pairs=packed_active_pair_count(n_active);
+  if (vectors.rows()!=pairs || vectors.cols()<=0)
+    throw std::invalid_argument("active pair-kernel block has incompatible dimensions");
+  const auto& packed=require_packed_integrals(make_active_space_two_electron_view(integrals),n_active);
+  Eigen::MatrixXd result(pairs,vectors.cols());
+  constexpr int row_tile=64;
+  for (int first=0;first<pairs;first+=row_tile) {
+    const int count=std::min(row_tile,pairs-first);
+    Eigen::MatrixXd kernel(count,pairs);
+    for (int column=0;column<pairs;++column)
+      for (int row=0;row<count;++row)
+        kernel(row,column)=packed[core::PairIndex::packed_pair_of_pairs_index(first+row,column)];
+    result.middleRows(first,count).noalias()=kernel*vectors;
   }
   return result;
 }
 
 std::vector<double> reconstruct_packed_active_two_electron_integrals(
-    const ActiveSpaceTwoElectronView& two_electron_view,
-    int n_active_orbitals) {
-  if (two_electron_view.representation ==
-      ActiveSpaceTwoElectronRepresentation::PackedExact) {
-    return require_packed_integrals(two_electron_view, n_active_orbitals);
-  }
-
-  const int n_packed_active_pairs = packed_active_pair_count(n_active_orbitals);
-  std::vector<double> packed_active_two_electron_integrals(
-      packed_active_two_electron_integral_count(n_active_orbitals),
-      0.0);
-  for (int column_packed_pair_index = 0;
-       column_packed_pair_index < n_packed_active_pairs;
-       ++column_packed_pair_index) {
-    for (int row_packed_pair_index = 0;
-         row_packed_pair_index <= column_packed_pair_index;
-         ++row_packed_pair_index) {
-      const int packed_pair_of_pairs_index =
-          xmvb::core::PairIndex::packed_pair_of_pairs_index(
-              row_packed_pair_index,
-              column_packed_pair_index);
-      packed_active_two_electron_integrals[
-          packed_pair_of_pairs_index] =
-          lookup_active_space_two_electron_kernel_value(
-              two_electron_view,
-              row_packed_pair_index,
-              column_packed_pair_index,
-              n_active_orbitals);
-    }
-  }
-  return packed_active_two_electron_integrals;
+    const ActiveSpaceTwoElectronView& view,int n_active) {
+  return require_packed_integrals(view,n_active);
 }
-
 
 }  // namespace xmvb::integrals

@@ -58,7 +58,8 @@ void add_channel_gram(const Eigen::Ref<const Eigen::MatrixXd>& ca,
 
 void validate_source(const DirectCiSigmaAction& sigma, const SpinFactorSource& source) {
   if (source.n_alpha != sigma.n_alpha_strings() || source.n_beta != sigma.n_beta_strings() ||
-      source.count < 0 || !source.load || source.load_work < 0 || !std::isfinite(source.load_work))
+      source.count < 0 || !source.load || source.load_work < 0 || !std::isfinite(source.load_work) ||
+      source.contract_work < 0 || !std::isfinite(source.contract_work))
     throw std::invalid_argument("invalid direct-CI spin-factor source");
 }
 
@@ -259,10 +260,11 @@ DirectCiIntegralAdjoint factor_integral_adjoint(const DirectCiSigmaAction& sigma
   const int d = sigma.channel_kernel().rows();
   Eigen::MatrixXd gradient = Eigen::MatrixXd::Zero(d, d);
   if (!left.count || !right.count) return sigma.pullback_channel_kernel(gradient);
-  // H is self-adjoint. Put the smaller factor family on the ket side, where
-  // it controls the leading channel-Gram work, without changing the functional.
-  const auto& bra = left.count >= right.count ? left : right;
-  const auto& ket = left.count >= right.count ? right : left;
+  // Self-adjointness permits either bilinear order. Include the independent
+  // support-map multiplication cost, not only the number of source factors.
+  const bool first = detail::integral_bra_is_left(sigma,left,right,workspace_bytes);
+  const auto& bra = first ? left:right;
+  const auto& ket = first ? right:left;
   const auto plan = detail::plan_factor_panels(sigma,bra,ket,workspace_bytes,
       detail::FactorContraction::Integral);
   const int nl = plan.left, nr = plan.right, p = plan.channels;
@@ -270,22 +272,13 @@ DirectCiIntegralAdjoint factor_integral_adjoint(const DirectCiSigmaAction& sigma
   const auto tick = [&] { return timing ? Clock::now() : Clock::time_point{}; };
   const auto seconds = [](auto a, auto b) { return std::chrono::duration<double>(b-a).count(); };
   double load_time = 0, scatter_time = 0, covector_time = 0, gram_time = 0;
-  Eigen::MatrixXd la(left.n_alpha, nl), lb(left.n_beta, nl);
+  SpinAmplitudeWorkspace moments(bra,nl,nr*p);
   Eigen::MatrixXd ra(left.n_alpha, nr), rb(left.n_beta, nr);
   Eigen::MatrixXd wa(left.n_alpha, nr), wb(left.n_beta, nr);
   Eigen::MatrixXd rp_a(left.n_alpha, nr * p), rp_b(left.n_beta, nr * p);
   Eigen::MatrixXd rq_a(left.n_alpha, p < d ? nr * p : 0);
   Eigen::MatrixXd rq_b(left.n_beta, p < d ? nr * p : 0);
   Eigen::MatrixXd ca(left.n_alpha, nr * p), cb(left.n_beta, nr * p);
-  Eigen::MatrixXd moments(nl, nr * p);
-  // Retain a whole bra family only when it fits the same explicit slab budget.
-  // Otherwise the provider streams it through the very same contraction.
-  const bool bra_resident = nl == bra.count;
-  if (bra_resident) {
-    const auto start = tick();
-    bra.load(0, nl, la, lb);
-    load_time += seconds(start, tick());
-  }
   for (int r = 0; r < ket.count; r += nr) {
     const int wr = std::min(nr, ket.count - r);
     auto a = ra.leftCols(wr), b = rb.leftCols(wr);
@@ -297,19 +290,9 @@ DirectCiIntegralAdjoint factor_integral_adjoint(const DirectCiSigmaAction& sigma
     // Move self-adjoint generators through the spectator contraction:
     // C_alpha,P = E_alpha,P(Y_left F_right) + Y_left(E_beta,P F_right).
     // The weighted bases are formed once, with no bra-channel scatter.
-    for (int l = 0; l < bra.count; l += nl) {
-      const int wl = std::min(nl, bra.count - l);
-      auto u = la.leftCols(wl), v = lb.leftCols(wl);
-      if (!bra_resident) {
-        const auto start = tick(); bra.load(l, wl, u, v);
-        load_time += seconds(start, tick());
-      }
-      const auto start = tick();
-      auto moment = moments.topLeftCorner(wl, wr);
-      transpose_product(v, b, moment); add_product(u, moment, weighted_a);
-      transpose_product(u, a, moment); add_product(v, moment, weighted_b);
-      covector_time += seconds(start, tick());
-    }
+    const auto weighted_start = tick();
+    moments.add(a,b,weighted_a,weighted_b);
+    covector_time += seconds(weighted_start,tick());
     for (int first = 0; first < d; first += p) {
       const int np = std::min(p, d - first);
       auto bar_a = ca.leftCols(wr * np), bar_b = cb.leftCols(wr * np);
@@ -322,19 +305,9 @@ DirectCiIntegralAdjoint factor_integral_adjoint(const DirectCiSigmaAction& sigma
       scatter_time += seconds(scattered, tick());
       // Accumulate the entire bra before the Q-channel Gram: splitting bra
       // sources must not multiply the leading d^2 contraction by its tile count.
-      for (int l = 0; l < bra.count; l += nl) {
-        const int wl = std::min(nl, bra.count - l);
-        auto u = la.leftCols(wl), v = lb.leftCols(wl);
-        if (!bra_resident) {
-          const auto start = tick(); bra.load(l, wl, u, v);
-          load_time += seconds(start, tick());
-        }
-        const auto covectors = tick();
-        auto moment = moments.topLeftCorner(wl, wr * np);
-        transpose_product(v, pb, moment); add_product(u, moment, bar_a);
-        transpose_product(u, pa, moment); add_product(v, moment, bar_b);
-        covector_time += seconds(covectors, tick());
-      }
+      const auto covectors = tick();
+      moments.add(pa,pb,bar_a,bar_b);
+      covector_time += seconds(covectors,tick());
       for (int second = 0; second < d; second += p) {
         const int nq = std::min(p, d - second);
         if (second == first) {

@@ -1,6 +1,7 @@
 #include "integrals/ao/exact.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <stdexcept>
 #include <vector>
 
@@ -35,8 +36,9 @@ void contract_row(const AoIntegralInput& ao, int mu, const double* source,
     double* coulomb, int core_width, Eigen::Index coulomb_stride) {
   const auto& graph = ao.pair_graph;
   const int n = ao.n_basis_functions;
-  for (int nu=0; nu<n; ++nu)
-    std::fill_n(exchange+nu*exchange_stride,width,0.0);
+  if (exchange)
+    for (int nu=0; nu<n; ++nu)
+      std::fill_n(exchange+nu*exchange_stride,width,0.0);
   for (int j=0; j<n; ++j) {
     double* sum = core_width ? coulomb+j*coulomb_stride : nullptr;
     if (sum) std::fill_n(sum,core_width,0.0);
@@ -49,17 +51,19 @@ void contract_row(const AoIntegralInput& ao, int mu, const double* source,
       // D is symmetric: keep the ordered left partner j as the AO column.
       // All exchange RHS values then lie in one contiguous n-by-width stripe,
       // rather than touching n different pages for every integral row.
-      const double* djl=source+(static_cast<Eigen::Index>(j)*n+l)*width;
-      double* target_k=exchange+k*exchange_stride;
-#pragma omp simd
-      for (int channel=0; channel<width; ++channel)
-        target_k[channel]+=value*djl[channel];
-      if (k!=l) {
-        const double* djk=source+(static_cast<Eigen::Index>(j)*n+k)*width;
-        double* target_l=exchange+l*exchange_stride;
+      if (exchange) {
+        const double* djl=source+(static_cast<Eigen::Index>(j)*n+l)*width;
+        double* target_k=exchange+k*exchange_stride;
 #pragma omp simd
         for (int channel=0; channel<width; ++channel)
-          target_l[channel]+=value*djk[channel];
+          target_k[channel]+=value*djl[channel];
+        if (k!=l) {
+          const double* djk=source+(static_cast<Eigen::Index>(j)*n+k)*width;
+          double* target_l=exchange+l*exchange_stride;
+#pragma omp simd
+          for (int channel=0; channel<width; ++channel)
+            target_l[channel]+=value*djk[channel];
+        }
       }
       if (sum) {
         // Right packed pairs are ordered by k, then l. The symmetric AO
@@ -69,6 +73,44 @@ void contract_row(const AoIntegralInput& ao, int mu, const double* source,
 #pragma omp simd
         for (int channel=0; channel<core_width; ++channel)
           sum[channel]+=scale*dkl[channel];
+      }
+    }
+  }
+}
+
+void validate_weighted_graph(const AoIntegralInput& ao) {
+  const int n = ao.n_basis_functions;
+  if (n <= 0) throw std::invalid_argument("invalid exact AO JK basis size");
+  const auto& graph = ao.pair_graph;
+  const std::size_t n_pairs = static_cast<std::size_t>(n)*(n+1)/2;
+  const bool csr = graph.has_row_graph() &&
+      graph.row_offsets.size() == n_pairs+1 &&
+      graph.columns.size() == graph.values.size();
+  const bool compact = graph.has_compact_integral_stream() &&
+      graph.integral_rows.size() == graph.integral_columns.size() &&
+      graph.integral_rows.size() == graph.integral_values.size();
+  if ((!csr && !compact) || graph.pair_first.size() != n_pairs ||
+      graph.pair_second.size() != n_pairs)
+    throw std::invalid_argument("invalid exact AO JK integral representation");
+}
+
+/** Visit each distinct ordered permutation of one canonical quartet. */
+void accumulate_unique_quartet(const Eigen::Ref<const Eigen::MatrixXd>& density,
+    int i, int j, int k, int l, double value,
+    double coulomb_weight, double exchange_weight, Eigen::MatrixXd* output) {
+  for (int pair_swap = 0; pair_swap < 1+(i!=k || j!=l); ++pair_swap) {
+    const int first = pair_swap ? k : i, second = pair_swap ? l : j;
+    const int third = pair_swap ? i : k, fourth = pair_swap ? j : l;
+    for (int left_swap = 0; left_swap < 1+(first!=second); ++left_swap) {
+      const int a = left_swap ? second : first;
+      const int b = left_swap ? first : second;
+      for (int right_swap = 0; right_swap < 1+(third!=fourth); ++right_swap) {
+        const int c = right_swap ? fourth : third;
+        const int d = right_swap ? third : fourth;
+        if (coulomb_weight != 0.0)
+          (*output)(a,b) += coulomb_weight*value*density(c,d);
+        if (exchange_weight != 0.0)
+          (*output)(a,c) += exchange_weight*value*density(b,d);
       }
     }
   }
@@ -98,6 +140,54 @@ void apply_symmetric_ao_h1e_rows(const AoIntegralInput& ao, int n_threads,
       }
     }
   }
+}
+
+void apply_weighted_symmetric_ao_jk(
+    const Eigen::Ref<const Eigen::MatrixXd>& density,
+    const AoIntegralInput& ao, double coulomb_weight, double exchange_weight,
+    int n_threads, Eigen::MatrixXd* response) {
+  validate_weighted_graph(ao);
+  const int n = ao.n_basis_functions;
+  if (!response || density.rows()!=n || density.cols()!=n)
+    throw std::invalid_argument("invalid exact AO JK density or response");
+  response->setZero(n,n);
+  if (coulomb_weight==0.0 && exchange_weight==0.0) return;
+  const auto& graph = ao.pair_graph;
+  if (!graph.has_row_graph()) {
+    // The compact representation stores each integral once. Expand only its
+    // distinct index permutations, so equal AO indices need no half weights.
+    for (std::size_t index=0; index<graph.integral_count(); ++index) {
+      const AoPairIntegral eri=graph.integral(index);
+      accumulate_unique_quartet(density,
+          graph.pair_first[eri.left_pair],graph.pair_second[eri.left_pair],
+          graph.pair_first[eri.right_pair],graph.pair_second[eri.right_pair],
+          eri.value,coulomb_weight,exchange_weight,response);
+    }
+  } else {
+    // Directed CSR values are raw ERIs. Every AO output row has one owner.
+    n_threads=bounded_openmp_thread_count(n_threads,n);
+#pragma omp parallel num_threads(n_threads)
+    {
+      std::vector<double> coulomb(coulomb_weight!=0.0 ? n : 0);
+#pragma omp for schedule(dynamic,1)
+      for (int mu=0; mu<n; ++mu) {
+        contract_row(ao,mu,density.data(),
+            exchange_weight!=0.0 ? response->data()+mu : nullptr,
+            1,n,coulomb_weight!=0.0 ? coulomb.data() : nullptr,
+            coulomb_weight!=0.0 ? 1 : 0,1);
+        for (int nu=0; nu<n; ++nu) {
+          const double j = coulomb_weight!=0.0 ? coulomb[nu] : 0.0;
+          const double k = exchange_weight!=0.0 ? (*response)(mu,nu) : 0.0;
+          (*response)(mu,nu)=coulomb_weight*j+exchange_weight*k;
+        }
+      }
+    }
+  }
+  // Enforce one full symmetric AO matrix, including under differing sum order.
+  for (int nu=0; nu<n; ++nu)
+    for (int mu=0; mu<nu; ++mu)
+      (*response)(mu,nu)=(*response)(nu,mu)=
+          0.5*((*response)(mu,nu)+(*response)(nu,mu));
 }
 
 void apply_ao_density_diagonals(const AoIntegralInput& ao,

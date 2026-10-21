@@ -69,6 +69,8 @@ struct ResponseSpectrumSummary {
 struct OrbitalCouplingAction {
   Eigen::VectorXd orbital_hessian;
   Eigen::MatrixXd scaled_structure_forcing;
+  /** Normalization gauge from the same directional overlap, A_g=-G^-1 D/2. */
+  Eigen::MatrixXd gauge_frame;
   std::optional<StructureConnectionDirection> connection;
 };
 

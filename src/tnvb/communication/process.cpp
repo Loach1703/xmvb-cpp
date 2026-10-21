@@ -163,6 +163,9 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
     throw std::invalid_argument("TNVB raw structure dimensions are inconsistent");
   }
   if (!resume) {
+  if (prepared.active_space_two_electron_result.orbital_transform.size() != 0) {
+    throw std::invalid_argument("TNVB worker requires raw nonorthogonal active integrals");
+  }
   std::vector<double> packed = prepared.active_space_two_electron_result.packed_active_two_electron_integrals;
   if (packed.empty() && prepared.active_space_two_electron_result.representation ==
       integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {

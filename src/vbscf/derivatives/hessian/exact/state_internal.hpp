@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include <Eigen/Core>
@@ -15,6 +16,7 @@
 #include "vbscf/derivatives/hessian/responses/orbital/preparation.hpp"
 #include "integrals/response/types.hpp"
 #include "integrals/response/ri.hpp"
+#include "integrals/response/ri_ao.hpp"
 #include "integrals/ao/exact.hpp"
 #include "integrals/ao/ri_operator.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
@@ -25,6 +27,7 @@ namespace xmvb::vb {
 
 struct AcceptedOrbitalPreparationCache;
 struct ActiveSpaceGradientDirection;
+struct ActiveResponseView;
 
 struct ExactHvpOperator::State {
   struct PrecomputedDirection;
@@ -82,11 +85,18 @@ private:
   PrecomputedDirection prepare_direction(
       Eigen::VectorXd packed_direction) const;
 
+  std::vector<integrals::RiAoProjectedResponse> ri_ao_responses(
+      std::span<const PrecomputedDirection> directions,
+      const Eigen::Ref<const Eigen::MatrixXd>& weighted_active_columns,
+      bool fixed_two_electron) const;
+
+  ActiveSpaceGradientDirection active_response_gradient(
+      const ActiveResponseView& response, HvpComponents components) const;
+
   ActiveSpaceIntegralDirectionView build_active_integral_direction(
-      const OrbitalPreparationDirectionalResult& orbital_direction,
+      const PrecomputedDirection& direction,
       const Eigen::Ref<const Eigen::MatrixXd>& delta_h1e_times_active,
       const Eigen::VectorXd* precomputed_delta_packed_two_electron,
-      Eigen::VectorXd* ri_delta_packed_two_electron,
       ActiveSpaceIntegralDirectionWorkspace* workspace,
       bool packed_two_electron_required = true) const;
 
@@ -98,7 +108,6 @@ private:
       const Eigen::VectorXd* precomputed_delta_packed_active_two_electron,
       const Eigen::MatrixXd* precomputed_ri_active_pair_factor_direction,
       const xmvb::integrals::ExactCtxPairMatrix* precomputed_directional_pair_products,
-      const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
       const PrecomputedDirection* precomputed_direction,
       OrbitalCouplingAction* coupling_output,
       bool horizontal_forcing = true,StructureResponseRequest* ci_response=nullptr) const;
@@ -153,20 +162,15 @@ private:
   const OrbitalChart* nonredundant_space_ = nullptr;
   Eigen::MatrixXd accepted_active_auxiliary_orbitals_;
   Eigen::MatrixXd accepted_basis_overlap_times_active_auxiliary_orbitals_;
-  Eigen::MatrixXd accepted_ao_effective_one_electron_times_active_auxiliary_orbitals_;
-  Eigen::MatrixXd
-      accepted_ao_effective_one_electron_transpose_times_active_auxiliary_orbitals_;
   Eigen::MatrixXd accepted_sso_gradient_symmetric_;
   Eigen::MatrixXd accepted_hho_gradient_symmetric_;
+  /** R (W + W^T), acting directly on delta F Cbar projections. */
+  Eigen::MatrixXd accepted_hho_projection_weight_;
   mutable Eigen::MatrixXd ao_h1e_symmetrized_gradient_workspace_;
   mutable xmvb::integrals::AoH1eBatchWorkspace ao_h1e_batch_workspace_;
-  mutable xmvb::integrals::AoEffectiveOneElectronRiFusedWorkspace ri_ao_h1e_fused_workspace_;
-  mutable Eigen::MatrixXd ri_ao_h1e_forward_workspace_;
-  mutable Eigen::MatrixXd ri_ao_h1e_adjoint_workspace_;
-  mutable xmvb::integrals::AoEffectiveOneElectronRiStrategy ri_ao_h1e_strategy_ =
-      xmvb::integrals::AoEffectiveOneElectronRiStrategy::Uncalibrated;
+  mutable integrals::RiAoResponseWorkspace ri_ao_response_workspace_;
+  std::shared_ptr<const Eigen::MatrixXd> accepted_ri_inactive_one_index_factors_;
   Eigen::MatrixXd zero_core_hamiltonian_;
-  mutable std::vector<double> ao_h1e_inactive_density_gradient_workspace_;
   xmvb::integrals::ExactPackedActiveTwoElectronAdjointCache accepted_exact_two_electron_cache_;
   std::optional<xmvb::integrals::RiActiveTwoElectronResponseCache>
       accepted_ri_two_electron_cache_;

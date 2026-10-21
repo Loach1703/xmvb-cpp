@@ -18,6 +18,9 @@
 #include "vbscf/structures/assembly/action.hpp"
 #include "vbscf/structures/overlap/metric.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
+#include "vbscf/structures/overlap/spin_metric.hpp"
+#include "vbscf/derivatives/hessian/context/accepted_point.hpp"
+#include "vbscf/derivatives/hessian/coupled/structure.hpp"
 
 namespace {
 
@@ -84,10 +87,12 @@ struct Fixture {
         xmvb::integrals::packed_active_two_electron_integral_count(n), 0.0);
   }
 
-  xmvb::vb::StructureAction action() const {
+  xmvb::vb::StructureAction action(xmvb::vb::StructureActionMode mode =
+      xmvb::vb::StructureActionMode::ActionOnly,
+      const xmvb::vb::StructureDiagonal* diagonal = nullptr) const {
     return xmvb::vb::StructureAction(
         terms, selected.cols(), topology, overlap, one_electron, two_electron,
-        upper.rows(), nullptr, xmvb::vb::StructureActionMode::ActionOnly);
+        upper.rows(), diagonal, mode);
   }
 };
 
@@ -240,6 +245,108 @@ void check_retained_ill_conditioned_metric() {
           "retained factor lost the original metric residual certificate");
 }
 
+void check_selected_spin_metric() {
+  // Two independent columns in one occupation block plus an ionic column.
+  // Neither completeness, closure nor a particular spin sector is required
+  // by the orbital-independent Gram factorization.
+  Eigen::MatrixXd selected = Eigen::MatrixXd::Zero(9, 3);
+  selected(0, 0) = 1.3;
+  selected(1, 1) = selected(3, 1) = 1.0;
+  selected(1, 2) = 2.0;
+  selected(3, 2) = -1.0;
+  Fixture fixture(3, 1, 1, selected);
+  auto action = fixture.action();
+  const Eigen::MatrixXd gram = selected.transpose() * selected;
+  constexpr std::size_t bytes = 5 * sizeof(double);
+  require(xmvb::vb::SpinMetric::fits(action, fixture.alpha, fixture.beta, bytes) &&
+              !xmvb::vb::SpinMetric::fits(action, fixture.alpha, fixture.beta, bytes - 1),
+          "selected spin metric factor budget is not exact");
+  const xmvb::vb::SpinMetric spin(action, fixture.alpha, fixture.beta, bytes);
+  require(spin.block_count() == 2 && spin.max_block_size() == 2 &&
+              spin.factor_bytes() == bytes,
+          "selected spin metric did not preserve occupation blocks");
+  const Eigen::VectorXd rhs = Eigen::Vector3d(0.31, -0.47, 0.28);
+  require((gram * spin.solve(rhs).col(0) - rhs).norm() < 1e-12 &&
+              (spin.diagonal() - gram.diagonal()).norm() < 1e-12,
+          "selected spin Gram solve disagrees with independent dense oracle");
+  const Eigen::VectorXd weights = Eigen::Vector3d(0.8, 1.1, 1.1);
+  const Eigen::MatrixXd diagonal_orbital_metric =
+      weights.asDiagonal() * gram * weights.asDiagonal();
+  require((diagonal_orbital_metric * spin.precondition(rhs,
+              diagonal_orbital_metric.diagonal()) - rhs).norm() < 1e-12,
+          "scaled spin inverse is not exact for occupation-diagonal orbital metrics");
+
+  // At nonorthogonal orbitals this remains only a preconditioner. The exact
+  // selected M action and original certified residual determine the solution.
+  const xmvb::vb::RepresentationOverlap representation(
+      action, fixture.alpha, fixture.beta, fixture.upper.rows());
+  const auto metric = representation.prepare_metric(fixture.upper);
+  const Eigen::MatrixXd physical = metric.selected_matrix();
+  xmvb::linalg::MetricSolveStats stats;
+  const auto solution = xmvb::linalg::solve_metric(rhs,
+      [&](const Eigen::VectorXd& x) { return Eigen::VectorXd(physical * x); },
+      [&](const Eigen::VectorXd& x) { return spin.precondition(x, physical.diagonal()); },
+      &stats);
+  require(stats.certifications > 0 && stats.relative_residual <=
+              std::sqrt(std::numeric_limits<double>::epsilon()) &&
+              (physical * solution - rhs).norm() < 1e-10 * rhs.norm(),
+          "spin-preconditioned selected solve lost the physical metric certificate");
+  const Eigen::VectorXd other = Eigen::Vector3d(-0.1, 0.8, 0.34);
+  const Eigen::VectorXd px = spin.precondition(rhs, physical.diagonal());
+  const Eigen::VectorXd py = spin.precondition(other, physical.diagonal());
+  require(rhs.dot(px) > 0.0 &&
+              std::abs(rhs.dot(py) - other.dot(px)) < 1e-12,
+          "scaled spin preconditioner is not symmetric positive definite");
+
+  const Eigen::Vector3d d(0.6,1.4,0.8);
+  const Eigen::VectorXd k=(d.array()/gram.diagonal().array()).sqrt();
+  const Eigen::MatrixXd model=k.asDiagonal()*gram*k.asDiagonal();
+  const Eigen::MatrixXd inverse=spin.solve_diagonal_model(Eigen::Matrix3d::Identity(),d);
+  require((model*inverse-Eigen::Matrix3d::Identity()).norm()<2e-12 &&
+          (inverse-inverse.transpose()).norm()<2e-12 && rhs.dot(inverse*rhs)>0.0,
+      "diagonal-matched spin inverse differs from independent dense model");
+
+  // The selected columns do not close under orbital changes. Check the
+  // constrained preconditioner against a separately restricted dense model.
+  const xmvb::vb::StructureDiagonal model_diagonal{
+      Eigen::VectorXd::Zero(3),physical.diagonal()};
+  auto modeled_action=fixture.action(xmvb::vb::StructureActionMode::Davidson,&model_diagonal);
+  for (int states:{1,2}) {
+    auto point=std::make_shared<xmvb::vb::AcceptedPointContext>();
+    point->n_structures=3;
+    point->selected_state_indices.resize(states);
+    point->selected_state_energies.assign(states,0.0);
+    point->normalized_state_weights.assign(states,1.0/states);
+    const Eigen::LLT<Eigen::MatrixXd> norm(physical);
+    point->selected_state_eigenvectors=norm.matrixU().solve(Eigen::Matrix3d::Identity()).leftCols(states);
+    const auto& c=point->selected_state_eigenvectors;
+    point->selected_state_structure_images=xmvb::vb::StructureActionResult{
+        Eigen::MatrixXd::Zero(3,states),physical*c};
+    point->spin_metric=std::make_shared<xmvb::vb::SpinMetric>(
+        modeled_action,fixture.alpha,fixture.beta,bytes);
+    const xmvb::vb::StructureTangentOperator tangent(point,modeled_action);
+    const int size=tangent.tangent_size();
+    Eigen::MatrixXd z(3*states,size), actual(size,size);
+    for (int j=0;j<size;++j) {
+      const auto axis=Eigen::VectorXd::Unit(size,j);
+      const auto raw=tangent.expand(axis).scaled_coefficients;
+      z.col(j)=Eigen::Map<const Eigen::VectorXd>(raw.data(),raw.size());
+      actual.col(j)=tangent.apply_inverse_augmented_hessian_diagonal(axis,-0.07);
+    }
+    const auto& diagonal=modeled_action.preconditioner_diagonal();
+    const Eigen::VectorXd positive=(diagonal.hamiltonian+0.07*diagonal.overlap)
+        .cwiseAbs().cwiseMax(1e-8);
+    const Eigen::VectorXd scale=(positive.array()/gram.diagonal().array()).sqrt();
+    const Eigen::MatrixXd block=scale.asDiagonal()*gram*scale.asDiagonal();
+    Eigen::MatrixXd blocks=Eigen::MatrixXd::Zero(3*states,3*states);
+    for (int s=0;s<states;++s) blocks.block(3*s,3*s,3,3)=block;
+    const Eigen::MatrixXd expected=(z.transpose()*blocks*z).inverse();
+    require((actual-expected).norm()<3e-11 &&
+            (actual-actual.transpose()).norm()<3e-12,
+        "spin AH model inverse lost a selected-space tangent constraint");
+  }
+}
+
 void singlet_case() {
   Eigen::MatrixXd selected = Eigen::MatrixXd::Zero(9, 4);
   selected(0, 0) = 1.0;
@@ -313,6 +420,7 @@ void doublet_case() {
 }  // namespace
 
 int main() {
+  check_selected_spin_metric();
   check_retained_ill_conditioned_metric();
   singlet_case();
   doublet_case();

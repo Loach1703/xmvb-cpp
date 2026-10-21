@@ -100,13 +100,13 @@ double energy(
   return value;
 }
 
-xmvb::vb::AnalyticDiagonalIntermediates make_intermediates(
+xmvb::mcscf::AnalyticDiagonalIntermediates make_intermediates(
     const Eigen::Ref<const Eigen::MatrixXd>& h,
     const std::vector<double>& g,
     int n_core,
     int na) {
   const int n = static_cast<int>(h.rows());
-  xmvb::vb::AnalyticDiagonalIntermediates x;
+  xmvb::mcscf::AnalyticDiagonalIntermediates x;
   x.n_core = n_core;
   x.n_active = na;
   x.h_core = h;
@@ -335,7 +335,7 @@ void check_contracted_density_span() {
       for (std::size_t j = 0; j < accepted.packed_active_two_electron_gradient.size(); ++j)
         accepted.packed_active_two_electron_gradient[j] =
             scale*0.03*std::sin(0.19*(j+1));
-      const auto expected = xmvb::vb::build_analytic_rotation_hessian_diagonal(
+      const auto expected = xmvb::mcscf::build_analytic_rotation_hessian_diagonal(
           reference,dm1,accepted.packed_active_two_electron_gradient);
       const auto actual = xmvb::vb::build_analytic_orbital_diagonal(input,accepted);
       const double error = (actual.rotation_diagonal-expected).cwiseAbs().maxCoeff();
@@ -381,7 +381,7 @@ int main() {
 
   const auto x = make_intermediates(h,g,nc,na);
   const Eigen::MatrixXd diagonal =
-      xmvb::vb::build_analytic_rotation_hessian_diagonal(x,dm1,packed);
+      xmvb::mcscf::build_analytic_rotation_hessian_diagonal(x,dm1,packed);
   // Exercise the complete AO-to-diagonal path against explicitly transformed
   // four-index integrals. Dense orbitals test off-diagonal density channels,
   // including all coincident-index ERI multiplicities.
@@ -397,7 +397,7 @@ int main() {
   const auto rotated_g = rotate_eri(g, mo);
   const auto rotated_x = make_intermediates(mo.transpose()*h*mo,rotated_g,nc,na);
   const Eigen::MatrixXd reference =
-      xmvb::vb::build_analytic_rotation_hessian_diagonal(rotated_x,dm1,packed);
+      xmvb::mcscf::build_analytic_rotation_hessian_diagonal(rotated_x,dm1,packed);
   xmvb::vb::VbScfInput input;
   input.standard_two_electron_mode = xmvb::vb::StandardTwoElectronMode::Exact;
   input.orbital_preparation_input.n_basis_functions = n;
@@ -465,7 +465,7 @@ int main() {
   const auto ri_x = make_intermediates(
       mo.transpose()*h*mo,rotate_eri(ri_g,mo),nc,na);
   const auto ri_reference =
-      xmvb::vb::build_analytic_rotation_hessian_diagonal(ri_x,dm1,packed);
+      xmvb::mcscf::build_analytic_rotation_hessian_diagonal(ri_x,dm1,packed);
   input.standard_two_electron_mode = xmvb::vb::StandardTwoElectronMode::ResolutionOfIdentity;
   input.ri_factorization = ri;
   prepared.ao_effective_one_electron_result.ao_coulomb_exchange_matrix =

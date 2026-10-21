@@ -10,6 +10,7 @@
 #include "parallel/openmp.hpp"
 #include "core/pair_index.hpp"
 #include "integrals/active/pair_map.hpp"
+#include "integrals/response/orbital_pair.hpp"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -28,17 +29,10 @@ void contract_orbital_pair_direction(
       cache.orbital_pair_products.cols() != pairs) {
     throw std::invalid_argument("invalid one-orbital integral direction");
   }
-  const Eigen::Map<const ExactCtxPairMatrix> image(
-      cache.orbital_pair_products.data(), cache.n_basis_functions, n * pairs);
-  const Eigen::MatrixXd projected = image.transpose() * direction;
-  contraction->resize(pairs, pairs);
-  for (Eigen::Index p = 0; p < pairs; ++p) {
-    const int a = cache.active_pair_first_indices[p];
-    const int b = cache.active_pair_second_indices[p];
-    for (Eigen::Index q = 0; q < pairs; ++q) {
-      (*contraction)(p, q) = projected(b * pairs + q, a) + projected(a * pairs + q, b);
-    }
-  }
+  *contraction = xmvb::integrals::contract_orbital_pair_direction(
+      cache.orbital_pair_products, direction,
+      cache.active_pair_first_indices, cache.active_pair_second_indices,
+      cache.n_active_orbitals);
 }
 
 void build_ao_pair_component_tables(

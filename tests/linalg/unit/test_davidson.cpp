@@ -277,6 +277,7 @@ bool run_residual_preconditioner_case() {
   bool observations_valid = true;
   double last_energy = 0.0;
   double last_relative_residual = 0.0;
+  double last_stationarity_residual = 0.0;
   options.residual_preconditioner =
       [&](const Eigen::VectorXd& residual, double energy) {
         ++inverse_calls;
@@ -299,16 +300,18 @@ bool run_residual_preconditioner_case() {
       };
   options.observe_iteration =
       [&](int iteration, int active_subspace, double lowest_energy,
-          double largest_relative_residual) {
+          double largest_relative_residual, double largest_stationarity_residual) {
         observations_valid = observations_valid &&
             iteration == ++observed_iterations &&
             active_subspace >= n_roots &&
             active_subspace <= options.max_subspace_dimension &&
             std::isfinite(lowest_energy) &&
             std::isfinite(largest_relative_residual) &&
-            largest_relative_residual >= 0.0;
+            largest_relative_residual >= 0.0 &&
+            std::isfinite(largest_stationarity_residual) && largest_stationarity_residual >= 0.0;
         last_energy = lowest_energy;
         last_relative_residual = largest_relative_residual;
+        last_stationarity_residual = largest_stationarity_residual;
       };
   const auto preconditioned = solver.solve_davidson(
       action, problem.hamiltonian.diagonal(),
@@ -340,6 +343,8 @@ bool run_residual_preconditioner_case() {
       observed_iterations == preconditioned.iterations &&
       last_energy == preconditioned.eigenpairs.eigenvalues[0] &&
       last_relative_residual == reported_max &&
+      last_stationarity_residual == *std::max_element(preconditioned.stationarity_residual_norms.begin(),
+          preconditioned.stationarity_residual_norms.end()) &&
       max_eigenvalue_error(
           reference.eigenvalues, preconditioned.eigenpairs.eigenvalues,
           n_roots) <= 1.0e-8 &&

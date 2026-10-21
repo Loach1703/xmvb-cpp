@@ -1,0 +1,4 @@
+space,status,termination,exit_code,structures,steps,hvp,accepted_hvp,failed_hvp,responses,initial_Eh,final_Eh,application_s,scf_s,process_s,rss_GiB,node
+ion02,converged,ciah_projected_gradient_tolerance,0,47256,4,44,44,0,44,-398.860723984539,-399.397232509244,89.413685,86.289623,92.24000000000001,2.8773956298828125,anode06
+full,converged,ciah_projected_gradient_tolerance,0,226512,4,40,40,0,40,-398.880685140388,-399.417495587056,94.786351,90.651593,105.25999999999999,3.522106170654297,anode06
+cov,converged,ciah_projected_gradient_tolerance,0,132,4,36,36,0,36,-398.533053417516,-399.106646267331,17.837822,15.246289,18.06,2.598888397216797,anode07

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <limits>
 #include <optional>
+#include <string_view>
 #include <stdexcept>
 #include <utility>
 
@@ -21,31 +22,32 @@
 #include "core/timing.hpp"
 #include "vbscf/optimization/driver/options.hpp"
 #include "vbscf/optimization/driver/result.hpp"
+#include "vbscf/optimization/driver/session.hpp"
 #include "vbscf/optimization/globalization/line_search.hpp"
-#include "mcscf/optimization/ciah/solver.hpp"
+#include "mcscf/optimization/ciah/driver.hpp"
 #include "vbscf/optimization/coupled/ci_transport.hpp"
+#include "vbscf/optimization/coupled/affine.hpp"
 #include "mcscf/optimization/preconditioners/coarse.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 
 namespace xmvb::vb::optimizer_detail {
-namespace {
 
-// Initial policies follow PySCF newton_casscf.update_orb_ci. They control
-// approximate microsteps, not the VBSCF outer accuracy contract.
-constexpr double max_component = 0.03;
-constexpr double gradient_trust = 3.0;
-constexpr int ah_start_cycle = 3;
-constexpr int keyframe_interval = 5;
-constexpr int base_micro_cycles = 10;
-
-struct Keyframe {
-  Eigen::VectorXd gradient;
-  /** Residual-balanced internal energy; macro acceptance remains physical. */
-  double energy = 0.0;
-  double physical_energy = 0.0;
-};
-
-}  // namespace
+bool CiahMacroStep::check_convergence(const SparseParameterLayout& layout,
+    const VbScfOptimizerOptions& options, bool complete_active_space,
+    double source_energy) {
+  converged_geometry.reset();
+  if (!(std::abs(trial.energy - source_energy) < options.energy_tolerance)) return false;
+  if (!trial.gradient_ready)
+    throw std::logic_error("CIAH terminal candidate requires its true gradient");
+  auto geometry = build_orbital_geometry(trial.orbital_preparation_input,
+      trial.gradient_result.orbital_preparation_result, layout,
+      complete_active_space, OrbitalChart::Coordinates::Unwhitened);
+  const auto projected = geometry.project_gradient(trial.gradient);
+  if (!orbital_gradient_converged(trial.orbital_preparation_input, layout,
+          geometry, projected.reduced_gradient, options.gradient_tolerance)) return false;
+  converged_geometry.emplace(std::move(geometry));
+  return true;
+}
 
 void CiahMacroStep::align_structure_frame(
     const Eigen::MatrixXd& reference, const Eigen::MatrixXd& overlap_roots) {
@@ -89,6 +91,8 @@ bool build_ciah_macro_step(
   std::unique_ptr<CiTransport> transport;
   if (ns) transport = std::make_unique<CiTransport>(
       orbitals, layout, chart, *context, hessian.structure_action(), structure);
+  std::optional<AffineCoupling> affine;
+  if (ns) affine.emplace(*context, hessian, structure);
   mcscf::CiahOptions ciah_options;
   double energy_scale = 0.0;
   for (const double state_energy : context->selected_state_energies)
@@ -117,32 +121,19 @@ bool build_ciah_macro_step(
     if (ns == 0) {
       image = hessian.apply_orbital(x);
     } else {
-      const bool direct_ci = hessian.structure_action().supports_integral_direction();
-      const Eigen::MatrixXd raw_ci=direct_ci ?
-          structure.coefficient_response_coordinates(x.tail(ns)):Eigen::MatrixXd{};
-      StructureResponseRequest response_request{raw_ci};
-      const auto orbital = hessian.apply_orbital_coupling(x.head(no),
-          direct_ci ? &response_request:nullptr);
-      xmvb::profiling::ScopedPhase structure_phase(xmvb::profiling::Phase::CiahStructure, true);
-      const auto structure_start=std::chrono::steady_clock::now();
-      StructureActiveIntegralAdjoint active_adjoint;
-      const auto ci = direct_ci ? structure.finish_coupling_coordinates(raw_ci,
-          std::move(response_request.result),&active_adjoint):
-          structure.apply_coupling_coordinates(x.tail(ns));
-      const auto coupling_end=std::chrono::steady_clock::now();
-      const Eigen::VectorXd adjoint = direct_ci
-          ? hessian.apply_structure_coupling_adjoint(active_adjoint)
-          : hessian.apply_structure_coupling_adjoint(
-              ci.coefficient_response, ci.adjoint_multipliers);
-      const auto adjoint_end=std::chrono::steady_clock::now();
+      const auto blocks = affine->apply(x.head(no), x.tail(ns));
+      const auto& orbital = blocks.orbital;
+      const auto& ci = blocks.ci;
+      const auto& adjoint = blocks.adjoint;
       if (metric_image) metric_image->tail(ns) = ci.metric_coordinates;
-      const Eigen::VectorXd forcing = structure.project_coordinates(
-          orbital.scaled_structure_forcing);
+      const auto& forcing = blocks.forcing;
       if (orbital.connection.has_value()) {
         xmvb::profiling::ScopedPhase connection_phase(xmvb::profiling::Phase::CiahConnection, true);
         const auto& connection = *orbital.connection;
-        const Eigen::VectorXd representation = structure.project_coordinates(
+        Eigen::VectorXd representation = structure.project_coordinates(
             connection.representation_forcing);
+        representation += forcing -
+            structure.project_coordinates(orbital.scaled_structure_forcing);
         const Eigen::VectorXd integral = structure.project_coordinates(
             connection.integral_forcing);
         const Eigen::VectorXd rhs = structure.project_coordinates(connection.overlap);
@@ -177,11 +168,6 @@ bool build_ciah_macro_step(
       // The residual-balanced finite model has the physical affine Hessian
       // at this origin, even for a finite CI residual. Its coordinate second
       // jet is cancelled in the keyframe energy AND gradient, not discarded.
-      mcscf::diagnostics::ciah_trace("ciah_structure_cost",
-          "coupling=%.17g,orbital_adjoint=%.17g,projection=%.17g",
-          std::chrono::duration<double>(coupling_end-structure_start).count(),
-          std::chrono::duration<double>(adjoint_end-coupling_end).count(),
-          std::chrono::duration<double>(std::chrono::steady_clock::now()-adjoint_end).count());
       if (mcscf::diagnostics::ciah_event_trace_enabled()) {
         const double orbital_energy = x.head(no).dot(orbital.orbital_hessian);
         const double structure_energy = x.tail(ns).dot(ci.hessian_coordinates);
@@ -294,10 +280,11 @@ bool build_ciah_macro_step(
     xmvb::profiling::ScopedPhase keyframe_phase(xmvb::profiling::Phase::CiahKeyframe, true);
     const auto parameters = build_nonredundant_lifted_trial_parameters(
         orbitals, chart, layout, displacement.head(no));
-    Keyframe keyframe;
+    mcscf::CiahKeyframe keyframe;
     if (ns) {
       const auto& point = transport_at(displacement);
-      const auto exact = objective->evaluate_coupled_keyframe(parameters, point.coefficients);
+      const auto exact = objective->evaluate_coupled_keyframe(
+          parameters, point.coefficients, point.selected_metric.get());
       auto model = transport->evaluate_model(point, exact);
       keyframe.gradient = std::move(model.gradient);
       keyframe.energy = model.energy;
@@ -312,60 +299,33 @@ bool build_ciah_macro_step(
     return keyframe;
   };
 
-  Eigen::VectorXd displacement = Eigen::VectorXd::Zero(dimension);
-  Eigen::VectorXd hessian_displacement = displacement;
-  Eigen::VectorXd predicted_gradient = initial_gradient;
-  mcscf::CiahEnergyModel energy_model(energy, initial_gradient);
-  mcscf::CiahKeyframes keyframes(energy);
-  Eigen::VectorXd last_step = displacement;
-  // Retain the finite Ritz residual rather than assuming exact CI stationarity.
-  double keyframe_norm = coordinate_norm(initial_gradient);
-  // newton_casscf.kernel passes 0.3 * its outer gradient tolerance to
-  // update_orb_ci; the microstep/keyframe tests use that inner tolerance.
-  const double micro_gradient_tolerance = 0.3 * options.gradient_tolerance;
-  int micro_steps = 0, since_keyframe = 0;
-  bool audit_next_keyframe_step = false;
-  bool audited_keyframe_step = false;
-  bool audited_origin_step = false;
-  bool audited_structure_path = false;
-  bool energy_model_stopped = false;
-  const char* micro_stop = "unset";
-  mcscf::CiahResult candidate;
-  setup_phase.stop();
-  while (true) {
-    candidate = workspace.next(predicted_gradient);
-    ++record->micro_iterations;
-    const double rhs_norm = coordinate_norm(predicted_gradient);
-    // A cached-only candidate can be consumed if the CURRENT AH equation is
-    // resolved. Otherwise enrich using its current residual before consuming
-    // an approximate step. The Ritz residual includes the reference alpha.
-    const bool forcing_resolved = candidate.resolved(rhs_norm, 1.0 / gradient_trust);
-    const bool ready = candidate.converged || candidate.exhaustion ||
-        (candidate.basis_size >= ah_start_cycle &&
-         (forcing_resolved || candidate.new_hvp_actions != 0));
-    if (!ready) continue;
-
-    Eigen::VectorXd step = candidate.step;
-    Eigen::VectorXd image = candidate.hessian_step;
-    double largest = chart.maximum_rotation_component(step.head(no));
+  mcscf::CiahMicroCallbacks callbacks;
+  callbacks.coordinate_norm = coordinate_norm;
+  callbacks.metric_action = metric_action;
+  callbacks.maximum_component = [&](const Eigen::VectorXd& direction) {
+    double largest = chart.maximum_rotation_component(direction.head(no));
     if (ns) largest = std::max(largest,
-        structure.maximum_coefficient_component_coordinates(step.tail(ns)));
-    const double step_scale = largest > max_component ? max_component / largest : 1.0;
-    if (step_scale < 1.0) {
-      step *= step_scale;
-      image *= step_scale;
-    }
-    if (step_audit) {
-      diagnostics::audit_orbital_step(
-          orbitals, chart, step.head(no), "micro_origin", micro_steps + 1);
-      diagnostics::audit_orbital_step(
-          orbitals, chart, step.head(no), "micro_increment", micro_steps + 1,
-          displacement.head(no));
-    }
-    if (!audited_origin_step && displacement.isZero() &&
-        mcscf::diagnostics::ciah_trace_enabled() && mcscf::diagnostics::ciah_candidate_audit_enabled()) {
-      // Compare the complete derivative in the immutable origin chart. These
-      // diagnostic evaluations must not count as optimizer keyframe updates.
+        structure.maximum_coefficient_component_coordinates(direction.tail(ns)));
+    return largest;
+  };
+  callbacks.evaluate_keyframe = evaluate_keyframe;
+  callbacks.orbital_size = no;
+  callbacks.orbital_coordinate_norm = [&](const Eigen::VectorXd& g) {
+    return chart.coordinate_dual_norm(g);
+  };
+  if (step_audit) callbacks.audit_step = [&](const char* label,
+      const Eigen::VectorXd& prior, const Eigen::VectorXd& step, int index) {
+    if (std::string_view(label) == "micro_increment")
+      diagnostics::audit_orbital_step(orbitals, chart, step.head(no),
+          label, index, prior.head(no));
+    else
+      diagnostics::audit_orbital_step(orbitals, chart, step.head(no), label, index);
+  };
+  if (mcscf::diagnostics::ciah_trace_enabled() &&
+      mcscf::diagnostics::ciah_candidate_audit_enabled()) {
+    callbacks.audit_origin = [&](const Eigen::VectorXd&,
+        const Eigen::VectorXd& step, const Eigen::VectorXd& image,
+        const Eigen::VectorXd&) {
       const double length = std::sqrt(std::max(0.0, step.dot(metric_action(step))));
       if (length > 0.0) {
         const Eigen::VectorXd direction = step / length;
@@ -373,195 +333,77 @@ bool build_ciah_macro_step(
         const double exact_norm = coordinate_norm(exact_image);
         const int previous_keyframes = record->keyframes;
         for (const double delta : {1.0e-3, 3.0e-4}) {
-          const Keyframe plus = evaluate_keyframe(delta * direction);
-          const Keyframe minus = evaluate_keyframe(-delta * direction);
+          const auto plus = evaluate_keyframe(delta * direction);
+          const auto minus = evaluate_keyframe(-delta * direction);
           const Eigen::VectorXd finite = (plus.gradient - minus.gradient) / (2.0 * delta);
           const Eigen::VectorXd error = finite - exact_image;
           const double derivative = initial_gradient.dot(direction);
           mcscf::diagnostics::ciah_trace("ciah_origin_hvp_audit",
               "delta=%.17g,image_norm=%.17g,finite_norm=%.17g,error_norm=%.17g,orbital_error=%.17g,structure_error=%.17g,derivative=%.17g,finite_derivative=%.17g,orbital_direction_norm=%.17g,structure_direction_norm=%.17g",
               delta, exact_norm, coordinate_norm(finite), coordinate_norm(error),
-              error.head(no).norm(),error.tail(ns).norm(),
+              error.head(no).norm(), error.tail(ns).norm(),
               derivative, (plus.energy - minus.energy) / (2.0 * delta),
               step.head(no).norm() / length, ns ? step.tail(ns).norm() / length : 0.0);
         }
         record->keyframes = previous_keyframes;
       }
-      audited_origin_step = true;
-    }
-    if (audit_next_keyframe_step) {
-      // Check the actual resumed direction at a nonzero keyframe, in the
-      // same immutable origin chart used by both the gradient and H images.
-      // This opt-in audit neither changes the candidate nor adds any HVP.
+    };
+  }
+  if (mcscf::diagnostics::ciah_event_trace_enabled() &&
+      mcscf::diagnostics::ciah_candidate_audit_enabled()) {
+    callbacks.audit_resumed = [&](const Eigen::VectorXd& displacement,
+        const Eigen::VectorXd& step, const Eigen::VectorXd& image,
+        const Eigen::VectorXd& predicted_gradient, int basis_size) {
       const double length = std::sqrt(std::max(0.0, step.dot(metric_action(step))));
       if (length > 0.0) {
         const Eigen::VectorXd direction = step / length;
         const Eigen::VectorXd origin_image = image / length;
         const double derivative = predicted_gradient.dot(direction);
         for (const double delta : {1.0e-3, 3.0e-4}) {
-          const Keyframe plus = evaluate_keyframe(displacement + delta * direction);
-          const Keyframe minus = evaluate_keyframe(displacement - delta * direction);
+          const auto plus = evaluate_keyframe(displacement + delta * direction);
+          const auto minus = evaluate_keyframe(displacement - delta * direction);
           const double finite = (plus.energy - minus.energy) / (2.0 * delta);
           const Eigen::VectorXd local_image =
               (plus.gradient - minus.gradient) / (2.0 * delta);
           mcscf::diagnostics::ciah_trace("ciah_keyframe_direction_audit",
               "basis=%d,delta=%.17g,analytic=%.17g,finite=%.17g,derivative_error=%.17g,local_curvature=%.17g,origin_curvature=%.17g,curvature_change=%.17g,orbital_derivative=%.17g,structure_derivative=%.17g",
-              candidate.basis_size, delta, derivative, finite,
+              basis_size, delta, derivative, finite,
               std::abs(derivative - finite), coordinate_norm(local_image),
               coordinate_norm(origin_image), coordinate_norm(local_image - origin_image),
               predicted_gradient.head(no).dot(direction.head(no)),
               ns ? predicted_gradient.tail(ns).dot(direction.tail(ns)) : 0.0);
         }
       }
-      audit_next_keyframe_step = false;
-      audited_keyframe_step = true;
-    }
-    const Eigen::VectorXd previous_gradient = predicted_gradient;
-    const Eigen::VectorXd previous_step = last_step;
-    displacement += step;
-    hessian_displacement += image;
-    energy_model.add(step, image);
-    predicted_gradient += image;
-    last_step = step;
-    ++micro_steps;
-    ++since_keyframe;
-    const double predicted_norm = coordinate_norm(predicted_gradient);
-    mcscf::diagnostics::ciah_trace("ciah_micro",
-        "basis=%d,micro=%d,omega=%.17g,alpha=%.17g,residual=%.17g,gradient=%.17g,step_scale=%.17g,max_component=%.17g,orbital_residual_euclidean=%.17g,structure_residual_euclidean=%.17g,rhs_norm=%.17g,forcing_target=%.17g,forcing_resolved=%d",
-        candidate.basis_size, micro_steps, candidate.eigenvalue,
-        candidate.reference_component, candidate.residual_norm, predicted_norm,
-        step_scale, largest, candidate.residual.head(no).norm(), candidate.residual.tail(ns).norm(),
-        rhs_norm,rhs_norm / gradient_trust,static_cast<int>(forcing_resolved));
-    if (micro_steps > 3 && predicted_norm > gradient_trust * keyframe_norm) {
-      displacement -= step;
-      hessian_displacement -= image;
-      energy_model.remove(step, image);
-      predicted_gradient = previous_gradient;
-      last_step = previous_step;
-      ++record->rejected_trial_count;
-      micro_stop = "gradient_growth";
-      break;
-    }
-    const int micro_limit = std::max(base_micro_cycles,
-        base_micro_cycles - static_cast<int>(2.0 * std::log(keyframe_norm + 1.0e-7)));
-    if (micro_steps >= micro_limit ||
-        predicted_norm < 0.3 * micro_gradient_tolerance || candidate.exhaustion) {
-      micro_stop = predicted_norm < 0.3 * micro_gradient_tolerance ? "micro_gradient" :
-          candidate.exhaustion ? "subspace_exhaustion" : "micro_budget";
-      mcscf::diagnostics::ciah_trace("ciah_micro_stop",
-          "reason=%s,micro=%d,budget=%d,basis=%d,keyframe_norm=%.17g,predicted=%.17g,target=%.17g,residual=%.17g,ah_converged=%d",
-          micro_stop,micro_steps,micro_limit,candidate.basis_size,keyframe_norm,
-          predicted_norm,0.3*micro_gradient_tolerance,candidate.residual_norm,
-          static_cast<int>(candidate.converged));
-      break;
-    }
-
-    // PySCF resets dr after committing a keyframe. The update interval is a
-    // function of displacement since that keyframe, not the entire macro.
-    const auto& keyframe_step = energy_model.displacement();
-    const double length = std::sqrt(std::max(0.0,
-        keyframe_step.dot(metric_action(keyframe_step))));
-    const double interval = std::max<double>(keyframe_interval,
-        keyframe_interval - std::log(length + 1.0e-7));
-    if (since_keyframe >= interval || predicted_norm < keyframe_norm / gradient_trust) {
-      if (step_audit) diagnostics::audit_orbital_step(
-          orbitals, chart, displacement.head(no), "keyframe", micro_steps);
-      const Keyframe exact = evaluate_keyframe(displacement);
-      if (ns && !audited_structure_path && diagnostics::ciah_keyframe_audit_enabled()) {
-        const int saved_keyframes = record->keyframes;
-        diagnostics::audit_ciah_keyframe(displacement, hessian_displacement,
-            exact.gradient, static_cast<int>(no), [&](const Eigen::VectorXd& point) {
-              const auto value = evaluate_keyframe(point);
-              return diagnostics::CiahKeyframeProbe{value.gradient, value.energy};
-            });
-        record->keyframes = saved_keyframes;
-        audited_structure_path = true;
-      }
-      const double actual_norm = coordinate_norm(exact.gradient);
-      const Eigen::VectorXd correction = exact.gradient - predicted_gradient;
-      const double mismatch_norm = coordinate_norm(correction);
-      const bool small_gradient = actual_norm < gradient_trust * micro_gradient_tolerance;
-      const bool mismatch_small = mismatch_norm < gradient_trust * predicted_norm;
-      if (mcscf::diagnostics::ciah_event_trace_enabled()) {
-        const double captured = workspace.projected_dual_norm(correction);
-        const double secant = correction.dot(keyframe_step);
-        mcscf::diagnostics::ciah_trace("ciah_keyframe_secant",
-            "mismatch_norm=%.17g,captured=%.17g,displacement_norm=%.17g,secant=%.17g,mismatch_small=%d",
-            mismatch_norm, captured, length, secant, static_cast<int>(mismatch_small));
-      }
-      const bool keep_keyframe = small_gradient || mismatch_small;
-      // Model agreement controls further microsteps, not true-energy descent.
-      // Keep an evaluated lower-energy candidate even when its model is stale;
-      // normal macro acceptance still reoptimizes CI and checks real energy.
-      keyframes.save(exact.energy,displacement,hessian_displacement,last_step,candidate);
-      mcscf::diagnostics::ciah_trace("ciah_keyframe",
-          "actual=%.17g,predicted=%.17g,mismatch=%.17g,mismatch_small=%d,energy=%.17g,physical_energy=%.17g,accepted=%d",
-          actual_norm, predicted_norm, mismatch_norm, static_cast<int>(mismatch_small),
-          exact.energy, exact.physical_energy, static_cast<int>(keep_keyframe));
-      if (mcscf::diagnostics::ciah_event_trace_enabled()) {
-        const double actual_orbital = chart.coordinate_dual_norm(exact.gradient.head(no));
-        const double predicted_orbital = chart.coordinate_dual_norm(predicted_gradient.head(no));
-        const double mismatch_orbital = chart.coordinate_dual_norm(correction.head(no));
-        mcscf::diagnostics::ciah_trace("ciah_keyframe_blocks",
-            "actual_orbital=%.17g,actual_structure_squared=%.17g,predicted_orbital=%.17g,predicted_structure_squared=%.17g,mismatch_orbital=%.17g,mismatch_structure_squared=%.17g",
-            actual_orbital, std::max(0.0,actual_norm*actual_norm-actual_orbital*actual_orbital),
-            predicted_orbital, std::max(0.0,predicted_norm*predicted_norm-predicted_orbital*predicted_orbital),
-            mismatch_orbital, std::max(0.0,mismatch_norm*mismatch_norm-mismatch_orbital*mismatch_orbital));
-      }
-      if (keep_keyframe) {
-        // Gradient agreement alone can miss an energy model that predicts
-        // descent while its exact segment climbs. Do not extrapolate that
-        // frozen curvature further. Keep this actual keyframe displacement
-        // for the normal relaxed-CI macro trial; it may still lower energy.
-        if (energy_model.descent_mismatch(exact.energy)) {
-          energy_model_stopped = true;
-          micro_stop = "keyframe_energy_model";
-          mcscf::diagnostics::ciah_trace("ciah_keyframe_energy_model",
-              "anchor=%.17g,predicted=%.17g,actual=%.17g,stop=1",
-              energy_model.anchor_energy(),energy_model.energy(),exact.energy);
-          break;
-        }
-        xmvb::profiling::ScopedPhase refresh_phase(xmvb::profiling::Phase::CiahRefresh);
-        predicted_gradient = exact.gradient;
-        energy_model.refresh(exact.energy, exact.gradient);
-        mcscf::diagnostics::ciah_trace("ciah_model_refresh",
-            "energy=%.17g,source_energy=%.17g,anchored_prediction=%.17g,origin_prediction=%.17g",
-            exact.energy, energy, energy - exact.energy,
-            -initial_gradient.dot(displacement) -
-                0.5 * displacement.dot(hessian_displacement));
-        keyframe_norm = actual_norm;
-        since_keyframe = 0;
-        audit_next_keyframe_step = !audited_keyframe_step &&
-            mcscf::diagnostics::ciah_event_trace_enabled() &&
-            mcscf::diagnostics::ciah_candidate_audit_enabled();
-      } else {
-        displacement -= step;
-        hessian_displacement -= image;
-        energy_model.remove(step, image);
-        predicted_gradient = previous_gradient;
-        last_step = previous_step;
-        ++record->rejected_trial_count;
-        micro_stop = "keyframe_mismatch";
-        break;
-      }
-    }
-    // The microstep and possibly a keyframe changed the RHS. Reproject that
-    // RHS in the retained space before spending an HVP on enrichment; a
-    // residual from the previously consumed equation is no longer current.
-    workspace.reset_rhs();
+    };
   }
-
-  if (mcscf::diagnostics::ciah_event_trace_enabled()) {
-    // These belong to the kept microstep sequence before prefix restoration.
-    // A keyframe changes the RHS, not the immutable Hessian images.
-    const Eigen::VectorXd frozen_gradient = initial_gradient + hessian_displacement;
-    mcscf::diagnostics::ciah_trace("ciah_micro_end",
-        "reason=%s,source_coordinate_norm=%.17g,predicted_coordinate_norm=%.17g,frozen_model_coordinate_norm=%.17g,keyframe_correction_norm=%.17g,last_ritz=%.17g",
-        micro_stop, coordinate_norm(initial_gradient), coordinate_norm(predicted_gradient),
-        coordinate_norm(frozen_gradient), coordinate_norm(predicted_gradient - frozen_gradient),
-        candidate.residual_norm);
+  if (ns && diagnostics::ciah_keyframe_audit_enabled()) {
+    callbacks.audit_keyframe = [&](const Eigen::VectorXd& displacement,
+        const Eigen::VectorXd& hessian_displacement,
+        const mcscf::CiahKeyframe& exact) {
+      const int saved_keyframes = record->keyframes;
+      diagnostics::audit_ciah_keyframe(displacement, hessian_displacement,
+          exact.gradient, static_cast<int>(no), [&](const Eigen::VectorXd& point) {
+            const auto value = evaluate_keyframe(point);
+            return diagnostics::CiahKeyframeProbe{value.gradient, value.energy};
+          });
+      record->keyframes = saved_keyframes;
+    };
   }
-
+  setup_phase.stop();
+  auto micro = mcscf::run_ciah_microsteps(workspace, initial_gradient, energy,
+      options.gradient_tolerance, callbacks);
+  record->micro_iterations += micro.micro_iterations;
+  record->rejected_trial_count += micro.rejected_trial_count;
+  auto& displacement = micro.displacement;
+  auto& hessian_displacement = micro.hessian_displacement;
+  auto& predicted_gradient = micro.predicted_gradient;
+  auto& last_step = micro.last_step;
+  auto& candidate = micro.candidate;
+  auto& energy_model = micro.energy_model;
+  auto& keyframes = micro.keyframes;
+  const int micro_steps = micro.micro_steps;
+  const bool energy_model_stopped = micro.energy_model_stopped;
+  const char* micro_stop = micro.stop_reason;
   double final_reduction = energy - energy_model.energy();
   if (mcscf::diagnostics::ciah_trace_enabled()) {
     // A diagnostic of the actual coupled trial space, not just its A block.
@@ -626,8 +468,8 @@ bool build_ciah_macro_step(
     if (!(largest > 0.0)) return false;
     // Clip BEFORE dividing by a possibly tiny AH reference component. A
     // Hessian-only negative-curvature root has alpha=0 and uses the same cap.
-    const double factor = largest > max_component * ray->reference_component
-        ? max_component / largest : 1.0 / ray->reference_component;
+    const double factor = largest > mcscf::ciah_max_component * ray->reference_component
+        ? mcscf::ciah_max_component / largest : 1.0 / ray->reference_component;
     displacement = factor * ray->step;
     hessian_displacement = factor * ray->hessian_step;
     last_step = displacement;
@@ -672,7 +514,21 @@ bool build_ciah_macro_step(
     const double reduction = energy - accepted->trial.energy;
     const double ratio = prediction > 0.0 ? reduction / prediction
         : -std::numeric_limits<double>::infinity();
-    const bool keep_trial = reduction > 0.0;
+    bool keep_trial = reduction > 0.0;
+    // Strict descent globalizes nonterminal steps. Near stationarity, first
+    // give the EXISTING energy/true-gradient stopping rule its candidate.
+    // Ordinary descent trials do not add any convergence work here. A
+    // non-descent candidate with small energy change needs its OWN gradient,
+    // not the source gradient or a model-based substitute.
+    if (!keep_trial && std::abs(reduction) < options.energy_tolerance) {
+      objective->complete_trial(&accepted->trial);
+      keep_trial = accepted->check_convergence(layout, options,
+          objective->input().complete_active_space, energy);
+      mcscf::diagnostics::ciah_trace("ciah_terminal_trial",
+          "energy_change=%.17g,energy_tolerance=%.17g,gradient_tolerance=%.17g,converged=%d",
+          -reduction, options.energy_tolerance, options.gradient_tolerance,
+          static_cast<int>(keep_trial));
+    }
     mcscf::diagnostics::ciah_trace("ciah_macro_trial",
         "scale=%.17g,linear=%.17g,quadratic=%.17g,current_energy=%.17g,trial_energy=%.17g,predicted=%.17g,actual=%.17g,rho=%.17g,accepted=%d",
         scale, model_linear, scale * scale * quadratic, energy,
@@ -726,7 +582,7 @@ bool build_ciah_macro_step(
   // Only the accepted point needs gradient backpropagation and its context.
   // Complete the retained forward evaluation, rather than rebuilding it.
   xmvb::profiling::ScopedPhase completion_phase(xmvb::profiling::Phase::CiahCompletion, true);
-  objective->complete_trial(&accepted->trial);
+  if (!accepted->trial.gradient_ready) objective->complete_trial(&accepted->trial);
   completion_phase.stop();
   displacement *= scale;
   hessian_displacement *= scale;
@@ -748,7 +604,7 @@ bool build_ciah_macro_step(
       // One additional fixed-C keyframe, only in explicit nonlinear audit mode.
       // The accepted relaxed gradient is the normal production completion,
       // brought forward and cached so the caller does not repeat its backprop.
-      const Keyframe exact = evaluate_keyframe(displacement);
+      const mcscf::CiahKeyframe exact = evaluate_keyframe(displacement);
       if (!accepted->trial.gradient_ready) objective->complete_trial(&accepted->trial);
       const Eigen::VectorXd relaxed =
           chart.project_reduced_gradient(accepted->trial.gradient);

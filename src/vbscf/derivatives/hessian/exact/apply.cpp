@@ -2,6 +2,8 @@
 #include "core/timing.hpp"
 
 #include "vbscf/derivatives/hessian/exact/apply_internal.hpp"
+#include "integrals/active/frame.hpp"
+#include "integrals/response/orbital_pair.hpp"
 
 #include "vbscf/derivatives/hessian/exact/ao_one_electron_internal.hpp"
 
@@ -82,45 +84,7 @@ void throw_if_nonfinite(
       std::string(label) + " contains non-finite values");
 }
 
-ActiveSpaceGradientDirection make_active_gradient_direction(
-    const StructureActiveIntegralAdjoint& adjoint,
-    int n_active_orbitals) {
-  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
-  if (adjoint.overlap.rows() != n_active_orbitals ||
-      adjoint.overlap.cols() != n_active_orbitals ||
-      adjoint.one_electron.rows() != n_active_orbitals ||
-      adjoint.one_electron.cols() != n_active_orbitals ||
-      adjoint.pair_kernel.rows() != n_pairs ||
-      adjoint.pair_kernel.cols() != n_pairs) {
-    throw std::runtime_error(
-        "direct-CI active-gradient direction has inconsistent dimensions");
-  }
-  ActiveSpaceGradientDirection result =
-      make_zero_active_space_gradient_direction(n_active_orbitals);
-  result.active_orbital_overlap_gradient.assign(
-      adjoint.overlap.data(),
-      adjoint.overlap.data() + adjoint.overlap.size());
-  result.active_one_electron_gradient.assign(
-      adjoint.one_electron.data(),
-      adjoint.one_electron.data() + adjoint.one_electron.size());
-  for (int column = 0; column < n_pairs; ++column) {
-    for (int row = 0; row <= column; ++row) {
-      result.packed_active_two_electron_gradient[
-          xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)] =
-          row == column
-          ? adjoint.pair_kernel(row, column)
-          : adjoint.pair_kernel(row, column) +
-                adjoint.pair_kernel(column, row);
-    }
-  }
-  return result;
-}
-
-/** @brief Add a known quadratic coefficient scaling without another pullback. */
-void add_scaled(std::vector<double>& target, const std::vector<double>& source, double scale) {
-  for (std::size_t i = 0; i < target.size(); ++i) target[i] += scale*source[i];
-}
-
+using detail::make_active_gradient_direction;
 }  // namespace
 
 Eigen::VectorXd ExactHvpOperator::apply_reduced(
@@ -135,7 +99,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced(
   return apply_reduced_impl(
       reduced_direction,
       components,
-      nullptr,
       nullptr,
       nullptr,
       nullptr,
@@ -164,7 +127,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_orbital(
        .fixed_upstream_pullback = true,
        .local_active_response = true,
        .structure_response = false},
-      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
       &gauge, false);
 }
 
@@ -177,7 +140,7 @@ OrbitalCouplingAction ExactHvpOperator::State::apply_orbital_coupling(
        .fixed_upstream_pullback = true,
        .local_active_response = true,
        .structure_response = false},
-      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
       &result,true,ci_response);
   return result;
 }
@@ -326,7 +289,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
     const Eigen::VectorXd* precomputed_delta_packed_active_two_electron,
     const Eigen::MatrixXd* precomputed_ri_active_pair_factor_direction,
     const xmvb::integrals::ExactCtxPairMatrix* precomputed_directional_pair_products,
-    const Eigen::MatrixXd* precomputed_two_electron_fixed_adjoint,
     const PrecomputedDirection* precomputed_direction,
     OrbitalCouplingAction* coupling_output,
     bool horizontal_forcing,StructureResponseRequest* ci_response) const {
@@ -356,6 +318,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
         "coupled orbital action cannot solve the structure response");
   }
   if (coupling_output != nullptr && horizontal_forcing) {
+    const auto n_states = accepted_point_context_->selected_state_eigenvectors.cols();
+    coupling_output->gauge_frame = Eigen::MatrixXd::Zero(n_states, n_states);
     coupling_output->scaled_structure_forcing = Eigen::MatrixXd::Zero(
         accepted_point_context_->n_structures,
         static_cast<int>(accepted_point_context_->selected_state_indices.size()));
@@ -419,7 +383,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       n_basis_functions,
       n_basis_functions);
   const auto& delta_dense_active_coefficients =
-      orbital_preparation_directional_result.delta_active_auxiliary_orbitals;
+      prepared_direction.integral_tangent;
   apply_timing_totals_.core_setup_wall_time_seconds +=
       detail::exact_hvp_elapsed_seconds(core_setup_start_time);
   setup_phase.stop();
@@ -430,56 +394,66 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       orbital_preparation_directional_result.delta_active_auxiliary_orbitals *
       accepted_hho_gradient_symmetric_;
   Eigen::MatrixXd total_inactive_density_direction;
+  Eigen::MatrixXd inactive_density_projection;
   Eigen::MatrixXd delta_ao_effective_h1e_times_active_auxiliary_orbitals;
+  Eigen::MatrixXd ri_factor_direction,ri_fixed_response;
+  const Eigen::MatrixXd* supplied_ri_factor_direction=
+      precomputed_ri_active_pair_factor_direction;
+  const Eigen::MatrixXd* fixed_ri_two_electron=
+      prepared_direction.ri_fixed_two_electron.size()
+          ? &prepared_direction.ri_fixed_two_electron : nullptr;
+  const int n_inactive = (current_input_->orbital_preparation_input.n_total_electrons -
+      current_input_->orbital_preparation_input.n_active_electrons) / 2;
+  const Eigen::Index response_columns = accepted_ri_factorization_ != nullptr
+      ? n_inactive : n_basis_functions;
   if (precomputed_ao_response != nullptr || precomputed_active_projection != nullptr) {
     if (precomputed_ao_response == nullptr || precomputed_active_projection == nullptr ||
-        precomputed_ao_response->size() != static_cast<Eigen::Index>(ao_matrix_size) ||
+        precomputed_ao_response->size() != n_basis_functions * response_columns ||
         precomputed_active_projection->rows() != n_basis_functions ||
         precomputed_active_projection->cols() != accepted_active_auxiliary_orbitals_.cols()) {
       throw std::invalid_argument(
           "precomputed block AO-H1E response has inconsistent dimensions");
     }
-    total_inactive_density_direction = Eigen::Map<const Eigen::MatrixXd>(
-        precomputed_ao_response->data(), n_basis_functions, n_basis_functions);
+    const Eigen::Map<const Eigen::MatrixXd> response(
+        precomputed_ao_response->data(), n_basis_functions, response_columns);
+    if (accepted_ri_factorization_ != nullptr) inactive_density_projection = response;
+    else total_inactive_density_direction = response;
     delta_ao_effective_h1e_times_active_auxiliary_orbitals = *precomputed_active_projection;
   } else {
     const auto ao_effective_one_electron_fused_start_time =
         std::chrono::steady_clock::now();
     xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::AoResponse);
-    Eigen::MatrixXd total_ao_effective_one_electron_direction =
-        orbital_preparation_directional_result.delta_inactive_density;
-    total_ao_effective_one_electron_direction.noalias() +=
-        delta_active_times_hho_symmetric * accepted_active_auxiliary_orbitals_.transpose();
-    ao_h1e_symmetrized_gradient_workspace_ =
-        total_ao_effective_one_electron_direction +
-        total_ao_effective_one_electron_direction.transpose();
     if (accepted_ri_factorization_ != nullptr) {
-      const auto& delta_inactive_density =
-          orbital_preparation_directional_result.delta_inactive_density;
-      xmvb::integrals::apply_ao_effective_one_electron_ri_operator_adaptive(
-          delta_inactive_density,
-          ao_h1e_symmetrized_gradient_workspace_,
-          *accepted_ri_factorization_,
-          &ri_ao_h1e_fused_workspace_,
-          &ri_ao_h1e_strategy_,
-          &ri_ao_h1e_forward_workspace_,
-          &ri_ao_h1e_adjoint_workspace_);
-      detail::encode_symmetric_ao_gradient(
-          ri_ao_h1e_adjoint_workspace_,
-          &ao_h1e_inactive_density_gradient_workspace_);
-      const Eigen::Map<const Eigen::MatrixXd> adjoint(
-          ao_h1e_inactive_density_gradient_workspace_.data(),
-          n_basis_functions, n_basis_functions);
-      total_inactive_density_direction = ri_ao_h1e_forward_workspace_ + adjoint;
-      delta_ao_effective_h1e_times_active_auxiliary_orbitals.noalias() =
-          ri_ao_h1e_forward_workspace_ * accepted_active_auxiliary_orbitals_;
+      const Eigen::Map<const Eigen::MatrixXd> weights(
+          delta_active_times_hho_symmetric.data(),delta_active_times_hho_symmetric.size(),1);
+      auto block=ri_ao_responses({&prepared_direction,1},weights,
+          components.direct_core_response);
+      auto& ri=block.front();
+      inactive_density_projection=std::move(ri.inactive);
+      delta_ao_effective_h1e_times_active_auxiliary_orbitals=std::move(ri.active);
+      if (ri.fixed_two_electron.size()) {
+        ri_factor_direction=std::move(ri.factor_direction);
+        ri_fixed_response=std::move(ri.fixed_two_electron);
+        supplied_ri_factor_direction=&ri_factor_direction;
+        fixed_ri_two_electron=&ri_fixed_response;
+      }
     } else {
+      Eigen::MatrixXd total_ao_effective_one_electron_direction =
+          orbital_preparation_directional_result.delta_inactive_density;
+      total_ao_effective_one_electron_direction.noalias() +=
+          delta_active_times_hho_symmetric * accepted_active_auxiliary_orbitals_.transpose();
+      ao_h1e_symmetrized_gradient_workspace_ =
+          total_ao_effective_one_electron_direction +
+          total_ao_effective_one_electron_direction.transpose();
       const Eigen::Map<const Eigen::MatrixXd> density(
           orbital_preparation_directional_result.delta_inactive_density.data(), ao_matrix_size, 1);
       const Eigen::Map<const Eigen::MatrixXd> pullback(
           ao_h1e_symmetrized_gradient_workspace_.data(), ao_matrix_size, 1);
+      const auto& frame=accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform;
+      const Eigen::MatrixXd integral_weights=frame.size() ?
+          (delta_active_times_hho_symmetric*frame.transpose()).eval() : delta_active_times_hho_symmetric;
       const Eigen::Map<const Eigen::MatrixXd> weights(
-          delta_active_times_hho_symmetric.data(), delta_active_times_hho_symmetric.size(), 1);
+          integral_weights.data(), integral_weights.size(), 1);
       Eigen::MatrixXd response, projection;
       detail::apply_exact_ao_response(density, pullback, weights,
           accepted_exact_two_electron_cache_,
@@ -502,17 +476,36 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       outer_response_context()
           .selected_state_eigen_response_operator.structure_action
           ->supports_integral_direction();
+  // CI needs delta G, not delta B. A resident three-active image removes its
+  // auxiliary contraction even when the fixed RI jet separately needs delta B.
+  const bool ri_orbital_pair_direction = direct_active_gradient &&
+      accepted_ri_two_electron_cache_ &&
+      integrals::ri_uses_orbital_pairs(*accepted_ri_two_electron_cache_);
   const bool packed_outer_two_electron_required =
-      !accepted_ri_two_electron_cache_.has_value() ||
-      direct_active_gradient;
-  std::optional<Eigen::MatrixXd> ri_directional_active_pair_factors;
-  Eigen::VectorXd ri_delta_packed_active_two_electron;
+      !accepted_ri_two_electron_cache_ || ri_orbital_pair_direction;
+  Eigen::VectorXd local_packed_two_electron;
+  const Eigen::VectorXd* packed_two_electron_direction = precomputed_delta_packed_active_two_electron;
+  if (ri_orbital_pair_direction && packed_two_electron_direction == nullptr) {
+    profiling::ScopedPhase phase(profiling::Phase::ActiveDirection);
+    const auto start = std::chrono::steady_clock::now();
+    const auto& cache = *accepted_ri_two_electron_cache_;
+    local_packed_two_electron = integrals::packed_orbital_pair_direction(
+        *cache.orbital_pair_products, delta_dense_active_coefficients,
+        cache.active_pair_first_indices, cache.active_pair_second_indices,
+        cache.n_active_orbitals);
+    packed_two_electron_direction = &local_packed_two_electron;
+    apply_timing_totals_.outer_response_active_space_integrals_wall_time_seconds +=
+        detail::exact_hvp_elapsed_seconds(start);
+  }
+  std::optional<Eigen::MatrixXd> local_ri_factor_direction;
+  const Eigen::MatrixXd* ri_directional_active_pair_factors = nullptr;
   if (accepted_ri_two_electron_cache_.has_value() &&
-      (compute_outer_response || components.direct_core_response)) {
-    if (precomputed_ri_active_pair_factor_direction != nullptr) {
-      if (precomputed_ri_active_pair_factor_direction->rows() !=
+      (components.direct_core_response ||
+       (compute_outer_response && !ri_orbital_pair_direction))) {
+    if (supplied_ri_factor_direction != nullptr) {
+      if (supplied_ri_factor_direction->rows() !=
               accepted_ri_two_electron_cache_->n_auxiliary_functions ||
-          precomputed_ri_active_pair_factor_direction->cols() !=
+          supplied_ri_factor_direction->cols() !=
               static_cast<Eigen::Index>(
                   accepted_ri_two_electron_cache_
                       ->active_pair_first_indices.size())) {
@@ -520,24 +513,19 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
             "precomputed RI active-pair factor direction has inconsistent dimensions");
       }
       ri_directional_active_pair_factors =
-          *precomputed_ri_active_pair_factor_direction;
+          supplied_ri_factor_direction;
     } else {
-      ri_directional_active_pair_factors.emplace(
+      local_ri_factor_direction.emplace(
           xmvb::integrals::compute_ri_active_pair_factor_directional_derivative(
               *accepted_ri_two_electron_cache_,
               delta_dense_active_coefficients));
-    }
-    if (compute_outer_response && packed_outer_two_electron_required) {
-      const std::vector<double> packed_direction =
-          xmvb::integrals::compute_ri_packed_active_two_electron_integral_directional_derivative(
-              *accepted_ri_two_electron_cache_,
-              *ri_directional_active_pair_factors);
-      ri_delta_packed_active_two_electron = Eigen::Map<const Eigen::VectorXd>(
-          packed_direction.data(),
-          static_cast<Eigen::Index>(packed_direction.size()));
+      ri_directional_active_pair_factors = &*local_ri_factor_direction;
     }
   }
+  const Eigen::MatrixXd* selected_ri_factor_direction =
+      ri_orbital_pair_direction ? nullptr : ri_directional_active_pair_factors;
   std::vector<double> combined_core_orbital_value_gradient;
+  bool two_electron_jet_consumed=false;
 
   if (compute_outer_response) {
     const auto outer_response_start_time =
@@ -559,16 +547,11 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
               precomputed_outer_response->integral_direction
                   .packed_two_electron}
         : build_active_integral_direction(
-              orbital_preparation_directional_result,
+              prepared_direction,
               delta_ao_effective_h1e_times_active_auxiliary_orbitals,
               packed_outer_two_electron_required
-                  ? (precomputed_delta_packed_active_two_electron != nullptr
-                         ? precomputed_delta_packed_active_two_electron
-                         : (accepted_ri_two_electron_cache_.has_value()
-                                ? &ri_delta_packed_active_two_electron
-                                : nullptr))
+                  ? packed_two_electron_direction
                   : nullptr,
-              &ri_delta_packed_active_two_electron,
               &outer_response_integral_direction_workspace_,
               packed_outer_two_electron_required);
     if (precomputed_outer_response == nullptr) {
@@ -581,9 +564,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
         std::chrono::steady_clock::now();
     active_direction_phase.stop();
     xmvb::profiling::ScopedPhase selected_direction_phase(xmvb::profiling::Phase::SelectedDirection);
-    const StructureAction* accepted_structure_action =
-        outer_response_context()
-            .selected_state_eigen_response_operator.structure_action;
     const bool use_directional_pair_tiles =
         precomputed_outer_response == nullptr && !direct_active_gradient &&
         (components.local_active_response || components.structure_response ||
@@ -630,6 +610,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           gauge_coupling = &*precomputed_outer_response->gauge_coupling;
           coupling_output->scaled_structure_forcing =
               gauge_coupling->horizontal_forcing.scaled_coefficients;
+          coupling_output->gauge_frame = gauge_coupling->gauge_frame;
         } else {
           directional_selected_state_response =
               &precomputed_outer_response->selected_state_response;
@@ -644,20 +625,16 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
                       ? accepted_ri_two_electron_cache_
                             ->accepted_active_pair_factors
                       : nullptr,
-                  ri_directional_active_pair_factors.has_value()
-                      ? &*ri_directional_active_pair_factors
-                      : nullptr,
+                  ri_directional_active_pair_factors,
                   consume_local_active_tile,ci_response)
             : build_selected_structure_direction(
                   outer_response_context(),
                   active_space_integral_direction,
-                  accepted_ri_two_electron_cache_.has_value()
+                  accepted_ri_two_electron_cache_.has_value() && !ri_orbital_pair_direction
                       ? accepted_ri_two_electron_cache_
                             ->accepted_active_pair_factors
                       : nullptr,
-                  ri_directional_active_pair_factors.has_value()
-                      ? &*ri_directional_active_pair_factors
-                      : nullptr,ci_response);
+                  selected_ri_factor_direction,ci_response);
         directional_pair_tiles_consumed = use_directional_pair_tiles;
         local_direct_ci_direction = std::move(images.direct_ci_direction);
         apply_timing_totals_
@@ -681,6 +658,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           gauge_coupling = &*local_gauge_coupling;
           coupling_output->scaled_structure_forcing =
               gauge_coupling->horizontal_forcing.scaled_coefficients;
+          coupling_output->gauge_frame = gauge_coupling->gauge_frame;
           if (local_direct_ci_direction.has_value() &&
               local_direct_ci_direction->connection.has_value()) {
             auto diagnostic = std::move(*local_direct_ci_direction->connection);
@@ -733,44 +711,6 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       }
     }
 
-    Eigen::MatrixXd state_multipliers;
-    if (directional_selected_state_response != nullptr) {
-      state_multipliers =
-          -directional_selected_state_response
-               ->selected_matrix_responses.front();
-    } else if (gauge_coupling != nullptr) {
-      state_multipliers = gauge_coupling->gauge_adjoint_multipliers;
-    }
-
-    const bool reuse_normalization = direct_active_gradient && gauge_coupling != nullptr &&
-        gauge_coupling->gauge_frame.rows() == 1;
-    Eigen::MatrixXd frame_response;
-    const Eigen::MatrixXd* coefficient_response = nullptr;
-    if (directional_selected_state_response != nullptr) {
-      coefficient_response = &directional_selected_state_response
-                                  ->delta_selected_eigenvector_matrix;
-    } else if (gauge_coupling != nullptr && !reuse_normalization) {
-      frame_response.noalias() = accepted_point_context_->selected_state_eigenvectors*
-          gauge_coupling->gauge_frame;
-      coefficient_response = &frame_response;
-    }
-
-    std::optional<SelectedStateDeterminantMatrices> directional_selected_states;
-    if (coefficient_response != nullptr && !direct_active_gradient) {
-      const auto selected_state_rebuild_start_time =
-          std::chrono::steady_clock::now();
-      directional_selected_states.emplace(
-          build_selected_state_determinant_matrices_from_selected_columns(
-              current_input_->structure_data,
-              *coefficient_response,
-              accepted_point_context_->selected_state_indices,
-              accepted_point_context_->normalized_state_weights,
-              accepted_point_context_->same_spin_pair_cache));
-      apply_timing_totals_
-          .outer_response_selected_state_rebuild_wall_time_seconds +=
-          detail::exact_hvp_elapsed_seconds(selected_state_rebuild_start_time);
-    }
-
     if (use_directional_pair_tiles && local_active_tile_accumulator &&
         !directional_pair_tiles_consumed) {
       detail::stream_directional_pair_tiles(
@@ -786,9 +726,7 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
           accepted_ri_two_electron_cache_.has_value()
               ? accepted_ri_two_electron_cache_->accepted_active_pair_factors
               : nullptr,
-          ri_directional_active_pair_factors.has_value()
-              ? &*ri_directional_active_pair_factors
-              : nullptr,
+          ri_directional_active_pair_factors,
           true,
           consume_local_active_tile,
           static_cast<int>(accepted_point_context_
@@ -796,118 +734,80 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
       directional_pair_tiles_consumed = true;
     }
 
-    const auto active_gradient_start_time = std::chrono::steady_clock::now();
     selected_direction_phase.stop();
     xmvb::profiling::ScopedPhase backward_phase(xmvb::profiling::Phase::ActiveBackward);
-    ActiveSpaceGradientDirection directional_active_space_gradient;
-    if (direct_active_gradient) {
-      if (!accepted_point_context_->structure_adjoint_state.has_value()) {
-        accepted_point_context_->structure_adjoint_state =
-            accepted_structure_action->prepare_active_adjoint(
-                accepted_point_context_->selected_state_eigenvectors,
-                accepted_point_context_->normalized_state_weights,
-                accepted_point_context_->selected_state_energies);
-      }
-      const StructureIntegralDirection* direct_ci_direction = nullptr;
-      if (precomputed_outer_response != nullptr &&
-          precomputed_outer_response->direct_ci_direction.has_value()) {
-        direct_ci_direction =
-            &*precomputed_outer_response->direct_ci_direction;
-      } else if (local_direct_ci_direction.has_value()) {
-        direct_ci_direction = &*local_direct_ci_direction;
-      }
-      directional_active_space_gradient = make_active_gradient_direction(
-          accepted_structure_action->active_integral_adjoint_direction(
-              *accepted_point_context_->structure_adjoint_state,
-              coefficient_response,
-              state_multipliers.size() ? &state_multipliers : nullptr,
-              active_space_integral_direction.overlap,
-              active_space_integral_direction.one_electron,
-              active_space_integral_direction.packed_two_electron,
-              direct_ci_direction,
-              components.local_active_response),
-          n_active_orbitals);
-      if (reuse_normalization) {
-        // Q_g=aC changes every fixed-energy active adjoint by exactly 2a.
-        // The multiplier and the orbital-map derivative were kept above.
-        const double scale = 2*gauge_coupling->gauge_frame(0,0);
-        add_scaled(directional_active_space_gradient.active_orbital_overlap_gradient,
-            accepted_point_context_->active_orbital_overlap_gradient,scale);
-        add_scaled(directional_active_space_gradient.active_one_electron_gradient,
-            accepted_point_context_->active_one_electron_gradient,scale);
-        add_scaled(directional_active_space_gradient.packed_active_two_electron_gradient,
-            accepted_point_context_->packed_active_two_electron_gradient,scale);
-        ++apply_timing_totals_.normalization_adjoint_reuses;
-      }
-      const double direct_seconds = detail::exact_hvp_elapsed_seconds(
-          active_gradient_start_time);
-      if (components.local_active_response) {
-        apply_timing_totals_
-            .outer_response_local_active_gradient_wall_time_seconds +=
-            direct_seconds;
-      } else {
-        apply_timing_totals_
-            .outer_response_structure_active_gradient_wall_time_seconds +=
-            direct_seconds;
-      }
-    } else {
-      const auto local_active_gradient_start_time =
-          std::chrono::steady_clock::now();
-      if (components.local_active_response && precomputed_outer_response != nullptr &&
-          precomputed_outer_response->local_active_gradient.has_value()) {
-        directional_active_space_gradient =
-            *precomputed_outer_response->local_active_gradient;
-      } else if (components.local_active_response &&
-                 local_active_tile_accumulator) {
-        directional_active_space_gradient =
-            local_active_tile_accumulator->finish();
-      } else if (components.local_active_response) {
-        throw std::logic_error(
-            "local active response is missing its pair-tile accumulation");
-      } else {
-        directional_active_space_gradient =
-            make_zero_active_space_gradient_direction(n_active_orbitals);
-      }
-      apply_timing_totals_
-          .outer_response_local_active_gradient_wall_time_seconds +=
-          detail::exact_hvp_elapsed_seconds(
-              local_active_gradient_start_time);
-
-      const auto structure_active_gradient_start_time =
-          std::chrono::steady_clock::now();
-      if (directional_selected_states) {
-        const SelectedStateResponseTiming response_timing =
-            add_selected_subspace_response_to_active_space_gradient(
-                *current_input_,
-                *accepted_point_context_,
-                directional_selected_states.value(),
-                state_multipliers,
-                &directional_active_space_gradient);
-        apply_timing_totals_
-            .outer_response_same_spin_backward_wall_time_seconds +=
-            response_timing.same_spin_seconds;
-        apply_timing_totals_
-            .outer_response_opposite_spin_backward_wall_time_seconds +=
-            response_timing.opposite_spin_seconds;
-        apply_timing_totals_
-            .outer_response_opposite_spin_packed_gradient_wall_time_seconds +=
-            response_timing.opposite_spin_packed_gradient_seconds;
-        apply_timing_totals_
-            .outer_response_opposite_spin_alpha_overlap_wall_time_seconds +=
-            response_timing.opposite_spin_alpha_overlap_seconds;
-        apply_timing_totals_
-            .outer_response_opposite_spin_beta_overlap_wall_time_seconds +=
-            response_timing.opposite_spin_beta_overlap_seconds;
-      }
-      apply_timing_totals_
-          .outer_response_structure_active_gradient_wall_time_seconds +=
-          detail::exact_hvp_elapsed_seconds(
-              structure_active_gradient_start_time);
+    std::optional<ActiveSpaceGradientDirection> local_active_gradient;
+    const ActiveSpaceGradientDirection* active_gradient =
+        precomputed_outer_response != nullptr && precomputed_outer_response->active_gradient
+        ? &*precomputed_outer_response->active_gradient : nullptr;
+    if (active_gradient == nullptr) {
+      const auto* direct_ci = precomputed_outer_response != nullptr &&
+          precomputed_outer_response->direct_ci_direction
+          ? &*precomputed_outer_response->direct_ci_direction
+          : (local_direct_ci_direction ? &*local_direct_ci_direction : nullptr);
+      const auto* local = precomputed_outer_response != nullptr &&
+          precomputed_outer_response->local_active_gradient
+          ? &*precomputed_outer_response->local_active_gradient : nullptr;
+      local_active_gradient=active_response_gradient(
+          {active_space_integral_direction,directional_selected_state_response,
+           gauge_coupling,direct_ci,selected_ri_factor_direction,local,
+           local_active_tile_accumulator.get()},components);
+      active_gradient=&*local_active_gradient;
     }
-    apply_timing_totals_.outer_response_active_gradient_wall_time_seconds +=
-        detail::exact_hvp_elapsed_seconds(active_gradient_start_time);
-    validate_outer_response_active_gradient(
-        directional_active_space_gradient);
+    const auto& directional_active_space_gradient=*active_gradient;
+
+    Eigen::MatrixXd two_electron_jet;
+    const Eigen::MatrixXd* two_electron_orbital_gradient=nullptr;
+    if (precomputed_outer_response != nullptr &&
+        precomputed_outer_response->changing_two_electron.size()) {
+      two_electron_jet=precomputed_outer_response->changing_two_electron;
+      if (components.direct_core_response) {
+        if (fixed_ri_two_electron) two_electron_jet+=*fixed_ri_two_electron;
+        else two_electron_jet+=
+            integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+                accepted_point_context_->packed_active_two_electron_gradient,
+                *accepted_ri_two_electron_cache_,delta_dense_active_coefficients,
+                ri_directional_active_pair_factors);
+        two_electron_jet_consumed=true;
+      }
+      two_electron_jet=integrals::active_frame_pullback(two_electron_jet,
+          accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform);
+      two_electron_orbital_gradient=&two_electron_jet;
+    } else if (components.direct_core_response) {
+      xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::TwoElectronResponse);
+      const auto start=std::chrono::steady_clock::now();
+      if (accepted_ri_two_electron_cache_) {
+        if (fixed_ri_two_electron) {
+          // The fixed term already consumed the same L*D as the AO response.
+          // Only the changing cotangent remains after the selected CI sweep.
+          two_electron_jet=*fixed_ri_two_electron+
+              integrals::backpropagate_ri_packed_active_two_electron_gradient(
+                  directional_active_space_gradient.packed_active_two_electron_gradient,
+                  *accepted_ri_two_electron_cache_);
+        } else {
+          two_electron_jet=integrals::apply_ri_active_two_electron_jet(
+              accepted_point_context_->packed_active_two_electron_gradient,
+              *accepted_ri_two_electron_cache_,delta_dense_active_coefficients,
+              directional_active_space_gradient.packed_active_two_electron_gradient,
+              ri_directional_active_pair_factors);
+        }
+      } else {
+        const auto* products=precomputed_directional_pair_products ?
+            precomputed_directional_pair_products :
+            &outer_response_integral_direction_workspace_.two_electron.directional_pair_products;
+        integrals::apply_exact_active_two_electron_jet(
+            accepted_exact_two_electron_cache_,delta_dense_active_coefficients,
+            directional_active_space_gradient.packed_active_two_electron_gradient,
+            current_input_->ao_integral_input,&accepted_exact_two_electron_apply_workspace_,
+            &two_electron_jet,products->size() ? products : nullptr);
+      }
+      two_electron_jet=integrals::active_frame_pullback(two_electron_jet,
+          accepted_point_context_->prepared_active_space.active_space_two_electron_result.orbital_transform);
+      two_electron_orbital_gradient=&two_electron_jet;
+      two_electron_jet_consumed=true;
+      apply_timing_totals_.active_two_electron_wall_time_seconds +=
+          detail::exact_hvp_elapsed_seconds(start);
+    }
 
     const auto orbital_pullback_start_time =
         std::chrono::steady_clock::now();
@@ -927,7 +827,8 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
                 : nullptr,
             accepted_ri_factorization_,
             &outer_response_symmetric_active_overlap_gradient_workspace_,
-            &outer_response_symmetric_active_one_electron_gradient_workspace_);
+            &outer_response_symmetric_active_one_electron_gradient_workspace_,
+            two_electron_orbital_gradient);
     add_orbital_value_gradient_in_place(
         &combined_core_orbital_value_gradient,
         outer_response_orbital_value_gradient,
@@ -945,74 +846,71 @@ Eigen::VectorXd ExactHvpOperator::State::apply_reduced_impl(
         accepted_sso_gradient_symmetric_;
     delta_auxiliary_active_gradient.noalias() +=
         delta_ao_effective_h1e_times_active_auxiliary_orbitals *
-        accepted_hho_gradient_symmetric_;
+        accepted_hho_projection_weight_;
     delta_auxiliary_active_gradient.noalias() +=
         ao_effective_h1e *
         delta_active_times_hho_symmetric;
-    const auto active_two_electron_start_time =
-        std::chrono::steady_clock::now();
-    xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::TwoElectronResponse);
-    if (accepted_ri_two_electron_cache_.has_value()) {
-      accepted_exact_two_electron_apply_workspace_
-          .dense_active_gradient_direction =
-          xmvb::integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
-              accepted_point_context_->packed_active_two_electron_gradient,
-              *accepted_ri_two_electron_cache_,
-              delta_dense_active_coefficients,
-              ri_directional_active_pair_factors.has_value()
-                  ? &*ri_directional_active_pair_factors
-                  : nullptr);
-    } else if (precomputed_two_electron_fixed_adjoint != nullptr &&
-        precomputed_two_electron_fixed_adjoint->rows() == n_basis_functions &&
-        precomputed_two_electron_fixed_adjoint->cols() == n_active_orbitals) {
-      accepted_exact_two_electron_apply_workspace_
-          .dense_active_gradient_direction =
-              *precomputed_two_electron_fixed_adjoint;
-    } else if (compute_outer_response &&
-        accepted_exact_two_electron_cache_.accepted_pair_products == nullptr &&
-        outer_response_integral_direction_workspace_.two_electron
-                .dense_fixed_adjoint_direction.rows() == n_basis_functions &&
-        outer_response_integral_direction_workspace_.two_electron
-                .dense_fixed_adjoint_direction.cols() == n_active_orbitals) {
-      accepted_exact_two_electron_apply_workspace_
-          .dense_active_gradient_direction =
-              outer_response_integral_direction_workspace_.two_electron
-                  .dense_fixed_adjoint_direction;
-    } else if (compute_outer_response &&
-        (precomputed_directional_pair_products != nullptr
-             ? precomputed_directional_pair_products
-             : &outer_response_integral_direction_workspace_.two_electron
-                    .directional_pair_products)->size() > 0) {
-      xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector_fused(
-          accepted_exact_two_electron_cache_,
-          delta_dense_active_coefficients,
-          current_input_->ao_integral_input,
-          *(precomputed_directional_pair_products != nullptr
-                ? precomputed_directional_pair_products
-                : &outer_response_integral_direction_workspace_.two_electron
-                       .directional_pair_products),
-          &accepted_exact_two_electron_apply_workspace_,
-          &accepted_exact_two_electron_apply_workspace_
-               .dense_active_gradient_direction);
-    } else {
-      xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
-          accepted_exact_two_electron_cache_,
-          delta_dense_active_coefficients,
-          current_input_->ao_integral_input,
-          &accepted_exact_two_electron_apply_workspace_,
-          &accepted_exact_two_electron_apply_workspace_
-               .dense_active_gradient_direction);
-    }
-    apply_timing_totals_.active_two_electron_wall_time_seconds +=
-        detail::exact_hvp_elapsed_seconds(active_two_electron_start_time);
-    delta_auxiliary_active_gradient.noalias() +=
-        accepted_exact_two_electron_apply_workspace_
-            .dense_active_gradient_direction;
+    if (!two_electron_jet_consumed) {
+      const auto active_two_electron_start_time =
+          std::chrono::steady_clock::now();
+      xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::TwoElectronResponse);
+      if (accepted_ri_two_electron_cache_.has_value()) {
+        if (fixed_ri_two_electron) {
+          accepted_exact_two_electron_apply_workspace_.dense_active_gradient_direction=
+              *fixed_ri_two_electron;
+        } else {
+          accepted_exact_two_electron_apply_workspace_
+              .dense_active_gradient_direction =
+              integrals::apply_ri_packed_active_two_electron_adjoint_hessian_vector(
+                accepted_point_context_->packed_active_two_electron_gradient,
+                *accepted_ri_two_electron_cache_,
+                delta_dense_active_coefficients,
+                ri_directional_active_pair_factors);
+        }
+      } else if (compute_outer_response &&
+          (precomputed_directional_pair_products != nullptr
+               ? precomputed_directional_pair_products
+               : &outer_response_integral_direction_workspace_.two_electron
+                      .directional_pair_products)->size() > 0) {
+        xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector_fused(
+            accepted_exact_two_electron_cache_,
+            delta_dense_active_coefficients,
+            current_input_->ao_integral_input,
+            *(precomputed_directional_pair_products != nullptr
+                  ? precomputed_directional_pair_products
+                  : &outer_response_integral_direction_workspace_.two_electron
+                         .directional_pair_products),
+            &accepted_exact_two_electron_apply_workspace_,
+            &accepted_exact_two_electron_apply_workspace_
+                 .dense_active_gradient_direction);
+      } else {
+        xmvb::integrals::apply_exact_packed_active_two_electron_adjoint_hessian_vector(
+            accepted_exact_two_electron_cache_,
+            delta_dense_active_coefficients,
+            current_input_->ao_integral_input,
+            &accepted_exact_two_electron_apply_workspace_,
+            &accepted_exact_two_electron_apply_workspace_
+                 .dense_active_gradient_direction);
+      }
+      apply_timing_totals_.active_two_electron_wall_time_seconds +=
+          detail::exact_hvp_elapsed_seconds(active_two_electron_start_time);
+      delta_auxiliary_active_gradient.noalias() +=
+          integrals::active_frame_pullback(
+              accepted_exact_two_electron_apply_workspace_.dense_active_gradient_direction,
+              accepted_point_context_->prepared_active_space
+                  .active_space_two_electron_result.orbital_transform);
+      }
 
     const auto orbital_backprop_start_time =
         std::chrono::steady_clock::now();
-    const std::vector<double> orbital_value_gradient =
-        backpropagate_active_space_orbital_gradient(
+    const std::vector<double> orbital_value_gradient = accepted_ri_factorization_ != nullptr
+        ? backpropagate_active_space_orbital_gradient(
+            delta_auxiliary_active_gradient,
+            InactiveDensityProjection{inactive_density_projection},
+            current_input_->orbital_preparation_input,
+            accepted_point_context_->prepared_active_space.orbital_result,
+            *orbital_preparation_cache)
+        : backpropagate_active_space_orbital_gradient(
             delta_auxiliary_active_gradient,
             total_inactive_density_direction,
             current_input_->orbital_preparation_input,

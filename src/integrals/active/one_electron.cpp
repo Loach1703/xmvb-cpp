@@ -28,17 +28,25 @@ ActiveSpaceOneElectronResult build_active_space_one_electron_impl(
       n_active_orbitals);
   // Project the AO effective Hamiltonian into the active orbital block
   // `HHO = T_active^T * F11 * T_active`.
-  const Eigen::MatrixXd temp =
-      active_auxiliary_orbitals.transpose() * ao_f11_matrix;
-  const Eigen::MatrixXd hho_matrix =
-      temp * active_auxiliary_orbitals;
-
-  ActiveSpaceOneElectronResult result;
-  result.h1e_act = hho_matrix;
-  return result;
+  return ActiveSpaceOneElectronBuilder{}.build(
+      ao_f11_matrix, active_auxiliary_orbitals);
 }
 
 }  // namespace
+
+ActiveSpaceOneElectronResult ActiveSpaceOneElectronBuilder::build(
+    const Eigen::Ref<const Eigen::MatrixXd>& ao_effective_h1e,
+    const Eigen::Ref<const Eigen::MatrixXd>& active_coefficients) const {
+  if (active_coefficients.rows() <= 0 || active_coefficients.cols() <= 0 ||
+      ao_effective_h1e.rows() != active_coefficients.rows() ||
+      ao_effective_h1e.cols() != active_coefficients.rows()) {
+    throw std::invalid_argument("active one-electron projection size mismatch");
+  }
+  ActiveSpaceOneElectronResult result;
+  result.ao_image.noalias() = ao_effective_h1e * active_coefficients;
+  result.h1e_act.noalias() = active_coefficients.transpose() * result.ao_image;
+  return result;
+}
 
 ActiveSpaceOneElectronResult ActiveSpaceOneElectronBuilder::build(
     const Eigen::Ref<const Eigen::MatrixXd>& ao_effective_h1e,

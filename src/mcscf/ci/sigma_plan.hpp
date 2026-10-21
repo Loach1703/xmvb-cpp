@@ -1,0 +1,61 @@
+#pragma once
+
+#include <cstddef>
+#include <optional>
+#include <vector>
+
+#include "mcscf/ci/links.hpp"
+#include "mcscf/ci/product_support.hpp"
+
+namespace xmvb::mcscf::detail {
+
+/** @brief Numeric halo, channel and target-index budget; immutable spin links are shared. */
+struct SigmaTileBudget {
+  int width,pairs,slabs;
+  std::size_t bytes;
+  int packed_slabs=0;
+};
+
+struct SigmaTargetGroup { int beta,begin,end,column=0; };
+
+/** @brief Stream each target once, admitting its actual shared neighborhoods.
+ * One pending target crosses a budget boundary without rewinding the support
+ * cursor. Storage is single-spin metadata plus the current tile, never U^2.
+ */
+class SigmaTilePlan {
+public:
+  SigmaTilePlan(const SpinConnections& alpha,const SpinConnections& beta,
+      const ProductSupport* support,int parity,SigmaTileBudget budget,bool release);
+  bool next();
+  std::size_t payload_bytes() const;
+
+  std::vector<SigmaTargetGroup> groups;
+  std::vector<int> active,group_index,halo,columns,halo_index,column_index,released;
+  std::vector<unsigned char> active_support;
+  std::vector<int> channel_groups;
+  /** Exchange-fixed rows and support counts, fused into node admission. */
+  std::vector<int> diagonal_rows;
+  std::size_t unsupported_targets=0;
+
+private:
+  struct Node { int alpha,beta; bool supported; int group,channels; };
+  bool pull(Node& node);
+  const SpinConnections& alpha_;
+  const SpinConnections& beta_;
+  const ProductSupport* support_;
+  int parity_;
+  SigmaTileBudget budget_;
+  std::vector<int> beta_targets_,seen_alpha_,new_alpha_,new_beta_,last_use_,release_order_;
+  std::vector<int> column_rows_;
+  std::vector<unsigned char> alpha_seen_;
+  std::optional<ProductSupport::Cursor> cursor_;
+  std::optional<Node> pending_;
+  std::size_t next_beta_=0,next_release_=0;
+  // Byte admission is integer arithmetic. A rejected candidate may exceed
+  // size_t; 128 bits cover the products of the int-bounded tile dimensions.
+  using Bytes=__uint128_t;
+  Bytes row_bytes_=0,entry_bytes_=0,column_bytes_=0,group_bytes_=0,payload_=0;
+  int next_alpha_=0;
+};
+
+} // namespace xmvb::mcscf::detail

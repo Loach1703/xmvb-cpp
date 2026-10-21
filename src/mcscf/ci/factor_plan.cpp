@@ -8,25 +8,37 @@
 
 namespace xmvb::mcscf::detail {
 
+bool use_amplitude_map(const SpinFactorSource& source) {
+  return source.contract && source.contract_work <
+      4.0L*(static_cast<long double>(source.n_alpha)+source.n_beta)*source.count;
+}
+
+std::size_t amplitude_workspace(const SpinFactorSource& source,int tile,int columns) {
+  if (use_amplitude_map(source)) return source.contract_rows*columns;
+  return (static_cast<std::size_t>(source.n_alpha)+source.n_beta+
+      source.workspace_rows+columns)*tile;
+}
+
 FactorPanels plan_factor_panels(const DirectCiSigmaAction& sigma,
     const SpinFactorSource& left, const SpinFactorSource& right,
     std::size_t workspace_bytes, FactorContraction contraction) {
   const bool integral = contraction == FactorContraction::Integral;
   const bool residual = contraction == FactorContraction::Residual;
+  const bool mapped = use_amplitude_map(left);
   const int d = sigma.channel_kernel().rows();
   const long double rows = static_cast<long double>(left.n_alpha)+left.n_beta;
   const long double capacity = workspace_bytes/sizeof(double);
   const long double reductions = integral ? 0 : static_cast<long double>(
       effective_openmp_thread_count()+1)*sigma.n_orbitals()*sigma.n_orbitals();
   const auto payload = [&](int l, int r, int p) {
-    const long double loading = std::max(static_cast<long double>(left.workspace_rows)*l,
+    const long double loading = std::max(mapped ? 0.0L:static_cast<long double>(left.workspace_rows)*l,
                                         static_cast<long double>(right.workspace_rows)*r);
+    const long double amplitude = mapped ? static_cast<long double>(left.contract_rows)*
+        r*std::max(1,p):rows*l+static_cast<long double>(l)*r*std::max(1,p);
     if (integral)
-      return rows*(l+2.0L*r+(p<d ? 3.0L : 2.0L)*r*p) +
-          static_cast<long double>(l)*r*p + loading;
+      return amplitude+rows*(2.0L*r+(p<d ? 3.0L : 2.0L)*r*p)+loading;
     const long double sweep = residual ? rows*r*(3.0L*p+6) : 0;
-    return rows*(l+(residual ? 3.0L : 2.0L)*r) +
-        static_cast<long double>(l)*r*std::max(1,p) + loading+sweep+reductions;
+    return amplitude+rows*(residual ? 3.0L : 2.0L)*r+loading+sweep+reductions;
   };
   FactorPanels best;
   long double best_calls = std::numeric_limits<long double>::infinity();
@@ -46,16 +58,16 @@ FactorPanels plan_factor_panels(const DirectCiSigmaAction& sigma,
     }
     const int maximum_right = low;
     for (int r = 1; r <= maximum_right; ++r) {
-      low = 1; high = left.count;
+      low = 1; high = mapped ? 1:left.count;
       while (low < high) {
         const int middle = low+(high-low+1)/2;
         if (payload(middle,r,p) <= capacity) low = middle; else high = middle-1;
       }
       const int l = low;
-      const long double nr = (right.count+r-1)/r, nl = (left.count+l-1)/l;
+      const long double nr = (right.count+r-1)/r, nl = mapped ? 1:(left.count+l-1)/l;
       const long double np = p ? (d+p-1)/p : 0;
       const long double moment_passes = integral ? np+1 : residual ? np+2 : 1;
-      const long double loads = left.count == l ? left.count : nr*moment_passes*left.count;
+      const long double loads = mapped ? 0:(left.count == l ? left.count : nr*moment_passes*left.count);
       // Sorted channel ranges visit only matching links. Binary range lookup
       // comparisons still repeat per scatter/gather, but rejected links do not.
       // Count zero fills and repeated output read+writes separately from FLOPs.
@@ -78,18 +90,31 @@ FactorPanels plan_factor_panels(const DirectCiSigmaAction& sigma,
   return best;
 }
 
-long double factor_integral_work(const DirectCiSigmaAction& sigma,
-    const SpinFactorSource& left, const SpinFactorSource& right,
+namespace {
+long double ordered_integral_work(const DirectCiSigmaAction& sigma,
+    const SpinFactorSource& bra, const SpinFactorSource& ket,
     std::size_t workspace_bytes) {
-  if (!left.count || !right.count) return 0;
-  const auto& bra = left.count >= right.count ? left : right;
-  const auto& ket = left.count >= right.count ? right : left;
   const auto plan = plan_factor_panels(sigma,bra,ket,workspace_bytes,FactorContraction::Integral);
-  const long double rows = static_cast<long double>(left.n_alpha)+left.n_beta;
+  const long double rows = static_cast<long double>(bra.n_alpha)+bra.n_beta;
   const long double d = sigma.channel_kernel().rows();
   // These leading terms do not depend on tile widths, and were deliberately
   // omitted from plan_factor_panels(). They do depend on the bilinear order.
-  return plan.work+2*rows*ket.count*d*d+4*rows*bra.count*ket.count*(d+1);
+  const long double moment = use_amplitude_map(bra) ? bra.contract_work:4*rows*bra.count;
+  return plan.work+2*rows*ket.count*d*d+moment*ket.count*(d+1);
+}
+} // namespace
+
+bool integral_bra_is_left(const DirectCiSigmaAction& sigma,
+    const SpinFactorSource& left,const SpinFactorSource& right,std::size_t bytes) {
+  if (!use_amplitude_map(left) && !use_amplitude_map(right)) return left.count >= right.count;
+  return ordered_integral_work(sigma,left,right,bytes) <= ordered_integral_work(sigma,right,left,bytes);
+}
+
+long double factor_integral_work(const DirectCiSigmaAction& sigma,
+    const SpinFactorSource& left,const SpinFactorSource& right,std::size_t bytes) {
+  if (!left.count || !right.count) return 0;
+  const bool first = integral_bra_is_left(sigma,left,right,bytes);
+  return ordered_integral_work(sigma,first ? left:right,first ? right:left,bytes);
 }
 
 } // namespace xmvb::mcscf::detail

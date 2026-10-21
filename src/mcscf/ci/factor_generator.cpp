@@ -11,25 +11,26 @@
 #include "core/timing.hpp"
 
 namespace xmvb::mcscf {
-namespace {
-
-using Clock = std::chrono::steady_clock;
-
-/** @brief Stream X B and X^T A through shared source-pair moments. */
-class FactorMoments {
-public:
-  FactorMoments(const SpinFactorSource& source, int width, int columns)
-      : source_(source), width_(width), a_(source.n_alpha,width),
-        b_(source.n_beta,width), moment_(width,columns) {
+SpinAmplitudeWorkspace::SpinAmplitudeWorkspace(const SpinFactorSource& source, int width, int columns)
+      : source_(source), width_(width), mapped_(detail::use_amplitude_map(source)),
+        a_(source.n_alpha,mapped_ ? 0:width),
+        b_(source.n_beta,mapped_ ? 0:width), moment_(mapped_ ? 0:width,mapped_ ? 0:columns) {
+    if (width <= 0 || columns <= 0) throw std::invalid_argument("invalid amplitude panel dimensions");
+    if (mapped_) return;
     if (width_ == source_.count) {
       source_.load(0,width_,a_,b_); loads_ = 1; columns_ = width_;
     }
   }
 
-  void add(const Eigen::Ref<const Eigen::MatrixXd>& alpha,
+void SpinAmplitudeWorkspace::add(const Eigen::Ref<const Eigen::MatrixXd>& alpha,
       const Eigen::Ref<const Eigen::MatrixXd>& beta,
       Eigen::Ref<Eigen::MatrixXd> result_alpha,
-      Eigen::Ref<Eigen::MatrixXd> result_beta, double scale = 1.0) {
+      Eigen::Ref<Eigen::MatrixXd> result_beta, double scale) {
+    if (mapped_) {
+      source_.contract(false,beta,result_alpha,scale);
+      source_.contract(true,alpha,result_beta,scale);
+      return;
+    }
     for (int first = 0; first < source_.count; first += width_) {
       const int count = std::min(width_,source_.count-first);
       auto a = a_.leftCols(count), b = b_.leftCols(count);
@@ -46,15 +47,9 @@ public:
     }
   }
 
-  std::size_t loads() const noexcept { return loads_; }
-  std::size_t columns() const noexcept { return columns_; }
+namespace {
 
-private:
-  const SpinFactorSource& source_;
-  int width_;
-  Eigen::MatrixXd a_, b_, moment_;
-  std::size_t loads_ = 0, columns_ = 0;
-};
+using Clock = std::chrono::steady_clock;
 
 Eigen::MatrixXd generator_adjoint(const DirectCiSigmaAction& sigma,
     const SpinFactorSource& left, const SpinFactorSource& right,
@@ -67,7 +62,12 @@ Eigen::MatrixXd generator_adjoint(const DirectCiSigmaAction& sigma,
   if (!left.count || !right.count) return result;
   // Only an identity bilinear permits exchanging sources followed by a
   // transpose. H on the left cannot be moved through an oriented generator.
-  const bool transpose = !hamiltonian && left.count < right.count;
+  const auto moment_work = [&](const SpinFactorSource& a,const SpinFactorSource& b) {
+    const long double rows=static_cast<long double>(a.n_alpha)+a.n_beta;
+    return (detail::use_amplitude_map(a) ? a.contract_work:4*rows*a.count)*b.count+
+        static_cast<long double>(sigma.spin_link_count())*b.count;
+  };
+  const bool transpose = !hamiltonian && moment_work(right,left)<moment_work(left,right);
   const auto& bra = transpose ? right : left;
   const auto& ket = transpose ? left : right;
   const std::size_t rows = static_cast<std::size_t>(left.n_alpha) + left.n_beta;
@@ -76,7 +76,7 @@ Eigen::MatrixXd generator_adjoint(const DirectCiSigmaAction& sigma,
   const int nl = plan.left, nr = plan.right, p = plan.channels;
   const bool timing = profiling::phase_totals().enabled;
   const auto start = timing ? Clock::now() : Clock::time_point{};
-  FactorMoments moments(bra,nl,nr*std::max(1,p));
+  SpinAmplitudeWorkspace moments(bra,nl,nr*std::max(1,p));
   Eigen::MatrixXd a(left.n_alpha,nr), b(left.n_beta,nr);
   Eigen::MatrixXd wa(left.n_alpha,nr), wb(left.n_beta,nr);
   Eigen::MatrixXd ca(left.n_alpha,hamiltonian ? nr : 0), cb(left.n_beta,hamiltonian ? nr : 0);

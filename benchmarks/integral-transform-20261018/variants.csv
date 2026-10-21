@@ -1,0 +1,3 @@
+variant,qualification_job,native_ri_job,native_exact_job,phase_c12_job,phase_fe_job,base_commit,notes
+per_auxiliary_trial,293649,293650,293651,293652,,3de329c4,Correctness passed; small GEMM per auxiliary; no blanket end-to-end gain
+batched,293661,293662,293663,293664,293665,3de329c4,Shared tall GEMM; independent frame timings; exact and RI pullbacks shared

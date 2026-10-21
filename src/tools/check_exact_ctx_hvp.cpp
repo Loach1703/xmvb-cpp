@@ -1068,6 +1068,20 @@ int main(int argc, char** argv) {
           "orbital coupling block diagnostics are inconsistent");
     }
 
+    // A local-only block has no cached orbital/structure forcing direction.
+    // Its reverse consumer must still receive the exact integral tangent.
+    const xmvb::vb::HvpComponents local_only{
+        .direct_core_response=false, .fixed_upstream_pullback=false,
+        .local_active_response=true, .structure_response=false};
+    const Eigen::MatrixXd local_block = exact_hvp.apply_reduced_batch(
+        coupling_directions, local_only);
+    Eigen::MatrixXd local_scalar(direction.size(),2);
+    local_scalar.col(0)=analytic_local_active;
+    local_scalar.col(1)=exact_hvp.apply_reduced(second_direction,local_only);
+    const double local_batch_error=relative_matrix_error(local_block,local_scalar);
+    if (local_batch_error>1e-10)
+      throw std::runtime_error("local-only HVP block differs from scalar action");
+
     double state_energy_average_error = 0.0;
     double state_gradient_average_error = 0.0;
     double state_hvp_average_error = 0.0;

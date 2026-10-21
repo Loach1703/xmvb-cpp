@@ -12,13 +12,14 @@ namespace {
 
 void write_deck(
     const std::filesystem::path& path,
-    const std::string& control_guess) {
+    const std::string& control_guess,
+    const std::string& method = "vbscf") {
   std::ofstream output(path);
   if (!output) {
     throw std::runtime_error("failed to create input-deck test fixture");
   }
   output << "$ctrl\n"
-         << "vbscf basis=cc-pvdz " << control_guess << "\n"
+         << method << " basis=cc-pvdz " << control_guess << "\n"
          << "$end\n"
          << "$gus\n"
          << "1\n"
@@ -51,6 +52,35 @@ int main() {
     require(
         !implicit.metadata.has_explicit_guess_type,
         "an implicit $GUS block must not be marked as explicit GUESS=");
+    require(
+        implicit.metadata.electronic_method == xmvb::vb::ElectronicMethod::Vbscf,
+        "VBSCF flag must select the VBSCF method");
+
+    const auto default_method_path = root / "default-method.xmi";
+    write_deck(default_method_path, "", "");
+    const auto default_method = xmvb::vb::parse_input_deck_model(
+        default_method_path.string());
+    require(
+        default_method.metadata.electronic_method == xmvb::vb::ElectronicMethod::Vbscf,
+        "omitted method must retain the VBSCF default");
+
+    const auto casscf_path = root / "casscf.xmi";
+    write_deck(casscf_path, "iscf=7", "casscf");
+    const auto casscf = xmvb::vb::parse_input_deck_model(casscf_path.string());
+    require(
+        casscf.metadata.electronic_method == xmvb::vb::ElectronicMethod::Casscf,
+        "CASSCF flag must select CASSCF despite a VB optimizer ISCF value");
+
+    const auto conflicting_method_path = root / "conflicting-method.xmi";
+    write_deck(conflicting_method_path, "", "vbscf casscf");
+    bool rejected_conflicting_methods = false;
+    try {
+      (void)xmvb::vb::parse_input_deck_model(conflicting_method_path.string());
+    } catch (const std::invalid_argument&) {
+      rejected_conflicting_methods = true;
+    }
+    require(rejected_conflicting_methods,
+        "conflicting VBSCF and CASSCF flags must be rejected");
 
     const auto explicit_auto_path = root / "explicit-auto.xmi";
     write_deck(explicit_auto_path, "guess=auto");

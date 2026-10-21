@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -20,15 +21,20 @@
 #include "mcscf/ci/sigma.hpp"
 #include "mcscf/ci/factors.hpp"
 #include "mcscf/ci/product_support.hpp"
+#include "mcscf/ci/sigma_plan.hpp"
+#include "mcscf/ci/channel_product.hpp"
+#include "mcscf/ci/sigma_gather.hpp"
 #include "parallel/openmp.hpp"
 #include "vbscf/determinants/pairs/same_spin_cache.hpp"
 #include "vbscf/structures/assembly/action.hpp"
+#include "vbscf/structures/assembly/input_columns.hpp"
 #include "vbscf/structures/assembly/states.hpp"
 #include "vbscf/structures/assembly/column_tiles.hpp"
 #include "vbscf/structures/assembly/sources.hpp"
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
 #include "vbscf/structures/overlap/representation.hpp"
+#include "vbscf/structures/overlap/metric.hpp"
 #include "mcscf/ci/product_paths.hpp"
 
 namespace {
@@ -304,6 +310,19 @@ void check_fixed_states(const xmvb::vb::StructureAction& action) {
   const std::vector<double> weights(count,1.0/count);
   const auto actual=xmvb::vb::evaluate_fixed_states(action,c,weights);
   const auto images=action.apply(c);
+  const xmvb::vb::SelectedMetric shared_metric(action.apply_overlap(
+      Eigen::MatrixXd::Identity(action.n_structures(),action.n_structures())));
+  const auto reused=xmvb::vb::evaluate_fixed_states(action,c,weights,&shared_metric);
+  const auto& reused_adjoint=reused.integral_adjoint.value();
+  require((reused.coefficient_gradient-actual.coefficient_gradient).norm()<3e-11 &&
+      (reused.residuals-actual.residuals).norm()<3e-11 &&
+      (reused_adjoint.overlap-actual.integral_adjoint->overlap).norm()<3e-11 &&
+      (reused_adjoint.one_electron-actual.integral_adjoint->one_electron).norm()<3e-11 &&
+      (reused_adjoint.pair_kernel-actual.integral_adjoint->pair_kernel).norm()<3e-11,
+      "trial-chart Gram reuse changed fixed-state gradients or integral adjoints");
+  for (int s=0;s<count;++s)
+    require(std::abs(reused.energies[s]-actual.energies[s])<3e-11,
+        "trial-chart Gram reuse changed a fixed-state energy");
   const Eigen::MatrixXd gram=c.transpose()*images.overlap;
   const Eigen::LLT<Eigen::MatrixXd> metric(gram);
   const Eigen::MatrixXd white=metric.matrixU().solve(Eigen::MatrixXd::Identity(count,count));
@@ -330,6 +349,14 @@ void check_fixed_states(const xmvb::vb::StructureAction& action) {
   // Exercise the optional image consumer independently of Rayleigh normalization.
   xmvb::vb::StructureActionResult fused_images;
   const auto fused=action.prepare_active_adjoint(c,weights,energies,&fused_images);
+  xmvb::vb::StructureActionResult known_images;
+  const auto known=action.prepare_active_adjoint(c,weights,energies,
+      &known_images,&images.overlap);
+  check_images(known_images,fused_images);
+  require((known.one_electron_gradient-fused.one_electron_gradient).norm()<3e-11 &&
+      (known.pair_kernel_gradient-fused.pair_kernel_gradient).norm()<3e-11 &&
+      (known.generator_gradient-fused.generator_gradient).norm()<3e-11,
+      "known-overlap consumption removed a physical adjoint term");
   check_images(fused_images,images);
   const auto separate=action.prepare_active_adjoint(c,weights,energies);
   require((fused.generator_gradient-separate.generator_gradient).norm()<3e-11 &&
@@ -378,9 +405,10 @@ void check_rumer_case(int n) {
   require((action.apply_hamiltonian(vectors)-actual.hamiltonian).norm()<
       2e-11*std::max(1.0,actual.hamiltonian.norm()),
       "Hamiltonian-only projection differs from the combined H/M action");
-  // Force one-column panels and eviction/recomputation in both caches.
-  // The resource choice must not change the operator or selected subspace.
-  check_images(action.apply_streamed(vectors, 512), actual);
+  // A shared budget must also hold one sigma target and its halo, unlike
+  // the former column-only budget (which had an independent 64 MiB sigma).
+  // Direct LRU eviction is separately exercised by check_input_columns().
+  check_images(action.apply_streamed(vectors,16*1024),actual);
   check_images(actual, reference_images(
       fixture, expansion.terms, expansion.product_alpha,
       expansion.product_beta, vectors));
@@ -424,7 +452,7 @@ void check_selected_unequal_spin_case() {
       "unequal-spin Hamiltonian-only projection lost selected products");
   check_images(action.apply(vectors), reference_images(
       fixture, terms, product_alpha, product_beta, vectors));
-  check_images(action.apply_streamed(vectors, 512), reference_images(
+  check_images(action.apply_streamed(vectors,16*1024), reference_images(
       fixture, terms, product_alpha, product_beta, vectors));
   check_images(action.apply_sources(vectors), action.apply(vectors));
   check_images(action.apply_sources(vectors,
@@ -536,6 +564,18 @@ void check_source_tangents() {
       for (const bool physical : {false,true}) {
         const auto base = plan.orthogonal_source(products,c,ta,tb,physical);
         const auto response = plan.orthogonal_source(products,q,ta,tb,physical);
+        const Eigen::MatrixXd full = reconstruct(base,3);
+        for (const bool transpose : {false,true}) {
+          const int in_rows = transpose ? na:nb,out_rows = transpose ? nb:na;
+          const Eigen::MatrixXd input = test_vectors(in_rows,3);
+          Eigen::MatrixXd output = Eigen::MatrixXd::Constant(out_rows,3,0.17);
+          Eigen::MatrixXd expected = output;
+          if (transpose) expected.noalias() -= 0.63*full.transpose()*input;
+          else expected.noalias() -= 0.63*full*input;
+          base.contract(transpose,input,output,-0.63);
+          require((output-expected).norm() < 4e-12*std::max(1.0,expected.norm()),
+                  "support amplitude map lost a transpose, parity weight or unequal spin space");
+        }
         const Eigen::MatrixXd orbital = sigma.apply_one_body_generator(reconstruct(base,3),generator);
         const Eigen::MatrixXd coefficient = reconstruct(response,3);
         for (const int mode : {0,1,2}) {
@@ -932,16 +972,22 @@ void check_product_response(int parity,bool unequal) {
 }
 
 /** @brief Broad selected support: one final projection, independent of closure. */
-void check_broad_product_projection(bool unequal) {
-  const auto fixture=unequal ? make_fixture(5,2,1):make_fixture(4,2,2);
+void check_broad_product_projection(bool unequal,bool partial=false,int parity=0) {
+  const auto fixture=unequal ? make_fixture(5,2,1):make_fixture(6,3,3);
   Terms terms;
   Strings alpha,beta;
   for (int a=0;a<static_cast<int>(fixture.alpha.size());++a)
     for (int b=0;b<static_cast<int>(fixture.beta.size());++b) {
+      // A broad but nonclosed raw support, including an interior column hole.
+      // Ordered transforms must not assume all Ua*Ub products were selected.
+      if (partial && a==static_cast<int>(fixture.alpha.size())-1 && b>=3) continue;
+      if (parity<0 && a==b) continue;
       alpha.push_back(fixture.alpha[a]); beta.push_back(fixture.beta[b]);
-      terms.push_back({{0,0.1*std::sin(a+2*b+1)},
-                       {1,0.2*std::cos(2*a+b+1)},
-                       {2,0.15*std::sin(3*a+b+2)}});
+      const int i=parity ? std::min(a,b):a,j=parity ? std::max(a,b):b;
+      const double sign=parity && a>b ? parity:1;
+      terms.push_back({{0,sign*0.1*std::sin(i+2*j+1)},
+                       {1,sign*0.2*std::cos(2*i+j+1)},
+                       {2,sign*0.15*std::sin(3*i+j+2)}});
     }
   const auto cache=topology(fixture,alpha,beta);
   const auto build=[&](const Fixture& f) {
@@ -950,6 +996,15 @@ void check_broad_product_projection(bool unequal) {
   };
   const auto action=build(fixture);
   const Eigen::MatrixXd c=test_vectors(3,2),q=0.02*c.array().cos().matrix();
+  if (partial || parity) {
+    const auto hs=action.apply_streamed(c);
+    require(hs.tiles.source_workspace_bound==0 && hs.tiles.input_resident_bytes>0,
+        "broad selected H/M regression did not execute the product contraction");
+    check_images(hs,reference_images(fixture,terms,alpha,beta,c));
+    check_images(hs,action.apply_streamed(c,16*1024));
+    require((action.apply_hamiltonian(c)-hs.hamiltonian).norm()<3e-11,
+        "ordered Hamiltonian-only contraction changed selected-space projection");
+  }
   auto wide=action.prepare_active_adjoint(c,{0.4,0.6},{-1.1,-0.7});
   wide.source_factors=false;
   wide.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
@@ -957,6 +1012,18 @@ void check_broad_product_projection(bool unequal) {
   narrow.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
   narrow.product_images->budget=128;
   const auto response=action.apply_response(wide,q);
+  // Exercise the source image order on the same nonclosed, arbitrary three
+  // structures. The wider equal-spin fixture favours the support-map image
+  // consumer; the unequal-spin fixture also certifies the resident order.
+  auto source_state=wide;
+  source_state.source_factors=true; source_state.product_images.reset();
+  const auto source_response=action.apply_response(source_state,q);
+  check_images(source_response.images,response.images);
+  require((source_response.generator-response.generator).norm()<3e-11 &&
+          (source_response.one_electron-response.one_electron).norm()<3e-11 &&
+          (source_response.pair_kernel-response.pair_kernel).norm()<3e-11 &&
+          source_response.images.tiles.source_workspace_bound<=xmvb::mcscf::kFactorWorkspaceBytes,
+          "single-pass source image changed an arbitrary-space adjoint or exceeded its budget");
   check_images(response.images,reference_images(fixture,terms,alpha,beta,q));
   check_images(response.images,action.apply_response(narrow,q).images);
   require(response.images.tiles.structure_projections==2*c.cols(),
@@ -980,6 +1047,20 @@ void check_broad_product_projection(bool unequal) {
   // Independently populate immutable accepted Y/(H-E)Y panels. This exercises
   // accepted-state jet reuse without generating it through the implementation.
   const auto oracle=explicit_product_state(fixture,cache,action,wide);
+  if (partial) {
+    // Populate the real compact accepted cache, not only the independent
+    // full-column oracle below. Interior holes must survive ordered input.
+    auto compact=action.prepare_active_adjoint(c,{0.4,0.6},{-1.1,-0.7});
+    require(!compact.source_factors && compact.product_images &&
+        !compact.product_images->states.empty() && !compact.product_images->states.front().empty(),
+        "broad selected regression did not retain accepted product tiles");
+    xmvb::vb::StructureIntegralDirection dcompact;
+    dcompact.capture_connection=true;
+    const auto compact_image=action.apply_integral_direction(compact,overlap,one,two,&dcompact);
+    check_images(compact_image,image);
+    require((dcompact.generator_direction-dw.generator_direction).norm()<3e-11,
+        "sparse accepted-image retention changed the orbital generator jet");
+  }
   auto resident=wide;
   resident.product_images=std::make_shared<xmvb::vb::detail::ProductImages>();
   resident.product_images->extent=fixture.beta.size();
@@ -1278,7 +1359,59 @@ void check_mixed_exchange_space() {
   const auto vectors = test_vectors(3, 2);
   const auto reference = reference_images(fixture, terms, alpha, beta, vectors);
   check_images(action.apply(vectors), reference);
-  check_images(action.apply_streamed(vectors, 512), reference);
+  check_images(action.apply_streamed(vectors,16*1024),reference);
+}
+
+void check_input_columns() {
+  constexpr int n_alpha=7,width=2;
+  const std::vector<std::uint8_t> support{1,1,1,1,1,1,0,1,1,1};
+  std::vector<int> generated;
+  const auto value=[](int beta,int alpha,int v) { return 100.0*beta+10*v+alpha+1; };
+  xmvb::vb::detail::InputColumns input(n_alpha,width,3,48,support,
+      [&](std::span<const int> betas) {
+    require(betas.size()<=3,"input generation exceeded its bounded batch");
+    std::vector<xmvb::vb::detail::ColumnTile> result;
+    for (const int beta:betas) {
+      generated.push_back(beta);
+      auto p=std::make_shared<xmvb::vb::detail::ColumnPattern>();
+      p->offsets.resize(2); p->offsets<<0,2;
+      p->rows.resize(2); p->rows<<beta%n_alpha,(beta+2)%n_alpha;
+      std::sort(p->rows.data(),p->rows.data()+2);
+      Eigen::MatrixXd values(2,width);
+      for (int v=0;v<width;++v) for (int a=0;a<2;++a)
+        values(a,v)=value(beta,p->rows[a],v);
+      result.push_back({std::move(p),std::move(values)});
+    }
+    return result;
+  });
+  const std::vector<int> betas{0,3,6,9},rows{0,1,3,5,6};
+  Eigen::MatrixXd actual(rows.size(),betas.size()*width);
+  const auto read=[&] { input.read(betas,rows,actual); };
+  read();
+  require(generated==std::vector<int>({0,3,9}),"reader generated an unrequested or strictly zero beta column");
+  const auto check=[&] {
+    for (int b=0;b<static_cast<int>(betas.size());++b)
+      for (int v=0;v<width;++v) for (int a=0;a<static_cast<int>(rows.size());++a) {
+        const int beta=betas[b],alpha=rows[a];
+        const double expected=support[beta] && (alpha==beta%n_alpha || alpha==(beta+2)%n_alpha)
+            ? value(beta,alpha,v):0.0;
+        require(actual(a,b*width+v)==expected,"column eviction/gather changed a multi-RHS coefficient");
+      }
+  };
+  check();
+#pragma omp parallel num_threads(2)
+#pragma omp single
+  read();
+  check();
+  const auto before=generated.size();
+  input.prepare({3});
+  require(generated.size()==before && input.cache().evictions>0,
+      "column hit regenerated data or the tiny-budget test did not evict");
+  input.release(3);
+  require(!input.cache().contains(3) && input.cache().releases==1,
+      "completed input column was not released");
+  input.release(3);
+  require(input.cache().releases==1,"an absent column was released twice");
 }
 
 void check_exterior_team() {
@@ -1447,7 +1580,26 @@ void check_sigma_columns(const Fixture& fixture, int width) {
                 3e-11*std::max(1.0,reference.pair_kernel.norm()),
             "generated sigma/adjoint channel sweep differs from the full oracle");
   };
-  sigma.apply_tiled(width, read, add);
+  std::vector<bool> released(n_beta,false);
+  int release_calls=0;
+  sigma.apply_tiled(width,
+      [&](const auto& betas,const auto& rows,Eigen::Ref<Eigen::MatrixXd> block) {
+        for (const int beta:betas)
+          require(!released[beta],"sigma read a released input column");
+        read(betas,rows,block);
+      },[&](const auto& betas,const auto& rows,const auto& accumulate) {
+        for (const int beta:betas)
+          require(!released[beta],"sigma wrote a released output column");
+        add(betas,rows,accumulate);
+      },nullptr,0,[&](std::span<const int> betas) {
+        if (!betas.empty()) ++release_calls;
+        for (const int beta:betas) {
+          require(!released[beta],"sigma released a column more than once");
+          released[beta]=true;
+        }
+      });
+  require(release_calls>0 && std::all_of(released.begin(),released.end(),[](bool x){return x;}),
+      "sigma did not finish every input/output column lifetime");
   const Eigen::MatrixXd ordinary = sigma.apply(carrier);
   require((tiled - ordinary).norm() <=
               2e-11 * std::max(1.0, ordinary.norm()),
@@ -1494,6 +1646,36 @@ void check_sigma_columns(const Fixture& fixture, int width) {
   check_adjoint(sequence_adjoints[2],cross);
   require((tiled-2*ordinary).norm()<4e-11*std::max(1.0,ordinary.norm()),
           "temporal halo refill overwrote a live image or accepted channels");
+  if (fixture.n<=5) {
+    // Retire only after ALL response writers have finished a generated tile.
+    // The small workspace forces multiple tiles independently of residency.
+    tiled.setZero();
+    std::fill(released.begin(),released.end(),false);
+    const auto guarded_read=[&](const auto& betas,const auto& rows,
+        Eigen::Ref<Eigen::MatrixXd> values) {
+      for (const int b:betas) require(!released[b],"response read after final release");
+      read(betas,rows,values);
+    };
+    const auto guarded_write=[&](const auto& betas,const auto& rows,const auto& accumulate) {
+      for (const int b:betas) require(!released[b],"temporal writer after final release");
+      add(betas,rows,accumulate);
+    };
+    const xmvb::mcscf::DirectCiTileRequest repeated[]={
+        {guarded_read,guarded_write},{guarded_read,guarded_write}};
+    const auto derivatives=sigma.apply_tiled_responses(width,repeated,guarded_read,nullptr,0,
+        [&](std::span<const int> columns) {
+          for (const int b:columns) {
+            require(!released[b],"response column released twice");
+            released[b]=true;
+          }
+        },16*1024);
+    require(std::all_of(released.begin(),released.end(),[](bool value){return value;}),
+        "response did not retire all columns");
+    require((tiled-2*ordinary).norm()<4e-11*std::max(1.0,ordinary.norm()),
+        "retiring temporal outputs changed sigma");
+    for (const auto& derivative:derivatives)
+      check_adjoint(derivative,sigma.integral_adjoint(carrier,carrier));
+  }
   Eigen::MatrixXd orbital(fixture.n,fixture.n);
   for (int q=0;q<fixture.n;++q)
     for (int p=0;p<fixture.n;++p) orbital(p,q)=std::sin(0.29*(p+2)*(q+1));
@@ -1641,13 +1823,17 @@ void check_prefix_words() {
       for (int b = 0; b < 3; ++b)
         for (int depth = 0; depth <= 1; ++depth) {
           int count = 0;
+          int first=-1,last=-1;
           bool expected = true;
           for (int k = 0; k < n; ++k) {
             count += ((alpha[a] >> k) & 1) + ((beta[b] >> k) & 1);
             expected = expected && count + depth >= k + 1;
+            if (count<k+1) { if (first<0) first=k; last=k; }
           }
           require(support.contains(a, b, depth) == expected,
                   "packed prefix comparison differs from scalar occupation counts");
+          require(support.channel_envelope(a,b)==std::pair{first,last},
+                  "packed channel envelope differs from scalar deficient prefixes");
         }
   }
 }
@@ -1804,6 +1990,211 @@ void check_generic_product_support() {
           "63-orbital path generation failed");
 }
 
+/** @brief Independent full-size oracle for incremental byte admission. */
+void check_sigma_payload(const xmvb::mcscf::detail::SigmaTilePlan& plan,
+    xmvb::mcscf::detail::SigmaTileBudget budget,int n) {
+  using xmvb::mcscf::detail::SigmaGatherRow;
+  const std::size_t rows=plan.active.size(),width=budget.width;
+  std::size_t entries=0;
+  for (const int group:plan.channel_groups)
+    entries+=group ? ((group-1)/n+1)*(n-1-(group-1)%n):budget.pairs;
+  const std::size_t input=sizeof(double)*width*plan.halo.size()*plan.columns.size();
+  const std::size_t images=sizeof(double)*width*rows*budget.pairs*(budget.slabs-budget.packed_slabs);
+  const std::size_t packed=sizeof(double)*width*entries*budget.packed_slabs;
+  const std::size_t indices=sizeof(int)*width*plan.halo.size()*plan.groups.size();
+  const std::size_t layout=budget.packed_slabs ?
+      rows*(sizeof(int)+width*(sizeof(int)+sizeof(std::size_t))):0;
+  require(plan.payload_bytes()==input+images+packed+indices+layout+rows*sizeof(SigmaGatherRow),
+      "incremental sigma admission differs from complete byte accounting");
+}
+
+/** @brief Admission metadata equals an independent completed-tile traversal. */
+void check_sigma_metadata(const xmvb::mcscf::detail::SigmaTilePlan& plan,int parity) {
+  std::vector<int> diagonal;
+  std::size_t unsupported=0;
+  for (const auto& group:plan.groups)
+    for (int i=group.begin;i<group.end;++i) {
+      unsupported+=!plan.active_support[i];
+      if (parity && plan.active[i]==group.beta) diagonal.push_back(i);
+    }
+  require(plan.diagonal_rows==diagonal && plan.unsupported_targets==unsupported,
+      "admission metadata differs from independent full tile traversal");
+}
+
+void check_sigma_tile_plan() {
+  using namespace xmvb::mcscf;
+  SpinConnections graph;
+  graph.strings=4; graph.degree=3;
+  graph.occupations.resize(1,4);
+  for (int b=0;b<4;++b) {
+    graph.occupations(0,b)=b;
+    for (int a=0;a<4;++a) if (a!=b)
+      graph.links.push_back({a,0,0,0,1.0});
+  }
+  const std::vector<std::uint64_t> masks{1,2,4,8};
+  const ProductSupport support(4,masks,masks,{3,12});
+  for (const ProductSupport* selected:std::array<const ProductSupport*,2>{nullptr,&support})
+    for (int parity:{0,1,-1})
+      for (const std::size_t bytes:{800U,8192U}) {
+        detail::SigmaTilePlan plan(graph,graph,selected,parity,
+            {2,10,2,bytes},true);
+        std::array<int,16> visits{};
+        std::array<bool,4> retired{};
+        while (plan.next()) {
+          check_sigma_payload(plan,{2,10,2,bytes},4);
+          check_sigma_metadata(plan,parity);
+          require(plan.payload_bytes()<=bytes,"sigma plan exceeds numeric payload budget");
+          for (const int column:plan.columns)
+            require(!retired[column],"sigma plan reads a retired column");
+          for (int i=0;i<static_cast<int>(plan.active.size());++i) {
+            const int a=plan.active[i],b=plan.groups[plan.group_index[i]].beta;
+            ++visits[4*a+b];
+            require(static_cast<bool>(plan.active_support[i])==(!selected || selected->contains(a,b)),
+                "sigma plan changed the structural support label");
+          }
+          for (const int column:plan.released) {
+            require(!retired[column],"sigma plan retires a column twice");
+            retired[column]=true;
+          }
+        }
+        for (int a=0;a<4;++a) for (int b=0;b<4;++b) {
+          const bool expected=(!selected || selected->contains(a,b,1)) &&
+              (!parity || a<b || (a==b && parity>0));
+          require(visits[4*a+b]==static_cast<int>(expected),
+              "sigma plan lost or duplicated a target at a tile boundary");
+        }
+        require(std::all_of(retired.begin(),retired.end(),[](bool value) { return value; }),
+            "sigma plan omitted a final column release");
+      }
+}
+
+/** @brief Full-channel images are column-major; ragged sources remain row-major. */
+void check_full_channel_image_layout() {
+  using namespace xmvb::mcscf::detail;
+  constexpr int count=4,width=3,pairs=6,threads=2;
+  Eigen::MatrixXd kernel(pairs,pairs),direction(pairs,pairs);
+  for (int j=0;j<pairs;++j) for (int i=0;i<pairs;++i) {
+    kernel(i,j)=0.13*(i+1)-0.07*(j+2)+0.011*i*j;
+    direction(i,j)=0.09*(j+1)+0.023*i-0.004*i*j;
+  }
+  const std::vector<int> groups{0,1,5,0},diagonal_rows{1,3};
+  for (bool restricted:{false,true}) for (bool exchange:{false,true}) {
+    const ChannelProduct basis(kernel,3,restricted),derivative(direction,3,restricted);
+    ChannelLayout layout;
+    layout.reset(basis,restricted ? std::span<const int>(groups):std::span<const int>{},count,width);
+    std::vector<double> source(layout.entries()),image(count*width*pairs,-1.0);
+    for (std::size_t i=0;i<source.size();++i) source[i]=0.02*(i+1)-0.17;
+    Eigen::MatrixXd expected=Eigen::MatrixXd::Zero(count*width,pairs);
+    const auto accumulate=[&](const Eigen::MatrixXd& k,bool add) {
+      for (int row=0;row<count*width;++row) {
+        const int group=restricted ? groups[row%count]:0;
+        const bool diagonal=std::find(diagonal_rows.begin(),diagonal_rows.end(),row%count)!=diagonal_rows.end();
+        const double scale=exchange ? (diagonal ? 1.0:2.0):1.0;
+        for (int pair=0;pair<pairs;++pair) {
+          double value=0.0;
+          for (int channel=0;channel<basis.channels(group);++channel)
+            value+=source[layout.packed(row)+channel]*k(pair,basis.global(group,channel));
+          if (add) expected(layout.image(row),pair)+=scale*value;
+          else expected(layout.image(row),pair)=scale*value;
+        }
+      }
+    };
+    for (int thread=0;thread<threads;++thread)
+      multiply_channels(basis,layout,source.data(),image.data(),thread,threads,false,
+          diagonal_rows,count,width,exchange);
+    accumulate(kernel,false);
+    Eigen::Map<const Eigen::MatrixXd> first(image.data(),count*width,pairs);
+    require((first-expected).norm()<1e-12,"full-channel image layout changed the dense product");
+    for (int thread=0;thread<threads;++thread)
+      multiply_channels(derivative,layout,source.data(),image.data(),thread,threads,true,
+          diagonal_rows,count,width,exchange);
+    accumulate(direction,true);
+    Eigen::Map<const Eigen::MatrixXd> combined(image.data(),count*width,pairs);
+    require((combined-expected).norm()<1e-12,"full-channel forcing changed the dense product");
+  }
+}
+
+/** @brief Composed beta addresses preserve grouped RHS, intervals and holes. */
+void check_sparse_beta_gather() {
+  const std::vector<int> halo{0,2,3,6,7,9},targets{0,2,4,5};
+  const std::vector<int> index{2,-1,0,-1,3,1},sparse{1,3,6,7,10};
+  constexpr int pairs=3,channel=2;
+  const Eigen::MatrixXd kernel=Eigen::MatrixXd::Identity(pairs,pairs);
+  using namespace xmvb::mcscf::detail;
+  const ChannelProduct basis(kernel,2,true);
+  const std::vector<int> groups{0,1,0,1};
+  for (const int width:{1,2,3}) for (const bool grouped:{false,true}) {
+    ChannelLayout layout;
+    layout.reset(basis,grouped ? std::span<const int>(groups):std::span<const int>{},4,width);
+    for (const bool column_major:{false,true}) {
+      const int image_rows=4*width;
+      Eigen::VectorXd values=Eigen::VectorXd::LinSpaced(image_rows*pairs,-0.7,1.1);
+      std::vector<SigmaGatherRow> composed;
+      for (const int h:targets) {
+        const int image=layout.image(index[h]);
+        composed.push_back({halo[h],image,width>1 ? layout.image(4+index[h])-image:0});
+      }
+      for (int rhs=0;rhs<width;++rhs) for (const bool selected:{false,true})
+        for (int first=0;first<=static_cast<int>(halo.size());++first)
+          for (int last=first;last<=static_cast<int>(halo.size());++last) {
+            Eigen::VectorXd actual=Eigen::VectorXd::Constant(selected ? sparse.size():11,0.25);
+            Eigen::VectorXd expected=actual;
+            for (int out=0;out<expected.size();++out) {
+              const int alpha=selected ? sparse[out]:out;
+              for (int h=first;h<last;++h)
+                if (halo[h]==alpha && index[h]>=0)
+                  expected[out]-=values[column_major ? layout.image(index[h]+4*rhs)+channel*image_rows :
+                      layout.image(index[h]+4*rhs)*pairs+channel];
+            }
+            const int begin=first<static_cast<int>(halo.size()) ? halo[first]:11;
+            const int end=last>first ? halo[last-1]+1:begin;
+            gather_beta_rows(values.data()+(column_major ? channel*image_rows:channel),
+                column_major ? 1:pairs,rhs,-1.0,
+                composed,begin,end,actual.data(),
+                selected ? sparse.data():nullptr,selected ? sparse.size():0);
+            require((actual-expected).norm()==0,"sparse beta gather changed a halo interval or destination support");
+          }
+    }
+  }
+}
+
+/** @brief Ragged-channel capacity never drops nodes at a budget boundary. */
+void check_packed_sigma_tile_plan() {
+  using namespace xmvb::mcscf;
+  const std::vector<std::uint64_t> masks{3,5,6,9,10,12};
+  SpinConnections graph;
+  graph.strings=6; graph.degree=4;
+  graph.occupations.resize(2,6);
+  for (int a=0;a<6;++a) {
+    int entry=0;
+    for (int p=0;p<4;++p) if ((masks[a]>>p)&1) graph.occupations(entry++,a)=p;
+    for (int b=0;b<6;++b) if (__builtin_popcountll(masks[a]^masks[b])==2)
+      graph.links.push_back({b,0,0,0,1.0});
+  }
+  const ProductSupport support(4,masks,masks);
+  for (int parity:{0,1,-1}) for (int packed:{1,2})
+    for (const std::size_t bytes:{2048U,8192U}) {
+      detail::SigmaTilePlan plan(graph,graph,&support,parity,{2,10,packed+1,bytes,packed},true);
+      std::array<int,36> visits{};
+      while (plan.next()) {
+        check_sigma_payload(plan,{2,10,packed+1,bytes,packed},4);
+        check_sigma_metadata(plan,parity);
+        require(plan.payload_bytes()<=bytes,"packed sigma plan exceeds shared budget");
+        require(plan.channel_groups.size()==plan.active.size(),"missing packed channel groups");
+        for (int i=0;i<static_cast<int>(plan.active.size());++i) {
+          const int a=plan.active[i],b=plan.groups[plan.group_index[i]].beta;
+          ++visits[6*a+b];
+          const auto [first,last]=support.channel_envelope(a,b);
+          require(plan.channel_groups[i]==(first<0 ? 0:1+4*first+last),
+              "packed sigma planner changed the exact channel envelope");
+        }
+      }
+      for (int a=0;a<6;++a) for (int b=0;b<6;++b)
+        require(visits[6*a+b]==static_cast<int>(support.contains(a,b,1) &&
+            (!parity || a<b || (a==b && parity>0))),"packed sigma plan lost or duplicated a target");
+    }
+}
+
 void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
                            const std::vector<xmvb::mcscf::ProductIndex>& products = {}) {
   const auto fixture = make_fixture(n, n_alpha, n_beta_electrons);
@@ -1856,6 +2247,12 @@ void check_supported_sigma(int n, int n_alpha, int n_beta_electrons, int width,
   auto expected = sigma.apply(carrier);
   require((actual - expected).norm() <= 2e-11 * std::max(1.0, expected.norm()),
           "generated closure sigma differs from full sigma, including outside-S outputs");
+  if (n==4 && n_alpha==2 && n_beta_electrons==2) {
+    actual.setZero();
+    sigma.apply_tiled(width,read,add,&support,0,{},2048);
+    require((actual-expected).norm()<=2e-11*std::max(1.0,expected.norm()),
+        "small-budget sigma changed the Hamiltonian action");
+  }
   actual.setZero();
   const auto fused=sigma.apply_tiled_with_adjoint(width,read,add,{},&support);
   const auto integral=sigma.integral_adjoint(carrier,carrier);
@@ -2098,7 +2495,7 @@ void check_covalent_subset(int selected_count, bool add_ionic) {
   const auto expected = reference_images(fixture, expansion.terms,
       expansion.product_alpha, expansion.product_beta, vectors);
   check_images(action.apply(vectors), expected);
-  check_images(action.apply_streamed(vectors, 512), expected);
+  check_images(action.apply_streamed(vectors,16*1024),expected);
   check_images(action.apply_sources(vectors), expected);
   require((action.apply_overlap(vectors) - expected.overlap).norm() <=
               2e-11 * std::max(1.0, expected.overlap.norm()),
@@ -3156,8 +3553,22 @@ int main(int argc, char** argv) {
       check_factor_structure_response(0,true);
       for (int parity:{0,1,-1}) check_product_response(parity,false);
       check_product_response(0,true);
+      {
+        // The complete derivative chain, not only bare sigma: force multiple
+        // generated tiles while the narrow-panel cases also force evictions.
+        const auto previous=xmvb::workspace::limit();
+        xmvb::workspace::set_limit(32*1024);
+        for (int parity:{0,1,-1}) check_product_response(parity,false);
+        check_product_response(0,true);
+        xmvb::workspace::set_limit(previous);
+      }
       check_broad_product_projection(false);
       check_broad_product_projection(true);
+      check_broad_product_projection(true,true);
+      for (int parity:{-1,1}) check_broad_product_projection(false,false,parity);
+      require(!xmvb::vb::detail::prefer_ordered_beta(32,10,5,10,4) &&
+          xmvb::vb::detail::prefer_ordered_beta(48,10,5,10,5),
+          "beta contraction planner counted unreachable columns");
       check_factor_accepted_gradient();
       check_factor_accepted_gradient(true);
       for (int parity : {0,1,-1}) check_scalar_source_direction(parity);
@@ -3165,16 +3576,24 @@ int main(int argc, char** argv) {
       check_factor_state_average();
       check_complete_unequal_spin_case();
       check_mixed_exchange_space();
+      check_input_columns();
       check_exterior_team();
       check_sigma_columns(make_fixture(5, 2, 1), 3);
       check_sigma_columns(make_fixture(4, 2, 2), 3);
       check_sigma_columns(make_fixture(4, 0, 1), 2);
       check_sigma_columns(make_fixture(4, 4, 1), 2);
       check_sigma_columns(make_fixture(10, 5, 4), 2);
+      check_sigma_tile_plan();
+      check_full_channel_image_layout();
+      check_sparse_beta_gather();
+      check_packed_sigma_tile_plan();
       check_prefix_words();
-      check_supported_sigma(4, 2, 2, 2);
+      for (const int width:{1,2,3}) check_supported_sigma(4, 2, 2, width);
       check_supported_sigma(5, 3, 2, 3);
       check_supported_sigma(6, 3, 3, 1);
+      // Enough halo scratch for the grouped per-worker Gram, including
+      // both exchange parities, multiple RHS and independent HVP adjoints.
+      check_supported_sigma(8, 4, 4, 2);
       check_generic_product_support();
       check_supported_sigma(5, 2, 1, 2, {3 * 5 + 2, 6 * 5 + 0});
       check_covalent_subset(1, false);

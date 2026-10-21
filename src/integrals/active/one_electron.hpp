@@ -16,6 +16,10 @@ namespace xmvb::integrals {
  */
 class ActiveSpaceOneElectronBuilder {
 public:
+  /** @brief Project F with an explicit active coefficient frame; retain F C. */
+  ActiveSpaceOneElectronResult build(
+      const Eigen::Ref<const Eigen::MatrixXd>& ao_effective_h1e,
+      const Eigen::Ref<const Eigen::MatrixXd>& active_coefficients) const;
   /**
    * @brief Builds the active-space effective one-electron matrix.
    *

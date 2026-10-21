@@ -1,0 +1,320 @@
+{
+  "dimension": 47256,
+  "electrons": 12,
+  "sampled_structures": 6,
+  "diagonal_samples": [
+    {
+      "structure": 1,
+      "ionic_order": 0,
+      "model_h": -598.3845741527059,
+      "model_m": 33.95435523240518,
+      "exact_h": -659.9713246535231,
+      "exact_m": 37.29267257728517,
+      "model_gap_per_G": 0.5511360285728397,
+      "exact_gap_per_G": 0.5622772191650078,
+      "model_rayleigh": -17.623205331303797,
+      "exact_rayleigh": -17.69707771106513,
+      "cross_occupation_inverse_norm_fraction": 0.6348799355960952,
+      "cross_ionic_order_inverse_norm_fraction": 0.6348799355960952,
+      "relative_gap_model_error": -0.01981440864474826
+    },
+    {
+      "structure": 132,
+      "ionic_order": 0,
+      "model_h": -835.2023390048096,
+      "model_m": 46.81087117997181,
+      "exact_h": -1683.3603115213405,
+      "exact_m": 92.12552835833814,
+      "model_gap_per_G": 0.599744673323924,
+      "exact_gap_per_G": 0.5607701623078789,
+      "model_rayleigh": -17.842059289897463,
+      "exact_rayleigh": -18.27246303514939,
+      "cross_occupation_inverse_norm_fraction": 0.6826211623267489,
+      "cross_ionic_order_inverse_norm_fraction": 0.6826211623267489,
+      "relative_gap_model_error": 0.06950175604144748
+    },
+    {
+      "structure": 133,
+      "ionic_order": 1,
+      "model_h": -299.0864585358727,
+      "model_m": 17.49641528437111,
+      "exact_h": -327.4813016039152,
+      "exact_m": 19.08923819643509,
+      "model_gap_per_G": 0.857256614996988,
+      "exact_gap_per_G": 0.898833797567292,
+      "model_rayleigh": -17.094156355732785,
+      "exact_rayleigh": -17.155283947636644,
+      "cross_occupation_inverse_norm_fraction": 0.6951814835041377,
+      "cross_ionic_order_inverse_norm_fraction": 0.6170047594037611,
+      "relative_gap_model_error": -0.04625680819171829
+    },
+    {
+      "structure": 5676,
+      "ionic_order": 1,
+      "model_h": -305.3860952015361,
+      "model_m": 17.912940437353036,
+      "exact_h": -406.4229954087324,
+      "exact_m": 23.612924000100367,
+      "model_gap_per_G": 0.9033056545447735,
+      "exact_gap_per_G": 1.0700674714867393,
+      "model_rayleigh": -17.048350954415525,
+      "exact_rayleigh": -17.211887668253407,
+      "cross_occupation_inverse_norm_fraction": 0.7398655564521185,
+      "cross_ionic_order_inverse_norm_fraction": 0.6861182132407032,
+      "relative_gap_model_error": -0.15584233834364558
+    },
+    {
+      "structure": 5677,
+      "ionic_order": 2,
+      "model_h": -121.4108676818898,
+      "model_m": 7.6446244469331015,
+      "exact_h": -132.97765870420443,
+      "exact_m": 8.34067921201669,
+      "model_gap_per_G": 1.328335124901277,
+      "exact_gap_per_G": 1.4172729753617634,
+      "model_rayleigh": -15.881861630311722,
+      "exact_rayleigh": -15.943264969670475,
+      "cross_occupation_inverse_norm_fraction": 0.44625392611503245,
+      "cross_ionic_order_inverse_norm_fraction": 0.00580889033461547,
+      "relative_gap_model_error": -0.06275280204068301
+    },
+    {
+      "structure": 47256,
+      "ionic_order": 2,
+      "model_h": -136.83207107991964,
+      "model_m": 8.579965279502451,
+      "exact_h": -216.29501295610606,
+      "exact_m": 13.339968528925159,
+      "model_gap_per_G": 1.455469974504469,
+      "exact_gap_per_G": 2.04099455831412,
+      "model_rayleigh": -15.947858368006646,
+      "exact_rayleigh": -16.21405721363674,
+      "cross_occupation_inverse_norm_fraction": 0.4162554273373229,
+      "cross_ionic_order_inverse_norm_fraction": 0.0053140900008739455,
+      "relative_gap_model_error": -0.28688199163710626
+    }
+  ],
+  "distance_bands": [
+    {
+      "structure": 1,
+      "ionic_order": 0,
+      "distance": 0,
+      "rows": 132,
+      "squared_inverse_norm_fraction": 0.596927467377498,
+      "cumulative_squared_inverse_norm_fraction": 0.596927467377498
+    },
+    {
+      "structure": 1,
+      "ionic_order": 0,
+      "distance": 1,
+      "rows": 5544,
+      "squared_inverse_norm_fraction": 0.34462695581823577,
+      "cumulative_squared_inverse_norm_fraction": 0.9415544231957338
+    },
+    {
+      "structure": 1,
+      "ionic_order": 0,
+      "distance": 2,
+      "rows": 41580,
+      "squared_inverse_norm_fraction": 0.05844557680426622,
+      "cumulative_squared_inverse_norm_fraction": 1.0
+    },
+    {
+      "structure": 132,
+      "ionic_order": 0,
+      "distance": 0,
+      "rows": 132,
+      "squared_inverse_norm_fraction": 0.5340283487436764,
+      "cumulative_squared_inverse_norm_fraction": 0.5340283487436764
+    },
+    {
+      "structure": 132,
+      "ionic_order": 0,
+      "distance": 1,
+      "rows": 5544,
+      "squared_inverse_norm_fraction": 0.2767894170027145,
+      "cumulative_squared_inverse_norm_fraction": 0.8108177657463909
+    },
+    {
+      "structure": 132,
+      "ionic_order": 0,
+      "distance": 2,
+      "rows": 41580,
+      "squared_inverse_norm_fraction": 0.18918223425360903,
+      "cumulative_squared_inverse_norm_fraction": 0.9999999999999999
+    },
+    {
+      "structure": 133,
+      "ionic_order": 1,
+      "distance": 0,
+      "rows": 42,
+      "squared_inverse_norm_fraction": 0.5167227049929767,
+      "cumulative_squared_inverse_norm_fraction": 0.5167227049929767
+    },
+    {
+      "structure": 133,
+      "ionic_order": 1,
+      "distance": 1,
+      "rows": 2232,
+      "squared_inverse_norm_fraction": 0.4359526573383132,
+      "cumulative_squared_inverse_norm_fraction": 0.9526753623312898
+    },
+    {
+      "structure": 133,
+      "ionic_order": 1,
+      "distance": 2,
+      "rows": 16002,
+      "squared_inverse_norm_fraction": 0.04652466734825003,
+      "cumulative_squared_inverse_norm_fraction": 0.9992000296795398
+    },
+    {
+      "structure": 133,
+      "ionic_order": 1,
+      "distance": 3,
+      "rows": 28980,
+      "squared_inverse_norm_fraction": 0.0007999703204601143,
+      "cumulative_squared_inverse_norm_fraction": 0.9999999999999999
+    },
+    {
+      "structure": 5676,
+      "ionic_order": 1,
+      "distance": 0,
+      "rows": 42,
+      "squared_inverse_norm_fraction": 0.4525989583757939,
+      "cumulative_squared_inverse_norm_fraction": 0.4525989583757939
+    },
+    {
+      "structure": 5676,
+      "ionic_order": 1,
+      "distance": 1,
+      "rows": 2232,
+      "squared_inverse_norm_fraction": 0.4962111093997874,
+      "cumulative_squared_inverse_norm_fraction": 0.9488100677755813
+    },
+    {
+      "structure": 5676,
+      "ionic_order": 1,
+      "distance": 2,
+      "rows": 16002,
+      "squared_inverse_norm_fraction": 0.050354126718667645,
+      "cumulative_squared_inverse_norm_fraction": 0.999164194494249
+    },
+    {
+      "structure": 5676,
+      "ionic_order": 1,
+      "distance": 3,
+      "rows": 28980,
+      "squared_inverse_norm_fraction": 0.000835805505751002,
+      "cumulative_squared_inverse_norm_fraction": 1.0
+    },
+    {
+      "structure": 5677,
+      "ionic_order": 2,
+      "distance": 0,
+      "rows": 14,
+      "squared_inverse_norm_fraction": 0.8008574334269163,
+      "cumulative_squared_inverse_norm_fraction": 0.8008574334269163
+    },
+    {
+      "structure": 5677,
+      "ionic_order": 2,
+      "distance": 1,
+      "rows": 616,
+      "squared_inverse_norm_fraction": 0.18674429877318313,
+      "cumulative_squared_inverse_norm_fraction": 0.9876017322000994
+    },
+    {
+      "structure": 5677,
+      "ionic_order": 2,
+      "distance": 2,
+      "rows": 6516,
+      "squared_inverse_norm_fraction": 0.012193928878969024,
+      "cumulative_squared_inverse_norm_fraction": 0.9997956610790684
+    },
+    {
+      "structure": 5677,
+      "ionic_order": 2,
+      "distance": 3,
+      "rows": 20440,
+      "squared_inverse_norm_fraction": 0.00020418676185725133,
+      "cumulative_squared_inverse_norm_fraction": 0.9999998478409257
+    },
+    {
+      "structure": 5677,
+      "ionic_order": 2,
+      "distance": 4,
+      "rows": 19670,
+      "squared_inverse_norm_fraction": 1.5215907429325626e-07,
+      "cumulative_squared_inverse_norm_fraction": 1.0
+    },
+    {
+      "structure": 47256,
+      "ionic_order": 2,
+      "distance": 0,
+      "rows": 14,
+      "squared_inverse_norm_fraction": 0.8267314192122226,
+      "cumulative_squared_inverse_norm_fraction": 0.8267314192122226
+    },
+    {
+      "structure": 47256,
+      "ionic_order": 2,
+      "distance": 1,
+      "rows": 616,
+      "squared_inverse_norm_fraction": 0.16375749296952297,
+      "cumulative_squared_inverse_norm_fraction": 0.9904889121817455
+    },
+    {
+      "structure": 47256,
+      "ionic_order": 2,
+      "distance": 2,
+      "rows": 6516,
+      "squared_inverse_norm_fraction": 0.009370618188487596,
+      "cumulative_squared_inverse_norm_fraction": 0.9998595303702331
+    },
+    {
+      "structure": 47256,
+      "ionic_order": 2,
+      "distance": 3,
+      "rows": 20440,
+      "squared_inverse_norm_fraction": 0.0001402974984918872,
+      "cumulative_squared_inverse_norm_fraction": 0.999999827868725
+    },
+    {
+      "structure": 47256,
+      "ionic_order": 2,
+      "distance": 4,
+      "rows": 19670,
+      "squared_inverse_norm_fraction": 1.7213127498409893e-07,
+      "cumulative_squared_inverse_norm_fraction": 1.0
+    }
+  ],
+  "probe_sha256": {
+    "probe.1.h.bin": "72420c188db4f0355c2fcfd73184e129a38ec41c980924a0d06f653e0f05f8df",
+    "probe.1.inverse.bin": "06eee9f78ff03334e3b41ab8f4bb5b8649410ce77102625ee570b2931efb0887",
+    "probe.1.m.bin": "c6eeb20a8dc9f2f5328808b2361e2add82e58a439e257e27ad935676c77aa1ac",
+    "probe.1.shifted.bin": "5a2367c9a59557ebcc3328c4fac38aaf1185dbcfb03f18bd0f1708a564464746",
+    "probe.132.h.bin": "dc5a7e317a97f65d08e9bc0e1f409430bec94cdd09dda50acdaf614a423a0856",
+    "probe.132.inverse.bin": "15e0e5a75a8121093b5e88ea4c84ffa456c69a361ec61eeddd5bda108daa1b2b",
+    "probe.132.m.bin": "79b4f75b44be39e1f5f4e8a7301bdf55a4b3c55dbf700b4a8e5d5c201c6ff1db",
+    "probe.132.shifted.bin": "1b6b647236dc5efcbf6f7f7f51ac575af719bdd8f92d087ea847d16e540e819d",
+    "probe.133.h.bin": "65e838eece93e4dce7c782a88ff83c4a253cd9c22beeb2b1efc249767b1afaf0",
+    "probe.133.inverse.bin": "44c0fed4d30caea1e5dc12ce642626f924000c6eb212ce50bdcbeb05b8364f6d",
+    "probe.133.m.bin": "dc89373e18ad85b57a20da2f77956d37c22e4aad549017a0bbd106e9a8402102",
+    "probe.133.shifted.bin": "eecd543c48f9f680e45edc415f6251b6151bca4302856ef45e90ce6230555919",
+    "probe.47256.h.bin": "886ea40ac231f8452b40e75b63b5617cde3e5ab0d01a42136167486bffbfb135",
+    "probe.47256.inverse.bin": "54bdae0524131a4ebce71e5ad5bcb2a04883dc8d8e7dadfd33cad7f1dfb5029c",
+    "probe.47256.m.bin": "0ce10b72403015ccf73949b2b5ab3f7a7b7102ac248a8c8af1be41b7cf3c113e",
+    "probe.47256.shifted.bin": "abfe4a4c41575a38425045f62e351e4349abd7287e944280ede0e4999ead37bf",
+    "probe.5676.h.bin": "f4c6e27af8592b8ab9567a71177dc1a2678f6a74fc7daf1c80887682ff603e0e",
+    "probe.5676.inverse.bin": "4501e73e7472b7c3a8fa0f507e68f8c9634310a45865a463a276eee63a9d31be",
+    "probe.5676.m.bin": "d91b43615736ca3c90bf9e7739c3346c6b5bf685d4813a80ebeae7c9c8a5bb5c",
+    "probe.5676.shifted.bin": "3157aab28bd38bccf35ac6cb34f2ade2316686e849227193ae663024f88ea907",
+    "probe.5677.h.bin": "a55695a12f6f4d87948171d46b86f6fec0be62db01438f30d189075614f25dd6",
+    "probe.5677.inverse.bin": "fda0dc6041c2c48b64578ce2a17ce850730ed3594f5d260b9d43a48b6e0d33a9",
+    "probe.5677.m.bin": "b3cdd8621ed6fa0be598874f4e62194b25a4612f8e2a51e56f8ca55bcc858314",
+    "probe.5677.shifted.bin": "46d6977c46e25cd5cde158dce64ce77f3893420d09ac22fa72e632514b814e06",
+    "probe.ionic_orders.bin": "4fbdb39ebe81565c1885b1ba2328848ac802ba81ed41def67f37d85890f67f1e",
+    "probe.occupations.bin": "5fd81a8baf7914727cc8d9b056455f4d71445cc8e488c69b73e52ac035819415",
+    "probe.structures.bin": "757550bceaddf393323fc0429f7e485e3b4ba052f22cb96b58758bad1d5a8dd6"
+  }
+}

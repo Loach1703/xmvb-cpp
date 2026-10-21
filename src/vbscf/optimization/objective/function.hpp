@@ -18,6 +18,7 @@
 namespace xmvb::vb {
 
 struct AcceptedPointContext;
+struct SelectedMetric;
 
 /**
  * @brief Result of evaluating an orbital point without accepting it.
@@ -97,9 +98,6 @@ class VbScfObjective {
   /** @brief Populates the reference-energy gradient at the accepted point. */
   void ensure_reference_gradient();
 
-  /** @brief Materializes exact structure norms once for final reporting. */
-  void ensure_exact_structure_overlap_diagonal();
-
   const std::vector<double>& energy_history() const { return energy_history_; }
   const std::vector<double>& gradient_inf_norm_history() const {
     return gradient_inf_norm_history_;
@@ -133,10 +131,12 @@ class VbScfObjective {
    *
    * This mirrors the CIAH keyframe operation: both the orbital displacement
    * and the current approximate structure displacement are retained.
+   * metric, when supplied, is the exact selected Gram at these trial orbitals.
    */
   VbScfCoupledKeyframeEvaluation evaluate_coupled_keyframe(
       const Eigen::VectorXd& parameter_vector,
-      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+      const SelectedMetric* metric = nullptr) const;
 
   /** @brief Relax CI from the supplied guess without orbital gradient backpropagation. */
   TrialEvaluation evaluate_trial_energy_with_structure_guess(

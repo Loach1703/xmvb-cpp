@@ -477,6 +477,8 @@ int main() {
               row, column)] = ri_kernel(row, column);
     }
   }
+  ri_pair_result.packed_active_two_electron_integrals =
+      packed_ri_result.packed_active_two_electron_integrals;
   std::vector<double> packed_ri_direction(
       static_cast<std::size_t>(n_channels) * (n_channels + 1) / 2,
       0.0);

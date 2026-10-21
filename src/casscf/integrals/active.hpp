@@ -3,6 +3,7 @@
 #include <functional>
 #include "mcscf/ci/integrals.hpp"
 #include "integrals/ao/input.hpp"
+#include "integrals/active/two_electron_result.hpp"
 
 namespace xmvb::casscf {
 
@@ -10,6 +11,14 @@ namespace xmvb::casscf {
 struct CasIntegrals {
   mcscf::ActiveIntegrals active;
   double core_energy = 0.0;
+};
+
+/** Owned accepted exact-CAS forward products, reused by orbital derivatives. */
+struct PreparedCasIntegrals {
+  CasIntegrals integrals;
+  xmvb::integrals::ActiveSpaceTwoElectronResult two_electron;
+  Eigen::MatrixXd core_density;
+  Eigen::MatrixXd fock;
 };
 
 /** @brief Read one chemists' MO Coulomb integral without requiring an MO^4 array. */
@@ -33,6 +42,12 @@ CasIntegrals make_active_integrals(
  * nonorthogonal orbital preparation or virtual four-index ERIs are used.
  */
 CasIntegrals make_active_integrals(
+    const integrals::AoIntegralInput& ao,
+    const Eigen::Ref<const Eigen::MatrixXd>& orbitals,
+    int n_inactive, int n_active, double nuclear_energy);
+
+/** Exact AO→CAS preparation with one core AO response and one active ERI transform. */
+PreparedCasIntegrals prepare_active_integrals(
     const integrals::AoIntegralInput& ao,
     const Eigen::Ref<const Eigen::MatrixXd>& orbitals,
     int n_inactive, int n_active, double nuclear_energy);

@@ -25,6 +25,8 @@ src/
   input/           XMI deck contracts and VBSCF input loading
   libcint/         Method-independent libcint providers (no VB dependency)
   guess/           Initial orbitals and restricted-HF construction
+  scf/             Common restricted SCF/DIIS and Hartree-Fock evaluation
+  dft/             Molecular grids, Libxc LDA/GGA, and RKS/UKS models
   output/          Molden and accepted-iteration output
   cli/             Command-line entry point and reporting
   tools/           Benchmarking and diagnostic tools
@@ -36,8 +38,8 @@ tests/linalg/      Linear-algebra tests with no electronic-model dependency
 tests/parallel/    Shared-buffer and nested-team execution tests
 ```
 
-The component dependency rules and numerical naming conventions are recorded
-in [Code Organization and Naming](docs/code_organization.md).
+Shared numerical modules do not depend on VB-specific model types. AO basis
+counts use `n_bf`; active orbital counts use `n_active`.
 
 ## Dependencies
 
@@ -103,6 +105,53 @@ reports omit the full structure Hamiltonian/overlap matrices and the Lowdin and
 inverse weights that require global overlap-matrix functions. Dense reference
 runs retain the complete matrices, spectrum, and all four weight definitions.
 
+### Molecular DFT
+
+Molecular RKS and collinear UKS support Libxc LDA/GGA and global-hybrid
+functionals with exact AO Coulomb/exchange integrals, using the common SCF/DIIS core.
+Select `DFT` rather than `VBSCF` in `$CTRL`:
+
+```text
+$CTRL
+DFT BASIS=CC-PVDZ INT=LIBCINT
+XC=LDA_X,LDA_C_VWN NRAD=80 NANG=590 SCF_TOL=1.0D-9
+$END
+$GEO
+He 0.0 0.0 0.0
+$END
+```
+
+The defaults are LDA exchange plus VWN correlation and an unpruned 80-by-590
+atom-centered grid with Becke partitioning. `SCF_TOL` applies to the maximum
+AO density change and commutator residual; `ITMAX` sets the iteration limit.
+Angular grids of 302 or 590 points are supported. `XC` accepts `LDA`/`SVWN5`,
+`PBE`, `BLYP`, `BP86`, `PW91`, `revPBE`, `PBEsol`, `PBE0`, `B3LYP`, and `B3LYP5`.
+Explicit Libxc component names remain available, e.g. `XC=GGA_X_B88,GGA_C_LYP`.
+Names are case-insensitive; output reports the resolved definition.
+
+`PBE0` includes 25% exact exchange. `B3LYP` uses Libxc 402 (VWN-RPA), while
+`B3LYP5` uses Libxc 475 (VWN5); both include 20% exact exchange. Exact exchange
+is included consistently in energy, Fock and analytical density response.
+The output distinguishes the semilocal XC energy from the total energy.
+GGA density gradients and AO potentials use the same shared grid tiles as LDA;
+all admitted components must provide analytical first and second derivatives.
+
+`NMUL` fixes the alpha/beta populations: its default of 1 selects RKS, while
+values greater than 1 select UKS. `KS=UKS` also allows an equal-population UKS
+calculation; `KS=RKS` explicitly requires equal populations. For example, OH
+uses `DFT NMUL=2 XC=PBE`. UKS fixes the spin projection, not a pure total-spin
+eigenfunction; the output reports the determinant spin-square expectation.
+Both spins share one Coulomb matrix and one coupled DIIS extrapolation.
+
+See `testdata/dft/` for closed- and open-shell examples. Converged restricted
+MO coefficients are written to `<input>.orb`; UKS writes `<input>.alpha.orb`
+and `<input>.beta.orb`, all in fixed-point GUS-body format.
+
+The initial guess diagonalizes the core Hamiltonian with the requested spin
+occupations. Range-separated hybrids, meta-GGA, double hybrids, nonlocal VV10,
+RI DFT, supplied guesses, nuclear derivatives and periodic DFT are not
+implemented and are not silently substituted by another functional or HF.
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE), with quadrature attribution in [NOTICE](NOTICE).

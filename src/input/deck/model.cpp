@@ -287,6 +287,31 @@ void apply_ctrl_assignment(
     metadata->basis_name = to_ascii_lower(raw_value);
     return;
   }
+  if (key == "XC") {
+    metadata->xc_functional = value_upper;
+    return;
+  }
+  if (key == "KS") {
+    if (value_upper == "RKS")
+      metadata->ks_spin = KohnShamSpin::Restricted;
+    else if (value_upper == "UKS")
+      metadata->ks_spin = KohnShamSpin::Unrestricted;
+    else
+      throw std::invalid_argument("KS must be RKS or UKS");
+    return;
+  }
+  if (key == "NRAD") {
+    metadata->grid_radial_points = std::stoi(raw_value);
+    return;
+  }
+  if (key == "NANG") {
+    metadata->grid_angular_points = std::stoi(raw_value);
+    return;
+  }
+  if (key == "SCF_TOL") {
+    metadata->scf_tolerance = parse_fortran_double(raw_value);
+    return;
+  }
   if (key == "AUXBASIS") {
     metadata->auxiliary_basis_name = to_ascii_lower(raw_value);
     return;
@@ -386,14 +411,22 @@ void apply_ctrl_flag(
   const std::string token = to_ascii_upper(raw_token);
   if (token == "TNVB") {
     metadata->tnvb.enabled = true;
+  } else if (token == "VBSCF" || token == "CASSCF" || token == "DFT") {
+    const ElectronicMethod requested = token == "DFT" ? ElectronicMethod::Dft :
+        token == "CASSCF" ? ElectronicMethod::Casscf : ElectronicMethod::Vbscf;
+    if (metadata->electronic_method_explicit &&
+        metadata->electronic_method != requested)
+      throw std::invalid_argument("$CTRL must select only one electronic method");
+    metadata->electronic_method = requested;
+    metadata->electronic_method_explicit = true;
   } else if (token == "TBVBSCF") {
     throw std::invalid_argument(
-        "TBVBSCF is no longer supported; only the standard VBSCF path remains");
+        "TBVBSCF is no longer supported");
   } else if (token == "MOLDEN") {
     metadata->request_molden_output = true;
   } else if (token == "VBPDFT") {
     throw std::invalid_argument(
-        "VBPDFT is no longer supported; only the standard VBSCF path remains");
+        "VBPDFT is no longer supported");
   }
 }
 

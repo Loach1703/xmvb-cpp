@@ -121,13 +121,17 @@ public:
       const VbScfInput& input,
       ActiveSpaceForwardEvaluation forward_evaluation) const;
 
-  /** @brief Evaluates a coupled keyframe without solving the structure eigenproblem. */
+  /** @brief Evaluates a coupled keyframe without solving the structure eigenproblem.
+   * Retain the second-order context only when an HVP at this fixed frame is needed.
+   */
   OrbitalFixedStructureGradient evaluate_fixed_structure(
       const VbScfInput& input,
       const std::vector<int>& selected_state_indices,
       const std::vector<double>& state_average_weights,
       double nuclear_repulsion_energy,
-      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients) const;
+      const Eigen::Ref<const Eigen::MatrixXd>& structure_coefficients,
+      const SelectedMetric* metric = nullptr,
+      bool retain_context = false) const;
 
   /**
    * @brief Evaluates the orbital gradient pullback from a precomputed active-space result.
@@ -172,7 +176,6 @@ public:
 private:
   ActiveSpaceGradientEvaluator active_space_gradient_evaluator_;
   AoEffectiveOneElectronBackpropagator ao_effective_one_electron_backpropagator_;
-  xmvb::integrals::ActiveSpaceMatrixBackpropagator active_space_matrix_backpropagator_;
 
   ActiveSpaceOrbitalBackpropagator active_space_orbital_backpropagator_;
   OrbitalGradientResult evaluate_from_active_space_gradient_result(

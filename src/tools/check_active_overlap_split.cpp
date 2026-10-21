@@ -11,6 +11,7 @@
 
 #include "linalg/eigensolver.hpp"
 #include "input/loading/loader.hpp"
+#include "integrals/active/raw.hpp"
 #include "vbscf/determinants/algebra/overlap.hpp"
 #include "vbscf/structures/assembly/hamiltonian_overlap.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
@@ -142,6 +143,14 @@ int main(int argc, char** argv) {
     xmvb::vb::ActiveSpaceGradientEvaluator evaluator;
     const auto baseline =
         evaluator.evaluate(load_result.input, load_result.nuclear_repulsion_energy);
+    // The original-phi and packed-tensor builder overloads consume raw C data.
+    const auto& frame = baseline.active_space_two_electron_result.orbital_transform;
+    const Matrix raw_one_electron = xmvb::integrals::materialize_raw_one_electron(
+        baseline.active_space_one_electron_result.h1e_act, frame);
+    const std::vector<double> raw_two_electron =
+        xmvb::integrals::materialize_raw_pair_kernel(
+            baseline.active_space_two_electron_result.packed_active_two_electron_integrals,
+            frame);
     const int n_active_orbitals = load_result.input.orbital_preparation_input.n_active_orbitals;
     const int n_determinants = static_cast<int>(
         load_result.input.structure_data.alpha_det.size());
@@ -195,18 +204,18 @@ int main(int argc, char** argv) {
             xmvb::vb::compute_same_spin_original_phi(
                 load_result.input.structure_data.alpha_det[determinant_index_left],
                 load_result.input.structure_data.alpha_det[determinant_index_right],
-                baseline.active_space_one_electron_result.h1e_act,
+                raw_one_electron,
                 n_active_orbitals,
-                baseline.active_space_two_electron_result.packed_active_two_electron_integrals,
+                raw_two_electron,
                 alpha_result,
                 &alpha_same_spin_inverse_overlap_gradient);
         xmvb::vb::SameSpinPhiResult beta_phi_result =
             xmvb::vb::compute_same_spin_original_phi(
                 load_result.input.structure_data.beta_det[determinant_index_left],
                 load_result.input.structure_data.beta_det[determinant_index_right],
-                baseline.active_space_one_electron_result.h1e_act,
+                raw_one_electron,
                 n_active_orbitals,
-                baseline.active_space_two_electron_result.packed_active_two_electron_integrals,
+                raw_two_electron,
                 beta_result,
                 &beta_same_spin_inverse_overlap_gradient);
         const double opposite_spin_phi =
@@ -217,7 +226,7 @@ int main(int argc, char** argv) {
                 load_result.input.structure_data.beta_det[determinant_index_left],
                 load_result.input.structure_data.beta_det[determinant_index_right],
                 beta_result,
-                baseline.active_space_two_electron_result.packed_active_two_electron_integrals,
+                raw_two_electron,
                 &alpha_opposite_spin_inverse_overlap_gradient,
                 &beta_opposite_spin_inverse_overlap_gradient);
         const Matrix alpha_inverse_overlap_gradient =
@@ -313,18 +322,18 @@ int main(int argc, char** argv) {
           load_result.input.structure_data.beta_det,
           load_result.input.structure_data.determinant_to_structure_terms,
           plus_overlap,
-          baseline.active_space_one_electron_result.h1e_act,
+          raw_one_electron,
           n_active_orbitals,
-          baseline.active_space_two_electron_result.packed_active_two_electron_integrals,
+          raw_two_electron,
           load_result.input.structure_data.n_structures);
       const auto minus_structure = structure_builder.build(
           load_result.input.structure_data.alpha_det,
           load_result.input.structure_data.beta_det,
           load_result.input.structure_data.determinant_to_structure_terms,
           minus_overlap,
-          baseline.active_space_one_electron_result.h1e_act,
+          raw_one_electron,
           n_active_orbitals,
-          baseline.active_space_two_electron_result.packed_active_two_electron_integrals,
+          raw_two_electron,
           load_result.input.structure_data.n_structures);
 
       const double fd_overlap_only = (

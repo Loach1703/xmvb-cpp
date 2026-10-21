@@ -190,9 +190,9 @@ bool CiahWorkspace::append(Eigen::VectorXd direction,
     const double work = residual->dot(direction);
     const double curvature = direction.dot(hessian_image) - shift * metric_squared;
     diagnostics::ciah_trace("ciah_expansion_geometry",
-        "basis=%d,residual_coordinate_norm=%.17g,coordinate_cosine=%.17g,metric_squared=%.17g,shifted_curvature=%.17g,physical_rayleigh=%.17g,remaining_fraction_estimate=%.17g",
+        "basis=%d,residual_coordinate_norm=%.17g,euclidean_cosine=%.17g,metric_squared=%.17g,shifted_curvature=%.17g,physical_rayleigh=%.17g,remaining_fraction_estimate=%.17g",
         basis_size()+1,residual_norm,
-        work/(residual_norm*direction.norm()),metric_squared,
+        work/(residual->norm()*direction.norm()),metric_squared,
         curvature,curvature/metric_squared,norm/initial_norm);
   }
   if (trace) diagnostics::ciah_trace("ciah_expansion_cost",
@@ -507,7 +507,13 @@ CiahResult CiahWorkspace::next(const Eigen::VectorXd& current_gradient) {
   // davidson_cc does not append a residual after yielding a converged root.
   // Reproject a changed RHS in the retained space first; that new root can
   // supply a new residual if it is no longer converged.
-  const bool residual_nonzero = result.residual_norm >= options_.lindep;
+  // Test backward resolution in the equation's own units, not against an
+  // absolute residual amplitude. Rank is then tested on normalized directions.
+  const double residual_scale=current_gradient.stableNorm()+
+      result.hessian_step.stableNorm()+
+      std::abs(result.eigenvalue)*result.metric_step.stableNorm();
+  const bool residual_nonzero = result.residual_norm > options_.lindep*residual_scale;
+  if (!residual_nonzero && !result.converged) result.exhaustion=true;
   if (!result.converged && !result.exhaustion && residual_nonzero) {
     pending_residual_ = result.residual;
     pending_eigenvalue_ = result.eigenvalue;

@@ -16,9 +16,9 @@ namespace xmvb::linalg {
  * Compute it only after the inexpensive symmetry check fails.
  */
 inline double projection_skew_roundoff(
-    const Eigen::MatrixXd& basis,
-    const Eigen::MatrixXd& images,
-    const Eigen::MatrixXd& projected) {
+    const Eigen::Ref<const Eigen::MatrixXd>& basis,
+    const Eigen::Ref<const Eigen::MatrixXd>& images,
+    const Eigen::Ref<const Eigen::MatrixXd>& projected) {
   const double u = 0.5 * std::numeric_limits<double>::epsilon();
   const double nu = static_cast<double>(basis.rows()) * u;
   const double gamma = nu / (1.0 - nu);

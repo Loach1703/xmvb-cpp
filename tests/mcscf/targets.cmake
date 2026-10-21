@@ -20,3 +20,11 @@ if (BUILD_TESTING)
   set_tests_properties(channel_support PROPERTIES
     ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
 endif()
+
+add_executable(test_spin_split ${CMAKE_CURRENT_LIST_DIR}/test_spin_split.cpp)
+target_link_libraries(test_spin_split PRIVATE xmvb_mcscf)
+if (BUILD_TESTING)
+  add_test(NAME spin_split COMMAND test_spin_split)
+  set_tests_properties(spin_split PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=1;OPENBLAS_NUM_THREADS=1")
+endif()

@@ -10,6 +10,7 @@
 #include "vbscf/determinants/pairs/accepted_tile.hpp"
 #include "vbscf/determinants/pairs/contractions.hpp"
 #include "integrals/active/two_electron.hpp"
+#include "integrals/active/ri.hpp"
 
 namespace {
 
@@ -108,6 +109,8 @@ int main() {
     }
   }
 
+  ri.packed_active_two_electron_integrals =
+      xmvb::integrals::pack_ri_active_integrals(ri.ri_active_pair_factors);
   xmvb::vb::DeterminantPairEvaluator evaluator;
   auto reference = xmvb::vb::build_same_spin_pair_cache_context(
       strings,

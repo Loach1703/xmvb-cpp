@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <barrier>
 #include <cmath>
@@ -16,6 +17,7 @@
 
 #include <Eigen/Core>
 #include <Eigen/LU>
+#include <Eigen/SparseCore>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -164,6 +166,52 @@ Eigen::MatrixXd explicit_exterior(
     }
   }
   return exterior;
+}
+
+void check_generated_exterior_rows() {
+  {
+    Eigen::MatrixXd upper=Eigen::MatrixXd::Identity(3,3);
+    upper(0,1)=-1e-250;
+    upper(0,2)=1e-180;
+    const xmvb::vb::ExteriorOrbitalTransform transform(complete_space(3,1),upper);
+    const std::vector<int> selected{0,1,2};
+    const auto factors=transform.generate_rows(selected);
+    require(factors.nonZeros()==5 && factors.coeff(0,1)==-1e-250 && factors.coeff(0,2)==1e-180,
+        "exact exterior CSC packing dropped a nonzero small factor");
+  }
+  for (int n:{3,6,8}) for (int electrons=0;electrons<=n;++electrons) {
+    auto strings=complete_space(n,electrons);
+    std::reverse(strings.begin(),strings.end());
+    Eigen::MatrixXd upper=Eigen::MatrixXd::Zero(n,n);
+    for (int i=0;i<n;++i) {
+      upper(i,i)=0.7+0.13*(i+1);
+      for (int j=i+1;j<n;++j) upper(i,j)=0.2*std::cos(0.31*(i+1)*(j+2));
+    }
+    const xmvb::vb::ExteriorOrbitalTransform transform(strings,upper);
+    const Eigen::MatrixXd reference=explicit_exterior(strings,upper);
+    std::vector<int> selected{static_cast<int>(strings.size())-1,0,
+        static_cast<int>(strings.size()/2)};
+    const Eigen::MatrixXd rows=transform.generate_rows(selected);
+    for (int i=0;i<static_cast<int>(selected.size());++i)
+      require((rows.row(i)-reference.row(selected[i])).cwiseAbs().maxCoeff()<2e-13,
+          "direct exterior rows differ from independent minors/permuted occupations");
+    const auto retained=transform.dynamic_bytes();
+    const Eigen::MatrixXd repeated=transform.generate_rows(selected);
+    const auto single=transform.row_block(selected.front(),1);
+    require(transform.dynamic_bytes()==retained && (repeated-rows).norm()==0.0 &&
+        (single->row(0)-rows.row(0)).norm()==0.0,
+        "input and projection rows do not share the same bounded orbital factors");
+    Eigen::MatrixXd team;
+#pragma omp parallel num_threads(2)
+#pragma omp single
+    team=transform.generate_rows(selected);
+    require((team-rows).norm()<1e-14,"direct exterior rows changed inside the sigma team");
+    const auto cached=transform.row_block(0,strings.size());
+    require((*cached-reference).cwiseAbs().maxCoeff()<2e-13,
+        "cached exterior row recursion differs from independent minors");
+    const auto empty=transform.generate_rows({});
+    require(empty.rows()==0 && empty.cols()==reference.cols(),"empty exterior row selection changed shape");
+  }
 }
 
 void check_exterior_transform(int width) {
@@ -581,19 +629,6 @@ void check_sigma_action() {
       std::abs(predicted_integral_direction - applied_integral_direction) <
           3.0e-10 * std::max(1.0, std::abs(applied_integral_direction)),
       "direct-CI integral adjoint fails the bilinear directional identity");
-  const auto pack_pair_kernel = [n_orbitals](
-      const Eigen::MatrixXd& kernel,
-      xmvb::integrals::ActiveSpaceTwoElectronResult* result) {
-    result->packed_active_two_electron_integrals.resize(
-        xmvb::integrals::packed_active_two_electron_integral_count(n_orbitals));
-    for (int column = 0; column < kernel.cols(); ++column) {
-      for (int row = 0; row <= column; ++row) {
-        result->packed_active_two_electron_integrals[
-            xmvb::core::PairIndex::packed_pair_of_pairs_index(
-                row, column)] = kernel(row, column);
-      }
-    }
-  };
   constexpr double adjoint_step = 1.0e-6;
   auto plus_sigma_integrals = orthogonal;
   auto minus_sigma_integrals = orthogonal;
@@ -605,12 +640,6 @@ void check_sigma_action() {
       adjoint_step * orthogonal_direction.pair_kernel;
   minus_sigma_integrals.pair_kernel -=
       adjoint_step * orthogonal_direction.pair_kernel;
-  pack_pair_kernel(
-      plus_sigma_integrals.pair_kernel,
-      &plus_sigma_integrals.two_electron);
-  pack_pair_kernel(
-      minus_sigma_integrals.pair_kernel,
-      &minus_sigma_integrals.two_electron);
   const double plus_bilinear =
       (left_coefficients.cwiseProduct(
            xmvb::mcscf::DirectCiSigmaAction(
@@ -1800,7 +1829,6 @@ void check_distinct_spin_sigma_action() {
   integrals.orbital_transform=Eigen::MatrixXd::Identity(n_orbitals,n_orbitals);
   integrals.one_electron=one_electron;
   integrals.pair_kernel=pair_kernel;
-  integrals.two_electron=two_electron;
   const xmvb::mcscf::DirectCiSigmaAction action(alpha, beta, integrals);
 
   Eigen::MatrixXd coefficients(
@@ -3173,6 +3201,7 @@ int main(int argc, char** argv) {
       benchmark_sigma();
       return 0;
     }
+    check_generated_exterior_rows();
     check_exterior_transform(7);
     check_exterior_transform(259);
     check_planner();

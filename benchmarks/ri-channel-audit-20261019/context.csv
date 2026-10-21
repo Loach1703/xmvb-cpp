@@ -1,0 +1,42 @@
+key,value
+decision,Reject point-rank and contiguous-range source-channel scatter prototypes; retain production C++ dbecff51
+goal_status,RI significant end-to-end advantage over exact remains unachieved
+scope,Real certified frontier channel scatters in tiled sigma and integral adjoints; shared by exact and RI
+cluster,Hanhai25 CPU-256C768GB
+threads,32 physical OpenMP cores; BLAS one thread; explicit core affinity; no nested OpenMP
+workspace,4096 MiB shared single-process CI budget unchanged
+baseline,Existing dbecff51 native jobs 293934 RI and 293935 exact; no old workload reruns
+ri_native_affinity,anode003 cores160-191; identical for retained and both candidates
+exact_native_affinity,anode060 cores224-255; identical for retained and both candidates
+point_jobs,Qualification293942; RI293944; exact293945; phases293946 and293947; C12 gprofng293948
+range_jobs,Qualification293951; RI293953; exact293954; phases293955 and293956; C12 gprofng293957
+initial_prototype,293941 failed existing exact graph-byte-accounting test with a dense uint16 pair index; not a passed numerical qualification; superseded without a native run
+point_math,Direct pair rank from occupied-orbital prefix counts; visits permitted channel rectangle without scanning all single links
+range_math,All links with fixed maximum orbital and lower orbital below a cutoff form a contiguous rank slice; visits actual permitted links and avoids point-query zeros
+precision,No amplitude or integral screening changes; no optimizer coordinates strategy or tolerance changes
+qualification,Each retained candidate experiment passed28of28 tests and six full exact/RI gradient-HVP finite-difference checks;660 source/test hashes verified
+extra_rank_tests,Independent sorted-link oracle on permuted strings; all fillings for4and7 orbitals and edge fillings for63; integrated signs checked by existing independent sigma and derivative oracles
+numerical_result,All native runs converged with unchanged step HVP and CI-action counts; maximum within-mode endpoint energy change below3e-12Eh
+memory_design,Prefix counts add51.5kB for shared C14 spin graph; O(U*n_act) metadata; no U-squared table or full per-thread matrix replicas
+ri_c12,Retained10.38s; point10.62s; range10.40s; no measured improvement
+ri_c14,Retained145.74s; point146.38s; range145.87s; no measured improvement
+exact_c12,Retained11.48s; point11.48s; range11.59s
+exact_c14,Retained151.38s; point152.63s; range150.56s; small isolated difference does not establish an RI acceleration
+rss_interpretation,Native process peak from GNUtime; slight RSS differences do not prove algorithmic storage savings
+ri_factor_cost,At C12 and C14 auxiliary counts985and1384 exceed active pair counts78and105; raw two-factor CI multiplication would require about25.3and26.4times the dense channel MACs
+accepted_gram,Existing accepted RI Gram already formed once; no repeated accepted Gram found
+ri_ao_ceiling,C14 RI AOresponse is approximately4s of145.74s; optimizing only that stage cannot give the requested major end-to-end speedup
+real_remaining_work,C14 metadata preparation approximately20.3s plus repeated sigma output gather and exterior transforms; focus future work on bounded symbolic generation and group-index parallelism
+symbolic_memory_constraint,Do not cache every product node; retain only existing single-spin DAG plus bounded current-column or current-tile metadata
+generic_support_constraint,Arbitrary selected spaces retain original cursor emission order; release timing and byte admission must stay exact; no closure assumption
+phase_c12_affinity,All phase runs on anode014 cores224-255
+phase_c14_affinity,Retained phase on anode064; point on anode064; range on anode085; attribution only and not native performance claims
+profiler_quality,Both gprofng captures resolve callback gather and scatter functions but warn collection interval timer period changed; use as hotspot leads only not accurate wall-time shares
+cpu_metric,Native consumed CPU includes OpenMP busy waiting; effective_cores is not a count of productive cores
+raw_artifacts,results/diagnostics/ri-channel-links-20261019 and results/diagnostics/ri-channel-ranges-20261019; rejected patches retained locally only
+source_restored,retained-source.sha256 must match the saved660-file dbecff51 source manifest exactly
+restore_build,Only restore and compile retained executable on a Slurm compute node; no historical numerical workload repeated
+restore_build_result,293958 completed successfully; all660 source/test hashes match dbecff51; rebuilt binary matches qualification293932 byte-for-byte
+retained_binary,91c3ca7caa1f5dcd2425e73e154f4c6682d89f4beef33f3803f1047d1ea78a3f
+unrelated_work,Existing .gitignore and RI AO operator and its unit-test changes excluded from snapshots and left untouched
+local_theory,docs/orthogonal_integral_jet_fusion.md updated with exact rank formulas and rejection results; ignored and not committed

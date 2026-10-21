@@ -289,8 +289,9 @@ VbScfOptimizerResult VbScfOptimizer::optimize(
       result.final_physical_gradient_diagnostic = error.what();
     }
   }
-  objective.ensure_exact_structure_overlap_diagonal();
   sync_result_from_objective(objective, &result);
+  result.active_orbital_overlap_matrix =
+      objective.gradient_result().active_orbital_overlap_matrix;
   result.one_particle_density_matrix = build_one_particle_density_matrix(
       objective.gradient_result(),
       objective.input().orbital_preparation_input);

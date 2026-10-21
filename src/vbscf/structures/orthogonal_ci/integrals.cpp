@@ -1,114 +1,19 @@
 #include "vbscf/structures/orthogonal_ci/integrals.hpp"
 
+#include <algorithm>
 #include <stdexcept>
+#include <utility>
 
 #include <Eigen/Cholesky>
 
 #include "core/pair_index.hpp"
+#include "core/timing.hpp"
 #include "integrals/active/two_electron.hpp"
+#include "integrals/active/transform.hpp"
+#include "integrals/active/ri_transform.hpp"
 
 namespace xmvb::vb {
 namespace {
-
-Eigen::MatrixXd pair_transform(
-    const Eigen::Ref<const Eigen::MatrixXd>& orbital_transform) {
-  const int n_orbitals = static_cast<int>(orbital_transform.rows());
-  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
-  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
-  for (int new_first = 0; new_first < n_orbitals; ++new_first) {
-    for (int new_second = 0; new_second <= new_first; ++new_second) {
-      const int new_pair = xmvb::core::PairIndex::packed_pair_index(
-          new_first, new_second);
-      for (int old_first = 0; old_first < n_orbitals; ++old_first) {
-        for (int old_second = 0; old_second <= old_first; ++old_second) {
-          const int old_pair = xmvb::core::PairIndex::packed_pair_index(
-              old_first, old_second);
-          double coefficient =
-              orbital_transform(old_first, new_first) *
-              orbital_transform(old_second, new_second);
-          if (old_first != old_second) {
-            coefficient +=
-                orbital_transform(old_second, new_first) *
-                orbital_transform(old_first, new_second);
-          }
-          result(old_pair, new_pair) = coefficient;
-        }
-      }
-    }
-  }
-  return result;
-}
-
-Eigen::MatrixXd pair_transform_direction(
-    const Eigen::Ref<const Eigen::MatrixXd>& orbital_transform,
-    const Eigen::Ref<const Eigen::MatrixXd>& orbital_direction) {
-  const int n_orbitals = static_cast<int>(orbital_transform.rows());
-  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
-  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_pairs, n_pairs);
-  for (int new_first = 0; new_first < n_orbitals; ++new_first) {
-    for (int new_second = 0; new_second <= new_first; ++new_second) {
-      const int new_pair = xmvb::core::PairIndex::packed_pair_index(
-          new_first, new_second);
-      for (int old_first = 0; old_first < n_orbitals; ++old_first) {
-        for (int old_second = 0; old_second <= old_first; ++old_second) {
-          const int old_pair = xmvb::core::PairIndex::packed_pair_index(
-              old_first, old_second);
-          double coefficient =
-              orbital_direction(old_first, new_first) *
-                  orbital_transform(old_second, new_second) +
-              orbital_transform(old_first, new_first) *
-                  orbital_direction(old_second, new_second);
-          if (old_first != old_second) {
-            coefficient +=
-                orbital_direction(old_second, new_first) *
-                    orbital_transform(old_first, new_second) +
-                orbital_transform(old_second, new_first) *
-                    orbital_direction(old_first, new_second);
-          }
-          result(old_pair, new_pair) = coefficient;
-        }
-      }
-    }
-  }
-  return result;
-}
-
-Eigen::MatrixXd pair_transform_adjoint(
-    const Eigen::Ref<const Eigen::MatrixXd>& orbital_transform,
-    const Eigen::Ref<const Eigen::MatrixXd>& pair_gradient) {
-  const int n_orbitals = static_cast<int>(orbital_transform.rows());
-  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
-  if (orbital_transform.cols() != n_orbitals ||
-      pair_gradient.rows() != n_pairs || pair_gradient.cols() != n_pairs) {
-    throw std::invalid_argument(
-        "pair-transform adjoint has incompatible dimensions");
-  }
-  Eigen::MatrixXd result = Eigen::MatrixXd::Zero(n_orbitals, n_orbitals);
-  for (int new_first = 0; new_first < n_orbitals; ++new_first) {
-    for (int new_second = 0; new_second <= new_first; ++new_second) {
-      const int new_pair = xmvb::core::PairIndex::packed_pair_index(
-          new_first, new_second);
-      for (int old_first = 0; old_first < n_orbitals; ++old_first) {
-        for (int old_second = 0; old_second <= old_first; ++old_second) {
-          const int old_pair = xmvb::core::PairIndex::packed_pair_index(
-              old_first, old_second);
-          const double weight = pair_gradient(old_pair, new_pair);
-          result(old_first, new_first) +=
-              weight * orbital_transform(old_second, new_second);
-          result(old_second, new_second) +=
-              weight * orbital_transform(old_first, new_first);
-          if (old_first != old_second) {
-            result(old_second, new_first) +=
-                weight * orbital_transform(old_first, new_second);
-            result(old_first, new_second) +=
-                weight * orbital_transform(old_second, new_first);
-          }
-        }
-      }
-    }
-  }
-  return result;
-}
 
 Eigen::MatrixXd unpack_two_electron_kernel(
     const std::vector<double>& packed,
@@ -129,20 +34,46 @@ Eigen::MatrixXd unpack_two_electron_kernel(
   return result;
 }
 
-void pack_two_electron_kernel(
-    const Eigen::Ref<const Eigen::MatrixXd>& kernel,
-    int n_active_orbitals,
-    xmvb::integrals::ActiveSpaceTwoElectronResult* result) {
-  result->representation = xmvb::integrals::ActiveSpaceTwoElectronRepresentation::PackedExact;
-  result->packed_active_two_electron_integrals.resize(
-      xmvb::integrals::packed_active_two_electron_integral_count(n_active_orbitals));
-  for (int column = 0; column < kernel.cols(); ++column) {
-    for (int row = 0; row <= column; ++row) {
-      result->packed_active_two_electron_integrals[
-          xmvb::core::PairIndex::packed_pair_of_pairs_index(row, column)] =
-          kernel(row, column);
+Eigen::MatrixXd apply_ri_factor_generator(
+    const Eigen::Ref<const Eigen::MatrixXd>& factors,
+    const Eigen::Ref<const Eigen::MatrixXd>& relative_transform) {
+  const int n = static_cast<int>(relative_transform.rows());
+  const int n_aux = static_cast<int>(factors.rows());
+  if (n <= 0 || relative_transform.cols() != n || n_aux <= 0 ||
+      factors.cols() != xmvb::integrals::packed_active_pair_count(n)) {
+    throw std::invalid_argument("RI factor generator has incompatible dimensions");
+  }
+  Eigen::MatrixXd direction(factors.rows(), factors.cols());
+  const std::size_t elements_per_aux = 2ULL * n * n;
+  const int tile_size = static_cast<int>(std::min<std::size_t>(n_aux,
+      std::max<std::size_t>(1,
+          xmvb::workspace::available() / sizeof(double) /
+              elements_per_aux)));
+  for (int first = 0; first < n_aux; first += tile_size) {
+    const int count = std::min(tile_size, n_aux - first);
+    Eigen::MatrixXd stacked(count * n, n);
+    for (int aux = 0; aux < count; ++aux) {
+      for (int row = 0; row < n; ++row) {
+        for (int column = 0; column < n; ++column) {
+          stacked(aux * n + row, column) = factors(
+              first + aux,
+              xmvb::core::PairIndex::packed_pair_index(row, column));
+        }
+      }
+    }
+    const Eigen::MatrixXd right = stacked * relative_transform;
+    for (int aux = 0; aux < count; ++aux) {
+      for (int row = 0; row < n; ++row) {
+        for (int column = 0; column <= row; ++column) {
+          direction(first + aux,
+              xmvb::core::PairIndex::packed_pair_index(row, column)) =
+              -right(aux * n + row, column) -
+              right(aux * n + column, row);
+        }
+      }
     }
   }
+  return direction;
 }
 
 }  // namespace
@@ -152,6 +83,7 @@ OrthogonalActiveIntegrals orthogonalize_active_integrals(
     const Eigen::Ref<const Eigen::MatrixXd>& one_electron,
     const xmvb::integrals::ActiveSpaceTwoElectronResult& two_electron,
     int n_active_orbitals) {
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ActiveFrame);
   if (n_active_orbitals <= 0 ||
       active_overlap.size() !=
           static_cast<std::size_t>(n_active_orbitals) * n_active_orbitals ||
@@ -164,44 +96,45 @@ OrthogonalActiveIntegrals orthogonalize_active_integrals(
       active_overlap.data(),
       n_active_orbitals,
       n_active_orbitals);
-  Eigen::LLT<Eigen::MatrixXd> cholesky(overlap);
-  if (cholesky.info() != Eigen::Success) {
-    throw std::runtime_error(
-        "active orbital overlap is not positive definite");
-  }
-
   OrthogonalActiveIntegrals result;
-  result.orbital_transform = cholesky.matrixU();
+  result.input_pretransformed = two_electron.orbital_transform.size() != 0;
+  if (result.input_pretransformed) {
+    if (two_electron.orbital_transform.rows() != n_active_orbitals ||
+        two_electron.orbital_transform.cols() != n_active_orbitals ||
+        !two_electron.orbital_transform.allFinite()) {
+      throw std::invalid_argument("pretransformed two-electron frame is invalid");
+    }
+    result.orbital_transform = two_electron.orbital_transform;
+  } else {
+    Eigen::LLT<Eigen::MatrixXd> cholesky(overlap);
+    if (cholesky.info() != Eigen::Success) {
+      throw std::runtime_error(
+          "active orbital overlap is not positive definite");
+    }
+    result.orbital_transform = cholesky.matrixU();
+  }
   const Eigen::MatrixXd inverse_transform =
       result.orbital_transform
           .template triangularView<Eigen::Upper>()
           .solve(Eigen::MatrixXd::Identity(
               n_active_orbitals,
               n_active_orbitals));
-  result.one_electron =
-      inverse_transform.transpose() * one_electron * inverse_transform;
+  result.one_electron = result.input_pretransformed
+      ? Eigen::MatrixXd(one_electron)
+      : Eigen::MatrixXd(inverse_transform.transpose() * one_electron * inverse_transform);
 
-  const int n_pairs = xmvb::integrals::packed_active_pair_count(n_active_orbitals);
-  const Eigen::MatrixXd packed_pair_transform =
-      pair_transform(inverse_transform);
-
-  Eigen::MatrixXd original_kernel(n_pairs, n_pairs);
-  const xmvb::integrals::ActiveSpaceTwoElectronView view =
-      xmvb::integrals::make_active_space_two_electron_view(two_electron);
-  for (int column = 0; column < n_pairs; ++column) {
-    for (int row = 0; row < n_pairs; ++row) {
-      original_kernel(row, column) =
-          xmvb::integrals::lookup_active_space_two_electron_kernel_value(
-              view, row, column, n_active_orbitals);
-    }
+  if (two_electron.representation ==
+      xmvb::integrals::ActiveSpaceTwoElectronRepresentation::ResolutionOfIdentity) {
+    result.ri_pair_factors = result.input_pretransformed
+        ? two_electron.ri_active_pair_factors
+        : xmvb::integrals::transform_ri_pair_factors(
+              two_electron.ri_active_pair_factors, inverse_transform);
   }
-  result.pair_kernel =
-      packed_pair_transform.transpose() * original_kernel *
-      packed_pair_transform;
-  pack_two_electron_kernel(
-      result.pair_kernel,
-      n_active_orbitals,
-      &result.two_electron);
+  Eigen::MatrixXd original_kernel=unpack_two_electron_kernel(
+      two_electron.packed_active_two_electron_integrals,n_active_orbitals);
+  result.pair_kernel = result.input_pretransformed
+      ? std::move(original_kernel)
+      : xmvb::integrals::transform_pair_kernel(original_kernel,inverse_transform);
   return result;
 }
 
@@ -210,7 +143,9 @@ OrthogonalActiveIntegrals orthogonalize_active_integral_direction(
     const std::vector<double>& overlap_direction,
     const Eigen::Ref<const Eigen::MatrixXd>& one_electron_direction,
     const std::vector<double>& packed_two_electron_direction,
-    int n_active_orbitals) {
+    int n_active_orbitals,
+    const Eigen::MatrixXd* ri_factor_direction) {
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ActiveFrameDirection);
   if (n_active_orbitals <= 0 ||
       accepted.orbital_transform.rows() != n_active_orbitals ||
       accepted.orbital_transform.cols() != n_active_orbitals ||
@@ -253,34 +188,47 @@ OrthogonalActiveIntegrals orthogonalize_active_integral_direction(
   OrthogonalActiveIntegrals result;
   result.orbital_transform =
       relative_transform * accepted.orbital_transform;
-  result.one_electron =
-      inverse_transform.transpose() * one_electron_direction *
-          inverse_transform -
-      relative_transform.transpose() * accepted.one_electron -
+  result.input_pretransformed = accepted.input_pretransformed;
+  result.one_electron = accepted.input_pretransformed
+      ? Eigen::MatrixXd(one_electron_direction)
+      : Eigen::MatrixXd(inverse_transform.transpose() * one_electron_direction *
+                        inverse_transform);
+  result.one_electron.noalias() -=
+      relative_transform.transpose() * accepted.one_electron +
       accepted.one_electron * relative_transform;
 
-  const Eigen::MatrixXd packed_pair_transform =
-      pair_transform(inverse_transform);
-  const Eigen::MatrixXd delta_original_kernel =
-      unpack_two_electron_kernel(
-          packed_two_electron_direction,
-          n_active_orbitals);
-  const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(
-      n_active_orbitals,
-      n_active_orbitals);
-  const Eigen::MatrixXd relative_pair_direction =
-      pair_transform_direction(identity, -relative_transform);
-  result.pair_kernel =
-      packed_pair_transform.transpose() * delta_original_kernel *
-          packed_pair_transform +
-      relative_pair_direction.transpose() * accepted.pair_kernel +
-      accepted.pair_kernel * relative_pair_direction;
+  if (ri_factor_direction) {
+    Eigen::MatrixXd delta_factors;
+    if (accepted.input_pretransformed) {
+      if (ri_factor_direction->rows() != accepted.ri_pair_factors.rows() ||
+          ri_factor_direction->cols() != accepted.ri_pair_factors.cols()) {
+        throw std::invalid_argument("pretransformed RI factor direction has incompatible dimensions");
+      }
+      delta_factors = *ri_factor_direction +
+          apply_ri_factor_generator(accepted.ri_pair_factors,
+              relative_transform);
+    } else {
+      delta_factors =
+          xmvb::integrals::transform_ri_pair_factor_direction_from_orthogonal(
+              accepted.ri_pair_factors, *ri_factor_direction,
+              inverse_transform, relative_transform);
+    }
+    const auto& factors = accepted.ri_pair_factors;
+    const Eigen::MatrixXd mixed = factors.transpose() * delta_factors;
+    result.pair_kernel = mixed + mixed.transpose();
+  } else {
+    const Eigen::MatrixXd delta_original_kernel =
+        unpack_two_electron_kernel(packed_two_electron_direction, n_active_orbitals);
+    result.pair_kernel = accepted.input_pretransformed
+        ? delta_original_kernel
+        : xmvb::integrals::transform_pair_kernel(
+              delta_original_kernel, inverse_transform);
+    // The Cholesky generator acts on one orbital index at a time.
+    result.pair_kernel += xmvb::integrals::apply_pair_generator(
+        accepted.pair_kernel, -relative_transform);
+  }
   result.pair_kernel = 0.5 *
-      (result.pair_kernel + result.pair_kernel.transpose());
-  pack_two_electron_kernel(
-      result.pair_kernel,
-      n_active_orbitals,
-      &result.two_electron);
+      (result.pair_kernel + result.pair_kernel.transpose()).eval();
   return result;
 }
 
@@ -290,6 +238,7 @@ backpropagate_orthogonal_active_integral_adjoint(
     const Eigen::Ref<const Eigen::MatrixXd>& orthogonal_one_electron_gradient,
     const Eigen::Ref<const Eigen::MatrixXd>& orthogonal_pair_kernel_gradient,
     const Eigen::Ref<const Eigen::MatrixXd>& generator_gradient) {
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ActiveFrameAdjoint);
   const int n_orbitals = static_cast<int>(accepted.one_electron.rows());
   const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   if (n_orbitals <= 0 || accepted.one_electron.cols() != n_orbitals ||
@@ -311,31 +260,26 @@ backpropagate_orthogonal_active_integral_adjoint(
       accepted.orbital_transform
           .template triangularView<Eigen::Upper>()
           .solve(Eigen::MatrixXd::Identity(n_orbitals, n_orbitals));
-  const Eigen::MatrixXd packed_pair_transform =
-      pair_transform(inverse_transform);
 
   NonorthogonalActiveIntegralAdjoint result;
   result.one_electron =
       inverse_transform * orthogonal_one_electron_gradient *
       inverse_transform.transpose();
   result.one_electron =
-      0.5 * (result.one_electron + result.one_electron.transpose());
+      (0.5 * (result.one_electron + result.one_electron.transpose())).eval();
+  result.pair_kernel = accepted.input_pretransformed
+      ? Eigen::MatrixXd(orthogonal_pair_kernel_gradient)
+      : xmvb::integrals::pullback_pair_kernel(
+            orthogonal_pair_kernel_gradient, inverse_transform);
   result.pair_kernel =
-      packed_pair_transform * orthogonal_pair_kernel_gradient *
-      packed_pair_transform.transpose();
-  result.pair_kernel =
-      0.5 * (result.pair_kernel + result.pair_kernel.transpose());
+      (0.5 * (result.pair_kernel + result.pair_kernel.transpose())).eval();
 
   Eigen::MatrixXd relative_gradient = generator_gradient;
   relative_gradient.noalias() -=
       accepted.one_electron * orthogonal_one_electron_gradient.transpose() +
       accepted.one_electron.transpose() * orthogonal_one_electron_gradient;
-  const Eigen::MatrixXd pair_transform_gradient =
-      accepted.pair_kernel * orthogonal_pair_kernel_gradient.transpose() +
-      accepted.pair_kernel.transpose() * orthogonal_pair_kernel_gradient;
-  relative_gradient.noalias() -= pair_transform_adjoint(
-      Eigen::MatrixXd::Identity(n_orbitals, n_orbitals),
-      pair_transform_gradient);
+  relative_gradient -= xmvb::integrals::orbital_generator_adjoint(
+      accepted.pair_kernel, orthogonal_pair_kernel_gradient);
 
   Eigen::MatrixXd normalized_overlap_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);
@@ -368,6 +312,7 @@ backpropagate_orthogonal_active_integral_adjoint_direction(
     const Eigen::Ref<const Eigen::MatrixXd>&
         orthogonal_pair_kernel_gradient_direction,
     const Eigen::Ref<const Eigen::MatrixXd>& generator_gradient_direction) {
+  xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::ActiveFrameAdjointDirection);
   const int n_orbitals = static_cast<int>(accepted.one_electron.rows());
   const int n_pairs = xmvb::integrals::packed_active_pair_count(n_orbitals);
   if (n_orbitals <= 0 || direction.one_electron.rows() != n_orbitals ||
@@ -394,12 +339,6 @@ backpropagate_orthogonal_active_integral_adjoint_direction(
       direction.orbital_transform * inverse_transform;
   const Eigen::MatrixXd inverse_transform_direction =
       -inverse_transform * relative_direction;
-  const Eigen::MatrixXd packed_pair_transform =
-      pair_transform(inverse_transform);
-  const Eigen::MatrixXd packed_pair_transform_direction =
-      pair_transform_direction(
-          inverse_transform,
-          inverse_transform_direction);
 
   NonorthogonalActiveIntegralAdjoint result;
   result.one_electron =
@@ -410,34 +349,26 @@ backpropagate_orthogonal_active_integral_adjoint_direction(
       inverse_transform * orthogonal_one_electron_gradient *
           inverse_transform_direction.transpose();
   result.one_electron =
-      0.5 * (result.one_electron + result.one_electron.transpose());
+      (0.5 * (result.one_electron + result.one_electron.transpose())).eval();
+  if (accepted.input_pretransformed) {
+    result.pair_kernel = orthogonal_pair_kernel_gradient_direction +
+        xmvb::integrals::pullback_pair_generator(
+            orthogonal_pair_kernel_gradient, -relative_direction);
+  } else {
+    result.pair_kernel = xmvb::integrals::pullback_pair_kernel_direction(
+        orthogonal_pair_kernel_gradient,
+        orthogonal_pair_kernel_gradient_direction,
+        inverse_transform, inverse_transform_direction);
+  }
   result.pair_kernel =
-      packed_pair_transform_direction * orthogonal_pair_kernel_gradient *
-          packed_pair_transform.transpose() +
-      packed_pair_transform * orthogonal_pair_kernel_gradient_direction *
-          packed_pair_transform.transpose() +
-      packed_pair_transform * orthogonal_pair_kernel_gradient *
-          packed_pair_transform_direction.transpose();
-  result.pair_kernel =
-      0.5 * (result.pair_kernel + result.pair_kernel.transpose());
+      (0.5 * (result.pair_kernel + result.pair_kernel.transpose())).eval();
 
-  const Eigen::MatrixXd pair_transform_gradient =
-      accepted.pair_kernel * orthogonal_pair_kernel_gradient.transpose() +
-      accepted.pair_kernel.transpose() * orthogonal_pair_kernel_gradient;
-  const Eigen::MatrixXd pair_transform_gradient_direction =
-      direction.pair_kernel * orthogonal_pair_kernel_gradient.transpose() +
-      accepted.pair_kernel *
-          orthogonal_pair_kernel_gradient_direction.transpose() +
-      direction.pair_kernel.transpose() * orthogonal_pair_kernel_gradient +
-      accepted.pair_kernel.transpose() *
-          orthogonal_pair_kernel_gradient_direction;
   Eigen::MatrixXd relative_gradient = generator_gradient;
   relative_gradient.noalias() -=
       accepted.one_electron * orthogonal_one_electron_gradient.transpose() +
       accepted.one_electron.transpose() * orthogonal_one_electron_gradient;
-  relative_gradient.noalias() -= pair_transform_adjoint(
-      Eigen::MatrixXd::Identity(n_orbitals, n_orbitals),
-      pair_transform_gradient);
+  relative_gradient -= xmvb::integrals::orbital_generator_adjoint(
+      accepted.pair_kernel, orthogonal_pair_kernel_gradient);
   Eigen::MatrixXd relative_gradient_direction = generator_gradient_direction;
   relative_gradient_direction.noalias() -=
       direction.one_electron * orthogonal_one_electron_gradient.transpose() +
@@ -446,9 +377,10 @@ backpropagate_orthogonal_active_integral_adjoint_direction(
       direction.one_electron.transpose() * orthogonal_one_electron_gradient +
       accepted.one_electron.transpose() *
           orthogonal_one_electron_gradient_direction;
-  relative_gradient_direction.noalias() -= pair_transform_adjoint(
-      Eigen::MatrixXd::Identity(n_orbitals, n_orbitals),
-      pair_transform_gradient_direction);
+  relative_gradient_direction -= xmvb::integrals::orbital_generator_adjoint(
+      direction.pair_kernel, orthogonal_pair_kernel_gradient);
+  relative_gradient_direction -= xmvb::integrals::orbital_generator_adjoint(
+      accepted.pair_kernel, orthogonal_pair_kernel_gradient_direction);
 
   Eigen::MatrixXd normalized_overlap_gradient = Eigen::MatrixXd::Zero(
       n_orbitals, n_orbitals);

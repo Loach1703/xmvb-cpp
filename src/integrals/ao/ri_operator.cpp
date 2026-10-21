@@ -1,7 +1,6 @@
 #include "integrals/ao/ri_operator.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -17,6 +16,9 @@
 #endif
 
 #include "parallel/openmp.hpp"
+#include "core/timing.hpp"
+#include "core/workspace.hpp"
+#include "integrals/jk/contraction.hpp"
 
 namespace xmvb::integrals {
 
@@ -94,6 +96,16 @@ void subtract_lower_triangle_in_place(
   }
 }
 
+void add_scaled_lower_triangle_in_place(
+    const Eigen::MatrixXd& exchange_matrix, double scale,
+    double* output_storage, int n_basis_functions) {
+  for (int column = 0; column < n_basis_functions; ++column) {
+    const std::size_t offset = static_cast<std::size_t>(column) * n_basis_functions;
+    for (int row = 0; row <= column; ++row)
+      output_storage[offset + row] += scale * exchange_matrix(column, row);
+  }
+}
+
 double packed_row_symmetric_matrix_dot(
     const Eigen::Ref<const Eigen::MatrixXd>& packed_factor_matrix,
     int auxiliary_index,
@@ -121,17 +133,23 @@ void accumulate_dense_ri_factor_action(
     const Eigen::MatrixXd& factor_matrix,
     Eigen::MatrixXd* left_workspace,
     Eigen::MatrixXd* exchange_matrix,
-    double* local_output) {
-  if (left_workspace == nullptr || exchange_matrix == nullptr ||
-      local_output == nullptr) {
+    double* local_output,
+    double coulomb_weight, double exchange_weight) {
+  if (local_output == nullptr ||
+      (exchange_weight != 0.0 &&
+       (left_workspace == nullptr || exchange_matrix == nullptr))) {
     throw std::invalid_argument("dense RI factor action received null workspace");
   }
   const int n_basis_functions = static_cast<int>(input_matrix.rows());
-  const double coulomb_projection =
-      packed_row_symmetric_matrix_dot(
-          packed_factor_matrix,
-          auxiliary_index,
-          weighted_packed_input);
+  if (coulomb_weight != 0.0) {
+    const double coulomb_projection = packed_row_symmetric_matrix_dot(
+        packed_factor_matrix, auxiliary_index, weighted_packed_input);
+    add_scaled_packed_factor_row_to_lower_triangle(
+        packed_factor_matrix, auxiliary_index,
+        coulomb_weight * coulomb_projection,
+        local_output, n_basis_functions);
+  }
+  if (exchange_weight == 0.0) return;
 
   cblas_dsymm(
       CblasColMajor,
@@ -161,16 +179,13 @@ void accumulate_dense_ri_factor_action(
       0.0,
       exchange_matrix->data(),
       n_basis_functions);
-  add_scaled_packed_factor_row_to_lower_triangle(
-      packed_factor_matrix,
-      auxiliary_index,
-      2.0 * coulomb_projection,
-      local_output,
-      n_basis_functions);
-  subtract_lower_triangle_in_place(
-      *exchange_matrix,
-      local_output,
-      n_basis_functions);
+  if (exchange_weight == -1.0)
+    subtract_lower_triangle_in_place(
+        *exchange_matrix, local_output, n_basis_functions);
+  else
+    add_scaled_lower_triangle_in_place(
+        *exchange_matrix, exchange_weight,
+        local_output, n_basis_functions);
 }
 
 void build_weighted_packed_symmetric_matrix(
@@ -295,12 +310,21 @@ SpectralFactorization build_prefactorized_spectral_factorization(
   return factorization;
 }
 
-int ri_auxiliary_thread_count(int n_auxiliary_functions) {
+int ri_auxiliary_thread_count(
+    int n_auxiliary_functions, int n_bf, int matrices_per_worker) {
   // RI application partitions by auxiliary factor. The reduction buffers are
   // full AO matrices, so launching more workers than factors, or launching an
   // inner team under an existing exact_ctx parallel region, only increases
-  // memory traffic without adding useful work.
-  int n_threads = xmvb::effective_openmp_thread_count();
+  // memory traffic without adding useful work. The aggregate worker budget
+  // accounts for outputs AND scratch, not merely the reduction matrices.
+  // One worker is indispensable even if its minimum storage exceeds budget.
+  const std::size_t workspace_bytes = workspace::available();
+  const std::size_t worker_elements =
+      static_cast<std::size_t>(n_bf) * n_bf * matrices_per_worker;
+  int n_threads = static_cast<int>(std::min<std::size_t>(
+      xmvb::effective_openmp_thread_count(),
+      std::max<std::size_t>(
+          1, workspace_bytes / sizeof(double) / worker_elements)));
   if (n_auxiliary_functions <= 1) {
     return 1;
   }
@@ -415,7 +439,7 @@ void apply_fused_dense_ri_operator(
     Eigen::MatrixXd* transpose) {
   const int n_basis_functions = ri_factorization.n_basis_functions;
   const int n_threads = ri_auxiliary_thread_count(
-      ri_factorization.n_auxiliary_functions);
+      ri_factorization.n_auxiliary_functions, n_basis_functions, 5);
   resize_fused_workspace(
       workspace,
       n_threads,
@@ -464,7 +488,7 @@ void apply_fused_dense_ri_operator(
           factor_matrix,
           &left_product,
           &exchange_product,
-          local_forward.data());
+          local_forward.data(), 2.0, -1.0);
       accumulate_dense_ri_factor_action(
           packed_factor_matrix,
           auxiliary_index,
@@ -473,7 +497,7 @@ void apply_fused_dense_ri_operator(
           factor_matrix,
           &left_product,
           &exchange_product,
-          local_adjoint.data());
+          local_adjoint.data(), 2.0, -1.0);
     }
   }
 
@@ -490,7 +514,8 @@ void apply_fused_dense_ri_operator(
 std::vector<double> apply_low_rank_ri_operator(
     const RiAoFactorization& ri_factorization,
     int n_basis_functions,
-    const SpectralFactorization& factorization) {
+    const SpectralFactorization& factorization,
+    double coulomb_weight, double exchange_weight) {
   const std::size_t matrix_size =
       n_basis_functions * n_basis_functions;
   std::vector<double> output_storage(matrix_size, 0.0);
@@ -505,7 +530,7 @@ std::vector<double> apply_low_rank_ri_operator(
 
   // The auxiliary-major Z tile is shared. Workers own AO row slices and
   // disjoint output panels, never full exchange output replicas.
-  constexpr std::size_t workspace_bytes = 64ULL * 1024 * 1024;
+  const std::size_t workspace_bytes = workspace::available();
   const int n_threads = std::min(
       xmvb::effective_openmp_thread_count(), n_basis_functions);
   // At least one near-square lower-triangle block per worker; the number
@@ -525,7 +550,9 @@ std::vector<double> apply_low_rank_ri_operator(
       std::max(1, n_auxiliary),
       std::max<std::size_t>(
           1, workspace_bytes / sizeof(double) / per_auxiliary_elements)));
-  Eigen::VectorXd auxiliary_projection = Eigen::VectorXd::Zero(n_auxiliary);
+  Eigen::VectorXd auxiliary_projection;
+  if (coulomb_weight != 0.0)
+    auxiliary_projection = Eigen::VectorXd::Zero(n_auxiliary);
   Eigen::Map<Eigen::MatrixXd> output(
       output_storage.data(), n_basis_functions, n_basis_functions);
   for (int first_auxiliary = 0; first_auxiliary < n_auxiliary;
@@ -533,8 +560,9 @@ std::vector<double> apply_low_rank_ri_operator(
     const int count = std::min(tile_width, n_auxiliary - first_auxiliary);
     Eigen::MatrixXd transformed(
         static_cast<Eigen::Index>(count) * rank, n_basis_functions);
-    std::vector<Eigen::VectorXd> partial_projections(
-        n_threads, Eigen::VectorXd::Zero(count));
+    std::vector<Eigen::VectorXd> partial_projections(n_threads);
+    if (coulomb_weight != 0.0)
+      for (auto& projection : partial_projections) projection.setZero(count);
 #pragma omp parallel num_threads(n_threads)
     {
       int thread = 0;
@@ -556,24 +584,26 @@ std::vector<double> apply_low_rank_ri_operator(
             transformed.col(mu).data(), count, rank);
         image.noalias() = ao_slice * factorization.scaled_eigenvectors;
         // Consume each just-transformed AO slice before it leaves cache.
-        for (int k = 0; k < rank; ++k) {
-          const double sign = k < factorization.n_positive_components
-              ? 1.0 : -1.0;
-          partial_projections[thread].noalias() +=
-              (sign * factorization.scaled_eigenvectors(mu, k)) * image.col(k);
-        }
+        if (coulomb_weight != 0.0)
+          for (int k = 0; k < rank; ++k) {
+            const double sign = k < factorization.n_positive_components
+                ? 1.0 : -1.0;
+            partial_projections[thread].noalias() +=
+                (sign * factorization.scaled_eigenvectors(mu, k)) * image.col(k);
+          }
       }
 #pragma omp single
       {
-        for (const auto& projection : partial_projections) {
-          auxiliary_projection.segment(first_auxiliary, count) += projection;
-        }
+        if (coulomb_weight != 0.0)
+          for (const auto& projection : partial_projections)
+            auxiliary_projection.segment(first_auxiliary, count) += projection;
       }
 
       // Blocks own disjoint output rectangles. Near-square GEMMs avoid
       // extremely narrow full-height panels at high worker counts.
 #pragma omp for schedule(dynamic, 1)
-      for (std::size_t block = 0; block < output_blocks.size(); ++block) {
+      for (std::size_t block = 0; block <
+           (exchange_weight != 0.0 ? output_blocks.size() : 0); ++block) {
         const auto [row_panel, column_panel] = output_blocks[block];
         const int row_begin = row_panel * n_basis_functions / n_panels;
         const int row_end = (row_panel + 1) * n_basis_functions / n_panels;
@@ -589,7 +619,8 @@ std::vector<double> apply_low_rank_ri_operator(
           if (rows == 0) continue;
           const int offset = sign_channel == 0
               ? 0 : count * factorization.n_positive_components;
-          const double scale = sign_channel == 0 ? -1.0 : 1.0;
+          const double scale = sign_channel == 0
+              ? exchange_weight : -exchange_weight;
           const double* panel =
               transformed.data() + static_cast<Eigen::Index>(begin) * leading +
               offset;
@@ -617,12 +648,14 @@ std::vector<double> apply_low_rank_ri_operator(
       }
     }
   }
-  const Eigen::VectorXd packed_coulomb =
-      2.0 * packed_factor_matrix.transpose() * auxiliary_projection;
-  Eigen::Index packed_index = 0;
-  for (int column = 0; column < n_basis_functions; ++column) {
-    for (int row = 0; row <= column; ++row) {
-      output(row, column) += packed_coulomb(packed_index++);
+  if (coulomb_weight != 0.0) {
+    const Eigen::VectorXd packed_coulomb =
+        coulomb_weight * packed_factor_matrix.transpose() * auxiliary_projection;
+    Eigen::Index packed_index = 0;
+    for (int column = 0; column < n_basis_functions; ++column) {
+      for (int row = 0; row <= column; ++row) {
+        output(row, column) += packed_coulomb(packed_index++);
+      }
     }
   }
   symmetrize_in_place(&output_storage, n_basis_functions);
@@ -632,20 +665,43 @@ std::vector<double> apply_low_rank_ri_operator(
 std::vector<double> apply_dense_ri_operator(
     const Eigen::Ref<const Eigen::MatrixXd>& input_matrix,
     const RiAoFactorization& ri_factorization,
-    int n_basis_functions) {
+    int n_basis_functions,
+    double coulomb_weight, double exchange_weight) {
   const std::size_t matrix_size =
       n_basis_functions * n_basis_functions;
   std::vector<double> output_storage(matrix_size, 0.0);
   std::vector<double> weighted_packed_input;
-  build_weighted_packed_symmetric_matrix(
-      input_matrix,
-      &weighted_packed_input);
+  if (coulomb_weight != 0.0)
+    build_weighted_packed_symmetric_matrix(
+        input_matrix, &weighted_packed_input);
   const auto& packed_factor_matrix =
       ri_factorization.metric_whitened_ao_pair_factors;
 
+  if (exchange_weight == 0.0) {
+    if (coulomb_weight == 0.0) return output_storage;
+    const Eigen::Map<const Eigen::VectorXd> weighted_input(
+        weighted_packed_input.data(),
+        static_cast<Eigen::Index>(weighted_packed_input.size()));
+    const Eigen::VectorXd auxiliary_projection =
+        packed_factor_matrix * weighted_input;
+    const Eigen::VectorXd packed_coulomb =
+        coulomb_weight * (packed_factor_matrix.transpose() * auxiliary_projection);
+    Eigen::Map<Eigen::MatrixXd> output(
+        output_storage.data(), n_basis_functions, n_basis_functions);
+    Eigen::Index packed_index = 0;
+    for (int column = 0; column < n_basis_functions; ++column)
+      for (int row = 0; row <= column; ++row) {
+        const double value = packed_coulomb(packed_index++);
+        output(row, column) = value;
+        output(column, row) = value;
+      }
+    return output_storage;
+  }
+
   int n_threads = 1;
   n_threads = ri_auxiliary_thread_count(
-      ri_factorization.n_auxiliary_functions);
+      ri_factorization.n_auxiliary_functions, n_basis_functions,
+      exchange_weight != 0.0 ? 4 : 1);
   std::vector<std::vector<double>> partial_outputs(
       n_threads,
       std::vector<double>(matrix_size, 0.0));
@@ -663,19 +719,21 @@ std::vector<double> apply_dense_ri_operator(
         partial_outputs[thread_index].data(),
         n_basis_functions,
         n_basis_functions);
-    Eigen::MatrixXd factor_matrix(n_basis_functions, n_basis_functions);
-    Eigen::MatrixXd left_workspace(n_basis_functions, n_basis_functions);
-    Eigen::MatrixXd exchange_matrix(n_basis_functions, n_basis_functions);
+    Eigen::MatrixXd factor_matrix, left_workspace, exchange_matrix;
+    if (exchange_weight != 0.0) {
+      factor_matrix.resize(n_basis_functions, n_basis_functions);
+      left_workspace.resize(n_basis_functions, n_basis_functions);
+      exchange_matrix.resize(n_basis_functions, n_basis_functions);
+    }
 
 #pragma omp for schedule(static)
     for (std::ptrdiff_t auxiliary_offset = 0;
          auxiliary_offset < ri_factorization.n_auxiliary_functions;
          ++auxiliary_offset) {
-      unpack_packed_factor_row_lower_triangle(
-          packed_factor_matrix,
-          static_cast<int>(auxiliary_offset),
-          n_basis_functions,
-          &factor_matrix);
+      if (exchange_weight != 0.0)
+        unpack_packed_factor_row_lower_triangle(
+            packed_factor_matrix, static_cast<int>(auxiliary_offset),
+            n_basis_functions, &factor_matrix);
 
       // In the dense contraction we expose only the lower triangle of `L_A`
       // to BLAS symmetric kernels, which avoids treating the RI factor as a
@@ -688,7 +746,7 @@ std::vector<double> apply_dense_ri_operator(
           factor_matrix,
           &left_workspace,
           &exchange_matrix,
-          local_output.data());
+          local_output.data(), coulomb_weight, exchange_weight);
     }
   }
 
@@ -708,6 +766,7 @@ std::vector<double> apply_ao_effective_one_electron_ri_operator(
     const RiAoFactorization& ri_factorization,
     int n_basis_functions,
     const AoEffectiveOneElectronRiOperatorOptions& options) {
+  profiling::ScopedPhase phase(profiling::Phase::RiAoH1e);
   validate_ri_factorization(ri_factorization, n_basis_functions);
 
   const std::size_t matrix_size =
@@ -726,18 +785,21 @@ std::vector<double> apply_ao_effective_one_electron_ri_operator(
     return apply_low_rank_ri_operator(
         ri_factorization,
         n_basis_functions,
-        spectral_factorization);
+        spectral_factorization,
+        2.0, -1.0);
   }
   return apply_dense_ri_operator(
       input,
       ri_factorization,
-      n_basis_functions);
+      n_basis_functions,
+      2.0, -1.0);
 }
 
 std::vector<double> apply_ao_effective_one_electron_ri_operator(
     const AoEffectiveOneElectronRiLowRankFactors& low_rank_factors,
     const RiAoFactorization& ri_factorization,
     int n_basis_functions) {
+  profiling::ScopedPhase phase(profiling::Phase::RiAoH1e);
   validate_ri_factorization(ri_factorization, n_basis_functions);
 
   const auto spectral_factorization =
@@ -747,7 +809,37 @@ std::vector<double> apply_ao_effective_one_electron_ri_operator(
   return apply_low_rank_ri_operator(
       ri_factorization,
       n_basis_functions,
-      spectral_factorization);
+      spectral_factorization,
+      2.0, -1.0);
+}
+
+Eigen::MatrixXd contract_jk(
+    const Eigen::Ref<const Eigen::MatrixXd>& density,
+    const RiAoFactorization& ri, JkWeights weights) {
+  const int n = ri.n_basis_functions;
+  validate_ri_factorization(ri, n);
+  if (density.rows() != n || density.cols() != n ||
+      !density.allFinite() || !density.isApprox(density.transpose()) ||
+      !std::isfinite(weights.coulomb) || !std::isfinite(weights.exchange))
+    throw std::invalid_argument("invalid symmetric AO density or JK weights");
+  if (weights.coulomb == 0.0 && weights.exchange == 0.0)
+    return Eigen::MatrixXd::Zero(n,n);
+  const bool hf_weights =
+      weights.coulomb == 1.0 && weights.exchange == -0.5;
+  if (hf_weights) {
+    // Match the established RHF RI spectral admission and 2J-K action.
+    const std::vector<double> input(
+        density.data(), density.data() + static_cast<Eigen::Index>(n)*n);
+    const auto storage = apply_ao_effective_one_electron_ri_operator(
+        input, ri, n, {.attempt_spectral_factorization = true});
+    Eigen::MatrixXd result = Eigen::Map<const Eigen::MatrixXd>(
+        storage.data(), n, n);
+    result *= 0.5;
+    return result;
+  }
+  const auto storage = apply_dense_ri_operator(
+      density, ri, n, weights.coulomb, weights.exchange);
+  return Eigen::Map<const Eigen::MatrixXd>(storage.data(), n, n);
 }
 
 void apply_ao_effective_one_electron_ri_operator_fused(
@@ -782,92 +874,6 @@ void apply_ao_effective_one_electron_ri_operator_fused(
       workspace,
       forward,
       transpose);
-}
-
-void apply_ao_effective_one_electron_ri_operator_adaptive(
-    const Eigen::Ref<const Eigen::MatrixXd>& source,
-    const Eigen::Ref<const Eigen::MatrixXd>& adjoint,
-    const RiAoFactorization& ri_factorization,
-    AoEffectiveOneElectronRiFusedWorkspace* workspace,
-    AoEffectiveOneElectronRiStrategy* strategy,
-    Eigen::MatrixXd* forward,
-    Eigen::MatrixXd* transpose) {
-  if (strategy == nullptr) {
-    throw std::invalid_argument("RI adaptive strategy must not be null");
-  }
-  const int n_basis_functions = ri_factorization.n_basis_functions;
-  const auto run_dense = [&]() {
-    apply_ao_effective_one_electron_ri_operator_fused(
-        source,
-        adjoint,
-        ri_factorization,
-        workspace,
-        forward,
-        transpose);
-  };
-  const auto run_spectral = [&]() {
-    const std::vector<double> source_storage(
-        source.data(), source.data() + source.size());
-    const std::vector<double> adjoint_storage(
-        adjoint.data(), adjoint.data() + adjoint.size());
-    constexpr AoEffectiveOneElectronRiOperatorOptions options{
-        .attempt_spectral_factorization = true};
-    const std::vector<double> forward_storage =
-        apply_ao_effective_one_electron_ri_operator(
-            source_storage,
-            ri_factorization,
-            n_basis_functions,
-            options);
-    const std::vector<double> transpose_storage =
-        apply_ao_effective_one_electron_ri_operator(
-            adjoint_storage,
-            ri_factorization,
-            n_basis_functions,
-            options);
-    *forward = Eigen::Map<const Eigen::MatrixXd>(
-        forward_storage.data(), n_basis_functions, n_basis_functions);
-    *transpose = Eigen::Map<const Eigen::MatrixXd>(
-        transpose_storage.data(), n_basis_functions, n_basis_functions);
-  };
-
-  if (*strategy == AoEffectiveOneElectronRiStrategy::DenseFused) {
-    run_dense();
-    return;
-  }
-  if (*strategy == AoEffectiveOneElectronRiStrategy::Spectral) {
-    run_spectral();
-    return;
-  }
-
-  const auto dense_start = std::chrono::steady_clock::now();
-  run_dense();
-  const double dense_seconds = std::chrono::duration<double>(
-      std::chrono::steady_clock::now() - dense_start).count();
-  Eigen::MatrixXd dense_forward = *forward;
-  Eigen::MatrixXd dense_transpose = *transpose;
-
-  const auto spectral_start = std::chrono::steady_clock::now();
-  run_spectral();
-  const double spectral_seconds = std::chrono::duration<double>(
-      std::chrono::steady_clock::now() - spectral_start).count();
-  const double forward_scale =
-      std::max(1.0, dense_forward.cwiseAbs().maxCoeff());
-  const double transpose_scale =
-      std::max(1.0, dense_transpose.cwiseAbs().maxCoeff());
-  if ((dense_forward - *forward).cwiseAbs().maxCoeff() >
-          1.0e-8 * forward_scale ||
-      (dense_transpose - *transpose).cwiseAbs().maxCoeff() >
-          1.0e-8 * transpose_scale) {
-    throw std::runtime_error(
-        "RI AO-H1E spectral contraction disagrees with dense action");
-  }
-  if (spectral_seconds < dense_seconds) {
-    *strategy = AoEffectiveOneElectronRiStrategy::Spectral;
-  } else {
-    *strategy = AoEffectiveOneElectronRiStrategy::DenseFused;
-    *forward = std::move(dense_forward);
-    *transpose = std::move(dense_transpose);
-  }
 }
 
 }  // namespace xmvb::integrals

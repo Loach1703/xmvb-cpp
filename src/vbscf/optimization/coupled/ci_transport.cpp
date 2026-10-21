@@ -13,6 +13,7 @@
 #include "vbscf/structures/orthogonal_ci/exterior_transform.hpp"
 #include "vbscf/structures/orthogonal_ci/metric.hpp"
 #include "vbscf/structures/overlap/metric.hpp"
+#include "vbscf/structures/overlap/spin_metric.hpp"
 
 namespace xmvb::vb {
 
@@ -105,8 +106,9 @@ Eigen::MatrixXd CiTransport::solve(const Eigen::MatrixXd& upper,
             return image;
           },
           [&](const Eigen::VectorXd& x) {
-            return selected_metric_ ? Eigen::VectorXd(selected_metric_->factor.solve(x))
-                                    : Eigen::VectorXd(x.cwiseQuotient(diagonal_));
+            if (selected_metric_) return Eigen::VectorXd(selected_metric_->factor.solve(x));
+            if (origin_.spin_metric) return origin_.spin_metric->precondition(x, diagonal_);
+            return Eigen::VectorXd(x.cwiseQuotient(diagonal_));
           },
           &stats, initial ? &seed : nullptr);
     } catch (const std::runtime_error& error) {
@@ -142,6 +144,9 @@ CiTransportPoint CiTransport::retract(const Eigen::VectorXd& orbital_step,
   // in the orbital step (at zero independent CI step). Correct the defect
   // of this known representative, with the original RHS-relative tolerance.
   point.coefficients = solve(point.upper, rhs, &point.base_coefficients);
+  // solve() has prepared this chart's Gram. Retain its immutable ownership,
+  // since a later retraction may replace the transport workspace's trial point.
+  if (!inverse_) point.selected_metric = selected_metric_;
   return point;
 }
 

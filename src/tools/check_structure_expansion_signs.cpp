@@ -412,8 +412,10 @@ int main(int argc, char** argv) {
         xmvb::vb::load_vbscf_input_with_timings(options.input_path, load_options);
 
 
+    const Eigen::MatrixXd raw_two_electron_frame;
     const auto prepared_active_space =
-        xmvb::vb::prepare_timed_active_space_context(load_result.input)
+        xmvb::vb::prepare_timed_active_space_context(
+            load_result.input, &raw_two_electron_frame)
             .prepared_active_space;
 
     xmvb::linalg::GeneralizedEigensolver generalized_eigensolver;

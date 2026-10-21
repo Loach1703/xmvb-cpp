@@ -1,0 +1,43 @@
+field,value
+decision,Reject the mirrored-beta gather implementation and restore production e0b6d02e without a fallback
+scope,Exact exchange-projector identity for CI backprojection shared by RI and exact; no optimizer or threshold or physical-response changes
+identity,P_s times (E_alpha_transpose plus E_beta_transpose) Z equals P_s E_beta_transpose (Z plus s swap(Z)); no additional one-half factor
+representation,Only parity-projected actions agree; the weighted upper-triangle channel representative is not itself parity adapted
+arbitrary_spaces,Requires actual certified spin-exchange parity only; no assumption of orbital closure or full selected space; unequal spins keep their necessary two-spin contraction
+memory,Replaced tile-local alpha index map with transposed target CSR; no numerical slab duplication or persistent product cache or large worker arrays
+initial_qualification_job,293966 failed two tests because generic beta cursor order was incorrectly assumed to be caller-index order; not qualified and no native benchmark used that binary
+corrected_qualification_job,293968
+corrected_qualification,28 of 28 tests; 660 source/test files verified; complete exact and RI gradient/HVP finite differences for F2 FeCl2 and 241
+maximum_full_hvp_relative_error,5.86533742139e-9
+additional_oracle,Parity action with 16 KiB budget and release guards; every reflected output column remains live until its actual final consumer
+cluster,Hanhai25 CPU-256C768GB
+threads,32 physical OpenMP cores; BLAS one thread; no nested OpenMP
+workspace,4096 MiB shared CI budget unchanged; numerical buffers not copied per worker
+ri_native_job,293969
+ri_node_mask,anode003; 160-191; same as saved baseline 293961
+exact_native_job,293970
+exact_node_mask,anode060; 224-255; same as saved baseline 293962
+candidate_binary,e88bec3cf4b0502f8ea894a085f5e56245196cb6fca0ae440915c022c8aac9d1
+ri_c12,4 steps and 33 HVP; 10.20 to 10.29 s; 1.34827 to 1.31122 GiB; printed final energy unchanged
+ri_c14,4 steps and 46 HVP; 143.27 to 205.20 s; 4.02365 to 3.94296 GiB; final energy change 1.02e-12 Eh
+exact_c12,4 steps and 33 HVP; 11.38 to 11.43 s; 3.38635 to 3.42492 GiB; final energy change 3.01e-12 Eh
+exact_c14,4 steps and 46 HVP; 149.13 to 211.88 s; 8.16198 to 8.05194 GiB; final energy change 5.00e-12 Eh
+trajectory_caveat,First C14 candidate orbitals and intermediate energies changed while steps/HVP and final energies agreed; no claim of identical floating-point trajectory or unverified attribution to rounding
+phase_c12_job,293971 on anode014; same node/mask as saved 293963
+phase_c14_job,293972 on anode039; same node as saved 293964; phase measurements are attribution not native speed claims
+c14_tile_invariants,687826425 targets; 33344380233 source channels; 1223 batches in both saved and candidate phase runs
+c14_tile_write,31.09290 to 92.00290 s; dominant observed regression
+c14_tile_compute,38.06577 to 38.85353 s; almost unchanged
+c14_tile_prepare,17.54998 to 18.44457 s; additional mirror metadata mostly offset by lower storage allocation time
+interpretation,The former alpha gather is destination driven; the mirrored gather consumes larger depth-one target lists; removing an address lookup does not reduce physical incidence work and broadened write scheduling can cost more
+profile_job,293974; bounded C12 RI gprofng capture and reports generated in a Slurm compute job
+profile_quality,Collection interval timer period was changed warning persists; resolved gather functions are leads only and sampled percentages are not wall-time fractions
+profile_lead,New mirrored writer remains a resolved hot function; native and phase measurements establish the regression rather than profiler percentages
+baseline_rerun,None; comparisons use saved CSVs and logs; restoration performs compilation only
+restoration_job,293977 completed 0; all 660 source files match e0b6d02e; rebuilt binary is byte-identical to retained d781e8155f2c5b19873b5d6252668721762862e555bfdb06d1f6db36d12ca413
+retained_production,e0b6d02e; C12 RI 10.20 s and C14 RI 143.27 s remain the current retained measurements; not replaced by slower prototype
+goal_status,RI significant speed advantage over exact remains unachieved
+raw_artifacts,results/diagnostics/ri-exchange-gather-20261019
+rejected_patch,rejected-gather.patch retained locally only; not maintained in production
+local_theory,docs/orthogonal_integral_jet_fusion.md; ignored and not committed per user request
+unrelated_work,Existing .gitignore and src/integrals/ao/ri_operator.cpp and tests/vbscf/unit/test_ri_ao_h1e_hvp.cpp modifications untouched

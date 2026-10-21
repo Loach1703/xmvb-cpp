@@ -1,0 +1,39 @@
+field,value
+decision,Retain fused tile metadata and disjoint group index preparation; small measured end-to-end gain only
+source_base,aee57d3d; production C++ identical to dbecff51
+scope,Complete orthogonal-integral gradient and scalar/block HVP chain retained; this round removes a completed-tile metadata rescan and shares index construction with the existing OpenMP team
+cluster,Hanhai25 CPU-256C768GB
+threads,32 physical OpenMP cores; BLAS one thread; no nested OpenMP
+ci_workspace,4096 MiB single-process budget unchanged
+qualification_job,293960
+qualification,28 of 28 tests; 660 indexed source/test files verified; full gradient/HVP finite differences for F2 FeCl2 and 241 in exact and RI
+full_hvp_max_relative_error,5.86533742139e-9
+native_ri_job,293961
+native_ri_node_mask,anode003; 160-191; same as saved 293934
+native_exact_job,293962
+native_exact_node_mask,anode060; 224-255; same as saved 293935
+native_binary,d781e8155f2c5b19873b5d6252668721762862e555bfdb06d1f6db36d12ca413
+ri_c12,4 steps and 33 HVP; 10.38 to 10.20 s; 1.40994 to 1.34827 GiB; printed final energy unchanged
+ri_c14,4 steps and 46 HVP; 145.74 to 143.27 s; 4.11992 to 4.02365 GiB; printed final energy unchanged
+exact_c12,4 steps and 33 HVP; 11.48 to 11.38 s; 3.48626 to 3.38635 GiB; energy change -1.02e-12 Eh
+exact_c14,4 steps and 46 HVP; 151.38 to 149.13 s; 8.10881 to 8.16198 GiB; energy change -1.93e-12 Eh; RSS did not improve
+small_ri_regression,241 FeCl2 and MnF2 all converge with unchanged steps/HVP and printed final energies
+index_math,Independent beta groups own disjoint target intervals and image-map slices; implicit taskgroup completes before sigma; no floating-point contraction order changed
+metadata_math,Exchange-fixed rows and unsupported counts are known at successful node admission; the subsequent full-tile scan is unnecessary
+metadata_tests,Compare fused metadata against an independent full traversal across exchange parities and tiny workspace eviction boundaries
+memory,No new numerical cache or large per-worker array; diagonal-row storage changes owner but is not duplicated
+precision,No optimizer strategy or thresholds or physical response terms changed; arbitrary selected-space projection preserved
+phase_c12_job,293963 on anode014; same node and mask as saved 293936
+phase_c12_indices,0.16950 to 0.08747 s; phase timing only
+phase_c14_job,293964 on anode039; saved 293937 on anode064; attribution only and not matched native timing
+phase_c14_indices,3.45587 to 1.19519 s; phase timing only; different nodes
+phase_interpretation,Metadata admission takes additional bookkeeping while removing its separate scan; do not sum nested phase timers
+remaining_c14_phases,CI integral direction 53.63 s and CI sigma 46.07 s in phase run; nested and not additive
+historical_best_c12_ri,9.97 s remains faster than this 10.20 s result; no claim to beat every historical baseline
+ri_exact_comparison,Current runs use different native nodes for RI and exact; 11.38/10.20 and 149.13/143.27 are descriptive ratios not same-node integral-method speedups
+goal_status,RI remains far from a significant end-to-end speed advantage over exact; no claim of completed performance objective
+baseline_rerun,None; only current candidate workloads ran
+execution_harness,Same qualification and native harness as benchmarks/ri-left-generator-20261019; raw artifacts retain the executed scripts
+raw_artifacts,results/diagnostics/ri-tile-preparation-20261019
+local_theory,docs/orthogonal_integral_jet_fusion.md; ignored and not committed per user request
+unrelated_work,Existing .gitignore and src/integrals/ao/ri_operator.cpp and tests/vbscf/unit/test_ri_ao_h1e_hvp.cpp changes excluded and untouched

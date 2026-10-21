@@ -40,8 +40,10 @@ generator and state-gauge tensors. Product order uses the same compact column
 format for accepted gradients, orbital directions and their reverse consumers.
 No unbounded accepted Y/residual or directional Y/sigma field remains.
 
-Accepted wave-function/residual panels may stay resident under a single shared64 MiB payload
-cap across all roots (one quarter of the existing256 MiB structure workspace).
+Accepted wave-function/residual panels may stay resident under one shared
+reservation across all roots, at most one quarter of `--ci-workspace-mib`.
+The remaining allowance is divided among input, output, sigma and reverse
+workspace; it is not duplicated for each derivative consumer or worker.
 A complete resident state avoids replaying its accepted sigma in later HVPs;
 coefficient-only responses also borrow its transformed coefficients directly.
 Otherwise its primal and tangent images are generated together and immediately
@@ -160,12 +162,13 @@ The topology should be shared by forward, backward and directional consumers.
 At present sigma directions share the spin links, but exterior shear pairs
 and topology reconstruction across accepted points still need a separate audit.
 
-The broad-support accepted orthogonal coefficients/residuals and orbital
-directions still use complete product arrays. Their migration must share the
-same pattern, excitation tables, generated channel sweep and physical upper
-generator pullback. Do not create a second sparse carrier format for each
-consumer, duplicate alpha/beta tables, or remove accepted reuse only to
-recompute the accepted Hamiltonian for every tile.
+The broad-support derivative consumers share compact column patterns,
+excitation tables, the generated channel sweep and the physical upper
+generator pullback. Output panels retire after their last contributor, not
+after an individual temporal response. Fully resident images are accumulated
+before the reverse contraction; bounded partial-image consumption remains
+exact when the live frontier cannot fit. Input columns have longer lifetimes
+because the generator adjoint still reads their neighbors.
 
 The occupation masks and excitation XOR/popcount operations already use
 uint64 bit arithmetic. Covalent support packs eight prefix-count comparisons
@@ -173,10 +176,3 @@ into one word. Link generation now passes its already-known removed/inserted
 orbital labels directly, rather than reconstructing them from two bit scans.
 Further bit-level work should avoid repeated conversions and searches, not
 introduce a dense `2^norb` address table or replace floating GEMM with bit logic.
-
-One separate index issue remains: the original touched-product IDs currently
-use `int(alpha*n_beta+beta)`. In a complete CAS(18,18) one-spin sector,
-48620 strings per spin already give2363904400 logical products, exceeding
-signed32-bit range even if only a few original products are touched. Widen
-the product ID or store the two string IDs separately before qualifying this
-scale. A small allocation size does not prove that a flattened logical ID fits.

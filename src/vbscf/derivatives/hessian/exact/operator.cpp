@@ -7,6 +7,8 @@
 #include <utility>
 
 #include <Eigen/Core>
+#include "core/timing.hpp"
+#include "parallel/openmp.hpp"
 
 #include "vbscf/structures/assembly/coefficient_blocks.hpp"
 #include "integrals/response/adjoint.hpp"
@@ -126,22 +128,12 @@ ExactHvpOperator::State::State(
             .auxiliary_orbital_matrix.data(),
         n_basis_functions,
         n_basis_functions);
-    const Eigen::Map<const Eigen::MatrixXd> accepted_ao_effective_h1e(
-        accepted_point_context_->prepared_active_space
-            .ao_effective_one_electron_result.ao_effective_h1e.data(),
-        n_basis_functions,
-        n_basis_functions);
     accepted_active_auxiliary_orbitals_ =
         accepted_auxiliary_matrix.middleCols(
             n_inactive_doubly_occupied_orbitals,
             n_active_orbitals);
     accepted_basis_overlap_times_active_auxiliary_orbitals_ =
         basis_overlap * accepted_active_auxiliary_orbitals_;
-    accepted_ao_effective_one_electron_times_active_auxiliary_orbitals_ =
-        accepted_ao_effective_h1e * accepted_active_auxiliary_orbitals_;
-    accepted_ao_effective_one_electron_transpose_times_active_auxiliary_orbitals_ =
-        accepted_ao_effective_h1e.transpose() *
-        accepted_active_auxiliary_orbitals_;
     const Eigen::Map<const Eigen::MatrixXd> accepted_sso_gradient(
         accepted_point_context_->active_orbital_overlap_gradient.data(),
         n_active_orbitals,
@@ -154,6 +146,11 @@ ExactHvpOperator::State::State(
         n_active_orbitals);
     accepted_hho_gradient_symmetric_ =
         accepted_hho_gradient + accepted_hho_gradient.transpose();
+    const auto& integral_frame = accepted_point_context_->prepared_active_space
+        .active_space_two_electron_result.orbital_transform;
+    accepted_hho_projection_weight_ = integral_frame.size()
+        ? Eigen::MatrixXd(integral_frame * accepted_hho_gradient_symmetric_)
+        : accepted_hho_gradient_symmetric_;
     zero_core_hamiltonian_ =
         Eigen::MatrixXd::Zero(n_basis_functions, n_basis_functions);
     if (current_input_->standard_two_electron_mode ==
@@ -165,6 +162,8 @@ ExactHvpOperator::State::State(
               *accepted_ri_factorization_,
               accepted_two_electron_result,
               n_active_orbitals));
+      xmvb::integrals::prepare_ri_orbital_pair_products(
+          *accepted_ri_two_electron_cache_);
     } else {
       accepted_exact_two_electron_cache_ =
           xmvb::integrals::build_exact_packed_active_two_electron_adjoint_cache(
@@ -191,6 +190,34 @@ ExactHvpOperator::State::State(
                 current_input_->orbital_preparation_input,
                 accepted_point_context_->total_active_auxiliary_gradient,
                 accepted_point_context_->total_inactive_density_gradient));
+    if (accepted_ri_two_electron_cache_ && n_inactive_doubly_occupied_orbitals > 0) {
+      xmvb::profiling::ScopedPhase phase(xmvb::profiling::Phase::RiInactiveBuild);
+      const auto& cache = *accepted_ri_two_electron_cache_;
+      const auto scratch=sizeof(double)*static_cast<std::size_t>(n_basis_functions)*
+          (n_inactive_doubly_occupied_orbitals+effective_openmp_thread_count());
+      auto factors=workspace::make_matrix<Eigen::MatrixXd>(
+          static_cast<std::size_t>(n_inactive_doubly_occupied_orbitals)*cache.n_auxiliary_functions,
+          n_basis_functions,scratch);
+      if (factors) {
+        integrals::fill_ri_one_index_tiled(
+            *cache.metric_whitened_ao_pair_factors,
+            accepted_orbital_preparation_cache_->inactive_auxiliary,*factors);
+        accepted_ri_inactive_one_index_factors_=std::move(factors);
+      }
+    }
+    if (accepted_ri_two_electron_cache_ && profiling::phase_totals().enabled) {
+      const auto& cache = *accepted_ri_two_electron_cache_;
+      std::fprintf(stderr,
+          "XMVB_RI_CONTRACTION,basis=%d,active=%d,auxiliary=%d,"
+          "three_active_bytes=%zu,direct_pair_plan=%d,inactive_bytes=%zu,"
+          "workspace_limit=%zu,workspace_retained=%zu\n",
+          cache.n_basis_functions, cache.n_active_orbitals, cache.n_auxiliary_functions,
+          cache.orbital_pair_products ? static_cast<std::size_t>(cache.orbital_pair_products->size()) * sizeof(double):0,
+          static_cast<int>(integrals::ri_uses_orbital_pairs(cache)),
+          accepted_ri_inactive_one_index_factors_ ?
+              static_cast<std::size_t>(accepted_ri_inactive_one_index_factors_->size()) * sizeof(double):0,
+          workspace::limit(),workspace::retained());
+    }
   }
 }
 

@@ -2,13 +2,11 @@
 
 #include <algorithm>
 #include <stdexcept>
-#include <Eigen/Eigenvalues>
 #include <Eigen/QR>
 #include "parallel/openmp.hpp"
 #include "vbscf/core/contracts/input.hpp"
 #include "mcscf/optimization/trace.hpp"
 #include "integrals/ao/exact.hpp"
-#include "integrals/ao/ri_operator.hpp"
 #include "integrals/ao/ri.hpp"
 #include "core/pair_index.hpp"
 
@@ -18,41 +16,6 @@ std::size_t tensor4_index(
     int p, int q, int r, int s, int dimension) noexcept {
   return (((static_cast<std::size_t>(p) * dimension + q) * dimension + r) *
           dimension + s);
-}
-
-/** @brief RI diagonal of G[C W C^T], using the existing signed factorization. */
-Eigen::VectorXd ri_density_operator_diagonal(
-    const VbScfInput& input, const Eigen::MatrixXd& mo,
-    const Eigen::Ref<const Eigen::MatrixXd>& coefficients,
-    const Eigen::Ref<const Eigen::MatrixXd>& weights) {
-  const int n_bf = static_cast<int>(mo.rows());
-  Eigen::MatrixXd image;
-  if (!input.ri_factorization) {
-    throw std::invalid_argument("RI diagonal requires accepted AO factors");
-  }
-  xmvb::integrals::AoEffectiveOneElectronRiLowRankFactors factors;
-  const Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> spectrum(weights);
-  if (spectrum.info() != Eigen::Success || !spectrum.eigenvalues().allFinite()) {
-    throw std::runtime_error("failed to factor active diagonal density source");
-  }
-  factors.scaled_factor_matrix.resize(n_bf,weights.rows());
-  int positive = 0;
-  for (Eigen::Index j = 0; j < weights.rows(); ++j)
-    if (spectrum.eigenvalues()[j] >= 0.0) ++positive;
-  factors.n_positive_components = positive;
-  factors.n_negative_components = weights.rows()-positive;
-  int positive_column = 0, negative_column = positive;
-  for (Eigen::Index j = 0; j < weights.rows(); ++j) {
-    const double eigenvalue = spectrum.eigenvalues()[j];
-    const int column = eigenvalue >= 0.0 ? positive_column++ : negative_column++;
-    factors.scaled_factor_matrix.col(column).noalias() =
-        std::sqrt(std::abs(eigenvalue)) * coefficients * spectrum.eigenvectors().col(j);
-  }
-  const auto storage = xmvb::integrals::apply_ao_effective_one_electron_ri_operator(
-      factors, *input.ri_factorization, n_bf);
-  image = Eigen::Map<const Eigen::MatrixXd>(storage.data(), n_bf, n_bf);
-  const Eigen::MatrixXd products = image * mo;
-  return (mo.array() * products.array()).colwise().sum().transpose();
 }
 
 /** @brief Shared density channels; active Coulomb images reuse accepted ERIs. */
@@ -66,13 +29,12 @@ DensityDiagonals density_diagonal_channels(const VbScfInput& input,
   Eigen::MatrixXd result(n_bf,channels);
   const auto active=mo.middleCols(n_core,na);
   if (input.standard_two_electron_mode==StandardTwoElectronMode::ResolutionOfIdentity) {
-    for (int c=0;c<n_core;++c)
-      result.col(c)=ri_density_operator_diagonal(input,mo,mo.col(c),Eigen::MatrixXd::Ones(1,1));
-    for (int j=0;j<active_weights.cols();++j) {
-      const Eigen::Map<const Eigen::MatrixXd> weights(active_weights.col(j).data(),na,na);
-      result.col(n_core+j)=ri_density_operator_diagonal(input,mo,active,weights);
-    }
-    return {result.leftCols(n_core),result.rightCols(active_weights.cols()),{}};
+    if (!input.ri_factorization)
+      throw std::invalid_argument("RI diagonal requires accepted AO factors");
+    const Eigen::Map<const integrals::OrbitalPairMatrix> coulomb(
+        active_coulomb.data(),mo.cols(),na*na);
+    return integrals::contract_ri_density_diagonals(
+        *input.ri_factorization,mo,n_core,na,active_weights,coulomb);
   }
   const std::size_t matrix_bytes=sizeof(double)*static_cast<std::size_t>(n_bf)*n_bf;
   const std::size_t pair_bytes=sizeof(double)*static_cast<std::size_t>(n_bf)*(n_bf+1)/2;

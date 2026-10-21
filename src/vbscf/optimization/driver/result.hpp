@@ -94,6 +94,7 @@ struct CiahIterationRecord {
   /** Exact-gradient keyframes accepted inside this nonlinear macro step. */
   int keyframes = 0;
   int model_dimension = 0;
+  /** AH Ritz solves; replayed pieces of a clipped proposal do not count. */
   int micro_iterations = 0;
   int coupled_block_actions = 0;
   int orbital_hvp_actions = 0;
@@ -171,7 +172,7 @@ struct VbScfAcceptedIterationSnapshot {
   std::vector<double> active_orbital_overlap_matrix;
 
   /**
-   * @brief Column-major active-space effective one-electron matrix `HHO`.
+   * @brief Raw active h, matching the raw orbital and overlap snapshot.
    */
   Eigen::MatrixXd active_one_electron_integrals;
 
@@ -340,6 +341,12 @@ struct VbScfOptimizerResult {
    * @brief Last accepted single-step VBSCF result.
    */
   VbScfResult scf_result;
+
+  /** @brief Accepted active-orbital overlap in the structure-coefficient frame.
+   * Small geometry-only input for optional output analysis. Exported orbitals
+   * can use a different representative; no integral/HVP context is retained.
+   */
+  std::vector<double> active_orbital_overlap_matrix;
 
   /**
    * @brief Final spin-summed AO one-particle density matrix.

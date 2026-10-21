@@ -1,0 +1,36 @@
+field,value
+decision,Reject accepted B*G residency because native C12/C14 timings show no improvement; remove all production changes and optional reuse API
+source_base,e80100e7; retained production C++ identical to e0b6d02e
+scope,Full orthogonal-integral gradient and scalar/block HVP fusion audited and preserved; this candidate only removed a fixed accepted moment repeated across HVPs
+math,Accepted B and packed pair cotangent G are direction independent; B*G can be prepared once while deltaB*G and B*deltaG remain necessary
+no_false_duplicate,Generic fixed RI jet and fused AO fixed jet are mutually exclusive normal paths; they are not two copies executed in one ordinary HVP
+candidate_memory,One R by P immutable accepted factor moment charged after one-index plus three-active plus inactive images to the unchanged shared RI resident allowance; construction also needs P by P scratch
+cluster,Hanhai25 CPU-256C768GB; 32 physical OpenMP cores; BLAS one thread
+ci_workspace,4096 MiB unchanged; no threshold or optimizer-strategy change
+qualification_job,293986 completed; 11 CTests and 6 complete exact/RI gradient-HVP finite-difference checks passed; 661 indexed source/test hashes verified
+qualification_test_build_scope,Five edited/new unit targets and current application/HVP checker rebuilt; unchanged solver/CI tests ran from existing build targets
+full_hvp_max_relative_error,5.86533742139e-9
+native_ri_job,293987 on anode003 with mask 160-191; matches saved 293961 node and mask
+native_exact_job,293988 on anode060 with mask 224-255; matches saved 293962 node and mask
+candidate_binary,5aa4da18a423be984656e0b6137793ce75b319629b05e21772a05616f5db4089
+ri_c12,10.20 to 10.36 s; 1.34827 to 1.37196 GiB; unchanged 4 steps and 33 HVP and printed final energy
+ri_c14,143.27 to 143.82 s; 4.02365 to 4.10423 GiB; unchanged 4 steps and 46 HVP and printed final energy
+exact_control,11.38 to 11.45 s on C12 and 149.13 to 148.02 s on C14; exact algorithm unmodified; changes of this size do not demonstrate speedup
+small_ri_regression,241 and MnF2 keep counters and energies; FeCl2 14/243 to 13/245 and final energy difference 6.79e-8 Eh; all converge
+saved_baseline,benchmarks/ri-tile-preparation-20261019/ri.csv and exact.csv; historical best C12 RI 9.97 s remains faster
+baseline_rerun,None; candidate native jobs only; restoration job compiled and hashed without numerical workload
+restore_job,293991; all 661 restored source/test hashes verified; application byte-identical to retained production
+restored_binary,d781e8155f2c5b19873b5d6252668721762862e555bfdb06d1f6db36d12ca413
+new_retained_work,Independent small-space spin-separated generator and cotangent oracle; bounded exact structural cost census; no speculative production spin-split path
+spin_split_math,H(X)=L_alpha*X+X*L_beta^T+2*cross(X); identical cross orientations follow symmetric K and commuting spin sectors; use effective K including embedded one-electron terms
+spin_split_scope,Full operator identity handles unequal spins and arbitrary selected carriers; intersection pruning is only valid for restricted left/output support not generic raw H images
+cost_c14,Old quotient channel multiplication 19780564545 MAC; exact full-intersection cross 5447802015 MAC; one-spin local candidate bound adds 1355461965 under certified parity or 2710923930 generally
+cost_c12,Old quotient channel multiplication 890474676 MAC; exact full-intersection cross 249554444 MAC; local bound adds 59346144 under certified parity or 118692288 generally
+cost_limit,These are structural counts not timings or complete gradient/HVP cost; include local graph preparation and adjoints before claiming end-to-end acceleration
+cost_memory,Census has no product-amplitude array or U-squared numerical allocation; accounted metadata 1.20/4.65 MiB for C12/C14; 1 worker diagnostic not a production parallel benchmark
+remaining_bottleneck,CI channel contraction and projection dominate saved phase data; no large redundant AO transform remains in the audited fused path
+goal_status,No new end-to-end improvement in this candidate; RI is still not significantly faster than exact; performance objective remains unmet
+raw_artifacts,results/diagnostics/ri-fixed-adjoint-20261019
+rejected_patch,benchmarks/ri-fixed-adjoint-20261019/rejected-fixed-adjoint.patch; ignored and not staged
+local_theory,docs/orthogonal_integral_jet_fusion.md and docs/spin_separated_ci_contraction.md; ignored and not staged
+unrelated_changes,Existing .gitignore and src/integrals/ao/ri_operator.cpp and tests/vbscf/unit/test_ri_ao_h1e_hvp.cpp edits untouched and excluded

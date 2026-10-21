@@ -10,18 +10,11 @@
 namespace xmvb::integrals {
 
 /**
- * @brief Non-owning view of one active-space two-electron representation.
- *
- * Determinant kernels need read-only access to either the packed
- * `GGO` tensor or the RI factor matrix `L_{A,P}`. This view lets those
- * callers share one implementation path without copying the forward buffers.
+ * @brief Borrowed packed four-index kernel, independent of the AO backend.
+ * Both exact and RI integral preparation populate this same physical contract.
  */
 struct ActiveSpaceTwoElectronView {
-  ActiveSpaceTwoElectronRepresentation representation =
-      ActiveSpaceTwoElectronRepresentation::PackedExact;
   const std::vector<double>* packed_active_two_electron_integrals = nullptr;
-  int n_auxiliary_functions = 0;
-  const Eigen::MatrixXd* ri_active_pair_factors = nullptr;
 };
 
 /**
@@ -73,8 +66,7 @@ double lookup_active_space_two_electron_kernel_value(
  *
  * `packed_pair_indices[k]` and `packed_pair_values[k]` define a sparse vector
  * `c_P`. The returned dense vector stores `(G c)_P` over all packed active
- * pairs. Packed-exact callers reuse the `GGO` storage directly, while
- * RI callers evaluate the same contraction as `L^T (L c)`.
+ * pairs. Every caller reuses the prepared packed four-index kernel.
  */
 std::vector<double> apply_active_space_two_electron_kernel_to_sparse_projection(
     const ActiveSpaceTwoElectronView& two_electron_view,
@@ -100,8 +92,8 @@ Eigen::VectorXd apply_active_space_two_electron_kernel_to_sparse_projection_subs
 /**
  * @brief Applies the active pair kernel to a dense block without materializing it.
  *
- * `vectors` has one packed active-pair channel per row. Packed-exact input is
- * consumed in bounded row tiles; RI input evaluates `L^T (L vectors)` by GEMM.
+ * `vectors` has one packed active-pair channel per row. The prepared packed
+ * kernel is consumed in bounded row tiles for both exact and RI AO backends.
  */
 Eigen::MatrixXd apply_active_space_two_electron_kernel_block(
     const ActiveSpaceTwoElectronResult& active_space_two_electron_result,
@@ -109,11 +101,7 @@ Eigen::MatrixXd apply_active_space_two_electron_kernel_block(
     const Eigen::Ref<const Eigen::MatrixXd>& vectors);
 
 /**
- * @brief Materializes packed `GGO` storage from either exact or RI inputs.
- *
- * Production forward paths should prefer the direct pair-kernel helpers above.
- * This routine is intended for diagnostics and outputs that still expect the
- * packed tensor layout.
+ * @brief Copy the prepared packed kernel for diagnostics and output.
  */
 std::vector<double> reconstruct_packed_active_two_electron_integrals(
     const ActiveSpaceTwoElectronView& two_electron_view,

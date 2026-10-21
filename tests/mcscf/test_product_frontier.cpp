@@ -1,4 +1,4 @@
-// Standalone exact-support regression; compile with -Isrc and C++17.
+// Standalone exact-support regression; compile with -Isrc and C++23.
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
@@ -167,6 +167,67 @@ void check_special_cases() {
   require(certified.generator_count() == 0, "covalent shortcut lost");
   check_case(small_n, 2, 3, {}, covalent, true);
 }
+
+// Reusable column plans must match the independent original-seed oracle,
+// including unequal spins and caller permutations. No product table is kept.
+void check_column_plans() {
+  using Support=xmvb::mcscf::ProductSupport;
+  const auto check_bounds=[](const Support& support,int beta,int depth,
+      const std::vector<int>& expected,int count) {
+    for (int upper=0;upper<=count;++upper) {
+      std::vector<int> actual{-1}, bounded{-1};
+      support.append_column_rows(beta,actual,depth,upper);
+      for (const int a:expected) if (a>=0 && a<upper) bounded.push_back(a);
+      require(actual==bounded,"bounded column emission changed caller indices or support");
+    }
+  };
+  for (bool permuted:{false,true})
+  for (int n=1;n<=7;++n) for (int na=0;na<=n;++na) {
+    auto a=strings(n,na), b=strings(n,n-na);
+    if (permuted) {
+      std::reverse(a.begin(),a.end());
+      std::rotate(a.begin(),a.begin()+a.size()/3,a.end());
+    }
+    std::rotate(b.begin(),b.begin()+b.size()/2,b.end());
+    const Mask full=(Mask{1}<<n)-1;
+    std::vector<Seed> seeds;
+    std::vector<xmvb::mcscf::ProductIndex> products;
+    for (int i=0;i<static_cast<int>(a.size());++i) {
+      const auto j=std::find(b.begin(),b.end(),full^a[i])-b.begin();
+      seeds.emplace_back(a[i],b[j]);
+      products.push_back(xmvb::mcscf::product_index(i,j,b.size()));
+    }
+    const Support support(n,a,b,products);
+    for (int depth=0;depth<=1;++depth) for (int j=0;j<static_cast<int>(b.size());++j) {
+      std::vector<int> actual{-1}, expected{-1};
+      support.append_column_rows(j,actual,depth);
+      for (int i=0;i<static_cast<int>(a.size());++i)
+        if (reachable(a[i],b[j],seeds,n,depth)) expected.push_back(i);
+      require(actual==expected,"shared covalent column plan differs from seed oracle");
+      check_bounds(support,j,depth,expected,a.size());
+    }
+    require(support.columns().size()==b.size(),"covalent beta columns were lost");
+    // A genuinely arbitrary selection must keep its generator constraints.
+    products.resize(std::min<std::size_t>(products.size(),2));
+    seeds.resize(products.size());
+    const Support selected(n,a,b,products);
+    std::vector<int> columns;
+    for (int depth=0;depth<=1;++depth) for (int j=0;j<static_cast<int>(b.size());++j) {
+      std::vector<int> actual,expected;
+      selected.append_column_rows(j,actual,depth);
+      for (int i=0;i<static_cast<int>(a.size());++i)
+        if (reachable(a[i],b[j],seeds,n,depth)) expected.push_back(i);
+      require(actual==expected,"arbitrary column plan enlarged the selected support");
+      check_bounds(selected,j,depth,expected,a.size());
+      if (!depth && !actual.empty()) columns.push_back(j);
+    }
+    require(selected.columns()==columns,"shared beta column list is wrong");
+  }
+  const auto a=strings(14,7);
+  const xmvb::mcscf::CovalentSupport plan(14,a,a);
+  require(plan.dynamic_bytes()<8*(a.size()+a.size())*15*9,
+      "column plan retained product-sized metadata");
+}
 } // namespace
 
 int main() {
@@ -178,5 +239,6 @@ int main() {
   require(support.full(),"wide product seed decoded incorrectly");
   check_random();
   check_special_cases();
+  check_column_plans();
   std::cout << "product_frontier_exact_support=PASS\n";
 }

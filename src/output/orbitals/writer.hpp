@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <Eigen/Core>
 #include "vbscf/orbitals/preparation/input.hpp"
 
 namespace xmvb::output {
@@ -13,5 +14,10 @@ namespace xmvb::output {
 std::filesystem::path write_orbital_file(
     const std::filesystem::path& input_path,
     const vb::OrbitalPreparationInput& orbitals);
+
+/** @brief Write a dense normalized-AO orbital frame without a VB container. */
+std::filesystem::path write_orbital_file(
+    const std::filesystem::path& input_path,
+    const Eigen::MatrixXd& orbitals);
 
 }  // namespace xmvb::output

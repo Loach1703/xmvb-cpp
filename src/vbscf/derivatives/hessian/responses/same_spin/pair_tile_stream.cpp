@@ -4,6 +4,8 @@
 #include <optional>
 #include <stdexcept>
 
+#include "integrals/active/raw.hpp"
+#include "integrals/active/ri_transform.hpp"
 #include "vbscf/derivatives/hessian/responses/same_spin/tile_policy_internal.hpp"
 
 namespace xmvb::vb::detail {
@@ -133,20 +135,81 @@ void stream_directional_pair_tiles(
     throw std::invalid_argument(
         "directional pair tile stream requires an enabled cache and consumer");
   }
+  const Eigen::MatrixXd& upper = accepted_two_electron.orbital_transform;
+  Eigen::MatrixXd raw_h1e;
+  std::optional<xmvb::integrals::ActiveSpaceTwoElectronResult> raw_two_electron;
+  std::vector<double> raw_one_electron_direction;
+  std::vector<double> raw_packed_two_electron_direction;
+  Eigen::MatrixXd raw_accepted_ri_factors;
+  Eigen::MatrixXd raw_directional_ri_factors;
+  std::optional<ActiveSpaceIntegralDirectionView> raw_direction;
+  const Eigen::MatrixXd* streamed_h1e = &accepted_active_one_electron;
+  const xmvb::integrals::ActiveSpaceTwoElectronResult* streamed_two_electron =
+      &accepted_two_electron;
+  const ActiveSpaceIntegralDirectionView* streamed_direction = &direction;
+  const Eigen::MatrixXd* streamed_accepted_ri_factors =
+      accepted_ri_active_pair_factors;
+  const Eigen::MatrixXd* streamed_directional_ri_factors =
+      directional_ri_active_pair_factors;
+  if (upper.size() != 0) {
+    raw_h1e = xmvb::integrals::materialize_raw_one_electron(
+        accepted_active_one_electron, upper);
+    streamed_h1e = &raw_h1e;
+    raw_two_electron.emplace(
+        xmvb::integrals::materialize_raw_active_integrals(
+            accepted_two_electron));
+    streamed_two_electron = &*raw_two_electron;
+
+    const std::size_t active_matrix_size =
+        static_cast<std::size_t>(n_active_orbitals) * n_active_orbitals;
+    if (direction.one_electron.size() != active_matrix_size) {
+      throw std::invalid_argument(
+          "directional active one-electron matrix has incompatible dimensions");
+    }
+    const Eigen::Map<const Eigen::MatrixXd> framed_one_electron_direction(
+        direction.one_electron.data(), n_active_orbitals, n_active_orbitals);
+    const Eigen::MatrixXd raw_one_electron_direction_matrix =
+        upper.transpose() * framed_one_electron_direction * upper;
+    raw_one_electron_direction.assign(
+        raw_one_electron_direction_matrix.data(),
+        raw_one_electron_direction_matrix.data() +
+            raw_one_electron_direction_matrix.size());
+    if (!direction.packed_two_electron.empty()) {
+      raw_packed_two_electron_direction =
+          xmvb::integrals::materialize_raw_pair_kernel(
+              direction.packed_two_electron, upper);
+    }
+    raw_direction.emplace(ActiveSpaceIntegralDirectionView{
+        direction.overlap,
+        raw_one_electron_direction,
+        raw_packed_two_electron_direction});
+    streamed_direction = &*raw_direction;
+
+    if (accepted_ri_active_pair_factors != nullptr) {
+      raw_accepted_ri_factors = xmvb::integrals::transform_ri_pair_factors(
+          *accepted_ri_active_pair_factors, upper);
+      streamed_accepted_ri_factors = &raw_accepted_ri_factors;
+    }
+    if (directional_ri_active_pair_factors != nullptr) {
+      raw_directional_ri_factors = xmvb::integrals::transform_ri_pair_factors(
+          *directional_ri_active_pair_factors, upper);
+      streamed_directional_ri_factors = &raw_directional_ri_factors;
+    }
+  }
   const bool shared =
       accepted_pair_cache.shares_same_spin_pair_cache_between_spins();
   const PairTileExtents tile_extents = n_response_states > 0
       ? plan_local_response_tiles(
             accepted_pair_cache,
             n_active_orbitals,
-            accepted_two_electron,
+            *streamed_two_electron,
             n_response_states,
             1,
             workspace_bytes).extents
       : plan_pair_tile_extents(
             accepted_pair_cache,
             n_active_orbitals,
-            accepted_two_electron,
+            *streamed_two_electron,
             include_opposite_spin,
             workspace_bytes);
   stream_spin_table(
@@ -156,11 +219,11 @@ void stream_directional_pair_tiles(
       shared,
       n_active_orbitals,
       accepted_active_overlap,
-      accepted_active_one_electron,
-      accepted_two_electron,
-      direction,
-      accepted_ri_active_pair_factors,
-      directional_ri_active_pair_factors,
+      *streamed_h1e,
+      *streamed_two_electron,
+      *streamed_direction,
+      streamed_accepted_ri_factors,
+      streamed_directional_ri_factors,
       include_opposite_spin,
       tile_extents.alpha,
       consume);
@@ -174,11 +237,11 @@ void stream_directional_pair_tiles(
       true,
       n_active_orbitals,
       accepted_active_overlap,
-      accepted_active_one_electron,
-      accepted_two_electron,
-      direction,
-      accepted_ri_active_pair_factors,
-      directional_ri_active_pair_factors,
+      *streamed_h1e,
+      *streamed_two_electron,
+      *streamed_direction,
+      streamed_accepted_ri_factors,
+      streamed_directional_ri_factors,
       include_opposite_spin,
       tile_extents.beta,
       consume);

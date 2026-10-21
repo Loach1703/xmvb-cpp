@@ -12,11 +12,24 @@
 
 #include "parallel/openmp.hpp"
 #include "core/timing.hpp"
+#include "core/workspace.hpp"
 
 namespace xmvb::vb::detail {
 
 /** @brief Existing structure-action workspace; panels share equal quarters. */
 inline constexpr std::size_t kStructureTileWorkspaceBytes=256ULL*1024*1024;
+
+/** @brief Compare exact beta contractions, independently of residency.
+ * Row sampling costs touched_products * sampled_beta_columns multiply-adds. Applying the
+ * ordered exterior factors costs n_alpha * (n_beta + shear_pairs). Alpha
+ * transforms and structure incidence are common to both orders. Neither
+ * order assumes closure of the selected structure space.
+ */
+inline bool prefer_ordered_beta(std::size_t touched_products, int n_alpha,
+    int n_beta, std::size_t shear_pairs,int sampled_beta_columns) noexcept {
+  return static_cast<long double>(touched_products)*sampled_beta_columns >
+      static_cast<long double>(n_alpha)*(n_beta+static_cast<long double>(shear_pairs));
+}
 
 /** @brief Exact generated support of beta columns, shared by primal/image tiles. */
 struct ColumnPattern {
@@ -96,7 +109,8 @@ inline void project_exchange(std::vector<ColumnTile*>& panels,int extent,int par
 struct ProductImages {
   int extent=0;
   std::size_t bytes=0;
-  std::size_t budget=kStructureTileWorkspaceBytes/4;
+  std::size_t budget=workspace::available()/4;
+  workspace::Reservation residency;
   std::vector<std::vector<ColumnTile>> states;
   /** Single-root density already contracted for the energy-multiplier term. */
   Eigen::MatrixXd density;
@@ -157,13 +171,19 @@ public:
   ColumnPanels(std::size_t bytes,Build build,Consume consume={})
       : budget_(std::max<std::size_t>(1,bytes)),build_(std::move(build)),consume_(std::move(consume)) {}
 
+  bool contains(int index) const { return index_.contains(index); }
+
   ColumnTile& get(int index) {
     const auto found=index_.find(index);
     if (found!=index_.end()) {
       panels_.splice(panels_.begin(),panels_,found->second);
       return found->second->tile;
     }
-    ColumnTile tile=build_(index);
+    return insert(index,build_(index));
+  }
+
+  /** @brief Admit a newly generated tile; no existing owner may have this key. */
+  ColumnTile& insert(int index,ColumnTile tile) {
     const auto bytes=tile.bytes();
     while (!panels_.empty() && (bytes>budget_ || resident_>budget_-bytes)) {
       auto& last=panels_.back();
@@ -180,12 +200,24 @@ public:
     return panels_.front().tile;
   }
 
+  /** @brief Consume and free a column whose final physical user has completed. */
+  void release(int index) {
+    const auto found=index_.find(index);
+    if (found==index_.end()) return;
+    auto panel=found->second;
+    resident_-=panel->tile.bytes();
+    if (consume_) consume_(panel->index,panel->tile);
+    panels_.erase(panel);
+    index_.erase(found);
+    ++releases;
+  }
+
   void finish() {
     if (consume_) for (auto& panel:panels_) consume_(panel.index,panel.tile);
     panels_.clear(); index_.clear(); resident_=0;
   }
 
-  std::size_t evictions=0,peak_bytes=0;
+  std::size_t evictions=0,peak_bytes=0,releases=0;
 
 private:
   struct Entry { int index; ColumnTile tile; };

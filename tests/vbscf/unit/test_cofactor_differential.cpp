@@ -401,6 +401,22 @@ void check(
 int main() {
   try {
     const xmvb::vb::DeterminantOverlapResolver overlap_resolver;
+    // Row permutations exercise determinant sign; the last fixture enters
+    // SVD via relative LU rank but remains above the absolute singular cutoff.
+    for (const double scale : {1.0, 1.0e-8, 1.0e12}) {
+      Eigen::MatrixXd x = Eigen::MatrixXd::Identity(3, 3);
+      x(0, 0) = scale;
+      x.row(0).swap(x.row(1));
+      if (overlap_resolver.determinant(x) != -scale)
+        throw std::runtime_error("determinant-only path changed permutation parity");
+    }
+    Eigen::MatrixXd svd_regular = Eigen::MatrixXd::Identity(2, 2);
+    svd_regular(0, 0) = 1.0e6;
+    svd_regular(1, 1) = 1.0e-8;
+    const double svd_determinant = overlap_resolver.determinant(svd_regular);
+    if (svd_determinant != overlap_resolver.resolve_matrix(svd_regular).overlap_determinant ||
+        std::abs(svd_determinant - 1.0e-2) > 1.0e-15)
+      throw std::runtime_error("determinant-only SVD discarded an absolute-regular pair");
     for (int n=0;n<=7;++n) {
       Eigen::MatrixXd a=Eigen::MatrixXd::Random(n,n), b=Eigen::MatrixXd::Random(n,n);
       Eigen::MatrixXd u=Eigen::MatrixXd::Identity(n,n), v=u;
@@ -413,6 +429,9 @@ int main() {
         for (int i=0;i<std::min(n,deficient);++i) s(i)=small;
         const Eigen::MatrixXd x=u*s.asDiagonal()*v.transpose();
         const auto overlap = overlap_resolver.resolve_matrix(x);
+        const double scalar_overlap = overlap_resolver.determinant(x);
+        if (scalar_overlap != overlap.overlap_determinant)
+          throw std::runtime_error("determinant-only path changed LU/SVD overlap semantics");
         if (overlap.nullity == 0) {
           const double determinant = overlap.overlap_determinant;
           const double expected_sign = determinant < 0.0 ? -1.0 : 1.0;

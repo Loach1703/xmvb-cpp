@@ -38,7 +38,7 @@ double determinant_overlap(
       left_occ,
       right_occ,
       overlap_matrix);
-  return overlap_resolver.resolve_matrix(overlap_submatrix).overlap_determinant;
+  return overlap_resolver.determinant(overlap_submatrix);
 }
 
 }  // namespace

@@ -21,6 +21,9 @@
 #include "integrals/active/two_electron.hpp"
 #include "integrals/ao/graph.hpp"
 #include "vbscf/optimization/neo/coordinates.hpp"
+#include "vbscf/optimization/coupled/affine.hpp"
+#include "vbscf/optimization/coupled/ci_transport.hpp"
+#include "vbscf/optimization/objective/function.hpp"
 #include "vbscf/optimization/trust_region/retraction.hpp"
 #include "vbscf/orbitals/charts/chart.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
@@ -614,8 +617,7 @@ void check_connection(const StructureFixture& fixture) {
   }
 }
 
-/** Compare the complete orbital/CI coupling action with its separate calls. */
-void check_joint_coupling_action() {
+xmvb::vb::VbScfInput coupling_input() {
   xmvb::vb::VbScfInput input;
   input.standard_two_electron_mode = xmvb::vb::StandardTwoElectronMode::Exact;
   auto& orbitals = input.orbital_preparation_input;
@@ -651,6 +653,13 @@ void check_joint_coupling_action() {
       data.determinant_to_structure_terms.push_back({{data.n_structures++, 1.0}});
     }
   }
+  return input;
+}
+
+/** Compare the complete orbital/CI coupling action with its separate calls. */
+void check_joint_coupling_action() {
+  const auto input = coupling_input();
+  const auto& orbitals = input.orbital_preparation_input;
 
   const auto accepted = xmvb::vb::OrbitalGradientEvaluator().evaluate(
       input, {0, 3}, {0.5, 0.5}, 0.4);
@@ -705,6 +714,121 @@ void check_joint_coupling_action() {
   }
 }
 
+/** Production CIAH HVP against analytic keyframe-gradient differences, not FD-vs-FD. */
+void check_affine_keyframe_hvp(int n_states, bool selected, bool stationary) {
+  using namespace xmvb::vb;
+  auto input = coupling_input();
+  if (selected) {
+    // Three of four products: the selected subspace is not orbital-transform closed.
+    input.structure_data.determinant_to_structure_terms.back().clear();
+    input.structure_data.n_structures = 3;
+  }
+  const auto& orbitals = input.orbital_preparation_input;
+  const SparseParameterLayout layout(orbitals);
+  const OrbitalGradientEvaluator evaluator;
+  std::vector<int> roots(n_states);
+  for (int i = 0; i < n_states; ++i) roots[i] = i;
+  const std::vector<double> weights(n_states, 1.0/n_states);
+  const auto solved = evaluator.evaluate(input, roots, weights, 0.4);
+  const auto& spectrum = solved.second_order_context->root_eigenvectors;
+  Eigen::MatrixXd c = spectrum.leftCols(n_states);
+  if (!stationary) {
+    for (int i = 0; i < n_states; ++i)
+      c.col(i) += (0.23 + 0.11*i) * spectrum.col(n_states);
+  }
+  // Rebuild every physical gradient/cache at prescribed nonstationary CI;
+  // never perturb C while leaving accepted densities/adjoints stale.
+  const auto fixed = evaluator.evaluate_fixed_structure(
+      input, roots, weights, 0.4, c, nullptr, true);
+  const auto context = fixed.gradient.second_order_context;
+  const double residual = fixed.structure_residuals.norm();
+  require(stationary ? residual < 1e-10 : residual > 1e-2,
+      "finite-residual HVP fixture did not attain the requested CI residual");
+  const auto& prepared = fixed.gradient.orbital_preparation_result;
+  const OrbitalChart chart(orbitals, layout,
+      prepared.auxiliary_orbital_matrix.leftCols(orbitals.n_orbitals),
+      prepared.physical_orbital_frame.normalized_orbital_matrix,
+      nullptr, false, false, nullptr, OrbitalChart::Coordinates::Unwhitened);
+  const ExactHvpOperator hessian(context, &input, layout, &chart);
+  const StructureTangentOperator structure(context, hessian.structure_action());
+  const AffineCoupling affine(*context, hessian, structure);
+  const CiTransport transport(orbitals, layout, chart, *context,
+      hessian.structure_action(), structure);
+  const int no = chart.reduced_size(), ns = structure.tangent_size();
+  const auto model = [&](const Eigen::VectorXd& x) {
+    const auto point = transport.retract(x.head(no), x.tail(ns));
+    auto trial = input;
+    trial.orbital_preparation_input = point.input;
+    const auto value = evaluator.evaluate_fixed_structure(
+        trial, roots, weights, 0.4, point.coefficients, point.selected_metric.get());
+    VbScfCoupledKeyframeEvaluation keyframe;
+    keyframe.energy = value.gradient.scf_result.total_energy;
+    keyframe.orbital_gradient = layout.gather_from_full(value.gradient.sparse_orbital_energy_gradient);
+    keyframe.normalized_structure_coefficients = value.normalized_coefficients;
+    keyframe.structure_residuals = value.structure_residuals;
+    keyframe.coefficient_gradient = value.coefficient_gradient;
+    return transport.evaluate_model(point, keyframe);
+  };
+  const auto action = [&](const Eigen::VectorXd& x) -> Eigen::VectorXd {
+    const auto blocks = affine.apply(x.head(no), x.tail(ns));
+    Eigen::VectorXd result(no+ns);
+    result << blocks.orbital.orbital_hessian+blocks.adjoint,
+              blocks.forcing+blocks.ci.hessian_coordinates;
+    return result;
+  };
+  Eigen::VectorXd p = Eigen::VectorXd::LinSpaced(no, -0.23, 0.71).normalized();
+  Eigen::VectorXd q = Eigen::VectorXd::LinSpaced(ns, 0.63, -0.29).normalized();
+  double worst = 0.0, old_error = 0.0, coarse_error = 0.0;
+  for (int mode : {0, 1, 2}) {
+    Eigen::VectorXd direction(no+ns);
+    direction << p, q;
+    if (mode == 0) direction.tail(ns).setZero();
+    if (mode == 1) direction.head(no).setZero();
+    const Eigen::VectorXd analytic = action(direction);
+    for (double step : {2e-4, 1e-4}) {
+      const Eigen::VectorXd fd =
+          (model(step*direction).gradient-model(-step*direction).gradient)/(2*step);
+      const double error = (analytic-fd).norm()/std::max(1.0, fd.norm());
+      std::cout << "affine_hvp states=" << n_states << " selected=" << selected
+                << " stationary=" << stationary << " mode=" << mode
+                << " step=" << step << " residual=" << residual
+                << " error=" << error << '\n';
+      if (step == 1e-4) worst = std::max(worst, error);
+      else coarse_error = std::max(coarse_error, error);
+      if (mode == 2 && step == 1e-4) {
+        // Negative control: the old, symmetric response coupling misses RD/2.
+        const auto orbital = hessian.apply_orbital_coupling(p);
+        const auto ci = structure.apply_coupling_coordinates(q);
+        Eigen::VectorXd old(no+ns);
+        old << orbital.orbital_hessian+hessian.apply_structure_coupling_adjoint(
+                   ci.coefficient_response, ci.adjoint_multipliers),
+               structure.project_coordinates(orbital.scaled_structure_forcing)
+                   +ci.hessian_coordinates;
+        old_error = (old-fd).norm()/std::max(1.0, fd.norm());
+      }
+    }
+  }
+  require(worst < 2e-7, "production affine HVP differs from keyframe-gradient FD");
+  require(worst < 0.4*coarse_error || worst < 2e-9,
+      "keyframe-gradient differences do not show central-FD convergence");
+  require(stationary ? old_error < 2e-7 : old_error > 1e-4,
+      "negative control did not expose the finite-residual normalization mismatch");
+  Eigen::VectorXd x(no+ns), y(no+ns);
+  x << p, 0.3*q;
+  y << -0.4*p, q;
+  require(std::abs(x.dot(action(y))-y.dot(action(x))) < 2e-10,
+      "affine forward and reverse coupling are not adjoints");
+  // Independently check the actual balanced keyframe energy derivative.
+  const auto z = 0.015*x;
+  constexpr double step = 1e-5;
+  require(std::abs((model(z+step*y).energy-model(z-step*y).energy)/(2*step)
+      -model(z).gradient.dot(y)) < 2e-7,
+      "physical keyframe gradient fails model-energy finite differences");
+  std::cout << "affine_summary states=" << n_states << " selected=" << selected
+            << " stationary=" << stationary << " error=" << worst
+            << " old_error=" << old_error << '\n';
+}
+
 }  // namespace
 
 int main() {
@@ -718,6 +842,10 @@ int main() {
     check_carrier_diagonal(fixture);
     check_metric_factorization(fixture);
     check_joint_coupling_action();
+    for (int n_states : {1, 2})
+      for (bool selected : {false, true})
+        for (bool stationary : {false, true})
+          check_affine_keyframe_hvp(n_states, selected, stationary);
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

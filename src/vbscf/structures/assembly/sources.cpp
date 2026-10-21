@@ -7,6 +7,7 @@
 
 #include "core/timing.hpp"
 #include "mcscf/ci/factors_internal.hpp"
+#include "parallel/openmp.hpp"
 
 namespace xmvb::vb {
 namespace {
@@ -182,7 +183,7 @@ mcscf::SpinFactorSource SpinSources::orthogonal_source(const std::vector<mcscf::
     bool physical) const {
   const bool project = physical && parity_ != 0;
   const int rank = nodes.size();
-  return {alpha.dimension(), beta.dimension(), rank * (project ? 2 : 1),
+  mcscf::SpinFactorSource result{alpha.dimension(), beta.dimension(), rank * (project ? 2 : 1),
       [this, &products, coefficients, &alpha, &beta, project, rank](int first, int width,
           Eigen::Ref<Eigen::MatrixXd> a, Eigen::Ref<Eigen::MatrixXd> b) {
         int offset = 0;
@@ -200,6 +201,45 @@ mcscf::SpinFactorSource SpinSources::orthogonal_source(const std::vector<mcscf::
       }, 0, 2.0L * (alpha.dimension()+beta.dimension()) +
           2.0L * (alpha.shear_pair_count()+beta.shear_pair_count()) +
           2.0L * groups.size()/std::max(1,rank) + 1 + (project ? alpha.dimension() : 0)};
+  // Y V = T_alpha [Z (T_beta^T V)]. Z is traversed through the original
+  // support indices, never assembled as a product matrix. A physical parity
+  // image is P_eta Y, not a second unprojected representative.
+  result.contract = [this,&products,coefficients,&alpha,&beta,project](bool transpose,
+      const Eigen::Ref<const Eigen::MatrixXd>& input,
+      Eigen::Ref<Eigen::MatrixXd> output,double scale) {
+    const int nb = beta.dimension();
+      const auto& incoming = transpose ? alpha:beta;
+      const auto& outgoing = transpose ? beta:alpha;
+      Eigen::MatrixXd seed = input;
+      incoming.apply_adjoint_left(&seed);
+      Eigen::MatrixXd image = Eigen::MatrixXd::Zero(outgoing.dimension(),input.cols());
+      const int workers = coarse_openmp_thread_count(effective_openmp_thread_count(),
+          static_cast<std::size_t>(products.size())*input.cols());
+#pragma omp parallel for schedule(static) if(workers > 1) num_threads(workers)
+      for (int row = 0; row < image.rows(); ++row) {
+        const auto consume = [&](bool flip,double weight) {
+          const auto add = [&](int group) {
+            const int a = products[group]/nb,b = products[group]%nb;
+            if (parity_ && !(a < b || (a == b && parity_ > 0))) return;
+            const double value = weight*coefficients[group]*(parity_ && a != b ? 2:1);
+            image.row(row).noalias() += value*seed.row(flip ? a:b);
+          };
+          if (flip) for (const int group:beta_groups[row]) add(group);
+          else for (int group=alpha_offsets[row];group<alpha_offsets[row+1];++group) add(group);
+        };
+        consume(transpose,project ? 0.5:1);
+        // Certified exchange parity uses identical spin exterior maps. Apply
+        // P_eta to raw support inside this same traversal, not by transforming
+        // the representative twice. No numerical symmetry is inferred here.
+        if (project) consume(!transpose,0.5*parity_);
+      }
+      outgoing.apply_left(&image);
+      output.noalias() += scale*image;
+  };
+  result.contract_rows = static_cast<std::size_t>(alpha.dimension())+beta.dimension();
+  result.contract_work = 4.0L*(alpha.shear_pair_count()+beta.shear_pair_count())+
+       4.0L*(alpha.dimension()+beta.dimension())+4.0L*(project ? 2:1)*products.size();
+  return result;
 }
 
 mcscf::SpinFactorSource SpinSources::tangent_source(const std::vector<mcscf::ProductIndex>& products,
