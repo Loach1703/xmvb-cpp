@@ -114,7 +114,7 @@ int main(int argc,char** argv) {
               auto& g=trial.active_space_two_electron_result.packed_active_two_electron_integrals;
               Eigen::Map<Eigen::VectorXd>(g.data(),g.size())+=amount*direction;
             }
-            values[isign]=process.evaluate(input,trial,false).energies[0];
+            values[isign]=process.evaluate(input,trial,request,false).energies[0];
           } else {
             auto trial=input;
             layout.unpack(initial+amount*direction,&trial.orbital_preparation_input);

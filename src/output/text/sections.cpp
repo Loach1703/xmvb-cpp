@@ -1196,7 +1196,7 @@ double print_final_state_sections(
       result.optimized_input.orbital_preparation_input);
   if (result.energy_only) {
     output << "\n ENERGY-only evaluation: no total-state RDM or orbital gradient was requested.\n";
-    return;
+    return norms.mean_overlap;
   }
   const auto& orbitals = result.optimized_input.orbital_preparation_input;
   const NaturalOrbitalAnalysis natural_orbitals = compute_natural_orbitals(
