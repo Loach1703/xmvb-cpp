@@ -47,6 +47,7 @@ from pyblock2.driver.core import (
 )
 
 import hs_shared
+import rdm_full
 
 
 # Diagnostic only: never reject an evaluation or promote a bond stage on this
@@ -5426,6 +5427,10 @@ def compute_total_state_rdms(
         )
         dm3 = None
         dm3_seconds = 0.0
+        contraction3_error = 0.0
+        reduced_dm3 = False
+        dm3_reduce_seconds = 0.0
+        dm3_check_seconds = 0.0
         reference_contracted_orth = None
         requires_dm3 = d3g_mode in ("full", "validate") or validate_direct
         if (
@@ -5441,14 +5446,35 @@ def compute_total_state_rdms(
                 f"threads={rdm_threads}"
             )
             stage_started = time.perf_counter()
-            dm3 = np.asarray(
-                driver.get_3pdm(total, algo_type=npdm_algorithm, iprint=0),
-                dtype=np.float64,
-            ) / norm
+            dm3 = np.asarray(rdm_full.get_profiled_3pdm(
+                driver, total, npdm_algorithm, log_summary), dtype=np.float64)
             dm3_seconds = time.perf_counter() - stage_started
-            reference_contracted_orth = np.einsum(
-                "faeb,abcdef->dc", g_orth, dm3, optimize=True
-            )
+            if d3g_mode == "full" and not validate_direct:
+                (reference_contracted_orth, particle3,
+                 reduction_times) = rdm_full.reduce_full_3pdm(dm3, g_orth, norm)
+                dm3_reduce_seconds = reduction_times["integral_seconds"]
+                stage_started = time.perf_counter()
+                contraction3_error = float(np.max(np.abs(particle3 - (nae - 2) * dm2)))
+                dm3_check_seconds = (reduction_times["particle_seconds"] +
+                                     time.perf_counter() - stage_started)
+                tensor_gib = dm3.nbytes / 1024**3
+                # Release the native rank-six output before AO transformations.
+                # Its lifetime ends here; only O(K**4) and O(K**2) data survive.
+                del dm3, particle3
+                dm3 = None
+                reduced_dm3 = True
+                log_summary(
+                    f"[TNVB-3RDM] algorithm={npdm_algorithm_name} "
+                    f"actual_bond={sum_details.get('actual_bond', '-')} cap={sum_bond} "
+                    f"native={dm3_seconds:.3f}s reduce={dm3_reduce_seconds:.3f}s "
+                    f"check={dm3_check_seconds:.3f}s tensor={tensor_gib:.3f}GiB "
+                    "full_copy=0"
+                )
+            else:
+                # Research validation routines consume a normalized full tensor.
+                dm3 = dm3 / norm
+                reference_contracted_orth = np.einsum(
+                    "faeb,abcdef->dc", g_orth, dm3, optimize=True)
 
         # This optional diagnostic applies V to the SU(2) MPS.  It is not part
         # of the production contracted-gradient algorithm.
@@ -5773,8 +5799,7 @@ def compute_total_state_rdms(
         contraction2_error = float(
             np.max(np.abs(np.einsum("ijja->ia", dm2) - (nae - 1) * dm1))
         )
-        contraction3_error = 0.0
-        if dm3 is not None:
+        if dm3 is not None and not reduced_dm3:
             contraction3_error = float(
                 np.max(
                     np.abs(
@@ -5829,7 +5854,9 @@ def compute_total_state_rdms(
                            rdm_energy_error=rdm_energy_error,
                            total_seconds=rdm_total_seconds,
                            sum_seconds=sum_seconds, dm1_seconds=dm1_seconds,
-                           dm2_seconds=dm2_seconds, dm3_seconds=dm3_seconds)
+                           dm2_seconds=dm2_seconds, dm3_seconds=dm3_seconds,
+                           dm3_reduce_seconds=dm3_reduce_seconds,
+                           dm3_check_seconds=dm3_check_seconds)
         return (energy_error, eigenvalue, coefficient, pmat, pit,
                 contracted_d3, diagnostics)
     finally:

@@ -13,7 +13,7 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/libexec/xmvb-cpp/tnvb")
 configure_file(worker/evaluate.py "${XMVB_TNVB_WORKER}" COPYONLY)
 configure_file(worker/pair_core.py "${CMAKE_BINARY_DIR}/libexec/xmvb-cpp/tnvb/pair_core.py" COPYONLY)
 configure_file(worker/hs_shared.py "${CMAKE_BINARY_DIR}/libexec/xmvb-cpp/tnvb/hs_shared.py" COPYONLY)
-foreach(module davidson common_ci fixed_family shared_effective forward_state)
+foreach(module davidson common_ci fixed_family shared_effective forward_state rdm_full)
   configure_file(worker/${module}.py "${CMAKE_BINARY_DIR}/libexec/xmvb-cpp/tnvb/${module}.py" COPYONLY)
 endforeach()
 configure_file(config.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/tnvb/config.hpp" @ONLY)
@@ -27,10 +27,12 @@ target_include_directories(xmvb_tnvb PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/.."
 target_link_libraries(xmvb_tnvb PUBLIC xmvb_vbscf)
 install(TARGETS xmvb_tnvb ARCHIVE DESTINATION lib)
 install(FILES worker/evaluate.py worker/pair_core.py worker/hs_shared.py DESTINATION libexec/xmvb-cpp/tnvb)
-install(FILES worker/davidson.py worker/common_ci.py worker/fixed_family.py worker/shared_effective.py worker/forward_state.py
+install(FILES worker/davidson.py worker/common_ci.py worker/fixed_family.py worker/shared_effective.py worker/forward_state.py worker/rdm_full.py
         DESTINATION libexec/xmvb-cpp/tnvb)
 
 if (BUILD_TESTING)
+  add_test(NAME tnvb_full_rdm COMMAND "${XMVB_TNVB_PYTHON}"
+    "${CMAKE_SOURCE_DIR}/tests/tnvb/test_full_rdm.py")
   add_test(NAME tnvb_forward_state COMMAND "${XMVB_TNVB_PYTHON}"
     "${CMAKE_SOURCE_DIR}/tests/tnvb/test_forward_state.py")
   add_executable(handoff_tnvb "${CMAKE_SOURCE_DIR}/tests/tnvb/handoff.cpp")
