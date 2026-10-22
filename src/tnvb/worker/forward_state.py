@@ -15,10 +15,10 @@ import numpy as np
 
 def signature(request_path):
     data = bytearray(Path(request_path).read_bytes())
-    if len(data) < 64 or data[:8] != b'CPTNREQ2':
+    if len(data) < 64 or data[:8] != b'CPTNREQ3':
         raise ValueError('invalid TNVB handoff request')
     header = struct.unpack('<10i',data[8:48])
-    if header[0] != 2 or header[7] not in (0,1):
+    if header[0] != 3 or header[7] not in (0,1):
         raise ValueError('invalid TNVB handoff mode')
     # Only ENERGY versus GRADIENT may differ. Includes structures, all active
     # integrals, bond caps, CI solver/accuracy and any supplied initial guess.
@@ -30,7 +30,8 @@ def signature(request_path):
     h = hashlib.sha256(data)
     h.update(json.dumps(settings,sort_keys=True).encode())
     for name in ('evaluate.py','pair_core.py','forward_state.py','common_ci.py',
-                 'fixed_family.py','shared_effective.py','davidson.py','hs_shared.py'):
+                 'fixed_family.py','shared_effective.py','davidson.py','hs_shared.py',
+                 'rdm_full.py'):
         h.update(Path(__file__).with_name(name).read_bytes())
     return h.hexdigest()
 
@@ -106,10 +107,10 @@ def claim(directory, request, response):
 
 def read_energy_response(path,nstr,norb):
     with open(path,'rb') as stream:
-        if stream.read(8)!=b'CPTNRES2':
+        if stream.read(8)!=b'CPTNRES3':
             raise ValueError('invalid retained TNVB response')
         header=struct.unpack('<8i',stream.read(32))
-        if (header[:5]!=(2,0,nstr,norb,0) or header[5] not in (1,nstr) or
+        if (header[:5]!=(3,0,nstr,norb,0) or header[5] not in (1,nstr) or
                 header[6] not in (0,1) or header[7]):
             raise ValueError('invalid retained TNVB response dimensions')
         roots=header[5]
@@ -149,7 +150,8 @@ def resume(directory, request_path, request, sum_bond):
         f'D={bond}/{sum_bond} check=GRADIENT state=HANDOFF d3g=FULL')
     result=core.compute_total_state_rdms(str(root/'mps'),str(root.parent),
         manifest['state_tags'],norb,nelec,bond,sum_bond,0,h,s,rinv,h1,g2,0,0,0,
-        selected_eigenpair=(float(energies[0]),c[:,0]),consume_source=True)
+        selected_eigenpair=(float(energies[0]),c[:,0]),consume_source=True,
+        orthogonal_output=True)
     fit_error,energy,coefficient,p,pi,d3g,checks=result
     if abs(energy-energies[0])>1e-10:
         raise RuntimeError('TNVB handoff changed its CI eigenvalue')

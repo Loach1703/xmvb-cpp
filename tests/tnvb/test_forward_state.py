@@ -19,7 +19,7 @@ import hs_shared
 
 class HandoffTests(unittest.TestCase):
     def request(self,path,mode=0,solver=0,bond=32,payload=b'integrals'):
-        path.write_bytes(b'CPTNREQ2'+struct.pack('<10i',2,1,2,2,2,bond,64,mode,solver,0)+
+        path.write_bytes(b'CPTNREQ3'+struct.pack('<10i',3,1,2,2,2,bond,64,mode,solver,0)+
                          struct.pack('<2d',1e-7,1e-3)+payload)
 
     def test_only_mode_can_differ(self):

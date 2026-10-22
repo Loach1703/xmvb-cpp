@@ -76,11 +76,10 @@ vb::ActiveSpaceGradientResult ElectronicEvaluator::evaluate(
     throw std::invalid_argument("TNVB received nonfinite orbitals or nuclear energy");
   }
   const auto started=std::chrono::steady_clock::now();
-  // The worker transforms raw nonorthogonal h/G itself.  The shared
-  // preparer now defaults to C R^-1; explicitly request its raw-C branch
-  // so both the worker protocol and its overlap adjoint retain their frame.
-  const Eigen::MatrixXd raw_integral_frame;
-  auto timed=vb::prepare_timed_active_space_context(input, &raw_integral_frame);
+  // Shared preparation supplies h/G in C R^-1 and retains R for the
+  // nonorthogonal VB pair creators.  The worker consumes these integrals
+  // directly; the gradient adapter follows the shared framed pullback.
+  auto timed=vb::prepare_timed_active_space_context(input);
   auto& prepared=timed.prepared_active_space;
   WorkerResponse response=process_.evaluate(input,prepared,request,gradient,
                                             retain!=nullptr);

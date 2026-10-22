@@ -30,8 +30,9 @@ int main(int argc,char** argv) {
         loaded.nuclear_repulsion_energy,solver,{},&pullback,backend);
     Eigen::VectorXd gradient;
     const double accepted_energy=objective(initial,gradient);
-    require(objective.gradient_result().two_electron_frame.size()==0,
-        "TNVB integral preparation silently adopted the shared orthogonal frame");
+    require(objective.gradient_result().two_electron_frame.rows()==6 &&
+        objective.gradient_result().two_electron_frame.cols()==6,
+        "TNVB integral preparation did not retain the shared orthogonal frame");
     const auto accepted_orbitals=objective.input().orbital_preparation_input.orbital_value_table;
     const auto accepted_matrices=objective.gradient_result().scf_result.structure_matrices.hamiltonian_matrix;
     const auto verify_accepted=[&]() {

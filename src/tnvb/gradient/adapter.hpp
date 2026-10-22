@@ -5,7 +5,7 @@
 
 namespace xmvb::tnvb {
 
-/** Map P/Pi/D3G to As, Ah and packed Ag, not to a final orbital gradient. */
+/** Map orthogonal P/Pi/D3G to raw As/Ah and framed packed Ag. */
 void populate_active_space_adjoints(
     const WorkerResponse&, vb::ActiveSpaceGradientResult*);
 

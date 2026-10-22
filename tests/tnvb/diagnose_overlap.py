@@ -64,10 +64,10 @@ def main():
                         help="test commuting pair-product order without changing the CSF")
     args = parser.parse_args()
     content = Path(args.request).read_bytes()
-    if content[:8] != b"CPTNREQ2":
+    if content[:8] != b"CPTNREQ3":
         raise ValueError("bad C++ request")
     version, n, k, nae, nel, d, s, mode, solver, nguess = struct.unpack("<10i", content[8:48])
-    if version != 2 or solver or nguess or not (0 < k <= 14) or nae % 2 or nel < nae:
+    if version != 3 or solver or nguess or not (0 < k <= 14) or nae % 2 or nel < nae:
         raise ValueError("oracle restricted to valid small singlet requests")
     if args.bond is not None:
         if not 1 <= args.bond <= 400:
@@ -98,7 +98,7 @@ def main():
         subprocess.run([sys.executable, str(Path(args.worker).resolve()),
                         str(request), str(response)], check=True, env=env, timeout=180)
         data = response.read_bytes()
-    if data[:8] != b"CPTNRES2" or struct.unpack("<8i", data[8:40]) != (2, 0, n, k, 0, n, 0, 0):
+    if data[:8] != b"CPTNRES3" or struct.unpack("<8i", data[8:40]) != (3, 0, n, k, 0, n, 0, 0):
         raise ValueError("invalid ENERGY response")
     tensor = np.frombuffer(data, dtype="<f8", count=n * n,
                            offset=40 + 8 * n * n).reshape((n, n), order="F")

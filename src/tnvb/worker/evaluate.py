@@ -24,9 +24,9 @@ import numpy as np
 import scipy.linalg
 import pair_core as core
 
-REQUEST_MAGIC = b"CPTNREQ2"
-RESPONSE_MAGIC = b"CPTNRES2"
-VERSION = 2
+REQUEST_MAGIC = b"CPTNREQ3"
+RESPONSE_MAGIC = b"CPTNRES3"
+VERSION = 3
 
 
 def read_array(stream, count, dtype, shape=None):
@@ -57,15 +57,16 @@ def read_request(path):
                         initial=initial) if solver else None)
         structures = read_array(stream, nstr * total_elec, "<i4", (total_elec, nstr))
         overlap = read_array(stream, norb * norb, "<f8", (norb, norb))
+        frame = read_array(stream, norb * norb, "<f8", (norb, norb))
         one_electron = read_array(stream, norb * norb, "<f8", (norb, norb))
         npair = norb * (norb + 1) // 2
         eri = read_array(stream, npair * (npair + 1) // 2, "<f8")
         if stream.read(1):
             raise ValueError("trailing C++ TNVB request data")
-        if not all(np.all(np.isfinite(v)) for v in (overlap, one_electron, eri)):
+        if not all(np.all(np.isfinite(v)) for v in (overlap, frame, one_electron, eri)):
             raise ValueError("nonfinite C++ TNVB integrals")
     return (nstr, norb, nelec, total_elec, bond, structures,
-            overlap, one_electron, eri), sum_bond, mode, options
+            overlap, one_electron, eri), sum_bond, mode, options, frame
 
 
 def dense_roots(hamiltonian, overlap):
@@ -78,7 +79,9 @@ def dense_roots(hamiltonian, overlap):
     return energy, coefficients
 
 
-def evaluate(request, sum_bond, mode, ci_options=None, retain_state=None):
+def evaluate(request, sum_bond, mode, ci_options=None, retain_state=None, integral_frame=None):
+    if integral_frame is None:
+        raise ValueError("C++ TNVB requires its orthogonal integral frame")
     # The C++ paired-CSF expansion is invariant under exchanging the two
     # members of an individual singlet pair. The reused XMVB core attaches an
     # oriented-pair phase instead. Canonicalize pair members at this adapter
@@ -95,13 +98,14 @@ def evaluate(request, sum_bond, mode, ci_options=None, retain_state=None):
     ci_result = {}
     if mode == 0:
         hmat, smat = core.build_hs(request, ci_options=ci_options, ci_result=ci_result,
-                                  retain_state=retain_state)
+                                  retain_state=retain_state, integral_frame=integral_frame)
         reduced = None
         fit_error = identity_error = rdm_seconds = 0.0
     else:
         result = core.build_hs(request, root=0, sum_bond=sum_bond,
                                d3g_mode=0, d3g_backend=0, sum_mode=0,
-                               ci_options=ci_options, ci_result=ci_result)
+                               ci_options=ci_options, ci_result=ci_result,
+                               integral_frame=integral_frame)
         hmat, smat, fit_error, root_energy, root_coefficient, p, pi, d3g, checks = result
         reduced = (p, pi, d3g)
         identity_error = checks["identity_error"]
@@ -148,7 +152,7 @@ def write_response(path, request, mode, result):
 def main(argv):
     if len(argv) not in (3,5) or (len(argv)==5 and argv[3] not in ('--retain','--resume')):
         raise ValueError("usage: evaluate.py REQUEST RESPONSE [--retain|--resume STATE]")
-    request, sum_bond, mode, options = read_request(argv[1])
+    request, sum_bond, mode, options, frame = read_request(argv[1])
     retain=None
     if len(argv)==5:
         import forward_state
@@ -161,9 +165,9 @@ def main(argv):
             if mode!=0:
                 raise ValueError('TNVB handoff retention requires ENERGY')
             retain=dict(directory=argv[4])
-            result=evaluate(request,sum_bond,mode,options,retain)
+            result=evaluate(request,sum_bond,mode,options,retain,frame)
     else:
-        result=evaluate(request,sum_bond,mode,options)
+        result=evaluate(request,sum_bond,mode,options,integral_frame=frame)
     write_response(argv[2], request, mode, result)
     if retain is not None:
         forward_state.publish(argv[4],argv[1],argv[2],retain)

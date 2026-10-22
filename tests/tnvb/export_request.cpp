@@ -20,8 +20,7 @@ int main(int argc,char** argv) {
     if (!input.tnvb.enabled || loaded.structure_expansion_seconds!=0 || !input.structure_data.alpha_det.empty()) {
       throw std::invalid_argument("requires unexpanded TNVB input");
     }
-    const Eigen::MatrixXd raw_integral_frame;
-    const auto timed=xmvb::vb::prepare_timed_active_space_context(input, &raw_integral_frame);
+    const auto timed=xmvb::vb::prepare_timed_active_space_context(input);
     const auto& prepared=timed.prepared_active_space;
     const auto& raw=input.raw_structure_data;
     const int k=input.orbital_preparation_input.n_active_orbitals;
@@ -38,8 +37,8 @@ int main(int argc,char** argv) {
       out.write(reinterpret_cast<const char*>(values),count*sizeof(*values));
       if (!out) throw std::runtime_error("interop request write failed");
     };
-    out.write("CPTNREQ2",8);
-    const std::array<std::int32_t,10> header{2,raw.n_structures,k,raw.n_active_electrons,
+    out.write("CPTNREQ3",8);
+    const std::array<std::int32_t,10> header{3,raw.n_structures,k,raw.n_active_electrons,
         raw.n_total_electrons,input.tnvb.structure_bond,input.tnvb.total_bond,1,
         loaded.structure_eigensolver==xmvb::vb::StructureEigensolver::Davidson ? 1 : 0,0};
     write(header.data(),header.size());
@@ -50,7 +49,9 @@ int main(int argc,char** argv) {
     }
     const auto& s=prepared.orbital_result.active_orbital_overlap_matrix;
     const auto& h=prepared.active_space_one_electron_result.h1e_act;
-    write(s.data(),s.size()); write(h.data(),h.size()); write(eri.data(),eri.size());
+    const auto& frame=prepared.active_space_two_electron_result.orbital_transform;
+    write(s.data(),s.size()); write(frame.data(),frame.size());
+    write(h.data(),h.size()); write(eri.data(),eri.size());
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n'; return 1;

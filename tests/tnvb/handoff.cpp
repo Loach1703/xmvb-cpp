@@ -52,8 +52,7 @@ int main(int argc,char** argv) {
     request.eigensolver=solver=="dense" ? xmvb::vb::StructureEigensolver::Dense : xmvb::vb::StructureEigensolver::Davidson;
     if (argc==6) {
       if (std::string(argv[5])!="control") throw std::invalid_argument("invalid handoff control argument");
-      const Eigen::MatrixXd raw_integral_frame;
-      const auto prepared=xmvb::vb::prepare_timed_active_space_context(loaded.input, &raw_integral_frame);
+      const auto prepared=xmvb::vb::prepare_timed_active_space_context(loaded.input);
       std::shared_ptr<const xmvb::tnvb::StateDirectory> surviving;
       std::filesystem::path surviving_path,root;
       {

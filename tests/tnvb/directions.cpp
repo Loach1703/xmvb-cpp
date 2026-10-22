@@ -12,6 +12,8 @@
 #include "tnvb/electronic/evaluator.hpp"
 #include "vbscf/derivatives/gradient/orbital/evaluator.hpp"
 #include "vbscf/orbitals/charts/layout.hpp"
+#include "integrals/active/raw.hpp"
+#include "vbscf/structures/orthogonal_ci/integrals.hpp"
 
 namespace {
 
@@ -36,6 +38,19 @@ void materialize_active_eri(xmvb::integrals::ActiveSpaceTwoElectronResult* value
   for (int j=0;j<np;++j) for (int i=0;i<=j;++i) {
     value->packed_active_two_electron_integrals[j*(j+1)/2+i]=factors.col(i).dot(factors.col(j));
   }
+}
+
+void reframe_raw_trial(xmvb::vb::PreparedActiveSpaceContext* trial,int n) {
+  auto& two=trial->active_space_two_electron_result;
+  const auto framed=xmvb::vb::orthogonalize_active_integrals(
+      trial->orbital_result.active_orbital_overlap_matrix,
+      trial->active_space_one_electron_result.h1e_act,two,n);
+  trial->active_space_one_electron_result.h1e_act=framed.one_electron;
+  two.orbital_transform=framed.orbital_transform;
+  const int np=n*(n+1)/2;
+  two.packed_active_two_electron_integrals.resize(static_cast<std::size_t>(np)*(np+1)/2);
+  for (int j=0;j<np;++j) for (int i=0;i<=j;++i)
+    two.packed_active_two_electron_integrals[j*(j+1)/2+i]=framed.pair_kernel(i,j);
 }
 
 }  // namespace
@@ -105,6 +120,15 @@ int main(int argc,char** argv) {
           const double amount=(isign ? 1.0 : -1.0)*steps[istep];
           if (component<3) {
             auto trial=prepared;
+            if (component<2) {
+              trial.active_space_one_electron_result.h1e_act=
+                  xmvb::integrals::materialize_raw_one_electron(
+                      prepared.active_space_one_electron_result.h1e_act,
+                      prepared.active_space_two_electron_result.orbital_transform);
+              trial.active_space_two_electron_result=
+                  xmvb::integrals::materialize_raw_active_integrals(
+                      prepared.active_space_two_electron_result);
+            }
             if (component==0) {
               Eigen::Map<Eigen::VectorXd>(trial.orbital_result.active_orbital_overlap_matrix.data(),n*n)+=amount*direction;
             } else if (component==1) {
@@ -114,6 +138,7 @@ int main(int argc,char** argv) {
               auto& g=trial.active_space_two_electron_result.packed_active_two_electron_integrals;
               Eigen::Map<Eigen::VectorXd>(g.data(),g.size())+=amount*direction;
             }
+            if (component<2) reframe_raw_trial(&trial,n);
             values[isign]=process.evaluate(input,trial,request,false).energies[0];
           } else {
             auto trial=input;

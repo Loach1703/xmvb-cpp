@@ -189,6 +189,30 @@ def orthogonalize_integrals(sso, hho, packed_ggo):
     return rmat, h_orth, g_orth
 
 
+def accept_orthogonal_integrals(sso, h_orth, packed_g_orth, rmat):
+    """Accept C++'s framed h/G without another orbital transformation."""
+    n = sso.shape[0]
+    if (sso.shape != (n, n) or h_orth.shape != (n, n) or
+            rmat.shape != (n, n) or
+            packed_g_orth.shape != (n*(n+1)//2*(n*(n+1)//2+1)//2,) or
+            not all(np.all(np.isfinite(x)) for x in (sso,h_orth,packed_g_orth,rmat))):
+        raise ValueError("invalid orthogonal TNVB integral dimensions or values")
+    scale = max(1.0, float(np.max(np.abs(rmat))))
+    if (np.any(np.diag(rmat)<=0) or np.max(np.abs(np.tril(rmat,-1)))>1e-12*scale or
+            np.max(np.abs(rmat.T@rmat-sso))>1e-10*max(1.0,float(np.max(np.abs(sso))))):
+        raise ValueError("TNVB orthogonal integral frame does not match its VB overlap")
+    if np.max(np.abs(h_orth-h_orth.T))>1e-10*max(1.0,float(np.max(np.abs(h_orth)))):
+        raise ValueError("asymmetric orthogonal TNVB one-electron integrals")
+    return rmat, h_orth, unpack_eri(packed_g_orth,n)
+
+
+def orthogonal_reduced_data(dm1, dm2, contracted_orth):
+    """Protocol v3 index layout, with every free index in the orthogonal basis."""
+    return (np.asfortranarray(dm1.T),
+            np.asfortranarray(dm2.transpose(2,3,1,0)),
+            np.asfortranarray(contracted_orth))
+
+
 def structure_determinants(structure, nao: int, nae: int, nel: int):
     """Expand a carrier into Block2 SZ determinants for regression only.
 
@@ -5319,6 +5343,7 @@ def compute_total_state_rdms(
     warm_write_directory=None,
     selected_eigenpair=None,
     consume_source=False,
+    orthogonal_output=False,
 ):
     """Reload final structures, form one weighted state, and compute its RDMs."""
     started = time.perf_counter()
@@ -5790,9 +5815,11 @@ def compute_total_state_rdms(
             if d3g_mode == "contracted"
             else reference_contracted_orth
         )
-        pmat, pit, contracted_d3 = transform_reduced_data_to_xmvb(
-            rinv, dm1, dm2, contracted_orth
-        )
+        if orthogonal_output:
+            pmat, pit, contracted_d3 = orthogonal_reduced_data(dm1,dm2,contracted_orth)
+        else:
+            pmat, pit, contracted_d3 = transform_reduced_data_to_xmvb(
+                rinv, dm1, dm2, contracted_orth)
         reconstructed = float(np.einsum("ij,ij", h_orth, dm1))
         reconstructed += 0.5 * float(np.einsum("ijkl,iklj", g_orth, dm2))
         trace_error = abs(float(np.trace(dm1)) - nae)
@@ -5866,10 +5893,14 @@ def compute_total_state_rdms(
 def build_hs(
     request, root=None, sum_bond=None, d3g_mode=None, d3g_backend=None,
     sum_mode=0, ci_options=None, ci_result=None, retain_state=None,
+    integral_frame=None,
 ):
     nstr, nao, nae, nel, tnbond, ntstr, sso, hho, packed_ggo = request
     started = time.perf_counter()
-    rmat, h_orth, g_orth = orthogonalize_integrals(sso, hho, packed_ggo)
+    if integral_frame is None:
+        rmat, h_orth, g_orth = orthogonalize_integrals(sso, hho, packed_ggo)
+    else:
+        rmat, h_orth, g_orth = accept_orthogonal_integrals(sso,hho,packed_ggo,integral_frame)
     rinv = scipy.linalg.solve_triangular(
         rmat, np.eye(nao), lower=False, check_finite=True
     )
@@ -5969,7 +6000,8 @@ def build_hs(
         f"D={tnbond}/{sum_bond if root is not None else '-'} "
         f"check={'GRADIENT' if root is not None else 'ENERGY'} "
         f"sum={('DIRECT' if sum_mode == 0 else 'FIT') if root is not None else '-'} "
-        f"d3g={d3g_name} backend={backend_name}"
+        f"d3g={d3g_name} backend={backend_name} "
+        f"integrals={'ORTHOGONAL' if integral_frame is not None else 'RAW'}"
     )
     log_summary(
         f"[TNVB-PARALLEL] state={state_workers}x{state_threads} "
@@ -6083,7 +6115,8 @@ def build_hs(
                 root, hmat, smat, rinv, h_orth, g_orth, d3g_mode, d3g_backend,
                 sum_mode, warm_read_directory=warm_read_directory,
                 warm_write_directory=warm_write_directory,
-                selected_eigenpair=(eigenvalue, coefficient))
+                selected_eigenpair=(eigenvalue, coefficient),
+                orthogonal_output=integral_frame is not None)
         if warm_root is not None:
             commit_warm_cache(warm_root, warm_write_directory, warm_manifest_data)
         if retain_state is not None:
@@ -6254,6 +6287,7 @@ def build_hs(
             sum_mode,
             warm_read_directory=warm_read_directory,
             warm_write_directory=warm_write_directory,
+            orthogonal_output=integral_frame is not None,
         )
     else:
         # Keep objects alive until all contractions finish, then remove scratch.

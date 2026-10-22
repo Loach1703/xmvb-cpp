@@ -17,6 +17,8 @@ struct WorkerResponse {
   Eigen::VectorXd energies;
   Eigen::MatrixXd coefficients;
   std::optional<vb::DavidsonDiagnostics> davidson_diagnostics;
+  // Protocol v3 densities use the orthonormal active basis. Pi retains its
+  // established index permutation; contracted_three is the orthogonal D3G.
   Eigen::MatrixXd density_one;
   std::vector<double> density_two_buffer;
   Eigen::MatrixXd contracted_three;

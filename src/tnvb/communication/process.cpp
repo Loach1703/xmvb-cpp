@@ -163,8 +163,19 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
     throw std::invalid_argument("TNVB raw structure dimensions are inconsistent");
   }
   if (!resume) {
-  if (prepared.active_space_two_electron_result.orbital_transform.size() != 0) {
-    throw std::invalid_argument("TNVB worker requires raw nonorthogonal active integrals");
+  const auto& frame = prepared.active_space_two_electron_result.orbital_transform;
+  const auto& overlap = prepared.orbital_result.active_orbital_overlap_matrix;
+  if (frame.rows()!=n_ao || frame.cols()!=n_ao || !frame.allFinite() ||
+      (frame.diagonal().array()<=0).any() ||
+      frame.triangularView<Eigen::StrictlyLower>().toDenseMatrix().norm()>1e-12*std::max(1.0,frame.norm()) ||
+      overlap.size()!=std::size_t(n_ao)*n_ao) {
+    throw std::invalid_argument("TNVB requires orthogonal active integrals and their upper orbital frame");
+  }
+  const Eigen::Map<const Eigen::MatrixXd> orbital_overlap(overlap.data(),n_ao,n_ao);
+  if (!orbital_overlap.allFinite() ||
+      (frame.transpose()*frame-orbital_overlap).cwiseAbs().maxCoeff()>
+          1e-10*std::max(1.0,orbital_overlap.cwiseAbs().maxCoeff())) {
+    throw std::invalid_argument("TNVB orbital frame does not match the active overlap");
   }
   std::vector<double> packed = prepared.active_space_two_electron_result.packed_active_two_electron_integrals;
   if (packed.empty() && prepared.active_space_two_electron_result.representation ==
@@ -190,8 +201,8 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
     if (has_guess && (initial.rows() != n_str || initial.cols() < 1 || !initial.allFinite())) {
       throw std::invalid_argument("invalid TNVB Davidson initial coefficients");
     }
-    stream.write("CPTNREQ2", 8);
-    const std::array<std::int32_t, 10> header{2, n_str, n_ao, topology.n_active_electrons,
+    stream.write("CPTNREQ3", 8);
+    const std::array<std::int32_t, 10> header{3, n_str, n_ao, topology.n_active_electrons,
         topology.n_total_electrons, input.tnvb.structure_bond, input.tnvb.total_bond,
         gradient ? 1 : 0, davidson ? 1 : 0, has_guess ? 1 : 0};
     write_values(stream, header.data(), header.size());
@@ -204,12 +215,12 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
       const std::int32_t value = orbital;
       write_values(stream, &value, 1);
     }
-    const auto& overlap = prepared.orbital_result.active_orbital_overlap_matrix;
     const auto& h = prepared.active_space_one_electron_result.h1e_act;
     if (overlap.size() != std::size_t(n_ao)*n_ao || h.size() != n_ao*n_ao) {
       throw std::invalid_argument("TNVB active matrix size mismatch");
     }
     write_values(stream, overlap.data(), overlap.size());
+    write_values(stream, frame.data(), frame.size());
     write_values(stream, h.data(), h.size());
     write_values(stream, packed.data(), packed.size());
   }
@@ -225,7 +236,7 @@ WorkerResponse WorkerProcess::evaluate(const vb::VbScfInput& input,
   read_values(stream, header.data(), header.size());
   const bool davidson = electronic_request.eigensolver == vb::StructureEigensolver::Davidson;
   const int n_roots = davidson ? 1 : n_str;
-  if (std::memcmp(magic.data(), "CPTNRES2", 8) || header[0] != 2 || header[1] != 0 ||
+  if (std::memcmp(magic.data(), "CPTNRES3", 8) || header[0] != 3 || header[1] != 0 ||
       header[2] != n_str || header[3] != n_ao || header[4] != (gradient ? 1 : 0) ||
       header[5] != n_roots || header[6] != (davidson ? 1 : 0) || header[7]) {
     throw std::runtime_error("TNVB response header mismatch");
